@@ -31,7 +31,7 @@ export default async function handler(req, res) {
   if (req.method === 'GET') {
     const { action, id, password } = req.query;
     try {
-      const rows = await readRange('events!A2:F');
+      const rows = await readRange('events!A2:G');
 
       if (action === 'get' && id) {
         if (password !== adminPassword) return res.status(401).json({ error: '密碼錯誤' });
@@ -39,16 +39,18 @@ export default async function handler(req, res) {
         if (!row) return res.status(404).json({ error: '活動不存在' });
         return res.status(200).json({
           id: row[0], name: row[1], color: row[2] || '#0F9E7A',
-          knowledge_base: row[3] || '', status: row[4] || 'active', created_at: row[5]
+          knowledge_base: row[3] || '', status: row[4] || 'active', created_at: row[5],
+          chips: row[6] || ''
         });
       }
 
-      // 預設：列表（不含知識庫）
+      // 預設：列表（不含知識庫，含 chips）
       const events = rows
         .filter(r => r[0] && r[4] !== 'archived')
         .map(r => ({
           id: r[0], name: r[1], color: r[2] || '#0F9E7A',
-          status: r[4] || 'active', created_at: r[5] || ''
+          status: r[4] || 'active', created_at: r[5] || '',
+          chips: r[6] || ''
         }));
       return res.status(200).json({ events });
     } catch (err) {
@@ -58,7 +60,7 @@ export default async function handler(req, res) {
 
   // ── POST ─────────────────────────────────────────────────────────────
   if (req.method === 'POST') {
-    const { action, password, id, name, color, knowledge_base, status } = req.body || {};
+    const { action, password, id, name, color, knowledge_base, chips, status } = req.body || {};
 
     if (password !== adminPassword) return res.status(401).json({ error: '密碼錯誤' });
     if (!action) return res.status(400).json({ error: '缺少 action 參數' });
@@ -68,15 +70,15 @@ export default async function handler(req, res) {
         if (!name) return res.status(400).json({ error: '活動名稱必填' });
         const newId = generateId(name);
         const created_at = new Date().toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' });
-        await appendRows('events!A:F', [[
-          newId, name, color || '#0F9E7A', knowledge_base || '', 'active', created_at
+        await appendRows('events!A:G', [[
+          newId, name, color || '#0F9E7A', knowledge_base || '', 'active', created_at, chips || ''
         ]]);
         return res.status(200).json({ success: true, id: newId });
       }
 
       if (action === 'update') {
         if (!id) return res.status(400).json({ error: '缺少活動 ID' });
-        const rows = await readRange('events!A2:F');
+        const rows = await readRange('events!A2:G');
         const rowIndex = rows.findIndex(r => r[0] === id);
         if (rowIndex === -1) return res.status(404).json({ error: '活動不存在' });
         const existing = rows[rowIndex];
@@ -86,20 +88,21 @@ export default async function handler(req, res) {
           color !== undefined ? color : (existing[2] || '#0F9E7A'),
           knowledge_base !== undefined ? knowledge_base : (existing[3] || ''),
           status !== undefined ? status : (existing[4] || 'active'),
-          existing[5] || ''
+          existing[5] || '',
+          chips !== undefined ? chips : (existing[6] || '')
         ];
-        await updateRange(`events!A${rowIndex + 2}:F${rowIndex + 2}`, [updated]);
+        await updateRange(`events!A${rowIndex + 2}:G${rowIndex + 2}`, [updated]);
         return res.status(200).json({ success: true });
       }
 
       if (action === 'archive') {
         if (!id) return res.status(400).json({ error: '缺少活動 ID' });
-        const rows = await readRange('events!A2:F');
+        const rows = await readRange('events!A2:G');
         const rowIndex = rows.findIndex(r => r[0] === id);
         if (rowIndex === -1) return res.status(404).json({ error: '活動不存在' });
         const existing = rows[rowIndex];
-        const updated = [existing[0], existing[1], existing[2], existing[3], 'archived', existing[5]];
-        await updateRange(`events!A${rowIndex + 2}:F${rowIndex + 2}`, [updated]);
+        const updated = [existing[0], existing[1], existing[2], existing[3], 'archived', existing[5], existing[6] || ''];
+        await updateRange(`events!A${rowIndex + 2}:G${rowIndex + 2}`, [updated]);
         return res.status(200).json({ success: true });
       }
 
