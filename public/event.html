@@ -237,7 +237,7 @@
 
 <div id="media-banner">
   <label><i class="ti ti-id-badge"></i> 媒體：</label>
-  <input id="media-input" type="text" placeholder="請填寫媒體名稱（選填）" maxlength="40">
+  <input id="media-input" type="text" placeholder="請填寫媒體名稱（必填，填完後才能提問）" maxlength="40">
   <span id="media-saved"><i class="ti ti-check"></i> 已記錄</span>
 </div>
 
@@ -262,7 +262,7 @@ let hist = [];
 let eventColor = '#0F9E7A';
 let mediaName = '';
 
-// 動態快速問題（依活動名稱判斷）
+// 預設快速問題（若活動未自訂則使用）
 const defaultChips = [
   '這次活動的主要發表內容是什麼？',
   '有哪些合作廠商參與？',
@@ -270,6 +270,22 @@ const defaultChips = [
   '請問主要的技術突破點是什麼？',
   '這項技術預計何時商業化？'
 ];
+
+// 媒體名稱尚未填寫時鎖定輸入
+function lockUntilMedia() {
+  const inp = document.getElementById('user-input');
+  const btn = document.getElementById('send-btn');
+  inp.disabled = true;
+  btn.disabled = true;
+  inp.placeholder = '請先填寫上方媒體名稱，再開始提問…';
+}
+function unlockChat() {
+  const inp = document.getElementById('user-input');
+  const btn = document.getElementById('send-btn');
+  inp.disabled = false;
+  btn.disabled = false;
+  inp.placeholder = '請輸入您的問題… （Enter 送出，Shift+Enter 換行）';
+}
 
 async function init() {
   if (!eventId) { showError('請在網址加上 ?id=活動ID'); return; }
@@ -295,20 +311,27 @@ async function init() {
     document.getElementById('welcome-name').textContent = event.name;
     document.title = event.name + ' — AI 新聞助理';
 
-    // 快速問題
+    // 快速問題：優先使用活動自訂 chips，否先用預設
     const chipsEl = document.getElementById('chips');
-    defaultChips.forEach(q => {
+    const chipList = event.chips
+      ? event.chips.split('\n').map(s => s.trim()).filter(Boolean)
+      : defaultChips;
+    chipList.forEach(q => {
       const btn = document.createElement('button');
       btn.className = 'chip';
       btn.textContent = q;
-      btn.onclick = () => sendMessage(q);
+      btn.onclick = () => {
+        if (!mediaName) { document.getElementById('media-input').focus(); return; }
+        sendMessage(q);
+      };
       chipsEl.appendChild(btn);
     });
 
     // 初始問候
-    addMessage('ai', `您好！我是「${event.name}」的 AI 新聞助理。\n\n請問有什麼可以協助您的嗎？歡迎詢問本次活動相關內容。`);
+    addMessage('ai', `您好！我是「${event.name}」的 AI 新聞助理。\n\n請先填寫上方的媒體名稱，再開始提問。`);
 
     document.getElementById('loading').hidden = true;
+    lockUntilMedia(); // 初始鎖定
   } catch (err) {
     showError('載入活動資料失敗：' + err.message);
   }
@@ -320,13 +343,16 @@ function showError(msg) {
   document.getElementById('error-screen').hidden = false;
 }
 
-// 媒體名稱處理
-document.getElementById('media-input').addEventListener('change', e => {
+// 媒體名稱處理（強制填寫）
+document.getElementById('media-input').addEventListener('input', e => {
   mediaName = e.target.value.trim();
-  const savedEl = document.getElementById('media-saved');
   if (mediaName) {
+    unlockChat();
+    const savedEl = document.getElementById('media-saved');
     savedEl.style.display = 'inline';
     setTimeout(() => savedEl.style.display = 'none', 2000);
+  } else {
+    lockUntilMedia();
   }
 });
 
