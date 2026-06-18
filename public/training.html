@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>媒體訓練模式</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.3.0/tabler-icons.min.css">
+<style>
+  :root {
+    --primary: #e85d04;
+    --primary-dark: #c44d03;
+    --primary-light: rgba(232,93,4,0.08);
+    --text: #1a1a2e;
+    --muted: #6b7280;
+    --bg: #fdf5f0;
+    --card: #ffffff;
+    --border: #e5e7eb;
+    --radius: 12px;
+    --font: 'PingFang TC','Noto Sans TC','Microsoft JhengHei',sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: var(--font); background: var(--bg); color: var(--text); height: 100dvh; display: flex; flex-direction: column; }
+
+  #header {
+    background: var(--primary);
+    color: white;
+    padding: 14px 20px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+    flex-shrink: 0;
+  }
+  #header h1 { font-size: 1.1rem; font-weight: 700; }
+  #header p { font-size: 0.78rem; opacity: 0.85; margin-top: 1px; }
+  #back-link {
+    margin-left: auto;
+    color: rgba(255,255,255,0.8);
+    font-size: 0.82rem;
+    text-decoration: none;
+    display: flex; align-items: center; gap: 4px;
+    padding: 6px 12px;
+    border: 1px solid rgba(255,255,255,0.3);
+    border-radius: 8px;
+    transition: all 0.15s;
+  }
+  #back-link:hover { background: rgba(255,255,255,0.15); color: white; }
+
+  /* 說明卡片 */
+  #info-card {
+    margin: 12px 16px 0;
+    background: var(--primary-light);
+    border: 1px solid rgba(232,93,4,0.2);
+    border-radius: var(--radius);
+    padding: 14px 16px;
+    font-size: 0.85rem;
+    color: #7c3a0a;
+    line-height: 1.6;
+    flex-shrink: 0;
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+  }
+  #info-card i { font-size: 20px; color: var(--primary); flex-shrink: 0; margin-top: 1px; }
+
+  /* 進度條 */
+  #progress-bar {
+    padding: 10px 16px 4px;
+    flex-shrink: 0;
+  }
+  #progress-label { font-size: 0.78rem; color: var(--muted); margin-bottom: 6px; display: flex; justify-content: space-between; }
+  #progress-track { height: 6px; background: var(--border); border-radius: 3px; }
+  #progress-fill { height: 100%; background: var(--primary); border-radius: 3px; transition: width 0.4s; width: 0%; }
+
+  /* Chat */
+  #messages {
+    flex: 1; overflow-y: auto;
+    padding: 12px 16px 16px;
+    display: flex; flex-direction: column; gap: 14px;
+  }
+  .msg { display: flex; gap: 10px; align-items: flex-start; }
+  .msg.user { flex-direction: row-reverse; }
+  .avatar {
+    width: 34px; height: 34px;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 16px; flex-shrink: 0;
+  }
+  .msg.reporter .avatar { background: #1a1a2e; color: white; }
+  .msg.user .avatar { background: #0F9E7A; color: white; }
+  .msg.eval .avatar { background: #6366f1; color: white; }
+  .bubble {
+    max-width: 82%;
+    padding: 11px 15px;
+    border-radius: 16px;
+    font-size: 0.9rem;
+    line-height: 1.7;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .msg.reporter .bubble {
+    background: #1a1a2e; color: #e2e8f0;
+    border-bottom-left-radius: 4px;
+  }
+  .msg.reporter .bubble .label {
+    display: inline-block;
+    background: var(--primary);
+    color: white;
+    font-size: 0.72rem;
+    padding: 2px 8px;
+    border-radius: 10px;
+    margin-bottom: 7px;
+    font-weight: 600;
+  }
+  .msg.user .bubble { background: #0F9E7A; color: white; border-bottom-right-radius: 4px; }
+  .msg.eval .bubble {
+    background: #f0f0ff;
+    border: 1px solid #c7d2fe;
+    border-bottom-left-radius: 4px;
+    color: #3730a3;
+  }
+  .msg.eval .bubble .eval-label {
+    display: inline-block;
+    background: #6366f1;
+    color: white;
+    font-size: 0.72rem;
+    padding: 2px 8px;
+    border-radius: 10px;
+    margin-bottom: 7px;
+    font-weight: 600;
+  }
+
+  /* 分數徽章 */
+  .score-badge {
+    display: inline-block;
+    font-size: 1.4rem;
+    font-weight: 800;
+    color: var(--primary);
+    margin-right: 4px;
+  }
+
+  /* Typing */
+  .typing-dot { display: inline-block; width: 7px; height: 7px; background: #94a3b8; border-radius: 50%; margin: 0 2px; animation: blink 1.2s infinite; }
+  .typing-dot:nth-child(2) { animation-delay: 0.2s; }
+  .typing-dot:nth-child(3) { animation-delay: 0.4s; }
+  @keyframes blink { 0%,80%,100% { opacity: 0.2; } 40% { opacity: 1; } }
+
+  /* Input */
+  #input-area {
+    border-top: 1px solid var(--border);
+    padding: 12px 16px;
+    background: white;
+    display: flex; gap: 10px; align-items: flex-end;
+    flex-shrink: 0;
+  }
+  #user-input {
+    flex: 1;
+    border: 1.5px solid var(--border);
+    border-radius: 10px;
+    padding: 10px 14px;
+    font-family: var(--font); font-size: 0.9rem;
+    resize: none; overflow-y: auto; max-height: 120px;
+    line-height: 1.5; outline: none;
+    transition: border-color 0.2s;
+  }
+  #user-input:focus { border-color: #0F9E7A; }
+  #user-input:disabled { background: #f9fafb; color: var(--muted); }
+  #send-btn {
+    width: 44px; height: 44px;
+    border: none; border-radius: 10px;
+    background: #0F9E7A; color: white;
+    font-size: 20px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: background 0.2s; flex-shrink: 0;
+  }
+  #send-btn:hover:not(:disabled) { background: #0a7a60; }
+  #send-btn:disabled { background: var(--border); cursor: default; }
+
+  /* 開始按鈕 */
+  #start-area {
+    padding: 16px; display: flex; justify-content: center;
+    flex-shrink: 0;
+  }
+  #start-btn {
+    background: var(--primary); color: white;
+    border: none; border-radius: 10px;
+    padding: 14px 32px;
+    font-family: var(--font); font-size: 1rem; font-weight: 700;
+    cursor: pointer;
+    display: flex; align-items: center; gap: 8px;
+    transition: background 0.2s;
+  }
+  #start-btn:hover { background: var(--primary-dark); }
+
+  /* 結束畫面 */
+  #end-screen {
+    display: none;
+    padding: 30px 20px;
+    text-align: center;
+    flex-shrink: 0;
+  }
+  #end-screen .trophy { font-size: 52px; margin-bottom: 12px; }
+  #end-screen h2 { font-size: 1.3rem; margin-bottom: 8px; }
+  #end-screen p { color: var(--muted); font-size: 0.9rem; margin-bottom: 20px; }
+  #restart-btn {
+    background: var(--primary); color: white;
+    border: none; border-radius: 10px;
+    padding: 12px 28px;
+    font-family: var(--font); font-size: 0.95rem; font-weight: 600;
+    cursor: pointer;
+    transition: background 0.2s;
+  }
+  #restart-btn:hover { background: var(--primary-dark); }
+
+  /* Loading */
+  #loading {
+    position: fixed; inset: 0;
+    background: rgba(253,245,240,0.9);
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 12px; font-size: 0.95rem; color: var(--muted);
+    z-index: 100;
+  }
+  .spinner { width: 40px; height: 40px; border: 3px solid var(--border); border-top-color: var(--primary); border-radius: 50%; animation: spin 0.8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+
+<div id="loading">
+  <div class="spinner"></div>
+  <span>載入活動資訊中…</span>
+</div>
+
+<div id="header">
+  <i class="ti ti-microphone" style="font-size:26px"></i>
+  <div>
+    <h1 id="event-title">媒體訓練模式</h1>
+    <p id="event-subtitle">AI 記者實戰演練</p>
+  </div>
+  <a id="back-link" href="#"><i class="ti ti-arrow-left"></i> 母後台</a>
+</div>
+
+<div id="info-card">
+  <i class="ti ti-info-circle"></i>
+  <span>AI 將扮演犀利記者向您提問，請盡量以發言人角色回答。每題回答後 AI 會評分並給出建議，共進行 <strong>5 題</strong>。</span>
+</div>
+
+<div id="progress-bar">
+  <div id="progress-label">
+    <span>訓練進度</span>
+    <span id="q-counter">0 / 5 題</span>
+  </div>
+  <div id="progress-track"><div id="progress-fill"></div></div>
+</div>
+
+<div id="messages"></div>
+
+<div id="start-area">
+  <button id="start-btn">
+    <i class="ti ti-player-play"></i> 開始媒體訓練
+  </button>
+</div>
+
+<div id="input-area" style="display:none">
+  <textarea id="user-input" rows="1" placeholder="輸入您的回答…（Enter 送出，Shift+Enter 換行）" disabled></textarea>
+  <button id="send-btn" disabled><i class="ti ti-send"></i></button>
+</div>
+
+<div id="end-screen">
+  <div class="trophy">🎯</div>
+  <h2>訓練完成！</h2>
+  <p>您已完成本次媒體訓練。請參考各題的評分建議，調整您的發言策略。</p>
+  <button id="restart-btn"><i class="ti ti-refresh"></i> 再練一次</button>
+</div>
+
+<script>
+const params = new URLSearchParams(location.search);
+const eventId = params.get('id');
+let reporterHist = [];  // 記者對話歷程
+let questionCount = 0;
+const MAX_Q = 5;
+let isWaiting = false;
+let awaitingAnswer = false; // 等待使用者回答
+let eventName = '工研院活動';
+
+async function init() {
+  // 設定返回連結
+  document.getElementById('back-link').href = '/';
+
+  if (!eventId) {
+    document.getElementById('loading').hidden = true;
+    document.getElementById('info-card').querySelector('span').textContent =
+      '⚠️ 未指定活動 ID，將以通用模式進行訓練。';
+    document.getElementById('loading').hidden = true;
+    return;
+  }
+
+  try {
+    const res = await fetch('/api/events');
+    const data = await res.json();
+    const event = data.events?.find(e => e.id === eventId);
+    if (event) {
+      eventName = event.name;
+      document.getElementById('event-title').textContent = event.name + ' — 媒體訓練';
+      document.getElementById('event-subtitle').textContent = 'AI 記者實戰演練';
+      document.title = event.name + ' — 媒體訓練';
+    }
+  } catch(e) {}
+
+  document.getElementById('loading').hidden = true;
+}
+
+document.getElementById('start-btn').addEventListener('click', startTraining);
+document.getElementById('restart-btn').addEventListener('click', () => {
+  reporterHist = [];
+  questionCount = 0;
+  document.getElementById('messages').innerHTML = '';
+  document.getElementById('end-screen').style.display = 'none';
+  document.getElementById('input-area').style.display = 'none';
+  document.getElementById('start-area').style.display = 'flex';
+  updateProgress();
+});
+
+async function startTraining() {
+  document.getElementById('start-area').style.display = 'none';
+  document.getElementById('input-area').style.display = 'flex';
+  await askNextQuestion();
+}
+
+async function askNextQuestion() {
+  isWaiting = true;
+  awaitingAnswer = false;
+  document.getElementById('user-input').disabled = true;
+  document.getElementById('send-btn').disabled = true;
+
+  showTyping('reporter');
+
+  try {
+    const res = await fetch('/api/training', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        messages: reporterHist,
+        event_id: eventId,
+        mode: 'reporter'
+      })
+    });
+    const data = await res.json();
+    removeTyping();
+
+    const reply = data.reply || '（無法取得問題）';
+    reporterHist.push({ role: 'assistant', content: reply });
+    addReporterMsg(reply);
+
+    questionCount++;
+    updateProgress();
+
+    // 開放使用者回答
+    document.getElementById('user-input').disabled = false;
+    document.getElementById('user-input').focus();
+    document.getElementById('send-btn').disabled = false;
+    awaitingAnswer = true;
+  } catch(e) {
+    removeTyping();
+    addSystemMsg('連線錯誤，請重新整理後再試。');
+  }
+
+  isWaiting = false;
+}
+
+async function submitAnswer() {
+  if (isWaiting || !awaitingAnswer) return;
+  const ans = document.getElementById('user-input').value.trim();
+  if (!ans) return;
+
+  document.getElementById('user-input').value = '';
+  document.getElementById('user-input').style.height = 'auto';
+  document.getElementById('user-input').disabled = true;
+  document.getElementById('send-btn').disabled = true;
+  awaitingAnswer = false;
+  isWaiting = true;
+
+  addUserMsg(ans);
+  reporterHist.push({ role: 'user', content: ans });
+
+  // 評分
+  showTyping('eval');
+
+  try {
+    const evalRes = await fetch('/api/training', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        messages: reporterHist,
+        event_id: eventId,
+        mode: 'evaluate'
+      })
+    });
+    const evalData = await evalRes.json();
+    removeTyping();
+
+    const evalText = evalData.reply || '（無法取得評分）';
+    reporterHist.push({ role: 'assistant', content: evalText });
+
+    // 解析評分中的下一題（分隔線後的內容）
+    const parts = evalText.split(/---下一題---|---下一個問題---/);
+    const evalPart = parts[0].trim();
+    const nextQ = parts[1]?.trim();
+
+    addEvalMsg(evalPart);
+
+    if (questionCount >= MAX_Q || !nextQ) {
+      // 訓練結束
+      setTimeout(() => {
+        document.getElementById('input-area').style.display = 'none';
+        document.getElementById('end-screen').style.display = 'block';
+        updateProgress();
+      }, 800);
+    } else {
+      // 繼續下一題（把下一題加入對話）
+      reporterHist.push({ role: 'assistant', content: nextQ });
+      addReporterMsg(nextQ);
+
+      questionCount++;
+      updateProgress();
+
+      document.getElementById('user-input').disabled = false;
+      document.getElementById('user-input').focus();
+      document.getElementById('send-btn').disabled = false;
+      awaitingAnswer = true;
+    }
+  } catch(e) {
+    removeTyping();
+    addSystemMsg('評分失敗，請稍後再試。');
+  }
+
+  isWaiting = false;
+}
+
+function updateProgress() {
+  const pct = Math.min((questionCount / MAX_Q) * 100, 100);
+  document.getElementById('progress-fill').style.width = pct + '%';
+  document.getElementById('q-counter').textContent = `${Math.min(questionCount, MAX_Q)} / ${MAX_Q} 題`;
+}
+
+// 訊息渲染
+function addReporterMsg(text) {
+  const el = document.createElement('div');
+  el.className = 'msg reporter';
+  el.innerHTML = `
+    <div class="avatar"><i class="ti ti-microphone"></i></div>
+    <div class="bubble">
+      <span class="label">AI 記者</span><br>
+      ${escHtml(text)}
+    </div>`;
+  document.getElementById('messages').appendChild(el);
+  el.scrollIntoView({ behavior: 'smooth', block: 'end' });
+}
+
+function addUserMsg(text) {
+  const el = document.createElement('div');
+  el.className = 'msg user';
+  el.innerHTML = `
+    <div class="avatar"><i class="ti ti-user"></i></div>
+    <div class="bubble">${escHtml(text)}</div>`;
+  document.getElementById('messages').appendChild(el);
+  el.scrollIntoView({ behavior: 'smooth', block: 'end' });
+}
+
+function addEvalMsg(text) {
+  const el = document.createElement('div');
+  el.className = 'msg eval';
+  el.innerHTML = `
+    <div class="avatar"><i class="ti ti-star"></i></div>
+    <div class="bubble">
+      <span class="eval-label">訓練師評分</span><br>
+      ${escHtml(text)}
+    </div>`;
+  document.getElementById('messages').appendChild(el);
+  el.scrollIntoView({ behavior: 'smooth', block: 'end' });
+}
+
+function addSystemMsg(text) {
+  const el = document.createElement('div');
+  el.style.cssText = 'text-align:center;color:#9ca3af;font-size:0.82rem;padding:8px';
+  el.textContent = text;
+  document.getElementById('messages').appendChild(el);
+}
+
+function showTyping(type) {
+  const el = document.createElement('div');
+  el.className = `msg ${type === 'eval' ? 'eval' : 'reporter'}`;
+  el.id = 'typing';
+  const icon = type === 'eval' ? 'ti-star' : 'ti-microphone';
+  el.innerHTML = `
+    <div class="avatar"><i class="ti ${icon}"></i></div>
+    <div class="bubble">
+      <span class="typing-dot"></span><span class="typing-dot"></span><span class="typing-dot"></span>
+    </div>`;
+  document.getElementById('messages').appendChild(el);
+  el.scrollIntoView({ behavior: 'smooth', block: 'end' });
+}
+
+function removeTyping() {
+  document.getElementById('typing')?.remove();
+}
+
+// 輸入事件
+document.getElementById('user-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submitAnswer(); }
+});
+document.getElementById('send-btn').addEventListener('click', submitAnswer);
+document.getElementById('user-input').addEventListener('input', function() {
+  this.style.height = 'auto';
+  this.style.height = Math.min(this.scrollHeight, 120) + 'px';
+});
+
+function escHtml(str) {
+  return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
+}
+
+init();
+</script>
+</body>
+</html>
