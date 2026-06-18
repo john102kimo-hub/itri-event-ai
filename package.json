@@ -1,0 +1,7 @@
+{
+  "name": "itri-event-ai",
+  "version": "2.0.0",
+  "description": "工研院活動溝通 AI 平台 — 多活動統一管理、問答記錄、媒體訓練",
+  "type": "module",
+  "engines": { "node": ">=18" }
+}
