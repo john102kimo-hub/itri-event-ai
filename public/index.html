@@ -855,4 +855,50 @@ async function saveEvent() {
 
 async function archiveEvent() {
   const id = document.getElementById('edit-event-id').value;
-  if 
+  if (!id) return;
+  if (!confirm('確定要封存這個活動嗎？封存後記者前台將無法使用。')) return;
+
+  try {
+    const res = await fetch('/api/events', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'archive', password: state.password, id })
+    });
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    closeModal();
+    toast('活動已封存');
+    await loadEvents();
+  } catch(e) {
+    toast('封存失敗：' + e.message);
+  }
+}
+
+// ── 工具函式 ──────────────────────────────────────────────
+function exportCSV(eventId) {
+  const eid = eventId || document.getElementById('analytics-event-filter')?.value || '';
+  const url = `/api/export?password=${encodeURIComponent(state.password)}${eid ? '&event_id=' + encodeURIComponent(eid) : ''}`;
+  window.open(url, '_blank');
+}
+
+function copyLink(eventId) {
+  const url = `${location.origin}/event?id=${encodeURIComponent(eventId)}`;
+  navigator.clipboard.writeText(url).then(() => toast('記者前台連結已複製！'));
+}
+
+let toastTimer;
+function toast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.style.display = 'block';
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.style.display = 'none', 3000);
+}
+
+function escHtml(str) {
+  if (str === null || str === undefined) return '';
+  return str.toString().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+</script>
+</body>
+</html>
