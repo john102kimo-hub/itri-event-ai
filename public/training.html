@@ -276,7 +276,7 @@
 
 <script>
 const params = new URLSearchParams(location.search);
-const eventId = params.get('id');
+let eventId = params.get('id');
 let reporterHist = [];  // 記者對話歷程
 let questionCount = 0;
 const MAX_Q = 5;
@@ -288,27 +288,96 @@ async function init() {
   // 設定返回連結
   document.getElementById('back-link').href = '/';
 
-  if (!eventId) {
-    document.getElementById('loading').hidden = true;
-    document.getElementById('info-card').querySelector('span').textContent =
-      '⚠️ 未指定活動 ID，將以通用模式進行訓練。';
-    document.getElementById('loading').hidden = true;
-    return;
-  }
-
   try {
     const res = await fetch('/api/events');
     const data = await res.json();
-    const event = data.events?.find(e => e.id === eventId);
-    if (event) {
-      eventName = event.name;
-      document.getElementById('event-title').textContent = event.name + ' — 媒體訓練';
-      document.getElementById('event-subtitle').textContent = 'AI 記者實戰演練';
-      document.title = event.name + ' — 媒體訓練';
+    const events = data.events || [];
+
+    if (!eventId) {
+      // 沒有指定活動 → 顯示選擇器
+      document.getElementById('event-title').textContent = '媒體訓練模式';
+      document.getElementById('loading').hidden = true;
+      showEventSelector(events);
+      return;
+    }
+
+    if (eventId === 'all') {
+      eventName = '工研院彙整媒體訓練';
+      document.getElementById('event-title').textContent = '彙整媒體訓練 — 全部活動';
+      document.getElementById('event-subtitle').textContent = 'AI 記者實戰演練（綜合所有活動）';
+      document.title = '彙整媒體訓練';
+    } else {
+      const event = events.find(e => e.id === eventId);
+      if (event) {
+        eventName = event.name;
+        document.getElementById('event-title').textContent = event.name + ' — 媒體訓練';
+        document.getElementById('event-subtitle').textContent = 'AI 記者實戰演練';
+        document.title = event.name + ' — 媒體訓練';
+      }
     }
   } catch(e) {}
 
   document.getElementById('loading').hidden = true;
+}
+
+function showEventSelector(events) {
+  // 隱藏進度條與開始按鈕，顯示選擇器
+  document.getElementById('progress-bar').style.display = 'none';
+  document.getElementById('start-area').style.display = 'none';
+
+  const container = document.createElement('div');
+  container.style.cssText = 'padding:20px 16px;';
+
+  const title = document.createElement('p');
+  title.style.cssText = 'font-size:0.9rem;color:#7c3a0a;margin-bottom:14px;font-weight:600;';
+  title.textContent = '請選擇要進行訓練的活動：';
+  container.appendChild(title);
+
+  // 彙整選項
+  const allBtn = createSelectorBtn('🗂 彙整訓練（全部活動）', 'all', '涵蓋所有進行中活動的知識庫');
+  container.appendChild(allBtn);
+
+  // 各活動選項
+  events.forEach(ev => {
+    const btn = createSelectorBtn('📋 ' + ev.name, ev.id, '');
+    container.appendChild(btn);
+  });
+
+  // 插入在 info-card 之後
+  document.getElementById('info-card').insertAdjacentElement('afterend', container);
+}
+
+function createSelectorBtn(label, id, desc) {
+  const btn = document.createElement('button');
+  btn.style.cssText = 'display:block;width:100%;text-align:left;background:white;border:1.5px solid #e5e7eb;border-radius:10px;padding:12px 16px;margin-bottom:10px;cursor:pointer;font-family:var(--font);font-size:0.9rem;font-weight:600;transition:all 0.15s;';
+  btn.textContent = label;
+  if (desc) {
+    const sub = document.createElement('div');
+    sub.style.cssText = 'font-size:0.76rem;font-weight:400;color:#6b7280;margin-top:3px;';
+    sub.textContent = desc;
+    btn.appendChild(sub);
+  }
+  btn.onmouseover = () => { btn.style.borderColor = 'var(--primary)'; btn.style.background = 'var(--primary-light)'; };
+  btn.onmouseout = () => { btn.style.borderColor = '#e5e7eb'; btn.style.background = 'white'; };
+  btn.onclick = () => selectEvent(id);
+  return btn;
+}
+
+function selectEvent(id) {
+  eventId = id;
+  // 更新 URL（不重新整理）
+  history.replaceState(null, '', '/training?id=' + encodeURIComponent(id));
+  // 移除選擇器，顯示進度條＋開始
+  const sel = document.getElementById('info-card').nextElementSibling;
+  if (sel && sel.tagName === 'DIV') sel.remove();
+  document.getElementById('progress-bar').style.display = '';
+  document.getElementById('start-area').style.display = 'flex';
+
+  if (id === 'all') {
+    eventName = '工研院彙整媒體訓練';
+    document.getElementById('event-title').textContent = '彙整媒體訓練 — 全部活動';
+    document.getElementById('event-subtitle').textContent = 'AI 記者實戰演練（綜合所有活動）';
+  }
 }
 
 document.getElementById('start-btn').addEventListener('click', startTraining);
