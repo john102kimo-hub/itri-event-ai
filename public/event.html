@@ -105,6 +105,39 @@
   }
   .chip:hover { background: var(--primary-light); border-color: var(--primary); color: var(--primary); }
 
+  /* Image gallery */
+  #image-gallery {
+    padding: 10px 16px 4px;
+    flex-shrink: 0;
+  }
+  #image-gallery-title { font-size: 0.82rem; color: var(--muted); margin-bottom: 8px; display: flex; align-items: center; gap: 6px; }
+  #image-gallery-grid { display: flex; gap: 8px; flex-wrap: wrap; }
+  .gallery-img {
+    width: 80px; height: 80px; object-fit: cover;
+    border-radius: 8px; border: 1px solid var(--border);
+    cursor: pointer; transition: transform 0.15s, box-shadow 0.15s;
+  }
+  .gallery-img:hover { transform: scale(1.05); box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
+  /* Lightbox */
+  #lightbox {
+    display: none; position: fixed; inset: 0;
+    background: rgba(0,0,0,0.85); z-index: 200;
+    align-items: center; justify-content: center;
+  }
+  #lightbox.open { display: flex; }
+  #lightbox img { max-width: 90vw; max-height: 85vh; border-radius: 8px; }
+  #lightbox-close {
+    position: absolute; top: 16px; right: 20px;
+    color: white; font-size: 28px; cursor: pointer;
+    background: none; border: none; line-height: 1;
+  }
+  #lightbox-dl {
+    position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
+    background: white; color: var(--text); border: none; border-radius: 8px;
+    padding: 8px 20px; font-family: var(--font); font-size: 0.85rem; font-weight: 600;
+    cursor: pointer; display: flex; align-items: center; gap: 6px;
+  }
+
   /* Chat area */
   #messages {
     flex: 1;
@@ -131,11 +164,13 @@
     border-radius: 16px;
     font-size: 0.9rem;
     line-height: 1.65;
-    white-space: pre-wrap;
     word-break: break-word;
   }
-  .msg.ai .bubble { background: white; border: 1px solid var(--border); border-top-left-radius: 4px; }
-  .msg.user .bubble { background: var(--primary); color: white; border-bottom-right-radius: 4px; }
+  .msg.ai .bubble { background: white; border: 1px solid var(--border); border-top-left-radius: 4px; white-space: normal; }
+  .msg.user .bubble { background: var(--primary); color: white; border-bottom-right-radius: 4px; white-space: pre-wrap; }
+  .msg.ai .bubble a { color: var(--primary); text-decoration: underline; }
+  .msg.ai .bubble strong { font-weight: 700; }
+  .msg.ai .bubble em { font-style: italic; }
   .typing-dot { display: inline-block; width: 7px; height: 7px; background: var(--muted); border-radius: 50%; margin: 0 2px; animation: blink 1.2s infinite; }
   .typing-dot:nth-child(2) { animation-delay: 0.2s; }
   .typing-dot:nth-child(3) { animation-delay: 0.4s; }
@@ -248,6 +283,23 @@
 
 <div id="chips"></div>
 
+<!-- 圖片資源（若活動有設定）-->
+<div id="image-gallery" style="display:none">
+  <div id="image-gallery-title">
+    <i class="ti ti-photo"></i> 圖片資源（點擊放大／下載）
+  </div>
+  <div id="image-gallery-grid"></div>
+</div>
+
+<!-- Lightbox -->
+<div id="lightbox" onclick="closeLightbox(event)">
+  <button id="lightbox-close" onclick="closeLightbox()">✕</button>
+  <img id="lightbox-img" src="" alt="">
+  <a id="lightbox-dl" href="" download target="_blank">
+    <i class="ti ti-download"></i> 下載圖片
+  </a>
+</div>
+
 <div id="messages"></div>
 
 <div id="input-area">
@@ -311,7 +363,7 @@ async function init() {
     document.getElementById('welcome-name').textContent = event.name;
     document.title = event.name + ' — AI 新聞助理';
 
-    // 快速問題：優先使用活動自訂 chips，否先用預設
+    // 快速問題：優先使用活動自訂 chips，否則用預設
     const chipsEl = document.getElementById('chips');
     const chipList = event.chips
       ? event.chips.split('\n').map(s => s.trim()).filter(Boolean)
@@ -326,6 +378,25 @@ async function init() {
       };
       chipsEl.appendChild(btn);
     });
+
+    // 圖片資源（若活動有設定）
+    if (event.images) {
+      const urls = event.images.split('\n').map(s => s.trim()).filter(Boolean);
+      if (urls.length) {
+        const gallery = document.getElementById('image-gallery');
+        const grid = document.getElementById('image-gallery-grid');
+        gallery.style.display = 'block';
+        urls.forEach(url => {
+          const img = document.createElement('img');
+          img.src = url;
+          img.className = 'gallery-img';
+          img.alt = '活動圖片';
+          img.onerror = () => img.style.display = 'none';
+          img.onclick = () => openLightbox(url);
+          grid.appendChild(img);
+        });
+      }
+    }
 
     // 初始問候
     addMessage('ai', `您好！我是「${event.name}」的 AI 新聞助理。\n\n請先填寫上方的媒體名稱，再開始提問。`);
@@ -361,95 +432,9 @@ function addMessage(role, text) {
   const msgEl = document.createElement('div');
   msgEl.className = `msg ${role}`;
   const icon = role === 'ai' ? 'ti-robot' : 'ti-user';
+  const content = role === 'ai' ? renderMarkdown(text) : escHtml(text);
   msgEl.innerHTML = `
     <div class="avatar"><i class="ti ${icon}"></i></div>
-    <div class="bubble">${escHtml(text)}</div>`;
+    <div class="bubble">${content}</div>`;
   document.getElementById('messages').appendChild(msgEl);
-  msgEl.scrollIntoView({ behavior: 'smooth', block: 'end' });
-  return msgEl;
-}
-
-function showTyping() {
-  const msgEl = document.createElement('div');
-  msgEl.className = 'msg ai';
-  msgEl.id = 'typing';
-  msgEl.innerHTML = `
-    <div class="avatar"><i class="ti ti-robot"></i></div>
-    <div class="bubble">
-      <span class="typing-dot"></span><span class="typing-dot"></span><span class="typing-dot"></span>
-    </div>`;
-  document.getElementById('messages').appendChild(msgEl);
-  msgEl.scrollIntoView({ behavior: 'smooth', block: 'end' });
-}
-
-async function sendMessage(text) {
-  const q = (text || document.getElementById('user-input').value).trim();
-  if (!q) return;
-
-  document.getElementById('user-input').value = '';
-  document.getElementById('user-input').style.height = 'auto';
-  document.getElementById('send-btn').disabled = true;
-  document.getElementById('chips').style.display = 'none';
-
-  addMessage('user', q);
-  hist.push({ role: 'user', content: q });
-
-  showTyping();
-
-  try {
-    const res = await fetch('/api/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        messages: hist,
-        event_id: eventId,
-        media_name: mediaName || document.getElementById('media-input').value.trim()
-      })
-    });
-    const data = await res.json();
-    document.getElementById('typing')?.remove();
-
-    const reply = data.reply || data.error || '抱歉，發生錯誤。';
-    hist.push({ role: 'assistant', content: reply });
-    addMessage('ai', reply);
-  } catch (err) {
-    document.getElementById('typing')?.remove();
-    addMessage('ai', '連線錯誤，請稍後再試。');
-  }
-
-  document.getElementById('send-btn').disabled = false;
-}
-
-// Enter 送出
-document.getElementById('user-input').addEventListener('keydown', e => {
-  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
-});
-document.getElementById('send-btn').addEventListener('click', () => sendMessage());
-
-// textarea 自動撐高
-document.getElementById('user-input').addEventListener('input', function() {
-  this.style.height = 'auto';
-  this.style.height = Math.min(this.scrollHeight, 120) + 'px';
-});
-
-// 工具函式
-function escHtml(str) {
-  return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
-}
-function shadeColor(hex, percent) {
-  const num = parseInt(hex.slice(1), 16);
-  const amt = Math.round(2.55 * percent);
-  const R = Math.max(0, Math.min(255, (num >> 16) + amt));
-  const G = Math.max(0, Math.min(255, (num >> 8 & 0x00FF) + amt));
-  const B = Math.max(0, Math.min(255, (num & 0x0000FF) + amt));
-  return `#${(0x1000000 + R*0x10000 + G*0x100 + B).toString(16).slice(1)}`;
-}
-function hexToRgba(hex, alpha) {
-  const num = parseInt(hex.slice(1), 16);
-  return `rgba(${num>>16},${(num>>8)&0xFF},${num&0xFF},${alpha})`;
-}
-
-init();
-</script>
-</body>
-</html>
+  msgEl.scrollIntoView({ 
