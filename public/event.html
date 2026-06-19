@@ -401,7 +401,7 @@ async function init() {
     // 初始問候
     addMessage('ai', `您好！我是「${event.name}」的 AI 新聞助理。\n\n請先填寫上方的媒體名稱，再開始提問。`);
 
-    document.getElementById('loading').hidden = true;
+    document.getElementById('loading').style.display = 'none';
     lockUntilMedia(); // 初始鎖定
   } catch (err) {
     showError('載入活動資料失敗：' + err.message);
@@ -410,7 +410,7 @@ async function init() {
 
 function showError(msg) {
   document.getElementById('error-msg').textContent = msg;
-  document.getElementById('loading').hidden = true;
+  document.getElementById('loading').style.display = 'none';
   document.getElementById('error-screen').hidden = false;
 }
 
