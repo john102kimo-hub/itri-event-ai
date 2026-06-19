@@ -424,6 +424,13 @@ textarea.form-control { min-height: 200px; resize: vertical; line-height: 1.6; }
       <div class="char-count" id="kb-count">0 / 2500 字</div>
       <div class="form-hint">建議控制在 2500 字以內，素材過多時請先摘要</div>
     </div>
+    <div class="form-group">
+      <label>快速問題按鈕（每行一題）</label>
+      <textarea class="form-control" id="input-chips" rows="4"
+        placeholder="這次活動的主要發表內容是什麼？&#10;有哪些合作廠商參與？&#10;這項技術的應用場域為何？"
+        style="font-size:0.85rem"></textarea>
+      <div class="form-hint">留空則使用預設通用問題；每行填一個問題，建議 3–6 題</div>
+    </div>
     <div class="form-group" id="status-group" style="display:none">
       <label>狀態</label>
       <select class="form-control" id="input-status">
@@ -606,14 +613,37 @@ function renderEvents() {
 // ── 分析 ──────────────────────────────────────────────────
 function updateEventFilter() {
   const sel = document.getElementById('analytics-event-filter');
+  const activeIds = new Set(state.events.map(e => e.id));
+  // 從分析資料補入已封存但有問答紀錄的活動
+  const archivedWithData = (state.analytics?.by_event || [])
+    .filter(e => !activeIds.has(e.event_id))
+    .map(e => ({ id: e.event_id, name: e.event_name + ' (已封存)' }));
+  const allEvents = [...state.events, ...archivedWithData];
   sel.innerHTML = '<option value="">全部活動</option>' +
-    state.events.map(e => `<option value="${escHtml(e.id)}">${escHtml(e.name)}</option>`).join('');
+    allEvents.map(e => `<option value="${escHtml(e.id)}">${escHtml(e.name)}</option>`).join('');
 }
 
 function showAnalyticsByEvent(eventId) {
   showView('analytics');
   document.getElementById('analytics-event-filter').value = eventId;
   loadAnalytics();
+}
+
+async function deleteQA(rowNum) {
+  if (!confirm('確定要刪除這筆問答紀錄嗎？')) return;
+  try {
+    const res = await fetch('/api/analytics', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'delete', row_num: rowNum, password: state.password })
+    });
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    toast('已刪除');
+    loadAnalytics();
+  } catch(e) {
+    toast('刪除失敗：' + e.message);
+  }
 }
 
 async function loadAnalytics() {
@@ -672,13 +702,16 @@ function renderAnalytics(data, eid) {
     ${data.recent?.length ? `
     <div style="overflow-x:auto">
     <table class="qa-table">
-      <thead><tr><th>時間</th><th>活動</th><th>媒體</th><th>問題</th></tr></thead>
+      <thead><tr><th>時間</th><th>活動</th><th>媒體</th><th>問題</th><th style="width:40px"></th></tr></thead>
       <tbody>${data.recent.map(r => `
         <tr>
           <td style="white-space:nowrap;font-size:0.78rem;color:var(--muted)">${escHtml(r.time||'')}</td>
           <td style="white-space:nowrap;font-size:0.78rem">${escHtml(r.event||r.event_id||'')}</td>
           <td style="font-size:0.82rem">${escHtml(r.media||'—')}</td>
           <td>${escHtml(r.question||'')}</td>
+          <td><button onclick="deleteQA(${r.row_num})" title="刪除此筆"
+            style="background:none;border:none;cursor:pointer;color:#ef4444;font-size:14px;padding:2px 6px">
+            <i class="ti ti-trash"></i></button></td>
         </tr>`).join('')}
       </tbody>
     </table>
@@ -715,6 +748,7 @@ function showCreateModal() {
   document.getElementById('color-preview').style.background = '#0F9E7A';
   document.getElementById('input-kb').value = '';
   document.getElementById('kb-count').textContent = '0 / 2500 字';
+  document.getElementById('input-chips').value = '';
   document.getElementById('status-group').style.display = 'none';
   document.getElementById('archive-btn').style.display = 'none';
   document.getElementById('event-modal').style.display = 'flex';
@@ -736,6 +770,7 @@ async function showEditModal(eventId) {
     document.getElementById('color-preview').style.background = ev.color || '#0F9E7A';
     document.getElementById('input-kb').value = ev.knowledge_base || '';
     document.getElementById('kb-count').textContent = (ev.knowledge_base?.length || 0) + ' / 2500 字';
+    document.getElementById('input-chips').value = ev.chips || '';
     document.getElementById('input-status').value = ev.status || 'active';
     document.getElementById('event-modal').style.display = 'flex';
   } catch(e) {
@@ -752,6 +787,7 @@ async function saveEvent() {
   const name = document.getElementById('input-name').value.trim();
   const color = document.getElementById('input-color').value.trim();
   const knowledge_base = document.getElementById('input-kb').value.trim();
+  const chips = document.getElementById('input-chips').value.trim();
   const status = document.getElementById('input-status').value;
 
   if (!name) { toast('活動名稱必填'); return; }
@@ -768,7 +804,7 @@ async function saveEvent() {
         action: id ? 'update' : 'create',
         password: state.password,
         id: id || undefined,
-        name, color, knowledge_base, status
+        name, color, knowledge_base, chips, status
       })
     });
     const data = await res.json();
