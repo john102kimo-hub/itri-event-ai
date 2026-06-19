@@ -7,6 +7,27 @@ import { readRange } from './lib/sheets.js';
 const eventCache = new Map();
 
 async function getEventConfig(eventId) {
+  // 特殊模式：彙整所有活動
+  if (eventId === 'all') {
+    const cacheKey = '__all__';
+    const cached = eventCache.get(cacheKey);
+    if (cached && Date.now() < cached.expiry) return cached.data;
+
+    const rows = await readRange('events!A2:F');
+    const activeRows = rows.filter(r => r[0] && r[4] !== 'archived');
+    const combined = activeRows
+      .map(r => `【${r[1] || r[0]}】\n${r[3] || ''}`)
+      .join('\n\n---\n\n');
+    const names = activeRows.map(r => r[1] || r[0]).join('、');
+    const data = {
+      id: 'all',
+      name: `工研院彙整訓練（${names}）`,
+      knowledge_base: combined || '（無活動資料）'
+    };
+    eventCache.set(cacheKey, { data, expiry: Date.now() + 5 * 60 * 1000 });
+    return data;
+  }
+
   const cached = eventCache.get(eventId);
   if (cached && Date.now() < cached.expiry) return cached.data;
 
