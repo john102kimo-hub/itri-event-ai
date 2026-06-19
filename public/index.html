@@ -304,6 +304,9 @@ textarea.form-control { min-height: 200px; resize: vertical; line-height: 1.6; }
     <button class="nav-item" onclick="showView('recent')">
       <i class="ti ti-message-circle"></i> 最新問答
     </button>
+    <a class="nav-item" href="/training" target="_blank" style="text-decoration:none;color:rgba(255,255,255,0.7)">
+      <i class="ti ti-microphone"></i> 彙整媒體訓練
+    </a>
     <div class="sidebar-bottom">
       <button class="logout-btn" onclick="logout()">
         <i class="ti ti-logout"></i> 登出
@@ -385,10 +388,10 @@ textarea.form-control { min-height: 200px; resize: vertical; line-height: 1.6; }
         <div style="overflow-x:auto">
           <table class="qa-table">
             <thead><tr>
-              <th>時間</th><th>活動</th><th>媒體</th><th>問題</th>
+              <th>時間</th><th>活動</th><th>媒體</th><th>問題</th><th style="width:40px"></th>
             </tr></thead>
             <tbody id="recent-tbody">
-              <tr><td colspan="4" style="text-align:center;padding:40px;color:var(--muted)">載入中…</td></tr>
+              <tr><td colspan="5" style="text-align:center;padding:40px;color:var(--muted)">載入中…</td></tr>
             </tbody>
           </table>
         </div>
@@ -420,9 +423,9 @@ textarea.form-control { min-height: 200px; resize: vertical; line-height: 1.6; }
       <label>活動知識庫（新聞稿 / 技術資料）*</label>
       <textarea class="form-control" id="input-kb"
         placeholder="貼入本次活動的新聞稿或重要資訊，AI 將根據此內容回答記者問題…"
-        oninput="document.getElementById('kb-count').textContent=this.value.length+' / 2500 字'"></textarea>
-      <div class="char-count" id="kb-count">0 / 2500 字</div>
-      <div class="form-hint">建議控制在 2500 字以內，素材過多時請先摘要</div>
+        oninput="document.getElementById('kb-count').textContent=this.value.length+' / 8000 字'"></textarea>
+      <div class="char-count" id="kb-count">0 / 8000 字</div>
+      <div class="form-hint">最多可輸入 8000 字；超過建議摘要精簡，確保 AI 回答品質</div>
     </div>
     <div class="form-group">
       <label>快速問題按鈕（每行一題）</label>
@@ -430,6 +433,13 @@ textarea.form-control { min-height: 200px; resize: vertical; line-height: 1.6; }
         placeholder="這次活動的主要發表內容是什麼？&#10;有哪些合作廠商參與？&#10;這項技術的應用場域為何？"
         style="font-size:0.85rem"></textarea>
       <div class="form-hint">留空則使用預設通用問題；每行填一個問題，建議 3–6 題</div>
+    </div>
+    <div class="form-group">
+      <label>圖片資源 URL（每行一個，供記者下載技術照片）</label>
+      <textarea class="form-control" id="input-images" rows="3"
+        placeholder="https://example.com/photo1.jpg&#10;https://example.com/photo2.png"
+        style="font-size:0.85rem"></textarea>
+      <div class="form-hint">貼上圖片直連 URL（需可公開存取），記者在前台可點擊放大並下載</div>
     </div>
     <div class="form-group" id="status-group" style="display:none">
       <label>狀態</label>
@@ -721,7 +731,7 @@ function renderAnalytics(data, eid) {
 
 async function loadRecent() {
   document.getElementById('recent-tbody').innerHTML =
-    '<tr><td colspan="4" style="text-align:center;padding:40px;color:var(--muted)">載入中…</td></tr>';
+    '<tr><td colspan="5" style="text-align:center;padding:40px;color:var(--muted)">載入中…</td></tr>';
   try {
     const res = await fetch(`/api/analytics?password=${encodeURIComponent(state.password)}`);
     const data = await res.json();
@@ -732,10 +742,30 @@ async function loadRecent() {
         <td style="font-size:0.82rem;white-space:nowrap">${escHtml(r.event||'')}</td>
         <td style="font-size:0.82rem">${escHtml(r.media||'—')}</td>
         <td>${escHtml(r.question||'')}</td>
-      </tr>`).join('') || '<tr><td colspan="4" style="text-align:center;padding:40px;color:var(--muted)">尚無資料</td></tr>';
+        <td><button onclick="deleteQARecent(${r.row_num})" title="刪除此筆"
+          style="background:none;border:none;cursor:pointer;color:#ef4444;font-size:14px;padding:2px 6px">
+          <i class="ti ti-trash"></i></button></td>
+      </tr>`).join('') || '<tr><td colspan="5" style="text-align:center;padding:40px;color:var(--muted)">尚無資料</td></tr>';
   } catch(e) {
     document.getElementById('recent-tbody').innerHTML =
-      `<tr><td colspan="4" style="color:#ef4444;padding:20px">載入失敗：${e.message}</td></tr>`;
+      `<tr><td colspan="5" style="color:#ef4444;padding:20px">載入失敗：${e.message}</td></tr>`;
+  }
+}
+
+async function deleteQARecent(rowNum) {
+  if (!confirm('確定要刪除這筆問答紀錄嗎？')) return;
+  try {
+    const res = await fetch('/api/analytics', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'delete', row_num: rowNum, password: state.password })
+    });
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    toast('已刪除');
+    loadRecent();
+  } catch(e) {
+    toast('刪除失敗：' + e.message);
   }
 }
 
@@ -747,8 +777,9 @@ function showCreateModal() {
   document.getElementById('input-color').value = '#0F9E7A';
   document.getElementById('color-preview').style.background = '#0F9E7A';
   document.getElementById('input-kb').value = '';
-  document.getElementById('kb-count').textContent = '0 / 2500 字';
+  document.getElementById('kb-count').textContent = '0 / 8000 字';
   document.getElementById('input-chips').value = '';
+  document.getElementById('input-images').value = '';
   document.getElementById('status-group').style.display = 'none';
   document.getElementById('archive-btn').style.display = 'none';
   document.getElementById('event-modal').style.display = 'flex';
@@ -769,8 +800,9 @@ async function showEditModal(eventId) {
     document.getElementById('input-color').value = ev.color || '#0F9E7A';
     document.getElementById('color-preview').style.background = ev.color || '#0F9E7A';
     document.getElementById('input-kb').value = ev.knowledge_base || '';
-    document.getElementById('kb-count').textContent = (ev.knowledge_base?.length || 0) + ' / 2500 字';
+    document.getElementById('kb-count').textContent = (ev.knowledge_base?.length || 0) + ' / 8000 字';
     document.getElementById('input-chips').value = ev.chips || '';
+    document.getElementById('input-images').value = ev.images || '';
     document.getElementById('input-status').value = ev.status || 'active';
     document.getElementById('event-modal').style.display = 'flex';
   } catch(e) {
@@ -788,6 +820,7 @@ async function saveEvent() {
   const color = document.getElementById('input-color').value.trim();
   const knowledge_base = document.getElementById('input-kb').value.trim();
   const chips = document.getElementById('input-chips').value.trim();
+  const images = document.getElementById('input-images').value.trim();
   const status = document.getElementById('input-status').value;
 
   if (!name) { toast('活動名稱必填'); return; }
@@ -804,7 +837,7 @@ async function saveEvent() {
         action: id ? 'update' : 'create',
         password: state.password,
         id: id || undefined,
-        name, color, knowledge_base, chips, status
+        name, color, knowledge_base, chips, images, status
       })
     });
     const data = await res.json();
@@ -822,50 +855,4 @@ async function saveEvent() {
 
 async function archiveEvent() {
   const id = document.getElementById('edit-event-id').value;
-  if (!id) return;
-  if (!confirm('確定要封存這個活動嗎？封存後記者前台將無法使用。')) return;
-
-  try {
-    const res = await fetch('/api/events', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'archive', password: state.password, id })
-    });
-    const data = await res.json();
-    if (data.error) throw new Error(data.error);
-    closeModal();
-    toast('活動已封存');
-    await loadEvents();
-  } catch(e) {
-    toast('封存失敗：' + e.message);
-  }
-}
-
-// ── 工具函式 ──────────────────────────────────────────────
-function exportCSV(eventId) {
-  const eid = eventId || document.getElementById('analytics-event-filter')?.value || '';
-  const url = `/api/export?password=${encodeURIComponent(state.password)}${eid ? '&event_id=' + encodeURIComponent(eid) : ''}`;
-  window.open(url, '_blank');
-}
-
-function copyLink(eventId) {
-  const url = `${location.origin}/event?id=${encodeURIComponent(eventId)}`;
-  navigator.clipboard.writeText(url).then(() => toast('記者前台連結已複製！'));
-}
-
-let toastTimer;
-function toast(msg) {
-  const el = document.getElementById('toast');
-  el.textContent = msg;
-  el.style.display = 'block';
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => el.style.display = 'none', 3000);
-}
-
-function escHtml(str) {
-  if (str === null || str === undefined) return '';
-  return str.toString().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-}
-</script>
-</body>
-</html>
+  if 
