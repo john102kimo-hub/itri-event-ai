@@ -437,4 +437,121 @@ function addMessage(role, text) {
     <div class="avatar"><i class="ti ${icon}"></i></div>
     <div class="bubble">${content}</div>`;
   document.getElementById('messages').appendChild(msgEl);
-  msgEl.scrollIntoView({ 
+  msgEl.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  return msgEl;
+}
+
+function showTyping() {
+  const msgEl = document.createElement('div');
+  msgEl.className = 'msg ai';
+  msgEl.id = 'typing';
+  msgEl.innerHTML = `
+    <div class="avatar"><i class="ti ti-robot"></i></div>
+    <div class="bubble">
+      <span class="typing-dot"></span><span class="typing-dot"></span><span class="typing-dot"></span>
+    </div>`;
+  document.getElementById('messages').appendChild(msgEl);
+  msgEl.scrollIntoView({ behavior: 'smooth', block: 'end' });
+}
+
+async function sendMessage(text) {
+  const q = (text || document.getElementById('user-input').value).trim();
+  if (!q) return;
+
+  document.getElementById('user-input').value = '';
+  document.getElementById('user-input').style.height = 'auto';
+  document.getElementById('send-btn').disabled = true;
+  document.getElementById('chips').style.display = 'none';
+
+  addMessage('user', q);
+  hist.push({ role: 'user', content: q });
+
+  showTyping();
+
+  try {
+    const res = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        messages: hist,
+        event_id: eventId,
+        media_name: mediaName || document.getElementById('media-input').value.trim()
+      })
+    });
+    const data = await res.json();
+    document.getElementById('typing')?.remove();
+
+    const reply = data.reply || data.error || '抱歉，發生錯誤。';
+    hist.push({ role: 'assistant', content: reply });
+    addMessage('ai', reply);
+  } catch (err) {
+    document.getElementById('typing')?.remove();
+    addMessage('ai', '連線錯誤，請稍後再試。');
+  }
+
+  document.getElementById('send-btn').disabled = false;
+}
+
+// Enter 送出
+document.getElementById('user-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+});
+document.getElementById('send-btn').addEventListener('click', () => sendMessage());
+
+// textarea 自動撐高
+document.getElementById('user-input').addEventListener('input', function() {
+  this.style.height = 'auto';
+  this.style.height = Math.min(this.scrollHeight, 120) + 'px';
+});
+
+// 工具函式
+function escHtml(str) {
+  return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
+}
+
+// Markdown → HTML（AI 回應用）
+function renderMarkdown(text) {
+  let s = text
+    .replace(/&/g,'&amp;')
+    .replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;');
+
+  s = s.replace(/^#{1,6}\s*/gm, '');
+  s = s.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  s = s.replace(/\*([^*\n]+?)\*/g, '<em>$1</em>');
+  s = s.replace(
+    /(https?:\/\/[^\s&<>"]+)/g,
+    '<a href="$1" target="_blank" rel="noopener">$1</a>'
+  );
+  s = s.replace(/\n/g, '<br>');
+  return s;
+}
+
+// 圖片燈筱
+function openLightbox(url) {
+  document.getElementById('lightbox-img').src = url;
+  document.getElementById('lightbox-dl').href = url;
+  document.getElementById('lightbox').classList.add('open');
+}
+function closeLightbox(e) {
+  if (!e || e.target === document.getElementById('lightbox') || e.currentTarget.id === 'lightbox-close') {
+    document.getElementById('lightbox').classList.remove('open');
+  }
+}
+function shadeColor(hex, percent) {
+  const num = parseInt(hex.slice(1), 16);
+  const amt = Math.round(2.55 * percent);
+  const R = Math.max(0, Math.min(255, (num >> 16) + amt));
+  const G = Math.max(0, Math.min(255, (num >> 8 & 0x00FF) + amt));
+  const B = Math.max(0, Math.min(255, (num & 0x0000FF) + amt));
+  return `#${(0x1000000 + R*0x10000 + G*0x100 + B).toString(16).slice(1)}`;
+}
+function hexToRgba(hex, alpha) {
+  const num = parseInt(hex.slice(1), 16);
+  return `rgba(${num>>16},${(num>>8)&0xFF},${num&0xFF},${alpha})`;
+}
+
+init();
+</script>
+</body>
+</html>
