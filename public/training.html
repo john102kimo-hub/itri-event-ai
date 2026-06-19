@@ -296,7 +296,7 @@ async function init() {
     if (!eventId) {
       // 沒有指定活動 → 顯示選擇器
       document.getElementById('event-title').textContent = '媒體訓練模式';
-      document.getElementById('loading').hidden = true;
+      document.getElementById('loading').style.display = 'none';
       showEventSelector(events);
       return;
     }
@@ -317,7 +317,7 @@ async function init() {
     }
   } catch(e) {}
 
-  document.getElementById('loading').hidden = true;
+  document.getElementById('loading').style.display = 'none';
 }
 
 function showEventSelector(events) {
