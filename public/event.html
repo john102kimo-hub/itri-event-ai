@@ -399,7 +399,7 @@ async function init() {
     }
 
     // 初始問候
-    addMessage('ai', `您好！我是「${event.name}」的 AI 新聞助理。\n\n請先填寫上方的媒體名稱，再開始提問。`);
+    addMessage('ai', event.greeting || `您好！我是「${event.name}」的 AI 新聞助理。\n\n請先填寫上方的媒體名稱，再開始提問。`);
 
     document.getElementById('loading').style.display = 'none';
     lockUntilMedia(); // 初始鎖定
@@ -461,7 +461,6 @@ async function sendMessage(text) {
   document.getElementById('user-input').value = '';
   document.getElementById('user-input').style.height = 'auto';
   document.getElementById('send-btn').disabled = true;
-  document.getElementById('chips').style.display = 'none';
 
   addMessage('user', q);
   hist.push({ role: 'user', content: q });
