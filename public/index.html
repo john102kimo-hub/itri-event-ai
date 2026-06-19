@@ -388,7 +388,7 @@ textarea.form-control { min-height: 200px; resize: vertical; line-height: 1.6; }
         <div style="overflow-x:auto">
           <table class="qa-table">
             <thead><tr>
-              <th>時間</th><th>活動</th><th>媒體</th><th>問題</th><th style="width:40px"></th>
+              <th>時間</th><th>活動</th><th>媒體</th><th>問題</th><th style="width:60px">操作</th>
             </tr></thead>
             <tbody id="recent-tbody">
               <tr><td colspan="5" style="text-align:center;padding:40px;color:var(--muted)">載入中…</td></tr>
@@ -712,7 +712,7 @@ function renderAnalytics(data, eid) {
     ${data.recent?.length ? `
     <div style="overflow-x:auto">
     <table class="qa-table">
-      <thead><tr><th>時間</th><th>活動</th><th>媒體</th><th>問題</th><th style="width:40px"></th></tr></thead>
+      <thead><tr><th>時間</th><th>活動</th><th>媒體</th><th>問題</th><th style="width:60px">操作</th></tr></thead>
       <tbody>${data.recent.map(r => `
         <tr>
           <td style="white-space:nowrap;font-size:0.78rem;color:var(--muted)">${escHtml(r.time||'')}</td>
@@ -720,8 +720,8 @@ function renderAnalytics(data, eid) {
           <td style="font-size:0.82rem">${escHtml(r.media||'—')}</td>
           <td>${escHtml(r.question||'')}</td>
           <td><button onclick="deleteQA(${r.row_num})" title="刪除此筆"
-            style="background:none;border:none;cursor:pointer;color:#ef4444;font-size:14px;padding:2px 6px">
-            <i class="ti ti-trash"></i></button></td>
+            style="background:#fef2f2;border:1px solid #fecaca;border-radius:6px;cursor:pointer;color:#ef4444;font-size:0.78rem;font-weight:600;padding:4px 10px;white-space:nowrap;font-family:var(--font)">
+            🗑 刪除</button></td>
         </tr>`).join('')}
       </tbody>
     </table>
@@ -743,8 +743,8 @@ async function loadRecent() {
         <td style="font-size:0.82rem">${escHtml(r.media||'—')}</td>
         <td>${escHtml(r.question||'')}</td>
         <td><button onclick="deleteQARecent(${r.row_num})" title="刪除此筆"
-          style="background:none;border:none;cursor:pointer;color:#ef4444;font-size:14px;padding:2px 6px">
-          <i class="ti ti-trash"></i></button></td>
+          style="background:#fef2f2;border:1px solid #fecaca;border-radius:6px;cursor:pointer;color:#ef4444;font-size:0.78rem;font-weight:600;padding:4px 10px;white-space:nowrap;font-family:var(--font)">
+          🗑 刪除</button></td>
       </tr>`).join('') || '<tr><td colspan="5" style="text-align:center;padding:40px;color:var(--muted)">尚無資料</td></tr>';
   } catch(e) {
     document.getElementById('recent-tbody').innerHTML =
