@@ -435,6 +435,13 @@ textarea.form-control { min-height: 200px; resize: vertical; line-height: 1.6; }
       <div class="form-hint">留空則使用預設通用問題；每行填一個問題，建議 3–6 題</div>
     </div>
     <div class="form-group">
+      <label>AI 開場白（記者前台初始問候語）</label>
+      <textarea class="form-control" id="input-greeting" rows="3"
+        placeholder="您好！我是「活動名稱」的 AI 新聞助理。&#10;&#10;請先填寫上方的媒體名稱，再開始提問。"
+        style="font-size:0.85rem"></textarea>
+      <div class="form-hint">留空則使用預設問候語；可自訂歡迎詞、注意事項等</div>
+    </div>
+    <div class="form-group">
       <label>圖片資源 URL（每行一個，供記者下載技術照片）</label>
       <textarea class="form-control" id="input-images" rows="3"
         placeholder="https://example.com/photo1.jpg&#10;https://example.com/photo2.png"
@@ -779,6 +786,8 @@ function showCreateModal() {
   document.getElementById('input-kb').value = '';
   document.getElementById('kb-count').textContent = '0 / 8000 字';
   document.getElementById('input-chips').value = '';
+  document.getElementById('input-greeting').value = '';
+  document.getElementById('input-greeting').value = '';
   document.getElementById('input-images').value = '';
   document.getElementById('status-group').style.display = 'none';
   document.getElementById('archive-btn').style.display = 'none';
@@ -802,6 +811,8 @@ async function showEditModal(eventId) {
     document.getElementById('input-kb').value = ev.knowledge_base || '';
     document.getElementById('kb-count').textContent = (ev.knowledge_base?.length || 0) + ' / 8000 字';
     document.getElementById('input-chips').value = ev.chips || '';
+    document.getElementById('input-greeting').value = ev.greeting || '';
+    document.getElementById('input-greeting').value = ev.greeting || '';
     document.getElementById('input-images').value = ev.images || '';
     document.getElementById('input-status').value = ev.status || 'active';
     document.getElementById('event-modal').style.display = 'flex';
@@ -820,6 +831,7 @@ async function saveEvent() {
   const color = document.getElementById('input-color').value.trim();
   const knowledge_base = document.getElementById('input-kb').value.trim();
   const chips = document.getElementById('input-chips').value.trim();
+  const greeting = document.getElementById('input-greeting').value.trim();
   const images = document.getElementById('input-images').value.trim();
   const status = document.getElementById('input-status').value;
 
@@ -837,7 +849,7 @@ async function saveEvent() {
         action: id ? 'update' : 'create',
         password: state.password,
         id: id || undefined,
-        name, color, knowledge_base, chips, images, status
+        name, color, knowledge_base, chips, images, greeting, status
       })
     });
     const data = await res.json();
