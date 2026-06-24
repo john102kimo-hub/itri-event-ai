@@ -418,7 +418,7 @@ async function askNextQuestion() {
     const data = await res.json();
     removeTyping();
 
-    const reply = data.reply || '（無法取得問題）';
+    const reply = data.reply || data.error || '（無法取得問題）';
     reporterHist.push({ role: 'assistant', content: reply });
     addReporterMsg(reply);
 
@@ -469,7 +469,7 @@ async function submitAnswer() {
     const evalData = await evalRes.json();
     removeTyping();
 
-    const evalText = evalData.reply || '（無法取得評分）';
+    const evalText = evalData.reply || evalData.error || '（無法取得評分）';
     reporterHist.push({ role: 'assistant', content: evalText });
 
     // 解析評分中的下一題（分隔線後的內容）
