@@ -120,7 +120,7 @@ ${knowledgeBase}
         model: 'claude-sonnet-4-6',
         max_tokens: 1200,
         system: systemPrompt,
-        messages
+        messages: messages.length > 0 ? messages : [{ role: 'user', content: '請開始。' }]
       })
     });
 
