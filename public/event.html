@@ -349,7 +349,19 @@ async function init() {
     const listData = await listRes.json();
     const event = listData.events?.find(e => e.id === eventId);
 
-    if (!event) { showError('此活動不存在或已結束。'); return; }
+    if (!event) { showError('此活動不存在，請確認網址是否正確。'); return; }
+
+    // 已結束活動：鎖定前台，禁止提問
+    if (event.status === 'ended') {
+      document.getElementById('error-screen').style.background = '#fffbeb';
+      document.querySelector('#error-screen i').style.color = '#d97706';
+      document.querySelector('#error-screen i').className = 'ti ti-lock';
+      document.querySelector('#error-screen h2').textContent = '記者會已結束';
+      document.getElementById('error-msg').textContent = '此記者會的提問功能已關閉，感謝您的參與。如需相關資料請洽主辦單位。';
+      document.getElementById('loading').style.display = 'none';
+      document.getElementById('error-screen').hidden = false;
+      return;
+    }
 
     // 套用活動設定
     eventColor = event.color || '#0F9E7A';
