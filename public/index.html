@@ -421,6 +421,11 @@ textarea.form-control { min-height: 200px; resize: vertical; line-height: 1.6; }
       <div class="form-hint">輸入 HEX 色碼，例如工研院綠 #0F9E7A</div>
     </div>
     <div class="form-group">
+      <label><i class="ti ti-calendar-event"></i> 活動日期</label>
+      <input class="form-control" id="input-date" type="date">
+      <div class="form-hint">設定記者會/活動的實際舉辦日期</div>
+    </div>
+    <div class="form-group">
       <label>活動知識庫（新聞稿 / 技術資料）*</label>
       <textarea class="form-control" id="input-kb"
         placeholder="貼入本次活動的新聞稿或重要資訊，AI 將根據此內容回答記者問題…"
@@ -786,6 +791,7 @@ function showCreateModal() {
   document.getElementById('input-name').value = '';
   document.getElementById('input-color').value = '#0F9E7A';
   document.getElementById('color-preview').style.background = '#0F9E7A';
+  document.getElementById('input-date').value = new Date().toISOString().slice(0,10);
   document.getElementById('input-kb').value = '';
   document.getElementById('kb-count').textContent = '0 / 8000 字';
   document.getElementById('input-chips').value = '';
@@ -818,6 +824,16 @@ async function showEditModal(eventId) {
     document.getElementById('input-greeting').value = ev.greeting || '';
     document.getElementById('input-images').value = ev.images || '';
     document.getElementById('input-status').value = ev.status || 'active';
+    // 解析 created_at 為 date input 格式（YYYY-MM-DD）
+    const dateStr = ev.created_at || '';
+    let isoDate = '';
+    if (dateStr.match(/^\d{4}-\d{2}-\d{2}/)) {
+      isoDate = dateStr.slice(0, 10);
+    } else if (dateStr.match(/^\d{4}\/\d{1,2}\/\d{1,2}/)) {
+      const parts = dateStr.split('/');
+      isoDate = parts[0] + '-' + String(parts[1]).padStart(2,'0') + '-' + String(parts[2]).padStart(2,'0');
+    }
+    document.getElementById('input-date').value = isoDate;
     document.getElementById('event-modal').style.display = 'flex';
   } catch(e) {
     toast('載入失敗：' + e.message);
@@ -837,6 +853,7 @@ async function saveEvent() {
   const greeting = document.getElementById('input-greeting').value.trim();
   const images = document.getElementById('input-images').value.trim();
   const status = document.getElementById('input-status').value;
+  const event_date = document.getElementById('input-date').value || undefined;
 
   if (!name) { toast('活動名稱必填'); return; }
   if (!knowledge_base) { toast('知識庫不可為空'); return; }
