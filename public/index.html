@@ -158,6 +158,7 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); min-
 }
 .status-active { background: #d1fae5; color: #065f46; }
 .status-archived { background: #f3f4f6; color: #9ca3af; }
+.status-ended { background: #fef3c7; color: #92400e; }
 .event-meta { font-size: 0.78rem; color: var(--muted); margin-bottom: 14px; display: flex; gap: 12px; flex-wrap: wrap; }
 .event-meta span { display: flex; align-items: center; gap: 4px; }
 .event-actions { display: flex; gap: 8px; flex-wrap: wrap; }
@@ -452,6 +453,7 @@ textarea.form-control { min-height: 200px; resize: vertical; line-height: 1.6; }
       <label>狀態</label>
       <select class="form-control" id="input-status">
         <option value="active">進行中</option>
+        <option value="ended">已結束</option>
         <option value="archived">封存</option>
       </select>
     </div>
@@ -555,7 +557,7 @@ async function loadStatsQuick() {
 }
 
 function updateStats(data) {
-  document.getElementById('stat-events').textContent = state.events.filter(e => e.status !== 'archived').length;
+  document.getElementById('stat-events').textContent = state.events.filter(e => e.status === 'active').length;
   document.getElementById('stat-total-qa').textContent = data.total || 0;
 
   const allMedia = new Set();
@@ -586,7 +588,8 @@ function renderEvents() {
 
   grid.innerHTML = events.map(ev => {
     const count = qCount[ev.id] || 0;
-    const isActive = ev.status !== 'archived';
+    const badgeClass = ev.status === 'active' ? 'status-active' : ev.status === 'ended' ? 'status-ended' : 'status-archived';
+    const badgeText = ev.status === 'active' ? '進行中' : ev.status === 'ended' ? '已結束' : '已封存';
     const color = ev.color || '#0F9E7A';
     return `
     <div class="event-card">
@@ -594,8 +597,8 @@ function renderEvents() {
       <div class="event-card-body">
         <div class="event-card-header">
           <div class="event-name">${escHtml(ev.name)}</div>
-          <span class="status-badge ${isActive ? 'status-active' : 'status-archived'}">
-            ${isActive ? '進行中' : '已封存'}
+          <span class="status-badge ${badgeClass}">
+            ${badgeText}
           </span>
         </div>
         <div class="event-meta">
