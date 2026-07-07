@@ -869,7 +869,7 @@ async function saveEvent() {
         action: id ? 'update' : 'create',
         password: state.password,
         id: id || undefined,
-        name, color, knowledge_base, chips, images, greeting, status
+        name, color, knowledge_base, chips, images, greeting, status, event_date
       })
     });
     const data = await res.json();
