@@ -464,6 +464,8 @@ async function init() {
     addMessage('ai', event.greeting || `您好！我是「${event.name}」的 AI 新聞助理。\n\n歡迎直接提問！填寫上方媒體名稱可協助統計（非必填）。`);
 
     document.getElementById('loading').style.display = 'none';
+    lockUntilMedia();
+    showMediaModal(event);
   } catch (err) {
     showError('載入活動資料失敗：' + err.message);
   }
