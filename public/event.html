@@ -235,6 +235,47 @@
   }
   @keyframes spin { to { transform: rotate(360deg); } }
   [hidden] { display: none !important; }
+
+  /* ── 媒體名稱強制彈窗 ── */
+  #media-modal {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.6);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 300; padding: 20px;
+    backdrop-filter: blur(4px);
+  }
+  #media-modal-box {
+    background: white; border-radius: 20px;
+    padding: 40px 32px 32px;
+    width: 100%; max-width: 400px;
+    box-shadow: 0 24px 64px rgba(0,0,0,0.25);
+    text-align: center;
+    animation: modalIn 0.25s cubic-bezier(.34,1.56,.64,1);
+  }
+  @keyframes modalIn {
+    from { transform: scale(0.88); opacity: 0; }
+    to   { transform: scale(1);    opacity: 1; }
+  }
+  #media-modal-icon { font-size: 52px; color: var(--primary); margin-bottom: 14px; }
+  #media-modal-title { font-size: 1.35rem; font-weight: 800; color: var(--text); margin-bottom: 8px; }
+  #media-modal-sub { font-size: 0.88rem; color: var(--muted); margin-bottom: 28px; line-height: 1.6; }
+  #media-modal-input {
+    width: 100%; border: 2px solid var(--border); border-radius: 12px;
+    padding: 15px 16px; font-family: var(--font); font-size: 1rem;
+    outline: none; transition: border-color 0.2s; margin-bottom: 14px;
+    text-align: center;
+  }
+  #media-modal-input:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(15,158,122,0.15); }
+  #media-modal-btn {
+    width: 100%; background: var(--primary); color: white;
+    border: none; border-radius: 12px; padding: 15px;
+    font-size: 1.05rem; font-weight: 700; font-family: var(--font);
+    cursor: pointer; transition: background 0.2s, opacity 0.2s;
+  }
+  #media-modal-btn:disabled { opacity: 0.35; cursor: default; }
+  #media-modal-btn:not(:disabled):hover { background: var(--primary-dark); }
+  #media-modal-hint { font-size: 0.75rem; color: #bbb; margin-top: 14px; }
+
   #error-screen {
     position: fixed; inset: 0;
     background: var(--bg);
@@ -259,6 +300,18 @@
   <i class="ti ti-alert-circle"></i>
   <h2 style="color:#1a1a2e">找不到活動</h2>
   <p id="error-msg">此活動不存在或已結束，請確認網址是否正確。</p>
+</div>
+
+<!-- 媒體名稱強制彈窗 -->
+<div id="media-modal" hidden>
+  <div id="media-modal-box">
+    <div id="media-modal-icon"><i class="ti ti-id-badge"></i></div>
+    <div id="media-modal-title">請填寫您的媒體名稱</div>
+    <div id="media-modal-sub">填寫後即可向 AI 提問<br>新聞稿・技術規格・合作廠商，隨問隨答</div>
+    <input id="media-modal-input" type="text" placeholder="例：中央社、自由時報、商業週刊" maxlength="40" autocomplete="organization">
+    <button id="media-modal-btn" disabled>開始提問</button>
+    <div id="media-modal-hint">本系統不會儲存任何個人資料</div>
+  </div>
 </div>
 
 <div id="header">
@@ -422,7 +475,37 @@ function showError(msg) {
   document.getElementById('error-screen').hidden = false;
 }
 
-// 媒體名稱處理（強制填寫）
+// ── 媒體彈窗邏輯 ──────────────────────────────────────
+let _pendingEvent = null;
+
+function showMediaModal(event) {
+  _pendingEvent = event || _pendingEvent;
+  const modal = document.getElementById('media-modal');
+  modal.hidden = false;
+  setTimeout(() => document.getElementById('media-modal-input').focus(), 120);
+}
+
+function confirmMediaModal() {
+  const val = document.getElementById('media-modal-input').value.trim();
+  if (!val) return;
+  mediaName = val;
+  document.getElementById('media-input').value = val;
+  document.getElementById('media-modal').hidden = true;
+  unlockChat();
+  if (_pendingEvent) {
+    const greeting = _pendingEvent.greeting
+      || ('您好！我是「' + _pendingEvent.name + '」的 AI 新聞助理。有任何問題歡迎直接提問！');
+    addMessage('ai', greeting);
+  }
+}
+
+const _modalInput = document.getElementById('media-modal-input');
+const _modalBtn   = document.getElementById('media-modal-btn');
+_modalInput.addEventListener('input',   () => { _modalBtn.disabled = !_modalInput.value.trim(); });
+_modalInput.addEventListener('keydown', e  => { if (e.key === 'Enter') confirmMediaModal(); });
+_modalBtn.addEventListener('click', confirmMediaModal);
+
+// 媒體名稱處理（banner 可修改媒體名稱）
 document.getElementById('media-input').addEventListener('input', e => {
   mediaName = e.target.value.trim();
   if (mediaName) {
