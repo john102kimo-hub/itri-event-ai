@@ -176,6 +176,18 @@
   .typing-dot:nth-child(3) { animation-delay: 0.4s; }
   @keyframes blink { 0%,80%,100% { opacity: 0.2; } 40% { opacity: 1; } }
 
+  /* AI 回答的「複製」鈕 */
+  .bubble-wrap { display: flex; flex-direction: column; align-items: flex-start; gap: 5px; max-width: 80%; }
+  .bubble-wrap .bubble { max-width: 100%; }
+  .copy-btn {
+    background: none; border: 1px solid var(--border); color: var(--muted);
+    border-radius: 8px; padding: 3px 10px; font-size: 0.72rem; font-family: var(--font);
+    cursor: pointer; display: inline-flex; align-items: center; gap: 4px;
+    opacity: 0.75; transition: all 0.15s;
+  }
+  .copy-btn:hover { opacity: 1; border-color: var(--primary); color: var(--primary); }
+  .copy-btn.copied { color: var(--primary); border-color: var(--primary); opacity: 1; }
+
   /* Input area */
   #input-area {
     border-top: 1px solid var(--border);
@@ -459,8 +471,7 @@ async function init() {
       }
     }
 
-    // 初始問候
-    addMessage('ai', event.greeting || `您好！我是「${event.name}」的 AI 新聞助理。\n\n歡迎直接提問！填寫上方媒體名稱可協助統計（非必填）。`);
+    // 初始問候改到填寫媒體名稱後（confirmMediaModal）才顯示，避免重複
 
     document.getElementById('loading').style.display = 'none';
     lockUntilMedia();
@@ -523,12 +534,34 @@ function addMessage(role, text) {
   msgEl.className = `msg ${role}`;
   const icon = role === 'ai' ? 'ti-robot' : 'ti-user';
   const content = role === 'ai' ? renderMarkdown(text) : escHtml(text);
-  msgEl.innerHTML = `
-    <div class="avatar"><i class="ti ${icon}"></i></div>
-    <div class="bubble">${content}</div>`;
+  if (role === 'ai') {
+    msgEl.innerHTML = `
+      <div class="avatar"><i class="ti ${icon}"></i></div>
+      <div class="bubble-wrap">
+        <div class="bubble">${content}</div>
+        <button class="copy-btn" type="button"><i class="ti ti-copy"></i> 複製</button>
+      </div>`;
+    const btn = msgEl.querySelector('.copy-btn');
+    btn.addEventListener('click', () => copyText(text, btn));
+  } else {
+    msgEl.innerHTML = `
+      <div class="avatar"><i class="ti ${icon}"></i></div>
+      <div class="bubble">${content}</div>`;
+  }
   document.getElementById('messages').appendChild(msgEl);
   msgEl.scrollIntoView({ behavior: 'smooth', block: 'end' });
   return msgEl;
+}
+
+// 一鍵複製 AI 回答（去掉 Markdown 記號，方便記者直接引用）
+function copyText(text, btn) {
+  const plain = text.replace(/\*\*/g, '').replace(/^#{1,6}\s*/gm, '').replace(/\*/g, '');
+  navigator.clipboard.writeText(plain).then(() => {
+    const orig = btn.innerHTML;
+    btn.classList.add('copied');
+    btn.innerHTML = '<i class="ti ti-check"></i> 已複製';
+    setTimeout(() => { btn.innerHTML = orig; btn.classList.remove('copied'); }, 1600);
+  }).catch(() => {});
 }
 
 function showTyping() {
@@ -547,6 +580,10 @@ function showTyping() {
 async function sendMessage(text) {
   const q = (text || document.getElementById('user-input').value).trim();
   if (!q) return;
+
+  // 首次提問後收合歡迎卡，釋放（尤其手機）對話空間
+  const welcomeEl = document.getElementById('welcome');
+  if (welcomeEl) welcomeEl.style.display = 'none';
 
   document.getElementById('user-input').value = '';
   document.getElementById('user-input').style.height = 'auto';
