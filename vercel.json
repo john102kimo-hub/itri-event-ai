@@ -2,6 +2,7 @@
   "rewrites": [
     { "source": "/event", "destination": "/event.html" },
     { "source": "/training", "destination": "/training.html" },
-    { "source": "/admin", "destination": "/index.html" }
+    { "source": "/admin", "destination": "/index.html" },
+    { "source": "/report", "destination": "/report.html" }
   ]
 }

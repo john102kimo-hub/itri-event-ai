@@ -33,6 +33,20 @@ export default async function handler(req, res) {
     try {
       const rows = await readRange('events!A2:I');
 
+      // 公開端點：只回傳單一活動前台所需欄位（不含知識庫、不需密碼），
+      // 避免前台為了取得一個活動而撈回全部活動清單
+      if (action === 'get_public' && id) {
+        const row = rows.find(r => r[0] === id);
+        if (!row || row[4] === 'archived') return res.status(404).json({ error: '活動不存在' });
+        return res.status(200).json({
+          event: {
+            id: row[0], name: row[1], color: row[2] || '#0F9E7A',
+            status: row[4] || 'active', created_at: row[5] || '',
+            chips: row[6] || '', images: row[7] || '', greeting: row[8] || ''
+          }
+        });
+      }
+
       if (action === 'get' && id) {
         if (password !== adminPassword) return res.status(401).json({ error: '密碼錯誤' });
         const row = rows.find(r => r[0] === id);

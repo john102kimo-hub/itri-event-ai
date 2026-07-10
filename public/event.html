@@ -407,11 +407,10 @@ async function init() {
   if (!eventId) { showError('請在網址加上 ?id=活動ID'); return; }
 
   try {
+    // 只取這一個活動（不再撈回全部活動清單，降低資訊外洩）
     const res = await fetch(`/api/events?action=get_public&id=${encodeURIComponent(eventId)}`);
-    // 改用 list 找到對應活動（不需要管理員密碼）
-    const listRes = await fetch('/api/events');
-    const listData = await listRes.json();
-    const event = listData.events?.find(e => e.id === eventId);
+    const data = await res.json();
+    const event = data.event;
 
     if (!event) { showError('此活動不存在，請確認網址是否正確。'); return; }
 
