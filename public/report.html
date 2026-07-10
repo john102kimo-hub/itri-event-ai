@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>成效報告 — 工研院活動溝通 AI 平台</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.3.0/tabler-icons.min.css">
+<style>
+  :root{
+    --primary:#0F9E7A; --primary-dark:#0a7a60; --primary-light:rgba(15,158,122,0.08);
+    --text:#1a1a2e; --muted:#6b7280; --bg:#f0f7f5; --card:#fff; --border:#e5e7eb; --radius:14px;
+    --font:'PingFang TC','Noto Sans TC','Microsoft JhengHei',sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:var(--font);background:var(--bg);color:var(--text);line-height:1.6}
+  .wrap{max-width:900px;margin:0 auto;padding:32px 20px 80px}
+
+  /* 登入 */
+  #gate{position:fixed;inset:0;background:linear-gradient(135deg,#0b3d30,#0F9E7A);display:flex;align-items:center;justify-content:center;padding:20px;z-index:50}
+  #gate-box{background:#fff;border-radius:20px;padding:40px 32px;width:100%;max-width:400px;text-align:center;box-shadow:0 24px 64px rgba(0,0,0,.25)}
+  #gate-box h1{font-size:1.3rem;margin-bottom:6px}
+  #gate-box p{color:var(--muted);font-size:.88rem;margin-bottom:24px}
+  #gate-box input{width:100%;border:2px solid var(--border);border-radius:12px;padding:14px;font-size:1rem;font-family:var(--font);text-align:center;outline:none;margin-bottom:14px}
+  #gate-box input:focus{border-color:var(--primary)}
+  #gate-box button{width:100%;background:var(--primary);color:#fff;border:none;border-radius:12px;padding:14px;font-size:1rem;font-weight:700;font-family:var(--font);cursor:pointer}
+  #gate-err{color:#ef4444;font-size:.82rem;margin-top:10px;min-height:18px}
+
+  /* 報告 */
+  .doc-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:8px;flex-wrap:wrap}
+  .doc-head h1{font-size:1.5rem}
+  .doc-head .sub{color:var(--muted);font-size:.9rem;margin-top:4px}
+  .toolbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  .toolbar label{font-size:.82rem;color:var(--muted)}
+  .toolbar input[type=number]{width:56px;border:1px solid var(--border);border-radius:8px;padding:5px 8px;font-family:var(--font)}
+  .btn{border:none;border-radius:10px;padding:9px 16px;font-family:var(--font);font-size:.88rem;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:6px}
+  .btn-primary{background:var(--primary);color:#fff}
+  .btn-outline{background:#fff;border:1px solid var(--border);color:var(--text)}
+
+  .section-label{font-size:.8rem;font-weight:700;color:var(--primary);letter-spacing:.05em;margin:28px 0 12px;text-transform:uppercase}
+  .kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px}
+  .kpi{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:20px}
+  .kpi .num{font-size:2rem;font-weight:800;color:var(--primary);line-height:1.1}
+  .kpi .lab{font-size:.82rem;color:var(--muted);margin-top:6px}
+  .kpi .hint{font-size:.72rem;color:#9ca3af;margin-top:4px}
+
+  .ev-card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:22px;margin-bottom:16px}
+  .ev-head{display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:16px;border-bottom:1px solid var(--border);padding-bottom:12px}
+  .ev-head h3{font-size:1.15rem}
+  .ev-head .date{font-size:.82rem;color:var(--muted)}
+  .ev-stats{display:flex;gap:28px;flex-wrap:wrap;margin-bottom:16px}
+  .ev-stat .n{font-size:1.4rem;font-weight:800;color:var(--text)}
+  .ev-stat .l{font-size:.78rem;color:var(--muted)}
+  .topic-title{font-size:.82rem;font-weight:700;color:var(--muted);margin-bottom:8px}
+  .topic-tags{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px}
+  .topic-tag{background:var(--primary-light);color:var(--primary-dark);border-radius:20px;padding:5px 12px;font-size:.82rem;font-weight:600}
+  .media-list{font-size:.82rem;color:var(--muted)}
+  .media-list b{color:var(--text)}
+  .foot-note{color:var(--muted);font-size:.78rem;margin-top:24px;line-height:1.7;border-top:1px solid var(--border);padding-top:16px}
+  #loading{text-align:center;padding:80px 0;color:var(--muted)}
+
+  @media print{
+    body{background:#fff}
+    .wrap{max-width:none;padding:0}
+    .no-print{display:none!important}
+    .kpi,.ev-card{break-inside:avoid;box-shadow:none}
+    .section-label{margin-top:18px}
+  }
+</style>
+</head>
+<body>
+
+<div id="gate">
+  <div id="gate-box">
+    <h1><i class="ti ti-chart-histogram" style="color:var(--primary)"></i> 成效報告</h1>
+    <p>請輸入管理員密碼以檢視</p>
+    <input id="gate-input" type="password" placeholder="管理員密碼" autocomplete="current-password">
+    <button onclick="unlock()">檢視報告</button>
+    <div id="gate-err"></div>
+  </div>
+</div>
+
+<div class="wrap" id="report" style="display:none">
+  <div class="doc-head">
+    <div>
+      <h1><i class="ti ti-chart-histogram" style="color:var(--primary)"></i> AI 新聞助理｜成效報告</h1>
+      <div class="sub" id="doc-sub">工研院活動溝通 AI 平台</div>
+    </div>
+    <div class="toolbar no-print">
+      <label>每題估算節省 <input type="number" id="min-per-q" value="3" min="1" max="30" onchange="render()"> 分鐘</label>
+      <button class="btn btn-outline" onclick="location.href='/'"><i class="ti ti-arrow-left"></i> 後台</button>
+      <button class="btn btn-primary" onclick="window.print()"><i class="ti ti-printer"></i> 列印 / 存 PDF</button>
+    </div>
+  </div>
+
+  <div id="loading">載入中…</div>
+  <div id="body" style="display:none"></div>
+</div>
+
+<script>
+let ANALYTICS = null;
+let PASSWORD = '';
+
+const STOP = new Set(['的','了','是','在','有','和','與','這','那','什麼','請問','可以','嗎','呢','一','會','不','也','都','我','你','他','她','我們','他們','您','這個','那個','如何','為什麼','是否','能否','目前','已經','未來','關於','想','請','一下','今天','沒有','什麼的']);
+
+function unlock(){
+  const pwd = document.getElementById('gate-input').value.trim();
+  if(!pwd){ return; }
+  PASSWORD = pwd;
+  document.getElementById('gate-err').textContent = '驗證中…';
+  load();
+}
+document.getElementById('gate-input').addEventListener('keydown', e=>{ if(e.key==='Enter') unlock(); });
+
+async function load(){
+  try{
+    const res = await fetch(`/api/analytics?password=${encodeURIComponent(PASSWORD)}&exclude_test=1`);
+    const data = await res.json();
+    if(data.error){ document.getElementById('gate-err').textContent = data.error; return; }
+    ANALYTICS = data;
+    document.getElementById('gate').style.display='none';
+    document.getElementById('report').style.display='block';
+    render();
+  }catch(e){
+    document.getElementById('gate-err').textContent = '載入失敗：' + e.message;
+  }
+}
+
+// 從問題陣列擷取熱門議題
+function topTopics(questions, n){
+  const kw = {};
+  (questions||[]).forEach(q=>{
+    const matches = (q.question||'').match(/[一-龥]{2,8}|[a-zA-Z]{3,}/g) || [];
+    matches.forEach(w=>{ if(!STOP.has(w)) kw[w]=(kw[w]||0)+1; });
+  });
+  return Object.entries(kw).sort((a,b)=>b[1]-a[1]).slice(0,n).map(([w,c])=>({w,c}));
+}
+
+function render(){
+  if(!ANALYTICS) return;
+  const minPerQ = parseInt(document.getElementById('min-per-q').value)||3;
+  const byEvent = ANALYTICS.by_event || [];
+  const total = ANALYTICS.total || 0;
+
+  // 全體服務媒體家數（跨活動去重）
+  const mediaUnion = new Set();
+  byEvent.forEach(e => (e.media_list||[]).forEach(m => mediaUnion.add(m)));
+
+  const savedHours = (total * minPerQ / 60);
+  const savedStr = savedHours >= 10 ? Math.round(savedHours) : savedHours.toFixed(1);
+
+  const today = new Date().toLocaleDateString('zh-TW',{year:'numeric',month:'long',day:'numeric'});
+  document.getElementById('doc-sub').textContent = `工研院活動溝通 AI 平台　·　報告產出日：${today}`;
+
+  const kpis = `
+    <div class="kpi"><div class="num">${byEvent.length}</div><div class="lab">支援記者會場次</div></div>
+    <div class="kpi"><div class="num">${mediaUnion.size}</div><div class="lab">服務媒體家數</div><div class="hint">依記者填寫之媒體去重</div></div>
+    <div class="kpi"><div class="num">${total}</div><div class="lab">累積回答題數</div></div>
+    <div class="kpi"><div class="num">${savedStr}<span style="font-size:1rem"> 小時</span></div><div class="lab">估算節省人力工時</div><div class="hint">${total} 題 × ${minPerQ} 分／題</div></div>
+    <div class="kpi"><div class="num" style="font-size:1.5rem">近乎零</div><div class="lab">雲端營運成本</div><div class="hint">Vercel 免費方案 + 輕量模型</div></div>
+  `;
+
+  const cards = byEvent.map(e=>{
+    const topics = topTopics(e.questions, 6);
+    const filled = (e.questions||[]).filter(q=>q.media && q.media!=='（未填寫）').length;
+    const fillRate = e.count ? Math.round(filled/e.count*100) : 0;
+    return `
+    <div class="ev-card">
+      <div class="ev-head">
+        <h3>${escHtml(e.event_name)}</h3>
+      </div>
+      <div class="ev-stats">
+        <div class="ev-stat"><div class="n">${e.count}</div><div class="l">回答題數</div></div>
+        <div class="ev-stat"><div class="n">${e.media_count}</div><div class="l">服務媒體家數</div></div>
+        <div class="ev-stat"><div class="n">${fillRate}%</div><div class="l">媒體填寫率</div></div>
+        <div class="ev-stat"><div class="n">${(e.count*minPerQ/60).toFixed(1)}</div><div class="l">估算節省工時</div></div>
+      </div>
+      <div class="topic-title"><i class="ti ti-flame"></i> 記者最關心的議題</div>
+      <div class="topic-tags">
+        ${topics.length ? topics.map(t=>`<span class="topic-tag">${escHtml(t.w)} ·${t.c}</span>`).join('') : '<span class="media-list">尚無資料</span>'}
+      </div>
+      <div class="media-list"><b>到訪媒體：</b>${(e.media_list&&e.media_list.length)? e.media_list.map(escHtml).join('、') : '（記者多未填寫媒體名稱）'}</div>
+    </div>`;
+  }).join('');
+
+  document.getElementById('body').innerHTML = `
+    <div class="section-label">整體戰功總覽</div>
+    <div class="kpi-grid">${kpis}</div>
+    <div class="section-label">各場記者會成效</div>
+    ${cards || '<div class="ev-card">尚無問答資料。</div>'}
+    <div class="foot-note">
+      · 本報告數據來自 AI 新聞助理實際問答紀錄，已排除測試資料。<br>
+      · 「服務媒體家數」以記者填寫之媒體名稱去重計算，實際觸及媒體數可能更高（部分記者未填寫）。<br>
+      · 「估算節省人力工時」為 AI 代答題數 × 每題估算人工回覆時間，供效益評估參考。<br>
+      · 除記者即時問答外，本平台亦提供「媒體訓練模式」供發言人於會前進行 AI 記者實戰演練。
+    </div>`;
+  document.getElementById('loading').style.display='none';
+  document.getElementById('body').style.display='block';
+}
+
+function escHtml(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+// 自後台（同分頁導覽）帶密碼進來時免登入
+(function(){
+  const p = sessionStorage.getItem('itri_pwd');
+  if(p){ PASSWORD=p; load(); }
+})();
+</script>
+</body>
+</html>

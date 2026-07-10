@@ -28,8 +28,19 @@ export default async function handler(req, res) {
   if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
 
   // ── GET：統計 ────────────────────────────────────────────
-  const { password, event_id } = req.query;
+  const { password, event_id, exclude_test } = req.query;
   if (password !== adminPassword) return res.status(401).json({ error: '密碼錯誤' });
+
+  // 判斷是否為測試資料（依媒體名稱）：測試 / test / demo / 純數字 / 常見亂打
+  const isTestMedia = (m) => {
+    if (!m) return false;
+    const s = String(m).trim().toLowerCase();
+    if (/測試|test|demo|範例|sample|練習/.test(s)) return true;
+    if (/^[0-9]+$/.test(s)) return true;
+    if (/^(abc|xxx|aaa|ttt|qqq|asdf|qwer|zzz|123)$/.test(s)) return true;
+    return false;
+  };
+  const dropTest = exclude_test === '1' || exclude_test === 'true';
 
   try {
     const rawRows = await readRange('qa_log!A2:F');
@@ -37,7 +48,8 @@ export default async function handler(req, res) {
     const rowsWithNum = rawRows.map((r, i) => ({ r, rowNum: i + 2 }));
 
     // 過濾已刪除
-    const valid = rowsWithNum.filter(({ r }) => r[1] && r[1] !== '[deleted]');
+    let valid = rowsWithNum.filter(({ r }) => r[1] && r[1] !== '[deleted]');
+    if (dropTest) valid = valid.filter(({ r }) => !isTestMedia(r[3]));
     const filtered = event_id
       ? valid.filter(({ r }) => r[1] === event_id)
       : valid;

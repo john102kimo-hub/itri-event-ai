@@ -308,6 +308,9 @@ textarea.form-control { min-height: 200px; resize: vertical; line-height: 1.6; }
     <a class="nav-item" href="/training" target="_blank" style="text-decoration:none;color:rgba(255,255,255,0.7)">
       <i class="ti ti-microphone"></i> 彙整媒體訓練
     </a>
+    <a class="nav-item" href="/report" style="text-decoration:none;color:rgba(255,255,255,0.7)">
+      <i class="ti ti-chart-histogram"></i> 成效報告
+    </a>
     <div class="sidebar-bottom">
       <button class="logout-btn" onclick="logout()">
         <i class="ti ti-logout"></i> 登出
@@ -364,6 +367,10 @@ textarea.form-control { min-height: 200px; resize: vertical; line-height: 1.6; }
           <select id="analytics-event-filter" class="btn btn-outline" style="font-family:var(--font);cursor:pointer">
             <option value="">全部活動</option>
           </select>
+          <label style="display:inline-flex;align-items:center;gap:6px;font-size:0.85rem;color:var(--muted);cursor:pointer;white-space:nowrap">
+            <input type="checkbox" id="analytics-exclude-test" checked onchange="loadAnalytics()" style="cursor:pointer">
+            排除測試資料
+          </label>
           <button class="btn btn-primary" onclick="loadAnalytics()"><i class="ti ti-refresh"></i> 更新</button>
           <button class="btn btn-outline" onclick="exportCSV()"><i class="ti ti-download"></i> 匯出 CSV</button>
         </div>
@@ -425,6 +432,17 @@ textarea.form-control { min-height: 200px; resize: vertical; line-height: 1.6; }
       <input class="form-control" id="input-date" type="date">
       <div class="form-hint">設定記者會/活動的實際舉辦日期</div>
     </div>
+    <div class="form-group" style="background:var(--primary-light);border:1px solid var(--border);border-radius:10px;padding:14px">
+      <label style="display:flex;align-items:center;gap:6px"><i class="ti ti-wand" style="color:var(--primary)"></i> 快速生成知識庫（貼長文或上傳 PDF，AI 自動摘要）</label>
+      <textarea id="kb-source" rows="3" placeholder="把完整新聞稿／資料整段貼在這裡，或用下方按鈕上傳 PDF／TXT…" style="width:100%;font-family:var(--font);font-size:0.85rem;border:1px solid var(--border);border-radius:8px;padding:10px;min-height:80px;resize:vertical"></textarea>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:8px">
+        <input type="file" id="kb-file" accept=".pdf,.txt" style="font-size:0.82rem">
+        <button type="button" class="btn btn-primary" id="kb-gen-btn" onclick="generateKB()"><i class="ti ti-sparkles"></i> 自動整理成知識庫</button>
+        <span id="kb-gen-status" style="font-size:0.82rem;color:var(--muted)"></span>
+      </div>
+      <div class="form-hint">產生後會自動填入下方知識庫欄位，可再手動微調。</div>
+    </div>
+
     <div class="form-group">
       <label>活動知識庫（新聞稿 / 技術資料）*</label>
       <textarea class="form-control" id="input-kb"
@@ -677,7 +695,8 @@ async function loadAnalytics() {
   view.innerHTML = '<div style="text-align:center;padding:60px;color:var(--muted)"><i class="ti ti-loader" style="font-size:32px;display:block;margin-bottom:12px"></i>載入中…</div>';
 
   try {
-    const url = `/api/analytics?password=${encodeURIComponent(state.password)}${eid ? '&event_id=' + encodeURIComponent(eid) : ''}`;
+    const noTest = document.getElementById('analytics-exclude-test')?.checked;
+    const url = `/api/analytics?password=${encodeURIComponent(state.password)}${eid ? '&event_id=' + encodeURIComponent(eid) : ''}${noTest ? '&exclude_test=1' : ''}`;
     const res = await fetch(url);
     const data = await res.json();
     if (data.error) throw new Error(data.error);
@@ -794,6 +813,7 @@ function showCreateModal() {
   document.getElementById('input-date').value = new Date().toISOString().slice(0,10);
   document.getElementById('input-kb').value = '';
   document.getElementById('kb-count').textContent = '0 / 8000 字';
+  resetKbHelper();
   document.getElementById('input-chips').value = '';
   document.getElementById('input-greeting').value = '';
   document.getElementById('input-greeting').value = '';
@@ -819,6 +839,7 @@ async function showEditModal(eventId) {
     document.getElementById('color-preview').style.background = ev.color || '#0F9E7A';
     document.getElementById('input-kb').value = ev.knowledge_base || '';
     document.getElementById('kb-count').textContent = (ev.knowledge_base?.length || 0) + ' / 8000 字';
+    resetKbHelper();
     document.getElementById('input-chips').value = ev.chips || '';
     document.getElementById('input-greeting').value = ev.greeting || '';
     document.getElementById('input-greeting').value = ev.greeting || '';
@@ -883,6 +904,72 @@ async function saveEvent() {
   }
 
   btn.disabled = false; btn.innerHTML = '<i class="ti ti-check"></i> 儲存';
+}
+
+// ── 知識庫自動摘要（貼長文 / 上傳 PDF）──────────────────────
+function resetKbHelper() {
+  const src = document.getElementById('kb-source'); if (src) src.value = '';
+  const f = document.getElementById('kb-file'); if (f) f.value = '';
+  const st = document.getElementById('kb-gen-status'); if (st) st.textContent = '';
+}
+
+function loadPdfjs() {
+  return new Promise((resolve, reject) => {
+    if (window.pdfjsLib) return resolve();
+    const s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js';
+    s.onload = () => {
+      try { window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js'; } catch (e) {}
+      resolve();
+    };
+    s.onerror = () => reject(new Error('PDF 解析元件載入失敗'));
+    document.head.appendChild(s);
+  });
+}
+
+async function extractPdfText(file) {
+  await loadPdfjs();
+  const buf = await file.arrayBuffer();
+  const pdf = await window.pdfjsLib.getDocument({ data: buf }).promise;
+  let text = '';
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+    const content = await page.getTextContent();
+    text += content.items.map(it => it.str).join(' ') + '\n';
+  }
+  return text;
+}
+
+async function generateKB() {
+  const status = document.getElementById('kb-gen-status');
+  const btn = document.getElementById('kb-gen-btn');
+  const file = document.getElementById('kb-file').files[0];
+  let source = document.getElementById('kb-source').value.trim();
+  try {
+    btn.disabled = true;
+    if (file) {
+      status.textContent = '讀取檔案中…';
+      if (file.name.toLowerCase().endsWith('.pdf')) source = await extractPdfText(file);
+      else source = await file.text();
+    }
+    if (!source || source.trim().length < 50) { status.textContent = '請貼上內容或選擇檔案（內容太短）'; btn.disabled = false; return; }
+    status.textContent = 'AI 整理中，請稍候…';
+    const res = await fetch('/api/summarize', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: state.password, text: source })
+    });
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    const kb = document.getElementById('input-kb');
+    kb.value = data.summary;
+    document.getElementById('kb-count').textContent = data.summary.length + ' / 8000 字';
+    status.textContent = '✓ 已生成，可再手動微調';
+  } catch (e) {
+    status.textContent = '失敗：' + e.message;
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 async function archiveEvent() {
