@@ -432,15 +432,22 @@ textarea.form-control { min-height: 200px; resize: vertical; line-height: 1.6; }
       <input class="form-control" id="input-date" type="date">
       <div class="form-hint">設定記者會/活動的實際舉辦日期</div>
     </div>
-    <div class="form-group" style="background:var(--primary-light);border:1px solid var(--border);border-radius:10px;padding:14px">
-      <label style="display:flex;align-items:center;gap:6px"><i class="ti ti-wand" style="color:var(--primary)"></i> 快速生成知識庫（貼長文或上傳 PDF，AI 自動摘要）</label>
-      <textarea id="kb-source" rows="3" placeholder="把完整新聞稿／資料整段貼在這裡，或用下方按鈕上傳 PDF／TXT…" style="width:100%;font-family:var(--font);font-size:0.85rem;border:1px solid var(--border);border-radius:8px;padding:10px;min-height:80px;resize:vertical"></textarea>
-      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:8px">
-        <input type="file" id="kb-file" accept=".pdf,.txt" style="font-size:0.82rem">
-        <button type="button" class="btn btn-primary" id="kb-gen-btn" onclick="generateKB()"><i class="ti ti-sparkles"></i> 自動整理成知識庫</button>
-        <span id="kb-gen-status" style="font-size:0.82rem;color:var(--muted)"></span>
-      </div>
-      <div class="form-hint">產生後會自動填入下方知識庫欄位，可再手動微調。</div>
+    <div class="form-group">
+      <label><i class="ti ti-building"></i> 主辦單位</label>
+      <input class="form-control" id="input-organizer" list="organizer-list" value="工研院" placeholder="工研院">
+      <datalist id="organizer-list">
+        <option value="工研院"></option>
+        <option value="經濟部"></option>
+      </datalist>
+      <div class="form-hint">會自動帶入 AI 回答結尾的警語「以○○官網新聞稿或發言為準」；可直接輸入其他單位</div>
+    </div>
+
+    <div class="form-group" id="copy-template-group" style="display:none;background:var(--primary-light);border:1px solid var(--border);border-radius:10px;padding:14px">
+      <label style="display:flex;align-items:center;gap:6px"><i class="ti ti-copy" style="color:var(--primary)"></i> 以既有活動為範本（複製其知識庫來改）</label>
+      <select class="form-control" id="copy-template-select" onchange="copyFromEvent(this.value)" style="cursor:pointer">
+        <option value="">— 選擇要複製的活動 —</option>
+      </select>
+      <div class="form-hint">選一場舊活動，會把它的知識庫與主辦單位帶進下方欄位，你再修改即可。</div>
     </div>
 
     <div class="form-group">
@@ -449,7 +456,7 @@ textarea.form-control { min-height: 200px; resize: vertical; line-height: 1.6; }
         placeholder="貼入本次活動的新聞稿或重要資訊，AI 將根據此內容回答記者問題…"
         oninput="document.getElementById('kb-count').textContent=this.value.length+' / 8000 字'"></textarea>
       <div class="char-count" id="kb-count">0 / 8000 字</div>
-      <div class="form-hint">最多可輸入 8000 字；超過建議摘要精簡，確保 AI 回答品質</div>
+      <div class="form-hint">新增活動時已內建固定範本，照格式填空即可，不會漏欄位。<b>範圍限制與結尾警語由系統自動加上，不需自己寫。</b>最多 8000 字。</div>
     </div>
     <div class="form-group">
       <label>快速問題按鈕（每行一題）</label>
@@ -808,19 +815,45 @@ function showCreateModal() {
   document.getElementById('modal-title').textContent = '新增活動';
   document.getElementById('edit-event-id').value = '';
   document.getElementById('input-name').value = '';
+  document.getElementById('input-organizer').value = '工研院';
   document.getElementById('input-color').value = '#0F9E7A';
   document.getElementById('color-preview').style.background = '#0F9E7A';
   document.getElementById('input-date').value = new Date().toISOString().slice(0,10);
-  document.getElementById('input-kb').value = '';
-  document.getElementById('kb-count').textContent = '0 / 8000 字';
-  resetKbHelper();
+  document.getElementById('input-kb').value = KB_TEMPLATE;
+  document.getElementById('kb-count').textContent = KB_TEMPLATE.length + ' / 8000 字';
   document.getElementById('input-chips').value = '';
-  document.getElementById('input-greeting').value = '';
   document.getElementById('input-greeting').value = '';
   document.getElementById('input-images').value = '';
   document.getElementById('status-group').style.display = 'none';
   document.getElementById('archive-btn').style.display = 'none';
+  // 顯示並填充「以既有活動為範本」下拉
+  populateCopyTemplate();
+  document.getElementById('copy-template-group').style.display = 'block';
   document.getElementById('event-modal').style.display = 'flex';
+}
+
+// 填充「以既有活動為範本」下拉（用已載入的活動清單）
+function populateCopyTemplate() {
+  const sel = document.getElementById('copy-template-select');
+  sel.innerHTML = '<option value="">— 選擇要複製的活動 —</option>' +
+    (state.events || []).map(e => `<option value="${escHtml(e.id)}">${escHtml(e.name)}</option>`).join('');
+}
+
+// 選擇舊活動 → 把其知識庫與主辦單位帶進表單
+async function copyFromEvent(eventId) {
+  if (!eventId) return;
+  try {
+    const res = await fetch(`/api/events?action=get&id=${encodeURIComponent(eventId)}&password=${encodeURIComponent(state.password)}`);
+    const ev = await res.json();
+    if (ev.error) throw new Error(ev.error);
+    document.getElementById('input-kb').value = ev.knowledge_base || KB_TEMPLATE;
+    document.getElementById('kb-count').textContent = (document.getElementById('input-kb').value.length) + ' / 8000 字';
+    if (ev.organizer) document.getElementById('input-organizer').value = ev.organizer;
+    if (ev.chips) document.getElementById('input-chips').value = ev.chips;
+    toast('已帶入「' + (ev.name || '') + '」的知識庫，請修改成本場內容');
+  } catch(e) {
+    toast('複製失敗：' + e.message);
+  }
 }
 
 async function showEditModal(eventId) {
@@ -833,15 +866,15 @@ async function showEditModal(eventId) {
     const ev = await res.json();
     if (ev.error) { toast(ev.error); return; }
 
+    document.getElementById('copy-template-group').style.display = 'none';
     document.getElementById('edit-event-id').value = ev.id;
     document.getElementById('input-name').value = ev.name || '';
+    document.getElementById('input-organizer').value = ev.organizer || '工研院';
     document.getElementById('input-color').value = ev.color || '#0F9E7A';
     document.getElementById('color-preview').style.background = ev.color || '#0F9E7A';
     document.getElementById('input-kb').value = ev.knowledge_base || '';
     document.getElementById('kb-count').textContent = (ev.knowledge_base?.length || 0) + ' / 8000 字';
-    resetKbHelper();
     document.getElementById('input-chips').value = ev.chips || '';
-    document.getElementById('input-greeting').value = ev.greeting || '';
     document.getElementById('input-greeting').value = ev.greeting || '';
     document.getElementById('input-images').value = ev.images || '';
     document.getElementById('input-status').value = ev.status || 'active';
@@ -868,6 +901,7 @@ function closeModal() {
 async function saveEvent() {
   const id = document.getElementById('edit-event-id').value;
   const name = document.getElementById('input-name').value.trim();
+  const organizer = document.getElementById('input-organizer').value.trim() || '工研院';
   const color = document.getElementById('input-color').value.trim();
   const knowledge_base = document.getElementById('input-kb').value.trim();
   const chips = document.getElementById('input-chips').value.trim();
@@ -890,7 +924,7 @@ async function saveEvent() {
         action: id ? 'update' : 'create',
         password: state.password,
         id: id || undefined,
-        name, color, knowledge_base, chips, images, greeting, status, event_date
+        name, organizer, color, knowledge_base, chips, images, greeting, status, event_date
       })
     });
     const data = await res.json();
@@ -906,71 +940,48 @@ async function saveEvent() {
   btn.disabled = false; btn.innerHTML = '<i class="ti ti-check"></i> 儲存';
 }
 
-// ── 知識庫自動摘要（貼長文 / 上傳 PDF）──────────────────────
-function resetKbHelper() {
-  const src = document.getElementById('kb-source'); if (src) src.value = '';
-  const f = document.getElementById('kb-file'); if (f) f.value = '';
-  const st = document.getElementById('kb-gen-status'); if (st) st.textContent = '';
-}
+// ── 知識庫固定範本（新增活動時自動帶入，照格式填空即可）──────────
+const KB_TEMPLATE = `【活動名稱】
 
-function loadPdfjs() {
-  return new Promise((resolve, reject) => {
-    if (window.pdfjsLib) return resolve();
-    const s = document.createElement('script');
-    s.src = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js';
-    s.onload = () => {
-      try { window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js'; } catch (e) {}
-      resolve();
-    };
-    s.onerror = () => reject(new Error('PDF 解析元件載入失敗'));
-    document.head.appendChild(s);
-  });
-}
+【日期 / 地點】
 
-async function extractPdfText(file) {
-  await loadPdfjs();
-  const buf = await file.arrayBuffer();
-  const pdf = await window.pdfjsLib.getDocument({ data: buf }).promise;
-  let text = '';
-  for (let i = 1; i <= pdf.numPages; i++) {
-    const page = await pdf.getPage(i);
-    const content = await page.getTextContent();
-    text += content.items.map(it => it.str).join(' ') + '\n';
-  }
-  return text;
-}
+【受訪者 / 發言人】
+- 姓名（職稱）：
 
-async function generateKB() {
-  const status = document.getElementById('kb-gen-status');
-  const btn = document.getElementById('kb-gen-btn');
-  const file = document.getElementById('kb-file').files[0];
-  let source = document.getElementById('kb-source').value.trim();
-  try {
-    btn.disabled = true;
-    if (file) {
-      status.textContent = '讀取檔案中…';
-      if (file.name.toLowerCase().endsWith('.pdf')) source = await extractPdfText(file);
-      else source = await file.text();
-    }
-    if (!source || source.trim().length < 50) { status.textContent = '請貼上內容或選擇檔案（內容太短）'; btn.disabled = false; return; }
-    status.textContent = 'AI 整理中，請稍候…';
-    const res = await fetch('/api/summarize', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ password: state.password, text: source })
-    });
-    const data = await res.json();
-    if (data.error) throw new Error(data.error);
-    const kb = document.getElementById('input-kb');
-    kb.value = data.summary;
-    document.getElementById('kb-count').textContent = data.summary.length + ' / 8000 字';
-    status.textContent = '✓ 已生成，可再手動微調';
-  } catch (e) {
-    status.textContent = '失敗：' + e.message;
-  } finally {
-    btn.disabled = false;
-  }
-}
+【貴賓致詞】
+- 姓名（職稱）：
+
+【活動議程】
+- 時間　項目：
+
+【新聞稿全文】
+
+
+【技術亮點 / 發表內容】
+
+
+【合作廠商】
+- 廠商：分工
+
+【背景數據 / 關鍵數字】
+-
+
+【常見問答 Q&A】
+Q：
+A：
+
+【聯絡窗口】
+- 公關姓名 / 電話：
+
+【得獎名單】（頒獎場填，其餘留空）
+-
+
+【素材連結】
+- 技術影片：
+- 新聞稿電子檔：
+- 記者會簡報：
+- 照片：
+`;
 
 async function archiveEvent() {
   const id = document.getElementById('edit-event-id').value;
