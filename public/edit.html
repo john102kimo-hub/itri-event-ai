@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>更新我的記者會內容 — 工研院活動溝通 AI 平台</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.3.0/tabler-icons.min.css">
+<style>
+:root {
+  --primary: #0F9E7A;
+  --primary-dark: #0a7a60;
+  --primary-light: rgba(15,158,122,0.08);
+  --accent: #e85d04;
+  --text: #1a1a2e;
+  --muted: #6b7280;
+  --bg: #f0f4f7;
+  --card: #ffffff;
+  --border: #e5e7eb;
+  --radius: 12px;
+  --font: 'PingFang TC','Noto Sans TC','Microsoft JhengHei',sans-serif;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: var(--font); background: var(--bg); color: var(--text); min-height: 100vh; }
+
+.topbar {
+  background: #0a2e22; color: white;
+  padding: 16px 20px;
+  display: flex; align-items: center; gap: 12px;
+}
+.topbar i { font-size: 24px; color: var(--primary); }
+.topbar-title { font-size: 1rem; font-weight: 700; line-height: 1.35; }
+.topbar-title span { display: block; font-size: 0.72rem; opacity: 0.6; font-weight: 400; }
+
+.wrap { max-width: 760px; margin: 0 auto; padding: 22px 16px 60px; }
+
+.banner {
+  background: var(--primary-light);
+  border: 1px solid rgba(15,158,122,0.25);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  font-size: 0.85rem; color: var(--text); line-height: 1.6;
+  margin-bottom: 20px;
+  display: flex; gap: 10px;
+}
+.banner i { color: var(--primary); font-size: 20px; flex-shrink: 0; margin-top: 1px; }
+
+.card {
+  background: white; border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 22px 20px; margin-bottom: 18px;
+}
+.card h2 {
+  font-size: 1.05rem; font-weight: 700; margin-bottom: 4px;
+  display: flex; align-items: center; gap: 8px;
+}
+.card .sub { font-size: 0.8rem; color: var(--muted); margin-bottom: 18px; }
+
+.form-group { margin-bottom: 16px; }
+.form-group label { display: block; font-size: 0.84rem; font-weight: 600; color: var(--text); margin-bottom: 6px; }
+.form-control {
+  width: 100%; border: 1.5px solid var(--border); border-radius: 8px;
+  padding: 10px 12px; font-family: var(--font); font-size: 0.92rem;
+  outline: none; transition: border-color 0.2s; background: white;
+}
+.form-control:focus { border-color: var(--primary); }
+textarea.form-control { min-height: 240px; resize: vertical; line-height: 1.65; }
+.form-hint { font-size: 0.76rem; color: var(--muted); margin-top: 5px; line-height: 1.5; }
+.char-count { font-size: 0.76rem; color: var(--muted); text-align: right; margin-top: 4px; }
+.color-preview { display: inline-block; width: 18px; height: 18px; border-radius: 4px; vertical-align: middle; margin-left: 6px; border: 1px solid var(--border); }
+
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 12px 20px; border-radius: 10px; border: none;
+  font-family: var(--font); font-size: 0.92rem; font-weight: 700;
+  cursor: pointer; transition: all 0.15s; text-decoration: none;
+}
+.btn-primary { background: var(--primary); color: white; }
+.btn-primary:hover { background: var(--primary-dark); }
+.btn-primary:disabled { opacity: 0.6; cursor: not-allowed; }
+.btn-outline { background: white; color: var(--text); border: 1.5px solid var(--border); }
+.btn-outline:hover { border-color: var(--primary); color: var(--primary); }
+
+.action-bar {
+  position: sticky; bottom: 0;
+  background: rgba(255,255,255,0.96); backdrop-filter: blur(6px);
+  border-top: 1px solid var(--border);
+  padding: 14px 16px;
+  display: flex; gap: 10px; justify-content: flex-end; align-items: center;
+  margin: 0 -16px -60px; flex-wrap: wrap;
+}
+.action-bar .saved-hint { margin-right: auto; font-size: 0.8rem; color: var(--muted); }
+
+/* 狀態畫面（載入 / 錯誤） */
+.state-screen {
+  min-height: 70vh; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; text-align: center;
+  padding: 40px 20px; color: var(--muted);
+}
+.state-screen i { font-size: 52px; margin-bottom: 14px; }
+.state-screen h2 { font-size: 1.15rem; color: var(--text); margin-bottom: 8px; }
+.state-screen p { font-size: 0.9rem; max-width: 420px; line-height: 1.6; }
+.state-screen.error i { color: #ef4444; }
+
+#toast {
+  position: fixed; bottom: 84px; left: 50%; transform: translateX(-50%);
+  background: #1a1a2e; color: white; padding: 12px 22px; border-radius: 10px;
+  font-size: 0.9rem; z-index: 200; display: none; box-shadow: 0 8px 24px rgba(0,0,0,0.25);
+}
+
+@media (max-width: 600px) {
+  .action-bar .saved-hint { width: 100%; margin: 0 0 6px; }
+}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <i class="ti ti-edit"></i>
+  <div class="topbar-title">更新我的記者會內容
+    <span>工研院活動溝通 AI 平台</span>
+  </div>
+</div>
+
+<!-- 載入中 -->
+<div id="loading" class="state-screen">
+  <i class="ti ti-loader"></i>
+  <p>載入中…</p>
+</div>
+
+<!-- 錯誤 -->
+<div id="error-screen" class="state-screen error" style="display:none">
+  <i class="ti ti-lock-exclamation"></i>
+  <h2 id="error-title">無法開啟</h2>
+  <p id="error-msg"></p>
+</div>
+
+<!-- 編輯表單 -->
+<div id="editor" class="wrap" style="display:none">
+  <div class="banner">
+    <i class="ti ti-info-circle"></i>
+    <div>
+      這是你這場記者會的<b>專屬編輯頁</b>。在這裡更新的內容，記者掃 QR / 開連結時，AI 就會依此回答。
+      <br>填完記得按下方<b>「儲存內容」</b>。有問題請聯絡活動承辦人。
+    </div>
+  </div>
+
+  <div class="card">
+    <h2><i class="ti ti-file-text" style="color:var(--primary)"></i> 基本資訊</h2>
+    <div class="sub">這場記者會的名稱與日期</div>
+
+    <div class="form-group">
+      <label>活動名稱</label>
+      <input class="form-control" id="input-name" placeholder="例：工研院 AI 智慧醫療大平台發表記者會">
+    </div>
+    <div class="form-group">
+      <label><i class="ti ti-calendar-event"></i> 活動日期</label>
+      <input class="form-control" id="input-date" type="date">
+    </div>
+    <div class="form-group">
+      <label><i class="ti ti-building"></i> 主辦單位</label>
+      <input class="form-control" id="input-organizer" list="organizer-list" placeholder="工研院">
+      <datalist id="organizer-list">
+        <option value="工研院"></option>
+        <option value="經濟部"></option>
+      </datalist>
+      <div class="form-hint">會用在 AI 回答結尾的警語「以○○官網新聞稿或發言為準」</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2><i class="ti ti-database" style="color:var(--primary)"></i> 活動知識庫（最重要）</h2>
+    <div class="sub">貼上本場新聞稿與重要資訊，AI 只會根據這裡的內容回答記者</div>
+
+    <div class="form-group">
+      <textarea class="form-control" id="input-kb"
+        placeholder="貼入本次活動的新聞稿或重要資訊…"
+        oninput="document.getElementById('kb-count').textContent=this.value.length+' / 8000 字'"></textarea>
+      <div class="char-count" id="kb-count">0 / 8000 字</div>
+      <div class="form-hint">
+        照下方欄位格式填空即可，不會漏欄位。<b>回答範圍限制與結尾警語由系統自動加上，不需自己寫。</b>最多 8000 字。
+        <br>若欄位是空的，可按 <a href="#" onclick="fillTemplate();return false" style="color:var(--primary);font-weight:600">帶入填寫範本</a>。
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2><i class="ti ti-adjustments" style="color:var(--primary)"></i> 前台呈現（選填）</h2>
+    <div class="sub">調整記者看到的畫面，不填就用系統預設</div>
+
+    <div class="form-group">
+      <label>快速問題按鈕（每行一題）</label>
+      <textarea class="form-control" id="input-chips" rows="4"
+        placeholder="這次活動的主要發表內容是什麼？&#10;有哪些合作廠商參與？&#10;這項技術的應用場域為何？"
+        style="font-size:0.85rem;min-height:auto"></textarea>
+      <div class="form-hint">留空則使用預設通用問題；建議 3–6 題</div>
+    </div>
+    <div class="form-group">
+      <label>AI 開場白</label>
+      <textarea class="form-control" id="input-greeting" rows="3"
+        placeholder="您好！我是「活動名稱」的 AI 新聞助理…"
+        style="font-size:0.85rem;min-height:auto"></textarea>
+      <div class="form-hint">留空則使用預設問候語</div>
+    </div>
+    <div class="form-group">
+      <label>圖片資源 URL（每行一個，供記者下載技術照片）</label>
+      <textarea class="form-control" id="input-images" rows="3"
+        placeholder="https://example.com/photo1.jpg&#10;https://example.com/photo2.png"
+        style="font-size:0.85rem;min-height:auto"></textarea>
+      <div class="form-hint">貼上圖片直連 URL（需可公開存取）</div>
+    </div>
+    <div class="form-group">
+      <label>品牌主色
+        <span class="color-preview" id="color-preview" style="background:#0F9E7A"></span>
+      </label>
+      <input class="form-control" id="input-color" placeholder="#0F9E7A"
+        oninput="document.getElementById('color-preview').style.background=this.value">
+      <div class="form-hint">輸入 HEX 色碼，例如工研院綠 #0F9E7A</div>
+    </div>
+  </div>
+
+  <div class="action-bar">
+    <span class="saved-hint" id="saved-hint"></span>
+    <a class="btn btn-outline" id="preview-link" target="_blank">
+      <i class="ti ti-eye"></i> 預覽記者前台
+    </a>
+    <button class="btn btn-primary" id="save-btn" onclick="save()">
+      <i class="ti ti-device-floppy"></i> 儲存內容
+    </button>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+const params = new URLSearchParams(location.search);
+const EVENT_ID = params.get('id') || '';
+const EDIT_CODE = params.get('code') || '';
+
+const KB_TEMPLATE = `【活動名稱】
+
+【日期 / 地點】
+
+【受訪者 / 發言人】
+- 姓名（職稱）：
+
+【貴賓致詞】
+- 姓名（職稱）：
+
+【活動議程】
+- 時間　項目：
+
+【新聞稿全文】
+
+
+【技術亮點 / 發表內容】
+
+
+【合作廠商】
+- 廠商：分工
+
+【背景數據 / 關鍵數字】
+-
+
+【常見問答 Q&A】
+Q：
+A：
+
+【聯絡窗口】
+- 公關姓名 / 電話：
+
+【得獎名單】（頒獎場填，其餘留空）
+-
+
+【素材連結】
+- 技術影片：
+- 新聞稿電子檔：
+- 記者會簡報：
+- 照片：
+`;
+
+function showError(title, msg) {
+  document.getElementById('loading').style.display = 'none';
+  document.getElementById('editor').style.display = 'none';
+  document.getElementById('error-screen').style.display = 'flex';
+  document.getElementById('error-title').textContent = title;
+  document.getElementById('error-msg').textContent = msg;
+}
+
+async function load() {
+  if (!EVENT_ID || !EDIT_CODE) {
+    return showError('連結不完整', '這個編輯連結缺少必要資訊，請向活動承辦人索取正確的專屬編輯連結。');
+  }
+  try {
+    const res = await fetch(`/api/events?action=get_edit&id=${encodeURIComponent(EVENT_ID)}&code=${encodeURIComponent(EDIT_CODE)}`);
+    const ev = await res.json();
+    if (!res.ok || ev.error) {
+      return showError('無法開啟', ev.error || '載入失敗，請稍後再試或聯絡承辦人。');
+    }
+
+    document.getElementById('input-name').value = ev.name || '';
+    document.getElementById('input-organizer').value = ev.organizer || '工研院';
+    document.getElementById('input-color').value = ev.color || '#0F9E7A';
+    document.getElementById('color-preview').style.background = ev.color || '#0F9E7A';
+    document.getElementById('input-kb').value = ev.knowledge_base || '';
+    document.getElementById('kb-count').textContent = (ev.knowledge_base?.length || 0) + ' / 8000 字';
+    document.getElementById('input-chips').value = ev.chips || '';
+    document.getElementById('input-greeting').value = ev.greeting || '';
+    document.getElementById('input-images').value = ev.images || '';
+
+    // 活動日期解析
+    const dateStr = ev.created_at || '';
+    let isoDate = '';
+    if (dateStr.match(/^\d{4}-\d{2}-\d{2}/)) {
+      isoDate = dateStr.slice(0, 10);
+    } else if (dateStr.match(/^\d{4}\/\d{1,2}\/\d{1,2}/)) {
+      const p = dateStr.split('/');
+      isoDate = p[0] + '-' + String(p[1]).padStart(2, '0') + '-' + String(p[2]).padStart(2, '0');
+    }
+    document.getElementById('input-date').value = isoDate;
+
+    document.getElementById('preview-link').href = `/event?id=${encodeURIComponent(EVENT_ID)}`;
+
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('editor').style.display = 'block';
+  } catch (e) {
+    showError('連線失敗', e.message + '，請檢查網路後重新整理。');
+  }
+}
+
+function fillTemplate() {
+  const kb = document.getElementById('input-kb');
+  if (kb.value.trim() && !confirm('目前欄位已有內容，帶入範本會覆蓋掉，確定嗎？')) return;
+  kb.value = KB_TEMPLATE;
+  document.getElementById('kb-count').textContent = KB_TEMPLATE.length + ' / 8000 字';
+}
+
+async function save() {
+  const name = document.getElementById('input-name').value.trim();
+  const knowledge_base = document.getElementById('input-kb').value.trim();
+  if (!name) { toast('請填寫活動名稱'); return; }
+  if (!knowledge_base) { toast('知識庫不可為空'); return; }
+
+  const btn = document.getElementById('save-btn');
+  btn.disabled = true;
+  btn.innerHTML = '<i class="ti ti-loader"></i> 儲存中…';
+
+  try {
+    const res = await fetch('/api/events', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'update_edit',
+        id: EVENT_ID,
+        code: EDIT_CODE,
+        name,
+        knowledge_base,
+        organizer: document.getElementById('input-organizer').value.trim() || '工研院',
+        color: document.getElementById('input-color').value.trim() || '#0F9E7A',
+        chips: document.getElementById('input-chips').value.trim(),
+        greeting: document.getElementById('input-greeting').value.trim(),
+        images: document.getElementById('input-images').value.trim(),
+        event_date: document.getElementById('input-date').value || undefined
+      })
+    });
+    const data = await res.json();
+    if (!res.ok || data.error) throw new Error(data.error || '儲存失敗');
+    toast('✓ 已儲存！記者前台會立即套用');
+    const now = new Date().toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' });
+    document.getElementById('saved-hint').textContent = `最後儲存 ${now}`;
+  } catch (e) {
+    toast('儲存失敗：' + e.message);
+  }
+
+  btn.disabled = false;
+  btn.innerHTML = '<i class="ti ti-device-floppy"></i> 儲存內容';
+}
+
+let toastTimer;
+function toast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.style.display = 'block';
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.style.display = 'none', 3200);
+}
+
+load();
+</script>
+</body>
+</html>

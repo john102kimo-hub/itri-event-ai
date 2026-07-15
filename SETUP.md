@@ -18,7 +18,8 @@
 2. 將試算表網址中的 ID 記下：
    `https://docs.google.com/spreadsheets/d/【這段就是ID】/edit`
 3. 點右鍵 Sheet1 標籤 → **重新命名**為 `events`
-4. 在 A1~F1 填入標題：`id` `name` `color` `knowledge_base` `status` `created_at`
+4. 在 A1~K1 填入標題：`id` `name` `color` `knowledge_base` `status` `created_at` `chips` `images` `greeting` `organizer` `edit_code`
+   - 其中 `edit_code`（K 欄）是「同仁編輯連結」用的每場專屬編輯碼，系統會自動產生、不用手動填。若是既有試算表，只要確保 K 欄留著給它用即可。
 5. 點 ＋ 新增分頁，重新命名為 `qa_log`
 6. 在 A1~F1 填入標題：`timestamp` `event_id` `event_name` `media_name` `question` `answer`
 
@@ -77,17 +78,36 @@
 
 ## 完成後的網址
 
-| 頁面 | 網址 |
-|---|---|
-| 後台儀表板（你用） | `https://itri-event-ai.vercel.app/` |
-| 記者前台（記者用） | `https://itri-event-ai.vercel.app/event?id=活動ID` |
-| 媒體訓練（主管用） | `https://itri-event-ai.vercel.app/training?id=活動ID` |
+| 頁面 | 網址 | 誰用 |
+|---|---|---|
+| 後台儀表板 | `https://itri-event-ai.vercel.app/` | **只有你**（需後台密碼） |
+| 記者前台 | `https://itri-event-ai.vercel.app/event?id=活動ID` | 記者（免登入） |
+| 同仁編輯頁 | `https://itri-event-ai.vercel.app/edit?id=活動ID&code=編輯碼` | 負責該場的同仁（免後台密碼） |
+| 媒體訓練 | `https://itri-event-ai.vercel.app/training?id=活動ID` | 主管 |
 
 ---
 
-## 日常使用流程
+## 日常使用流程（你自己辦一場）
 
 1. 登入後台 → **新增活動** → 貼入新聞稿 → 儲存
-2. 複製「記者前台」連結 → 傳給媒體
+2. 複製「記者連結」 → 傳給媒體
 3. 活動結束後 → **分析** 看問題熱點 → **匯出 CSV** 製作結案報告
 4. 下次記者會 → 再新增一個活動，同一個平台管理
+
+---
+
+## 讓同仁自己更新內容（你仍掌握後台與數據）
+
+適用情境：你幫同仁開好活動框架，內容細節請他自己填、之後也自己維護。
+
+1. 登入後台 → **新增活動**（先開好、填基本資料即可）
+2. 在該活動卡片點 **「同仁編輯連結」** → 連結自動複製
+3. 把這條連結（含 `?id=...&code=...`）貼給負責的同仁
+4. 同仁打開連結 → 直接編輯**這一場**的新聞稿、快速問題、開場白、圖片 → 按「儲存內容」
+
+**權限邊界（重點）**：
+
+- 同仁只需要那條連結，**不需要、也拿不到後台密碼**
+- 同仁只能改**自己那一場**，看不到後台、看不到問答分析數據、看不到其他活動、不能封存
+- 記者在同仁那場問的**每一題，全部照樣寫進你這張 Google Sheet**，分析與匯出仍只有你能看
+- 若連結外流要作廢：到試算表把該列 **K 欄（edit_code）清空或改字**，舊連結立即失效；下次在後台再點一次「同仁編輯連結」會產生新的碼

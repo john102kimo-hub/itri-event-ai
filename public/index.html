@@ -652,7 +652,10 @@ function renderEvents() {
             <i class="ti ti-edit"></i> 編輯
           </button>
           <button class="action-btn" onclick="copyLink('${escHtml(ev.id)}')">
-            <i class="ti ti-copy"></i> 複製連結
+            <i class="ti ti-copy"></i> 記者連結
+          </button>
+          <button class="action-btn" onclick="copyEditLink('${escHtml(ev.id)}', this)" title="給負責同仁自行更新內容用；對方只能改這一場，看不到後台與數據">
+            <i class="ti ti-user-edit"></i> 同仁編輯連結
           </button>
         </div>
       </div>
@@ -1014,6 +1017,28 @@ function exportCSV(eventId) {
 function copyLink(eventId) {
   const url = `${location.origin}/event?id=${encodeURIComponent(eventId)}`;
   navigator.clipboard.writeText(url).then(() => toast('記者前台連結已複製！'));
+}
+
+// 產生 / 取得該活動的「同仁編輯連結」並複製。同仁憑此連結只能更新這一場的內容，
+// 看不到後台、看不到分析數據、看不到其他活動。
+async function copyEditLink(eventId, btn) {
+  const original = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader"></i> 產生中…'; }
+  try {
+    const res = await fetch('/api/events', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'ensure_edit_code', password: state.password, id: eventId })
+    });
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    const url = `${location.origin}/edit?id=${encodeURIComponent(eventId)}&code=${encodeURIComponent(data.edit_code)}`;
+    await navigator.clipboard.writeText(url);
+    toast('同仁編輯連結已複製！貼給負責同仁即可（對方只能改這一場）');
+  } catch (e) {
+    toast('產生失敗：' + e.message);
+  }
+  if (btn) { btn.disabled = false; btn.innerHTML = original; }
 }
 
 let toastTimer;
