@@ -98,6 +98,7 @@
 
 <script>
 let ANALYTICS = null;
+let EXPOSURE = null;
 let PASSWORD = '';
 
 const STOP = new Set(['的','了','是','在','有','和','與','這','那','什麼','請問','可以','嗎','呢','一','會','不','也','都','我','你','他','她','我們','他們','您','這個','那個','如何','為什麼','是否','能否','目前','已經','未來','關於','想','請','一下','今天','沒有','什麼的']);
@@ -117,6 +118,13 @@ async function load(){
     const data = await res.json();
     if(data.error){ document.getElementById('gate-err').textContent = data.error; return; }
     ANALYTICS = data;
+
+    // 媒體露出（同仁在編輯頁上傳的資料）；沒有也不影響報告主體
+    try{
+      const r2 = await fetch(`/api/exposure?action=analysis_all&password=${encodeURIComponent(PASSWORD)}`);
+      if(r2.ok){ const d2 = await r2.json(); if(!d2.error) EXPOSURE = d2; }
+    }catch(_){ }
+
     document.getElementById('gate').style.display='none';
     document.getElementById('report').style.display='block';
     render();
@@ -157,6 +165,9 @@ function render(){
     <div class="kpi"><div class="num">${total}</div><div class="lab">累積回答題數</div></div>
     <div class="kpi"><div class="num">${savedStr}<span style="font-size:1rem"> 小時</span></div><div class="lab">估算節省人力工時</div><div class="hint">${total} 題 × ${minPerQ} 分／題</div></div>
     <div class="kpi"><div class="num" style="font-size:1.5rem">近乎零</div><div class="lab">雲端營運成本</div><div class="hint">Vercel 免費方案 + 輕量模型</div></div>
+    ${EXPOSURE && EXPOSURE.totalExposure ? `
+    <div class="kpi"><div class="num">${EXPOSURE.totalExposure}</div><div class="lab">累積媒體露出則數</div><div class="hint">涵蓋 ${EXPOSURE.eventsWithExposure} 場已登錄露出的活動</div></div>
+    <div class="kpi"><div class="num">${EXPOSURE.totalOutlets}</div><div class="lab">露出媒體家數</div><div class="hint">依監測清單媒體名稱去重</div></div>` : ''}
   `;
 
   const cards = byEvent.map(e=>{
@@ -179,6 +190,7 @@ function render(){
         ${topics.length ? topics.map(t=>`<span class="topic-tag">${escHtml(t.w)} ·${t.c}</span>`).join('') : '<span class="media-list">尚無資料</span>'}
       </div>
       <div class="media-list"><b>到訪媒體：</b>${(e.media_list&&e.media_list.length)? e.media_list.map(escHtml).join('、') : '（記者多未填寫媒體名稱）'}</div>
+      ${exposureBlock(e.event_id)}
     </div>`;
   }).join('');
 
@@ -195,6 +207,34 @@ function render(){
     </div>`;
   document.getElementById('loading').style.display='none';
   document.getElementById('body').style.display='block';
+}
+
+// 該場的媒體露出 + 「提問 vs 發稿」交叉分析；沒上傳露出清單就整段不顯示
+function exposureBlock(eventId){
+  const x = EXPOSURE && EXPOSURE.byEvent && EXPOSURE.byEvent[eventId];
+  if(!x || !x.exposure || !x.exposure.total) return '';
+
+  const tops = (x.exposure.topOutlets||[]).slice(0,8)
+    .map(o=>`<span class="topic-tag">${escHtml(o.name)} ·${o.n}</span>`).join('');
+
+  const c = x.cross || {};
+  const rate = c.askedPublishRate;
+  const crossLine = (x.qa && x.qa.mediaAsked)
+    ? `<div class="media-list" style="margin-top:8px">
+         <b>提問 → 發稿：</b>${c.askedAndPublished} / ${x.qa.mediaAsked} 家使用過 AI 問答的媒體後續有露出${rate!=null?`（<b>${rate}%</b>）`:''}；
+         另有 ${c.publishedNotAsked} 家媒體未使用 AI 問答但仍有露出。
+       </div>`
+    : '';
+
+  return `
+      <div class="topic-title" style="margin-top:14px"><i class="ti ti-news"></i> 媒體露出成效</div>
+      <div class="ev-stats">
+        <div class="ev-stat"><div class="n">${x.exposure.total}</div><div class="l">露出則數</div></div>
+        <div class="ev-stat"><div class="n">${x.exposure.outlets}</div><div class="l">露出媒體家數</div></div>
+        ${rate!=null?`<div class="ev-stat"><div class="n">${rate}%</div><div class="l">提問媒體發稿率</div></div>`:''}
+      </div>
+      ${tops?`<div class="topic-tags">${tops}</div>`:''}
+      ${crossLine}`;
 }
 
 function escHtml(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }

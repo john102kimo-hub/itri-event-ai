@@ -79,6 +79,45 @@ export async function appendRows(range, values) {
   return data;
 }
 
+// 結構操作（新增分頁）
+export async function batchUpdate(requests) {
+  const token = await getAccessToken();
+  const res = await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}:batchUpdate`,
+    {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ requests })
+    }
+  );
+  const data = await res.json();
+  if (data.error) throw new Error(data.error.message);
+  return data;
+}
+
+export async function listSheets() {
+  const token = await getAccessToken();
+  const res = await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}?fields=sheets.properties(sheetId,title)`,
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+  const data = await res.json();
+  if (data.error) throw new Error(data.error.message);
+  return (data.sheets || []).map(s => s.properties);
+}
+
+// 確保分頁存在，缺的就建立並寫入表頭。回傳實際新建的分頁名稱。
+export async function ensureSheets(spec) {
+  const existing = new Set((await listSheets()).map(p => p.title));
+  const missing = Object.keys(spec).filter(t => !existing.has(t));
+  if (!missing.length) return [];
+  await batchUpdate(missing.map(title => ({
+    addSheet: { properties: { title, gridProperties: { frozenRowCount: 1 } } }
+  })));
+  for (const t of missing) await updateRange(`${t}!A1`, [spec[t]]);
+  return missing;
+}
+
 export async function updateRange(range, values) {
   const token = await getAccessToken();
   const res = await fetch(

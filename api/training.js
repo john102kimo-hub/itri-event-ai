@@ -40,6 +40,58 @@ async function getEventConfig(eventId) {
   return data;
 }
 
+// 真實提問快取（5 分鐘）
+const qaCache = new Map();
+
+/**
+ * 從 qa_log 撈記者「真的問過」的問題。
+ * 這是這支 API 和純靠知識庫想像題目最大的差別：
+ * 本場問過的優先，其餘場次的高頻題當補充，辦愈多場愈準。
+ */
+async function getRealQuestions(eventId) {
+  const key = 'q:' + (eventId || 'all');
+  const cached = qaCache.get(key);
+  if (cached && Date.now() < cached.expiry) return cached.data;
+
+  let rows = [];
+  try { rows = await readRange('qa_log!A2:F'); } catch { rows = []; }
+
+  const norm = (q) => String(q || '').replace(/\s+/g, '').replace(/[？?。.，,、！!]/g, '');
+  const seen = new Set();
+  const take = (list, limit) => {
+    const out = [];
+    for (let i = list.length - 1; i >= 0 && out.length < limit; i--) {
+      const q = String(list[i][4] || '').trim();
+      if (q.length < 5 || q.length > 200) continue;
+      const k = norm(q);
+      if (!k || seen.has(k)) continue;
+      seen.add(k);
+      out.push({ q, media: String(list[i][3] || '').trim() });
+    }
+    return out;
+  };
+
+  const thisEvent = eventId && eventId !== 'all' ? rows.filter((r) => r[1] === eventId) : rows;
+  const data = {
+    thisEvent: take(thisEvent, 15),
+    otherEvents: eventId && eventId !== 'all' ? take(rows.filter((r) => r[1] !== eventId), 12) : [],
+    totalLogged: rows.length,
+  };
+  qaCache.set(key, { data, expiry: Date.now() + 5 * 60 * 1000 });
+  return data;
+}
+
+function realQuestionBlock(rq) {
+  if (!rq || (!rq.thisEvent.length && !rq.otherEvents.length)) return '';
+  const fmt = (arr) => arr.map((x) => `- ${x.q}${x.media ? `（${x.media}）` : ''}`).join('\n');
+  let s = '\n\n【記者實際問過的問題 —— 這是真實資料，不是推測】\n';
+  if (rq.thisEvent.length) s += `\n本場活動記者已經問過：\n${fmt(rq.thisEvent)}\n`;
+  if (rq.otherEvents.length) s += `\n工研院其他場次記者常問（可推測本場也會被問到）：\n${fmt(rq.otherEvents)}\n`;
+  s += '\n請優先從上面這些「真的被問過」的角度切入與追問，並依此推想同一路線記者接下來會追問什麼。'
+     + '這些比你自己想像的問題更有價值，因為它們反映記者真正關心的點。';
+  return s;
+}
+
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST,OPTIONS');
@@ -54,9 +106,13 @@ export default async function handler(req, res) {
   if (!messages || !Array.isArray(messages)) return res.status(400).json({ error: '請求格式錯誤' });
 
   try {
-    const event = event_id ? await getEventConfig(event_id) : null;
+    const [event, realQuestions] = await Promise.all([
+      event_id ? getEventConfig(event_id) : null,
+      getRealQuestions(event_id),
+    ]);
     const eventName = event?.name || '工研院活動';
     const knowledgeBase = event?.knowledge_base || '（活動資料未設定）';
+    const realQ = realQuestionBlock(realQuestions);
 
     let systemPrompt;
 
@@ -73,7 +129,7 @@ export default async function handler(req, res) {
 4. 整體表現
 
 【活動背景資料】
-${knowledgeBase}
+${knowledgeBase}${realQ}
 
 【回覆格式（請嚴格遵守）】
 ---評分---
@@ -103,7 +159,7 @@ ${knowledgeBase}
 - 一次只問一個問題，問完就等對方回答
 
 【你已做好的功課（活動背景資料）】
-${knowledgeBase}
+${knowledgeBase}${realQ}
 
 開場：先自我介紹（虛構媒體名稱與你的名字），說明今天想深入了解的角度，然後提出第一個問題。
 整個訓練共進行 5 題左右。`;
@@ -117,8 +173,10 @@ ${knowledgeBase}
         'anthropic-version': '2023-06-01'
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-6',
-        max_tokens: 1200,
+        // Sonnet 5 預設開啟 adaptive thinking（4.6 預設是關的），
+        // 而 max_tokens 是「思考＋回答」的總上限 —— 原本的 1200 會讓評分被截斷。
+        model: 'claude-sonnet-5',
+        max_tokens: 4000,
         system: systemPrompt,
         messages: messages.length > 0 ? messages : [{ role: 'user', content: '請開始。' }]
       })

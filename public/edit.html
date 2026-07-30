@@ -217,6 +217,27 @@ textarea.form-control { min-height: 240px; resize: vertical; line-height: 1.65; 
     </div>
   </div>
 
+  <div class="card">
+    <h2><i class="ti ti-chart-bar" style="color:var(--primary)"></i> 媒體露出（活動結束後上傳）</h2>
+    <div class="sub">上傳這場活動的露出清單，系統會自動統計並和記者的 AI 提問交叉分析</div>
+
+    <div class="form-group">
+      <label>露出清單檔案</label>
+      <input type="file" class="form-control" id="exp-file"
+             accept=".doc,.mht,.mhtml,.pptx,.html,.htm" style="padding:9px">
+      <div class="form-hint">
+        請上傳<strong>監測公司給的「OO露出清單.doc」原始檔</strong>（不用另存或轉檔，直接上傳即可）。<br>
+        也可以上傳露出報告 .pptx，但簡報是成品、欄位常不完整，抓到的資料會少很多。
+      </div>
+    </div>
+
+    <button class="btn btn-outline" id="exp-btn" onclick="uploadExposure()" disabled>
+      <i class="ti ti-upload"></i> 上傳並分析
+    </button>
+
+    <div id="exp-result" style="display:none;margin-top:16px"></div>
+  </div>
+
   <div class="action-bar">
     <span class="saved-hint" id="saved-hint"></span>
     <a class="btn btn-outline" id="preview-link" target="_blank">
@@ -321,6 +342,7 @@ async function load() {
 
     document.getElementById('loading').style.display = 'none';
     document.getElementById('editor').style.display = 'block';
+    loadExposure();
   } catch (e) {
     showError('連線失敗', e.message + '，請檢查網路後重新整理。');
   }
@@ -372,6 +394,75 @@ async function save() {
 
   btn.disabled = false;
   btn.innerHTML = '<i class="ti ti-device-floppy"></i> 儲存內容';
+}
+
+// ───────────────────────── 媒體露出上傳（同仁用 edit_code，不需後台密碼）
+
+document.getElementById('exp-file').addEventListener('change', function () {
+  document.getElementById('exp-btn').disabled = !this.files.length;
+});
+
+function renderExposure(d, prefix) {
+  const box = document.getElementById('exp-result');
+  if (!d || !d.total) { box.style.display = 'none'; return; }
+  const types = Object.entries(d.byType || {}).sort((a, b) => b[1] - a[1])
+    .map(([k, v]) => `${k} ${v}`).join('　·　');
+  const tops = (d.topOutlets || []).slice(0, 8)
+    .map((o) => `<span style="display:inline-block;background:#eef5f3;border-radius:4px;padding:2px 8px;margin:3px 4px 0 0;font-size:0.8rem">${esc(o.name)} ×${o.n}</span>`)
+    .join('');
+  box.innerHTML = `
+    <div style="background:#f5f9f8;border:1px solid #dceae6;border-radius:8px;padding:14px 16px">
+      <div style="font-weight:700;margin-bottom:8px">${prefix || ''}露出 ${d.total} 則　·　${d.outlets} 家媒體</div>
+      ${types ? `<div style="font-size:0.85rem;color:#5a6b68;margin-bottom:8px">${esc(types)}</div>` : ''}
+      ${tops ? `<div>${tops}</div>` : ''}
+      ${d.uploadedAt ? `<div style="font-size:0.78rem;color:#7b8b88;margin-top:10px">上次上傳：${esc(d.uploadedAt)}${d.sourceFile ? '（' + esc(d.sourceFile) + '）' : ''}</div>` : ''}
+    </div>`;
+  box.style.display = 'block';
+}
+
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+async function loadExposure() {
+  try {
+    const res = await fetch(`/api/exposure?action=list&id=${encodeURIComponent(EVENT_ID)}&code=${encodeURIComponent(EDIT_CODE)}`);
+    if (!res.ok) return;
+    renderExposure(await res.json(), '已登錄 ');
+  } catch { /* 沒上傳過就不顯示，不擋主流程 */ }
+}
+
+async function uploadExposure() {
+  const f = document.getElementById('exp-file').files[0];
+  if (!f) return;
+  const btn = document.getElementById('exp-btn');
+  btn.disabled = true;
+  btn.innerHTML = '<i class="ti ti-loader"></i> 解析中…';
+
+  try {
+    const data = await new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(String(r.result).split(',').pop());
+      r.onerror = () => reject(new Error('讀取檔案失敗'));
+      r.readAsDataURL(f);
+    });
+
+    const res = await fetch('/api/exposure', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'upload', id: EVENT_ID, code: EDIT_CODE, filename: f.name, data })
+    });
+    const d = await res.json();
+    if (!res.ok || d.error) throw new Error(d.error || '上傳失敗');
+
+    renderExposure(d, '');
+    toast(`✓ 已登錄 ${d.total} 則露出、${d.outlets} 家媒體`
+      + (d.replaced ? `（覆蓋先前 ${d.replaced} 筆）` : ''));
+    if (d.note) setTimeout(() => toast(d.note), 3400);
+  } catch (e) {
+    toast('上傳失敗：' + e.message);
+  }
+
+  btn.disabled = false;
+  btn.innerHTML = '<i class="ti ti-upload"></i> 上傳並分析';
 }
 
 let toastTimer;
