@@ -185,7 +185,9 @@ ${knowledgeBase}${realQ}
     const data = await response.json();
     if (!response.ok) return res.status(response.status).json({ error: data.error?.message || 'API 錯誤' });
 
-    return res.status(200).json({ reply: data.content?.[0]?.text || '無法取得回應。' });
+    // Adaptive thinking 開啟時 content[0] 常是 thinking block，真正文字要找 type === 'text' 那塊
+    const textBlock = (data.content || []).find((b) => b.type === 'text');
+    return res.status(200).json({ reply: textBlock?.text || '無法取得回應。' });
   } catch (err) {
     console.error(err);
     return res.status(500).json({ error: '伺服器錯誤' });
