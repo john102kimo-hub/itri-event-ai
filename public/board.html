@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>報到即時看板</title>
+<style>
+  :root{ --brand:#12d0b4; --brand-dim:#0a6b68; --bg:#0b1416; --panel:#111e21;
+         --line:#1e3236; --ink:#eaf5f4; --muted:#7b9a99; --warn:#ffb648; }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+       font-family:"Noto Sans TC","Microsoft JhengHei",-apple-system,sans-serif}
+  .top{display:flex;align-items:baseline;gap:16px;padding:20px 28px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+  .top h1{margin:0;font-size:22px;font-weight:700}
+  .top .live{margin-left:auto;font-size:13px;color:var(--muted)}
+  .dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--brand);
+       margin-right:6px;animation:p 1.6s ease-in-out infinite}
+  @keyframes p{0%,100%{opacity:1}50%{opacity:.25}}
+  .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;padding:22px 28px}
+  .kpi{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:20px 22px}
+  .kpi .k{font-size:13px;color:var(--muted);letter-spacing:.05em}
+  .kpi .v{font-size:52px;font-weight:800;line-height:1.1;margin-top:6px;
+          font-variant-numeric:tabular-nums;color:var(--brand)}
+  .kpi .v.sm{font-size:38px;color:var(--ink)}
+  .kpi .s{font-size:12.5px;color:var(--muted);margin-top:6px}
+  .bar{height:9px;border-radius:5px;background:#0a2124;overflow:hidden;margin-top:12px}
+  .bar i{display:block;height:100%;background:linear-gradient(90deg,var(--brand-dim),var(--brand));transition:width .6s ease}
+  .cols{display:grid;grid-template-columns:1.05fr 1fr 1fr;gap:16px;padding:0 28px 28px}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px 20px;
+         min-height:300px;display:flex;flex-direction:column}
+  .panel h2{margin:0 0 14px;font-size:14px;color:var(--muted);font-weight:600;letter-spacing:.06em}
+  .list{flex:1;overflow-y:auto;max-height:400px}
+  .t{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid #16292c;font-size:15px}
+  .t:last-child{border-bottom:0}
+  .t .ol{color:var(--muted);font-size:13px}
+  .t .tm{margin-left:auto;font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums}
+  .tag{font-size:11px;padding:2px 7px;border-radius:4px;background:#3a2c10;color:var(--warn)}
+  .tr{display:flex;align-items:center;gap:12px;margin-bottom:11px}
+  .tr .n{width:52px;font-size:13px;color:var(--muted)}
+  .tr .b{flex:1;height:22px;background:#0a2124;border-radius:4px;overflow:hidden}
+  .tr .b i{display:block;height:100%;background:var(--brand-dim);transition:width .6s ease}
+  .tr .c{width:34px;text-align:right;font-weight:700;font-variant-numeric:tabular-nums}
+  .muted{color:var(--muted);font-size:14px;padding:20px 0;text-align:center}
+  .gate{max-width:360px;margin:14vh auto;background:var(--panel);border:1px solid var(--line);
+        border-radius:14px;padding:26px}
+  .gate h2{margin:0 0 16px;font-size:17px}
+  .gate input{width:100%;padding:12px;border-radius:8px;border:1px solid var(--line);
+              background:#0a1618;color:var(--ink);font-size:15px;font-family:inherit}
+  .gate button{width:100%;margin-top:12px;padding:12px;border:0;border-radius:8px;background:var(--brand);
+               color:#04211d;font-weight:700;font-size:15px;cursor:pointer;font-family:inherit}
+  .gate .e{color:#ff8a8a;font-size:13px;margin-top:10px;min-height:18px}
+  @media(max-width:1100px){.grid{grid-template-columns:repeat(2,1fr)}.cols{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+
+<div id="gate" class="gate" style="display:none">
+  <h2>報到看板</h2>
+  <input id="pw" type="password" placeholder="後台密碼" autocomplete="current-password">
+  <button id="go">進入</button>
+  <div class="e" id="gerr"></div>
+</div>
+
+<div id="app" style="display:none">
+  <div class="top">
+    <h1 id="evName">載入中…</h1>
+    <div class="live"><span class="dot"></span><span id="ts">—</span> 每 10 秒自動更新</div>
+  </div>
+  <div class="grid">
+    <div class="kpi"><div class="k">已報到</div><div class="v" id="kChecked">0</div>
+      <div class="s" id="kRate">—</div><div class="bar"><i id="kBar" style="width:0"></i></div></div>
+    <div class="kpi"><div class="k">邀請人數</div><div class="v sm" id="kInvited">0</div><div class="s">名單內應到</div></div>
+    <div class="kpi"><div class="k">到場媒體家數</div><div class="v sm" id="kOutlets">0</div><div class="s">不重複計算</div></div>
+    <div class="kpi"><div class="k">名單外到場</div><div class="v sm" id="kWalk">0</div><div class="s">現場手動登記</div></div>
+  </div>
+  <div class="cols">
+    <div class="panel"><h2>最新報到</h2><div class="list" id="recent"></div></div>
+    <div class="panel"><h2>媒體類型分布</h2><div class="list" id="types"></div></div>
+    <div class="panel"><h2>尚未報到</h2><div class="list" id="notYet"></div></div>
+  </div>
+</div>
+
+<script>
+const EV = new URLSearchParams(location.search).get('id') || '';
+const KEY = 'itri_admin_pw';
+let pw = sessionStorage.getItem(KEY) || '';
+
+const $ = id => document.getElementById(id);
+const el = (t, c, x) => { const d = document.createElement(t); if (c) d.className = c;
+  if (x !== undefined) d.textContent = x; return d; };
+
+async function fetchStats() {
+  const r = await fetch('/api/checkin?action=stats&id=' + encodeURIComponent(EV) + '&password=' + encodeURIComponent(pw));
+  const j = await r.json();
+  if (!r.ok) throw Object.assign(new Error(j.error || '讀取失敗'), { status: r.status });
+  return j;
+}
+
+function openGate(msg) {
+  $('app').style.display = 'none';
+  $('gate').style.display = 'block';
+  $('gerr').textContent = msg || '';
+  $('pw').focus();
+}
+
+$('go').onclick = async () => {
+  pw = $('pw').value;
+  try {
+    const s = await fetchStats();
+    sessionStorage.setItem(KEY, pw);
+    $('gate').style.display = 'none';
+    $('app').style.display = 'block';
+    paint(s);
+    setInterval(tick, 10000);
+  } catch (e) { $('gerr').textContent = e.message; }
+};
+$('pw').addEventListener('keydown', e => { if (e.key === 'Enter') $('go').click(); });
+
+async function tick() {
+  try { paint(await fetchStats()); }
+  catch (e) { if (e.status === 401) openGate('密碼已失效，請重新輸入'); else $('ts').textContent = '連線異常'; }
+}
+
+function paint(s) {
+  $('evName').textContent = s.eventName;
+  $('kChecked').textContent = s.checked;
+  $('kInvited').textContent = s.invited;
+  $('kOutlets').textContent = s.outlets;
+  $('kWalk').textContent = s.walkins;
+  $('kRate').textContent = s.invited ? ('報到率 ' + s.rate + '%') : '未設定邀請名單';
+  $('kBar').style.width = Math.min(s.rate, 100) + '%';
+  $('ts').textContent = new Date().toLocaleTimeString('zh-TW', { hour12: false });
+
+  const R = $('recent'); R.innerHTML = '';
+  if (!s.recent.length) R.appendChild(el('div', 'muted', '尚無報到紀錄'));
+  s.recent.forEach(r => {
+    const d = el('div', 't');
+    d.appendChild(el('span', '', r.name));
+    d.appendChild(el('span', 'ol', r.outlet));
+    if (r.walkin) d.appendChild(el('span', 'tag', '名單外'));
+    d.appendChild(el('span', 'tm', r.time));
+    R.appendChild(d);
+  });
+
+  const T = $('types'); T.innerHTML = '';
+  const keys = Object.keys(s.byType).sort((a, b) => s.byType[b] - s.byType[a]);
+  if (!keys.length) T.appendChild(el('div', 'muted', '—'));
+  const max = keys.length ? s.byType[keys[0]] : 1;
+  keys.forEach(k => {
+    const row = el('div', 'tr');
+    row.appendChild(el('div', 'n', k));
+    const b = el('div', 'b'), i = el('i');
+    i.style.width = Math.round(s.byType[k] / max * 100) + '%';
+    b.appendChild(i); row.appendChild(b);
+    row.appendChild(el('div', 'c', s.byType[k]));
+    T.appendChild(row);
+  });
+
+  const N = $('notYet'); N.innerHTML = '';
+  if (!s.notYet.length) {
+    N.appendChild(el('div', 'muted', s.invited ? '名單內全數到齊' : '未設定邀請名單'));
+  } else {
+    if (s.notYetTotal > s.notYet.length)
+      N.appendChild(el('div', 'muted', '共 ' + s.notYetTotal + ' 位未到，顯示前 ' + s.notYet.length + ' 位'));
+    s.notYet.forEach(r => {
+      const d = el('div', 't');
+      d.appendChild(el('span', '', r.name));
+      d.appendChild(el('span', 'ol', r.outlet));
+      N.appendChild(d);
+    });
+  }
+}
+
+(async () => {
+  if (!EV) return openGate('網址缺少活動代碼（/board?id=活動ID）');
+  if (!pw) return openGate();
+  try {
+    const s = await fetchStats();
+    $('app').style.display = 'block';
+    paint(s);
+    setInterval(tick, 10000);
+  } catch (e) { openGate(e.status === 401 ? '請輸入後台密碼' : e.message); }
+})();
+</script>
+</body>
+</html>
