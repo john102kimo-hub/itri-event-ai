@@ -4,9 +4,6 @@
     { "source": "/edit", "destination": "/edit.html" },
     { "source": "/training", "destination": "/training.html" },
     { "source": "/admin", "destination": "/index.html" },
-    { "source": "/report", "destination": "/report.html" },
-    { "source": "/checkin", "destination": "/checkin.html" },
-    { "source": "/board", "destination": "/board.html" },
-    { "source": "/checkin-admin", "destination": "/checkin-admin.html" }
+    { "source": "/report", "destination": "/report.html" }
   ]
 }
