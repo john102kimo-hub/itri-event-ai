@@ -1,0 +1,540 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI 能見度追蹤 — 工研院活動溝通 AI 平台</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.3.0/tabler-icons.min.css">
+<style>
+  :root{
+    --primary:#0F9E7A; --primary-dark:#0a7a60; --primary-light:rgba(15,158,122,0.08);
+    --text:#1a1a2e; --muted:#6b7280; --bg:#f0f7f5; --card:#fff; --border:#e5e7eb; --radius:14px;
+    --up:#0F9E7A; --down:#ef4444; --event:#f59e0b;
+    --font:'PingFang TC','Noto Sans TC','Microsoft JhengHei',sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:var(--font);background:var(--bg);color:var(--text);line-height:1.6}
+  .wrap{max-width:1080px;margin:0 auto;padding:28px 20px 80px}
+
+  #gate{position:fixed;inset:0;background:linear-gradient(135deg,#0b3d30,#0F9E7A);display:flex;align-items:center;justify-content:center;padding:20px;z-index:50}
+  #gate-box{background:#fff;border-radius:20px;padding:40px 32px;width:100%;max-width:400px;text-align:center;box-shadow:0 24px 64px rgba(0,0,0,.25)}
+  #gate-box h1{font-size:1.3rem;margin-bottom:6px}
+  #gate-box p{color:var(--muted);font-size:.88rem;margin-bottom:24px}
+  #gate-box input{width:100%;border:2px solid var(--border);border-radius:12px;padding:14px;font-size:1rem;font-family:var(--font);text-align:center;outline:none;margin-bottom:14px}
+  #gate-box input:focus{border-color:var(--primary)}
+  #gate-box button{width:100%;background:var(--primary);color:#fff;border:none;border-radius:12px;padding:14px;font-size:1rem;font-weight:700;font-family:var(--font);cursor:pointer}
+  #gate-err{color:#ef4444;font-size:.82rem;margin-top:10px;min-height:18px}
+
+  .head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-bottom:6px}
+  .head h1{font-size:1.5rem}
+  .head .sub{color:var(--muted);font-size:.86rem;margin-top:4px}
+  .toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .btn{border:none;border-radius:10px;padding:9px 15px;font-family:var(--font);font-size:.86rem;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:6px}
+  .btn-primary{background:var(--primary);color:#fff}
+  .btn-outline{background:#fff;border:1px solid var(--border);color:var(--text)}
+  .btn-ghost{background:transparent;color:var(--muted);padding:6px 10px}
+  .btn:disabled{opacity:.5;cursor:not-allowed}
+  select,input[type=text],input[type=date],textarea{border:1px solid var(--border);border-radius:9px;padding:8px 10px;font-family:var(--font);font-size:.86rem;background:#fff;color:var(--text)}
+  textarea{width:100%;resize:vertical;line-height:1.5}
+
+  .caveat{background:#fffbeb;border:1px solid #fde68a;color:#92400e;border-radius:12px;padding:10px 14px;font-size:.8rem;margin:14px 0 22px;line-height:1.6}
+
+  .kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:22px}
+  .kpi{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:16px 18px}
+  .kpi .num{font-size:1.9rem;font-weight:800;color:var(--primary);line-height:1.15}
+  .kpi .lab{font-size:.8rem;color:var(--muted);margin-top:4px}
+  .kpi .hint{font-size:.7rem;color:#9ca3af;margin-top:3px}
+
+  .card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin-bottom:18px}
+  .card h2{font-size:1.02rem;margin-bottom:4px;display:flex;align-items:center;gap:7px}
+  .card .desc{color:var(--muted);font-size:.8rem;margin-bottom:14px}
+
+  .chips{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:12px}
+  .chip{border:1px solid var(--border);background:#fff;border-radius:20px;padding:4px 12px;font-size:.78rem;font-weight:600;cursor:pointer;color:var(--muted);display:inline-flex;align-items:center;gap:6px}
+  .chip .dot{width:8px;height:8px;border-radius:50%;background:currentColor;opacity:.35}
+  .chip.on{color:#fff;border-color:transparent}
+  .chip.on .dot{opacity:1;background:#fff}
+
+  #chart{width:100%;display:block;touch-action:pan-y}
+  #chart text{font-family:var(--font);fill:var(--muted)}
+  .tip{position:absolute;pointer-events:none;background:rgba(26,26,46,.94);color:#fff;border-radius:10px;padding:9px 12px;font-size:.76rem;line-height:1.6;max-width:min(280px,72vw);opacity:0;transition:opacity .1s;z-index:10;box-shadow:0 8px 24px rgba(0,0,0,.2)}
+  .chart-box{position:relative;overflow:hidden}
+
+  .tbl{overflow-x:auto;-webkit-overflow-scrolling:touch}
+  table{width:100%;border-collapse:collapse;font-size:.84rem}
+  th{text-align:left;padding:9px 10px;background:#f9fafb;border-bottom:2px solid var(--border);font-size:.75rem;color:var(--muted);font-weight:700;white-space:nowrap}
+  td{padding:9px 10px;border-bottom:1px solid var(--border);vertical-align:top}
+  tr:hover td{background:#fafafa}
+  .num-cell{font-variant-numeric:tabular-nums;font-weight:700}
+  .up{color:var(--up)} .down{color:var(--down)} .flat{color:var(--muted)}
+  .pill{display:inline-block;border-radius:20px;padding:2px 9px;font-size:.72rem;font-weight:700;background:var(--primary-light);color:var(--primary-dark)}
+  .empty{color:var(--muted);font-size:.85rem;padding:26px 0;text-align:center}
+
+  details summary{cursor:pointer;font-weight:700;font-size:.95rem;list-style:none;display:flex;align-items:center;gap:7px}
+  details summary::-webkit-details-marker{display:none}
+  details summary::before{content:'\203A';display:inline-block;transition:transform .15s;font-size:1.2rem;color:var(--muted)}
+  details[open] summary::before{transform:rotate(90deg)}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:12px}
+  .row > *{flex:0 0 auto}
+  .grow{flex:1 1 220px}
+  .excerpt{color:var(--muted);font-size:.78rem;max-width:min(520px,62vw)}
+  #toast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%) translateY(20px);background:#1a1a2e;color:#fff;padding:11px 20px;border-radius:10px;font-size:.86rem;opacity:0;transition:.2s;z-index:99;pointer-events:none}
+  #toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+  @media(max-width:640px){.wrap{padding:18px 14px 60px}.head h1{font-size:1.25rem}}
+</style>
+</head>
+<body>
+
+<div id="gate">
+  <div id="gate-box">
+    <h1><i class="ti ti-radar" style="color:var(--primary)"></i> AI 能見度追蹤</h1>
+    <p>請輸入管理員密碼</p>
+    <input id="gate-input" type="password" placeholder="管理員密碼" autocomplete="current-password">
+    <button onclick="unlock()">進入</button>
+    <div id="gate-err"></div>
+  </div>
+</div>
+
+<div class="wrap" id="app" style="display:none">
+
+  <div class="head">
+    <div>
+      <h1><i class="ti ti-radar" style="color:var(--primary)"></i> AI 搜尋能見度追蹤</h1>
+      <div class="sub" id="sub">—</div>
+    </div>
+    <div class="toolbar">
+      <select id="days" onchange="loadSeries()">
+        <option value="30">近 30 天</option>
+        <option value="90" selected>近 90 天</option>
+        <option value="180">近 180 天</option>
+        <option value="365">近 365 天</option>
+      </select>
+      <button class="btn btn-outline" onclick="loadAll()"><i class="ti ti-refresh"></i> 重整</button>
+      <button class="btn btn-outline" id="test-btn" onclick="selftest()"><i class="ti ti-stethoscope"></i> 測 1 題</button>
+      <button class="btn btn-primary" id="scan-btn" onclick="scan()"><i class="ti ti-player-play"></i> 立即掃描</button>
+      <a class="btn btn-ghost" href="/admin"><i class="ti ti-arrow-left"></i> 回後台</a>
+    </div>
+  </div>
+
+  <div class="caveat">
+    <b>這份數字量的是什麼：</b>用「不指名工研院」的問法去問可用 API 的 AI 答案引擎，記錄它會不會提到工研院、第幾個提到、有沒有引到自家網域、有沒有講出具體內容。
+    它是<b>代理指標</b>——趨勢與相對變化可用，但不等同 ChatGPT 或 Google AI Overviews 消費端畫面，對外引用時務必註明。單次查詢有隨機性，看趨勢請以<b>七日均線</b>為準。
+  </div>
+
+  <div class="card" id="test-card" style="display:none">
+    <h2><i class="ti ti-stethoscope" style="color:var(--primary)"></i> 自我測試（不入庫）</h2>
+    <div class="desc">拿一題實跑到底，確認引擎跟判官真的通了、判分合理。上線後先按這個再開始掃。</div>
+    <div id="test-out"></div>
+  </div>
+
+  <div class="kpi-grid" id="kpis"></div>
+
+  <div class="card">
+    <h2><i class="ti ti-chart-line" style="color:var(--primary)"></i> 能見度指數走勢</h2>
+    <div class="desc">0–100。提及 45＋位置 20＋自家網域被引用 20＋有具體內容 15。實線為七日均線，淡點為單日原始值，橘色虛線為記者會／發稿事件。</div>
+    <div class="chips" id="chips"></div>
+    <div class="chart-box">
+      <svg id="chart" viewBox="0 0 920 340" preserveAspectRatio="none"></svg>
+      <div class="tip" id="tip"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2><i class="ti ti-flag" style="color:var(--event)"></i> 事件效應：這一場替你留下幾天記憶</h2>
+    <div class="desc">半衰期＝峰值掉回「峰值與基線的中點」要幾天；基線抬升＝事件後第 15–30 天的均分減掉事前 14 天基線。抬升是真正能寫進績效的數字。</div>
+    <div id="events" class="tbl"></div>
+  </div>
+
+  <div class="card">
+    <h2><i class="ti ti-list-numbers" style="color:var(--primary)"></i> 關鍵字排行</h2>
+    <div class="desc">變化＝所選期間後半段均分減前半段。提及率與引用率取近半段樣本。</div>
+    <div id="board" class="tbl"></div>
+  </div>
+
+  <div class="card">
+    <details>
+      <summary><i class="ti ti-help-circle"></i> 題庫（<span id="prompt-count">0</span> 題）</summary>
+      <div class="desc" style="margin-top:10px">題目裡刻意不出現「工研院」——一旦指名就是自問自答。停用的題目不會被掃描，也不會計費。</div>
+      <div id="prompts" class="tbl"></div>
+      <div class="row">
+        <input type="text" id="np-topic" placeholder="主題（如 化合物半導體）" style="width:180px">
+        <input type="text" id="np-keyword" placeholder="關鍵字標籤" style="width:150px">
+        <input type="text" id="np-prompt" class="grow" placeholder="問句（不要出現工研院）">
+        <button class="btn btn-primary" onclick="savePrompt()"><i class="ti ti-plus"></i> 新增</button>
+        <button class="btn btn-outline" onclick="seed()"><i class="ti ti-seeding"></i> 帶入預設 12 題</button>
+      </div>
+    </details>
+  </div>
+
+  <div class="card">
+    <details>
+      <summary><i class="ti ti-calendar-event"></i> 事件標記（<span id="event-count">0</span> 筆）</summary>
+      <div class="desc" style="margin-top:10px">記者會日、發稿日標在這裡，曲線圖才會畫出對照線，半衰期與抬升才算得出來。關鍵字要和題庫的關鍵字標籤一致，才會鎖定那條線計算。</div>
+      <div id="event-list" class="tbl"></div>
+      <div class="row">
+        <input type="date" id="ne-date">
+        <input type="text" id="ne-title" class="grow" placeholder="事件名稱（如 0626 AI 智慧醫療大平台記者會）">
+        <input type="text" id="ne-keywords" placeholder="關鍵字（對應題庫標籤）" style="width:180px">
+        <button class="btn btn-primary" onclick="saveEvent()"><i class="ti ti-plus"></i> 新增</button>
+      </div>
+    </details>
+  </div>
+
+  <div class="card">
+    <details onclick="if(this.open===false)loadDetail()">
+      <summary><i class="ti ti-file-text"></i> 原始回答（人工複核）</summary>
+      <div class="desc" style="margin-top:10px">分數是機器判的，對外引用前抽幾筆看原文。</div>
+      <div id="detail" class="tbl"><div class="empty">展開後點「載入最近 60 筆」</div></div>
+      <div class="row"><button class="btn btn-outline" onclick="loadDetail()"><i class="ti ti-download"></i> 載入最近 60 筆</button></div>
+    </details>
+  </div>
+
+</div>
+
+<div id="toast"></div>
+
+<script>
+const PALETTE = ['#0F9E7A','#3b82f6','#8b5cf6','#ec4899','#f97316','#14b8a6','#6366f1','#84cc16'];
+let S = { pwd:'', data:null, on:new Set(['__overall__']), prompts:[], events:[] };
+
+/* ── 登入 ── */
+function toast(m){const t=document.getElementById('toast');t.textContent=m;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2600);}
+async function unlock(){
+  const pwd = document.getElementById('gate-input').value.trim();
+  if(!pwd) return;
+  const err = document.getElementById('gate-err'); err.textContent = '驗證中…';
+  const res = await fetch(`/api/geo?action=status&password=${encodeURIComponent(pwd)}`);
+  if(!res.ok){ err.textContent = '密碼錯誤'; return; }
+  S.pwd = pwd; sessionStorage.setItem('itri_pwd', pwd);
+  document.getElementById('gate').style.display='none';
+  document.getElementById('app').style.display='block';
+  loadAll();
+}
+document.getElementById('gate-input').addEventListener('keydown', e=>{ if(e.key==='Enter') unlock(); });
+(function(){ const p = sessionStorage.getItem('itri_pwd'); if(p){ document.getElementById('gate-input').value = p; unlock(); } })();
+
+const api = (qs) => fetch(`/api/geo?${qs}&password=${encodeURIComponent(S.pwd)}`).then(r=>r.json());
+const post = (body) => fetch('/api/geo',{method:'POST',headers:{'Content-Type':'application/json'},
+  body:JSON.stringify({...body, password:S.pwd})}).then(r=>r.json());
+
+async function loadAll(){ await Promise.all([loadStatus(), loadSeries(), loadPrompts(), loadEvents()]); }
+
+/* ── 狀態列 ── */
+async function loadStatus(){
+  const s = await api('action=status');
+  if(s.error) return;
+  const live = s.engines.filter(e=>e.enabled).map(e=>e.label);
+  // 有金鑰但被 GEO_ENGINES 關掉的，要跟「根本沒設金鑰」分開講，不然會以為是壞了
+  const muted = s.engines.filter(e=>!e.enabled && e.hasKey).map(e=>e.id);
+  const off   = s.engines.filter(e=>!e.enabled && !e.hasKey).map(e=>e.env);
+  document.getElementById('sub').innerHTML =
+    `今日 ${s.date}：已掃 <b>${s.done}/${s.total}</b> ｜ 探測：${live.join('、')||'（無）'} (${s.model})` +
+    ` ｜ 判官：${s.judge||'—'}` +
+    (muted.length?` ｜ 已停掃（省錢）：${muted.join('、')}`:'') +
+    (off.length?` ｜ 未設金鑰：${off.join('、')}`:'') +
+    (s.ready?` ｜ <span style="color:#ef4444;font-weight:700">${esc(s.ready)}</span>`:'');
+}
+
+/* ── 主資料 ── */
+async function loadSeries(){
+  const days = document.getElementById('days').value;
+  const d = await api(`action=series&days=${days}`);
+  if(d.error) return toast(d.error);
+  S.data = d;
+  renderKpis(d.summary); renderChips(d.series); renderChart(); renderEvents(d.events); renderBoard(d.board);
+}
+
+function renderKpis(s){
+  const v = (x,suf='') => x===null||x===undefined ? '—' : x+suf;
+  document.getElementById('kpis').innerHTML = `
+    <div class="kpi"><div class="num">${v(s.score14)}</div><div class="lab">近 14 天能見度指數</div><div class="hint">滿分 100</div></div>
+    <div class="kpi"><div class="num">${v(s.mentionRate14,'%')}</div><div class="lab">提及率</div><div class="hint">不指名問法下有被提到</div></div>
+    <div class="kpi"><div class="num">${v(s.citedRate14,'%')}</div><div class="lab">自家網域引用率</div><div class="hint">itri.org.tw 被列為來源</div></div>
+    <div class="kpi"><div class="num">${s.samples}</div><div class="lab">累計樣本</div><div class="hint">最後掃描 ${s.lastScan||'—'}${s.failed14?`｜近期失敗 ${s.failed14}`:''}</div></div>`;
+}
+
+function keyColor(k){ const i = (S.data.series.keywords.findIndex(x=>x.keyword===k)+1); return PALETTE[i % PALETTE.length]; }
+
+function renderChips(series){
+  const box = document.getElementById('chips');
+  const items = [{k:'__overall__',label:'整體',color:PALETTE[0]},
+    ...series.keywords.map(x=>({k:x.keyword,label:x.keyword,color:keyColor(x.keyword)}))];
+  box.innerHTML = items.map(it=>{
+    const on = S.on.has(it.k);
+    return `<button class="chip ${on?'on':''}" style="${on?`background:${it.color}`:`color:${it.color}`}"
+      onclick="toggle('${it.k.replace(/'/g,"\\'")}')"><span class="dot"></span>${it.label}</button>`;
+  }).join('');
+}
+function toggle(k){ S.on.has(k) ? S.on.delete(k) : S.on.add(k); renderChips(S.data.series); renderChart(); }
+
+/* ── 股票式曲線圖 ── */
+const W=920, H=340, PL=44, PR=14, PT=18, PB=30;
+const px = (i,n) => PL + (n<=1 ? 0 : (W-PL-PR) * i/(n-1));
+const py = (v) => PT + (H-PT-PB) * (1 - v/100);
+
+function pathOf(vals){
+  let d='', pen=false;
+  vals.forEach((v,i)=>{
+    if(v===null){ pen=false; return; }
+    d += (pen?'L':'M') + px(i,vals.length).toFixed(1) + ' ' + py(v).toFixed(1) + ' ';
+    pen = true;
+  });
+  return d.trim();
+}
+
+function renderChart(){
+  const svg = document.getElementById('chart');
+  if(!S.data){ svg.innerHTML=''; return; }
+  const { dates, overall, keywords } = S.data.series;
+  const n = dates.length;
+  if(!n){ svg.innerHTML = `<text x="${W/2}" y="${H/2}" text-anchor="middle" font-size="13">尚無資料，先按「立即掃描」</text>`; return; }
+
+  let g = '';
+  // 格線與 y 軸
+  [0,25,50,75,100].forEach(v=>{
+    g += `<line x1="${PL}" y1="${py(v)}" x2="${W-PR}" y2="${py(v)}" stroke="#eef0f2" stroke-width="1"/>`;
+    g += `<text x="${PL-8}" y="${py(v)+4}" text-anchor="end" font-size="11">${v}</text>`;
+  });
+  // x 軸日期（最多 6 個刻度）
+  const step = Math.max(1, Math.ceil(n/6));
+  for(let i=0;i<n;i+=step){
+    g += `<text x="${px(i,n)}" y="${H-8}" text-anchor="middle" font-size="10.5">${dates[i].slice(5)}</text>`;
+  }
+  // 事件垂直線
+  (S.data.events||[]).forEach((ev,k)=>{
+    const i = dates.indexOf(ev.date);
+    if(i<0) return;
+    const x = px(i,n);
+    g += `<line x1="${x}" y1="${PT}" x2="${x}" y2="${H-PB}" stroke="var(--event)" stroke-width="1.4" stroke-dasharray="4 4" opacity=".85"/>`;
+    g += `<circle cx="${x}" cy="${PT-2}" r="8" fill="var(--event)"/>`;
+    g += `<text x="${x}" y="${PT+2}" text-anchor="middle" font-size="10" fill="#fff" font-weight="700">${k+1}</text>`;
+  });
+  // 線
+  const lines = [];
+  if(S.on.has('__overall__')) lines.push({label:'整體', color:PALETTE[0], ...overall});
+  keywords.forEach(kw=>{ if(S.on.has(kw.keyword)) lines.push({label:kw.keyword, color:keyColor(kw.keyword), ...kw}); });
+  lines.forEach(L=>{
+    g += `<path d="${pathOf(L.raw)}" fill="none" stroke="${L.color}" stroke-width="1" opacity=".22"/>`;
+    L.raw.forEach((v,i)=>{ if(v!==null) g += `<circle cx="${px(i,n)}" cy="${py(v)}" r="1.8" fill="${L.color}" opacity=".3"/>`; });
+    g += `<path d="${pathOf(L.ma)}" fill="none" stroke="${L.color}" stroke-width="2.4" stroke-linejoin="round" stroke-linecap="round"/>`;
+  });
+  g += `<line id="cross" x1="0" y1="${PT}" x2="0" y2="${H-PB}" stroke="#94a3b8" stroke-width="1" opacity="0"/>`;
+  svg.innerHTML = g;
+
+  svg._lines = lines; svg._dates = dates;
+}
+
+(function bindHover(){
+  const svg = document.getElementById('chart'), tip = document.getElementById('tip');
+  const move = (clientX, clientY) => {
+    if(!svg._dates || !svg._dates.length) return;
+    const r = svg.getBoundingClientRect();
+    const vx = (clientX - r.left) / r.width * W;
+    const n = svg._dates.length;
+    let i = Math.round((vx - PL) / Math.max(1,(W-PL-PR)) * (n-1));
+    i = Math.max(0, Math.min(n-1, i));
+    const cross = svg.querySelector('#cross');
+    if(cross){ cross.setAttribute('x1',px(i,n)); cross.setAttribute('x2',px(i,n)); cross.setAttribute('opacity','.5'); }
+    const date = svg._dates[i];
+    const ev = (S.data?.events||[]).filter(e=>e.date===date);
+    const rows = (svg._lines||[]).map(L=>{
+      const v = L.ma[i], raw = L.raw[i];
+      if(v===null && raw===null) return '';
+      return `<div><span style="color:${L.color}">●</span> ${L.label}：<b>${v??'—'}</b>${raw!==null?` <span style="opacity:.6">(當日 ${raw})</span>`:''}</div>`;
+    }).filter(Boolean).join('');
+    tip.innerHTML = `<b>${date}</b>${ev.map(e=>`<div style="color:#fbbf24">▲ ${e.title}</div>`).join('')}${rows||'<div style="opacity:.7">當日無資料</div>'}`;
+    tip.style.opacity = 1;
+    const left = Math.min(r.width - 200, Math.max(0, (px(i,n)/W)*r.width - 60));
+    tip.style.left = left + 'px';
+    tip.style.top = Math.max(0, clientY - r.top - 70) + 'px';
+  };
+  svg.addEventListener('mousemove', e=>move(e.clientX, e.clientY));
+  svg.addEventListener('touchmove', e=>{ const t=e.touches[0]; if(t) move(t.clientX, t.clientY); });
+  svg.addEventListener('mouseleave', ()=>{ tip.style.opacity=0; const c=svg.querySelector('#cross'); if(c) c.setAttribute('opacity','0'); });
+})();
+
+/* ── 事件效應 ── */
+function renderEvents(events){
+  const box = document.getElementById('events');
+  if(!events || !events.length){ box.innerHTML = '<div class="empty">還沒有事件標記。到下方「事件標記」把記者會日期加進來。</div>'; return; }
+  box.innerHTML = `<table><thead><tr>
+      <th>#</th><th>日期</th><th>事件</th><th>鎖定關鍵字</th>
+      <th>事前基線</th><th>峰值</th><th>半衰期</th><th>基線抬升</th></tr></thead><tbody>` +
+    events.map((e,i)=>{
+      const lift = e.lift===null ? (e.settled?'—':'<span class="flat">觀察中</span>')
+        : `<span class="${e.lift>0?'up':e.lift<0?'down':'flat'}">${e.lift>0?'+':''}${e.lift}</span>`;
+      return `<tr>
+        <td><span class="pill" style="background:#fef3c7;color:#92400e">${i+1}</span></td>
+        <td>${e.date}</td><td><b>${esc(e.title)}</b>${e.type?`<br><span style="color:var(--muted);font-size:.76rem">${esc(e.type)}</span>`:''}</td>
+        <td>${e.matchedKeyword?esc(e.matchedKeyword):'<span class="flat">整體</span>'}</td>
+        <td class="num-cell">${e.baseline??'—'}</td>
+        <td class="num-cell">${e.peak??'—'}${e.peakDate?`<br><span style="color:var(--muted);font-size:.72rem;font-weight:400">${e.peakDate.slice(5)}</span>`:''}</td>
+        <td class="num-cell">${e.halfLifeDays===null?'<span class="flat">未回落</span>':e.halfLifeDays+' 天'}</td>
+        <td class="num-cell">${lift}</td></tr>`;
+    }).join('') + '</tbody></table>';
+}
+
+/* ── 關鍵字排行 ── */
+function renderBoard(board){
+  const box = document.getElementById('board');
+  if(!board || !board.length){ box.innerHTML = '<div class="empty">尚無資料</div>'; return; }
+  box.innerHTML = `<table><thead><tr><th>關鍵字</th><th>能見度指數</th><th>變化</th><th>提及率</th><th>自家網域引用率</th><th>樣本</th></tr></thead><tbody>` +
+    board.map(b=>`<tr>
+      <td><b>${esc(b.keyword)}</b></td>
+      <td class="num-cell">${b.score??'—'}</td>
+      <td class="num-cell ${b.delta>0?'up':b.delta<0?'down':'flat'}">${b.delta===null?'—':(b.delta>0?'▲ +':b.delta<0?'▼ ':'')+Math.abs(b.delta)}</td>
+      <td class="num-cell">${b.mentionRate===null?'—':b.mentionRate+'%'}</td>
+      <td class="num-cell">${b.citedRate===null?'—':b.citedRate+'%'}</td>
+      <td style="color:var(--muted)">${b.samples}</td></tr>`).join('') + '</tbody></table>';
+}
+
+/* ── 掃描（分批直到跑完） ── */
+async function scan(){
+  const btn = document.getElementById('scan-btn');
+  btn.disabled = true;
+  let total = 0;
+  try{
+    for(let round=0; round<12; round++){
+      btn.innerHTML = `<i class="ti ti-loader-2"></i> 掃描中… 已完成 ${total}`;
+      const r = await post({ action:'scan' });
+      if(r.error){ toast(r.error); break; }
+      total += r.processed;
+      if(r.remaining <= 0 || r.processed === 0) break;
+    }
+    toast(`掃描完成，本次 ${total} 筆`);
+  }catch(e){ toast('掃描失敗：'+e.message); }
+  btn.disabled = false;
+  btn.innerHTML = '<i class="ti ti-player-play"></i> 立即掃描';
+  loadStatus(); loadSeries();
+}
+
+/* ── 自我測試 ── */
+async function selftest(){
+  const btn = document.getElementById('test-btn');
+  const card = document.getElementById('test-card'), out = document.getElementById('test-out');
+  btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader-2"></i> 測試中…';
+  card.style.display = 'block';
+  out.innerHTML = '<div class="empty">實跑中，約 20–60 秒…</div>';
+  try{
+    const d = await api('action=selftest');
+    if(d.error){ out.innerHTML = `<div class="empty down">${esc(d.error)}</div>`; }
+    else{
+      out.innerHTML = `<div style="font-size:.84rem;margin-bottom:12px">
+        <b>題目：</b>${esc(d.prompt.prompt)}<br>
+        <span style="color:var(--muted)">關鍵字 ${esc(d.prompt.keyword)}｜判官 ${esc(d.judge)}</span></div>` +
+        d.results.map(r => r.ok ? `
+          <div style="border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:10px">
+            <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:baseline;margin-bottom:8px">
+              <b>${esc(r.engine)}</b>
+              <span class="pill">${r.score} 分</span>
+              <span style="font-size:.78rem;color:var(--muted)">
+                提及 ${r.mentioned?'✓':'✗'}｜第 ${r.rank||'—'} 個｜自家網域 ${r.cited?'✓':'✗'}｜具體內容 ${r.specifics?'✓':'✗'}｜${(r.ms/1000).toFixed(1)}s</span>
+            </div>
+            <div style="font-size:.8rem;color:var(--muted);margin-bottom:8px"><b>判官依據：</b>${esc(r.evidence)}
+              ${r.competitors.length?`｜出現的對照單位：${esc(r.competitors.join('、'))}`:''}</div>
+            <div style="font-size:.78rem;margin-bottom:8px"><b>來源網域：</b>${
+              r.citations.length ? r.citations.map(c=>esc(c.domain||c.url)).join('、') : '<span class="down">沒有回傳任何來源</span>'}</div>
+            <details><summary style="font-size:.8rem;font-weight:600">看回答全文</summary>
+              <div class="excerpt" style="max-width:none;margin-top:8px;white-space:pre-wrap">${esc(r.answer)}</div></details>
+          </div>` : `
+          <div style="border:1px solid #fecaca;background:#fef2f2;border-radius:12px;padding:14px;margin-bottom:10px">
+            <b>${esc(r.engine)}</b> <span class="down">失敗（${(r.ms/1000).toFixed(1)}s）</span>
+            <div style="font-size:.8rem;margin-top:6px">${esc(r.error)}</div></div>`).join('');
+    }
+  }catch(e){ out.innerHTML = `<div class="empty down">${esc(e.message)}</div>`; }
+  btn.disabled = false; btn.innerHTML = '<i class="ti ti-stethoscope"></i> 測 1 題';
+}
+
+/* ── 題庫 ── */
+async function loadPrompts(){
+  const d = await api('action=prompts');
+  S.prompts = d.prompts || [];
+  document.getElementById('prompt-count').textContent = S.prompts.length;
+  const box = document.getElementById('prompts');
+  if(!S.prompts.length){ box.innerHTML = '<div class="empty">還沒有題目。按「帶入預設 12 題」開始。</div>'; return; }
+  box.innerHTML = `<table><thead><tr><th>主題</th><th>問句</th><th>關鍵字</th><th>狀態</th><th></th></tr></thead><tbody>` +
+    S.prompts.map(p=>`<tr>
+      <td>${esc(p.topic)}</td>
+      <td style="max-width:420px">${esc(p.prompt)}</td>
+      <td>${esc(p.keyword)}</td>
+      <td><button class="chip ${p.active?'on':''}" style="${p.active?'background:var(--primary)':''}"
+          onclick="togglePrompt('${p.id}')">${p.active?'啟用':'停用'}</button></td>
+      <td><button class="btn btn-ghost" onclick="delPrompt('${p.id}')"><i class="ti ti-trash"></i></button></td>
+    </tr>`).join('') + '</tbody></table>';
+}
+async function savePrompt(){
+  const prompt = document.getElementById('np-prompt').value.trim();
+  if(!prompt) return toast('請填問句');
+  if(/工研院|ITRI/i.test(prompt) && !confirm('這句話裡出現「工研院」，那等於自問自答，量到的分數會虛高。仍要新增嗎？')) return;
+  const r = await post({ action:'prompt_save', prompt:{
+    topic: document.getElementById('np-topic').value.trim() || '未分類',
+    keyword: document.getElementById('np-keyword').value.trim(),
+    prompt }});
+  if(r.error) return toast(r.error);
+  ['np-topic','np-keyword','np-prompt'].forEach(id=>document.getElementById(id).value='');
+  toast('已新增'); loadPrompts();
+}
+async function togglePrompt(id){
+  const p = S.prompts.find(x=>x.id===id); if(!p) return;
+  const r = await post({ action:'prompt_save', prompt:{...p, active:!p.active} });
+  if(r.error) return toast(r.error);
+  loadPrompts();
+}
+async function delPrompt(id){
+  if(!confirm('刪掉這一題？已經掃過的歷史資料會保留。')) return;
+  const r = await post({ action:'prompt_delete', id });
+  if(r.error) return toast(r.error);
+  toast('已刪除'); loadPrompts();
+}
+async function seed(){
+  const r = await post({ action:'seed' });
+  if(r.error) return toast(r.error);
+  toast(`已帶入 ${r.added} 題`); loadPrompts();
+}
+
+/* ── 事件標記 ── */
+async function loadEvents(){
+  const d = await api('action=events');
+  S.events = (d.events||[]).sort((a,b)=>b.date.localeCompare(a.date));
+  document.getElementById('event-count').textContent = S.events.length;
+  const box = document.getElementById('event-list');
+  if(!S.events.length){ box.innerHTML = '<div class="empty">還沒有事件標記</div>'; return; }
+  box.innerHTML = `<table><thead><tr><th>日期</th><th>事件</th><th>類型</th><th>關鍵字</th><th></th></tr></thead><tbody>` +
+    S.events.map(e=>`<tr><td>${e.date}</td><td>${esc(e.title)}</td><td>${esc(e.type)}</td><td>${esc(e.keywords)}</td>
+      <td><button class="btn btn-ghost" onclick="delEvent('${e.id}')"><i class="ti ti-trash"></i></button></td></tr>`).join('') + '</tbody></table>';
+}
+async function saveEvent(){
+  const date = document.getElementById('ne-date').value;
+  const title = document.getElementById('ne-title').value.trim();
+  if(!date || !title) return toast('請填日期與名稱');
+  const r = await post({ action:'event_save', event:{ date, title,
+    keywords: document.getElementById('ne-keywords').value.trim() }});
+  if(r.error) return toast(r.error);
+  ['ne-title','ne-keywords'].forEach(id=>document.getElementById(id).value='');
+  toast('已新增'); loadEvents(); loadSeries();
+}
+async function delEvent(id){
+  if(!confirm('刪掉這個事件標記？')) return;
+  const r = await post({ action:'event_delete', id });
+  if(r.error) return toast(r.error);
+  loadEvents(); loadSeries();
+}
+
+/* ── 原始回答 ── */
+async function loadDetail(){
+  const d = await api('action=detail');
+  const box = document.getElementById('detail');
+  if(!d.runs || !d.runs.length){ box.innerHTML = '<div class="empty">尚無紀錄</div>'; return; }
+  box.innerHTML = `<table><thead><tr><th>日期</th><th>引擎</th><th>關鍵字</th><th>分數</th><th>回答摘錄 / 錯誤</th></tr></thead><tbody>` +
+    d.runs.map(r=>`<tr>
+      <td>${r.date}</td><td>${esc(r.engine)}</td><td>${esc(r.keyword)}</td>
+      <td class="num-cell">${r.error?'<span class="down">失敗</span>':r.score}</td>
+      <td class="excerpt">${r.error ? '<span class="down">'+esc(r.error)+'</span>' : esc(r.excerpt)}
+        ${r.citations?`<br><span style="font-size:.72rem;opacity:.7">來源：${esc(r.citations)}</span>`:''}</td>
+    </tr>`).join('') + '</tbody></table>';
+}
+
+function esc(s){ return String(s??'').replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+</script>
+</body>
+</html>

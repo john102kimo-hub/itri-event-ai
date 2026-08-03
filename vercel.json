@@ -4,6 +4,14 @@
     { "source": "/edit", "destination": "/edit.html" },
     { "source": "/training", "destination": "/training.html" },
     { "source": "/admin", "destination": "/index.html" },
-    { "source": "/report", "destination": "/report.html" }
+    { "source": "/report", "destination": "/report.html" },
+    { "source": "/geo", "destination": "/geo.html" }
+  ],
+  "functions": {
+    "api/geo.js": { "maxDuration": 60 }
+  },
+  "crons": [
+    { "path": "/api/geo?action=cron", "schedule": "0 1 * * *" },
+    { "path": "/api/geo?action=cron", "schedule": "30 1 * * *" }
   ]
 }
