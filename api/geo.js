@@ -1114,7 +1114,59 @@ export default async function handler(req, res) {
             + `排在前面的是${board.slice(0, myRank - 1).map((x) => x.name).join('、')}（${top.n} 次）。`;
         }
 
+        /* ── 績效區塊：發稿前 vs 發稿後 ──
+         * 沒有這一段就不是績效報告，只是現況盤點。
+         * 績效的定義是「我做了什麼，數字從 A 變成 B」，所以一定要有事前對照。 */
+        const evAll = (await safeRead('geo_events!A2:G')).filter((r) => r[0]).map(parseEvent);
+        const ev = evAll.filter((e) => !kw || (e.keywords || '').includes(kw))
+          .sort((a, b) => b.date.localeCompare(a.date))[0] || null;
+
+        let performance = null;
+        if (ev) {
+          const allRuns = (await safeRead('geo_runs!A2:O')).filter((r) => r[0]).map(parseRun)
+            .filter((r) => r.score !== null && (!kw || r.keyword === kw));
+
+          const slice = (f, t) => allRuns.filter((r) => r.date >= f && r.date <= t);
+          const before = slice(addDays(ev.date, -14), addDays(ev.date, -1));
+          const after = slice(addDays(ev.date, 15), addDays(ev.date, 30));
+
+          const profile = (rs) => {
+            if (!rs.length) return null;
+            const h = rs.filter((r) => r.mentioned);
+            const cc = {};
+            rs.forEach((r) => String(r.competitors || '').split(/[、,，]/)
+              .map((s) => s.trim()).filter(Boolean)
+              .forEach((c) => { cc[c] = (cc[c] || 0) + 1; }));
+            const bd = [{ name: '工研院', n: h.length, self: true },
+              ...Object.entries(cc).map(([name, n]) => ({ name, n, self: false }))]
+              .sort((a, b) => b.n - a.n || (b.self ? 1 : -1));
+            return {
+              samples: rs.length,
+              mentionRate: Math.round((h.length / rs.length) * 100),
+              firstRate: h.length ? Math.round((h.filter((r) => r.rank === 1).length / h.length) * 100) : 0,
+              rank: bd.findIndex((x) => x.self) + 1,
+              topRival: (bd.find((x) => !x.self) || {}).name || null,
+            };
+          };
+
+          const b = profile(before), a = profile(after);
+          const daysSince = dayDiff(ev.date, todayTW());
+          performance = {
+            event: { title: ev.title, date: ev.date, keyword: ev.keywords },
+            before: b, after: a, daysSince,
+            ready: !!(b && a),
+            waitingFor: !b ? '事件前 14 天沒有資料——追蹤是活動之後才開始的，這一場算不出前後對比'
+              : !a ? `還要等 ${Math.max(0, 30 - daysSince)} 天（活動後滿 30 天才結算）` : null,
+            delta: (b && a) ? {
+              mentionRate: a.mentionRate - b.mentionRate,
+              firstRate: a.firstRate - b.firstRate,
+              rank: b.rank - a.rank,
+            } : null,
+          };
+        }
+
         return ok(res, {
+          performance,
           ready: true, keyword: kw, days, samples: scored.length,
           dateRange: [scored[0].date, scored[scored.length - 1].date],
           engines: [...new Set(scored.map((r) => r.engine))],

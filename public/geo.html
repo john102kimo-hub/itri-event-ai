@@ -106,6 +106,7 @@
   .rep-stat .l{font-size:.78rem;color:var(--muted);line-height:1.5;margin-bottom:6px}
   .rep-stat .v{font-size:1.3rem;font-weight:800;color:var(--text)}
   .rep-stat .p{font-size:.76rem;font-weight:700;margin-top:2px}
+  .perf-wait{background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:12px 14px;font-size:.84rem;line-height:1.7}
   .quote{border:1px solid var(--border);border-radius:12px;padding:14px 16px;margin-bottom:10px}
   .quote.miss{background:#fef2f2;border-color:#fecaca}
   .quote .q{font-size:.82rem;font-weight:700;margin-bottom:6px}
@@ -377,6 +378,44 @@ async function loadAll(){
   await Promise.all([loadStatus(), loadSeries(), loadPrompts(), loadEvents(), loadItriEvents(), loadSnapshot()]);
 }
 
+/* ── 績效區塊：發稿前 vs 發稿後 ── */
+function perfHtml(p){
+  if(!p) return '';
+  const head = `<div class="rep-h3">這一場帶來的變化：${esc(p.event.title)}（${esc(p.event.date)}）</div>`;
+
+  if(!p.ready){
+    return head + `<div class="perf-wait">
+      <b>還算不出來。</b>${esc(p.waitingFor)}
+      <div style="margin-top:6px;color:var(--muted)">
+        績效＝發稿前 14 天 vs 發稿後第 15–30 天的對比。沒有事前基線就沒有對照組，
+        數字再漂亮也不能說是這場帶來的。</div></div>`;
+  }
+
+  const row = (label, b, a, delta, suf, invert) => {
+    const up = invert ? delta < 0 : delta > 0;
+    const flat = delta === 0;
+    const cls = flat ? 'flat' : up ? 'up' : 'down';
+    const sign = delta > 0 ? '+' : '';
+    return `<tr>
+      <td>${esc(label)}</td>
+      <td class="num-cell" style="color:var(--muted)">${b}${suf}</td>
+      <td class="num-cell">${a}${suf}</td>
+      <td class="num-cell ${cls}">${flat ? '持平' : `${up ? '▲' : '▼'} ${sign}${delta}${suf}`}</td></tr>`;
+  };
+
+  return head + `
+    <table style="margin-bottom:10px"><thead><tr>
+      <th>指標</th><th>發稿前 14 天</th><th>發稿後 15–30 天</th><th>變化</th>
+    </tr></thead><tbody>
+      ${row('AI 提到工研院的比例', p.before.mentionRate, p.after.mentionRate, p.delta.mentionRate, '%')}
+      ${row('被提到時排第一的比例', p.before.firstRate, p.after.firstRate, p.delta.firstRate, '%')}
+      ${row('在這個議題的位次', '第 '+p.before.rank, '第 '+p.after.rank, p.delta.rank, ' 名', false)}
+    </tbody></table>
+    <div style="font-size:.76rem;color:var(--muted)">
+      樣本：事前 ${p.before.samples} 次、事後 ${p.after.samples} 次問答。
+      ${p.before.topRival?`事前最強對手是${esc(p.before.topRival)}。`:''}</div>`;
+}
+
 /* ── 一頁報告（給同仁與主管） ── */
 async function openReport(keyword){
   const card = document.getElementById('rep-card'), out = document.getElementById('rep-out');
@@ -411,6 +450,8 @@ async function openReport(keyword){
       共 ${d.samples} 次問答｜問的對象：${d.engines.map(esc).join('、')}</div>
 
     <div class="rep-headline">${esc(d.headline)}</div>
+
+    ${perfHtml(d.performance)}
 
     <div class="rep-h3">誰是這個議題的答案</div>
     <div style="font-size:.78rem;color:var(--muted);margin-bottom:10px">
