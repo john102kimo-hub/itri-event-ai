@@ -70,10 +70,34 @@
   .pill{display:inline-block;border-radius:20px;padding:2px 9px;font-size:.72rem;font-weight:700;background:var(--primary-light);color:var(--primary-dark)}
   .empty{color:var(--muted);font-size:.85rem;padding:26px 0;text-align:center}
 
+  tr.clickable{cursor:pointer}
+  tr.clickable td:first-child::before{content:'\203A';display:inline-block;margin-right:6px;color:var(--muted);transition:transform .15s}
+  tr.clickable.open td:first-child::before{transform:rotate(90deg)}
+  .find-row td{background:#fafafa;padding:0}
+  .finds{padding:12px 14px 14px}
+  .find{border-left:3px solid var(--border);padding:8px 0 8px 12px;margin-bottom:10px}
+  .find:last-child{margin-bottom:0}
+  .find.bad{border-left-color:var(--down)} .find.warn{border-left-color:var(--event)}
+  .find.good{border-left-color:var(--up)} .find.info{border-left-color:var(--muted)}
+  .find .t{font-weight:700;font-size:.86rem;margin-bottom:3px}
+  .find .w{font-size:.8rem;color:var(--muted);margin-bottom:5px}
+  .find .d{font-size:.82rem}
+  .find .d::before{content:'要做的事：';font-weight:700;color:var(--primary-dark)}
+  .find .d b{background:var(--primary-light);padding:0 3px;border-radius:3px}
+
   details summary{cursor:pointer;font-weight:700;font-size:.95rem;list-style:none;display:flex;align-items:center;gap:7px}
   details summary::-webkit-details-marker{display:none}
   details summary::before{content:'\203A';display:inline-block;transition:transform .15s;font-size:1.2rem;color:var(--muted)}
   details[open] summary::before{transform:rotate(90deg)}
+  .gen-box{background:var(--primary-light);border:1px solid rgba(15,158,122,.25);border-radius:12px;padding:14px 16px;margin-top:16px}
+  .gen-title{font-size:.88rem;font-weight:700;color:var(--primary-dark);margin-bottom:10px;display:flex;align-items:center;gap:7px}
+  .cand{display:flex;gap:10px;align-items:flex-start;background:#fff;border:1px solid var(--border);border-radius:10px;padding:10px 12px;margin-bottom:8px}
+  .cand input[type=checkbox]{margin-top:9px;width:17px;height:17px;flex:0 0 auto;accent-color:var(--primary)}
+  .cand .body{flex:1 1 auto;min-width:0}
+  .cand .angle{font-size:.72rem;font-weight:700;color:var(--primary-dark);background:var(--primary-light);border-radius:20px;padding:1px 8px;display:inline-block;margin-bottom:5px}
+  .cand textarea{width:100%;border:1px solid transparent;background:transparent;font-size:.86rem;padding:2px 4px;min-height:2.6em}
+  .cand textarea:focus{border-color:var(--border);background:#fff;outline:none}
+
   .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:12px}
   .row > *{flex:0 0 auto}
   .grow{flex:1 1 220px}
@@ -141,13 +165,13 @@
 
   <div class="card">
     <h2><i class="ti ti-flag" style="color:var(--event)"></i> 事件效應：這一場替你留下幾天記憶</h2>
-    <div class="desc">半衰期＝峰值掉回「峰值與基線的中點」要幾天；基線抬升＝事件後第 15–30 天的均分減掉事前 14 天基線。抬升是真正能寫進績效的數字。</div>
+    <div class="desc">半衰期＝峰值掉回「峰值與基線的中點」要幾天；基線抬升＝事件後第 15–30 天的均分減掉事前 14 天基線。抬升是真正能寫進績效的數字。<b>點任一列看這場的診斷與下一步。</b></div>
     <div id="events" class="tbl"></div>
   </div>
 
   <div class="card">
-    <h2><i class="ti ti-list-numbers" style="color:var(--primary)"></i> 關鍵字排行</h2>
-    <div class="desc">變化＝所選期間後半段均分減前半段。提及率與引用率取近半段樣本。</div>
+    <h2><i class="ti ti-list-numbers" style="color:var(--primary)"></i> 議題排行</h2>
+    <div class="desc">變化＝所選期間後半段均分減前半段。提及率與引用率取近半段樣本。<b>點任一列看這個議題的診斷與下一步。</b></div>
     <div id="board" class="tbl"></div>
   </div>
 
@@ -156,13 +180,26 @@
       <summary><i class="ti ti-help-circle"></i> 題庫（<span id="prompt-count">0</span> 題）</summary>
       <div class="desc" style="margin-top:10px">題目裡刻意不出現「工研院」——一旦指名就是自問自答。停用的題目不會被掃描，也不會計費。</div>
       <div id="prompts" class="tbl"></div>
-      <div class="row">
-        <input type="text" id="np-topic" placeholder="主題（如 化合物半導體）" style="width:180px">
-        <input type="text" id="np-keyword" placeholder="關鍵字標籤" style="width:150px">
-        <input type="text" id="np-prompt" class="grow" placeholder="問句（不要出現工研院）">
-        <button class="btn btn-primary" onclick="savePrompt()"><i class="ti ti-plus"></i> 新增</button>
-        <button class="btn btn-outline" onclick="seed()"><i class="ti ti-seeding"></i> 帶入預設 12 題</button>
+
+      <div class="gen-box">
+        <div class="gen-title"><i class="ti ti-wand"></i> 只要打一個關鍵字，題目我幫你想</div>
+        <div class="row" style="margin-top:0">
+          <input type="text" id="gen-kw" class="grow" placeholder="例如：固態電池、碳捕捉、矽光子、智慧製造"
+                 onkeydown="if(event.key==='Enter')genPrompts()">
+          <button class="btn btn-primary" id="gen-btn" onclick="genPrompts()"><i class="ti ti-wand"></i> 產生題目</button>
+          <button class="btn btn-outline" onclick="seed()"><i class="ti ti-seeding"></i> 帶入預設 12 題</button>
+        </div>
+        <div id="gen-out"></div>
       </div>
+
+      <details style="margin-top:14px">
+        <summary style="font-size:.84rem;color:var(--muted)">自己寫一題</summary>
+        <div class="row">
+          <input type="text" id="np-keyword" placeholder="關鍵字" style="width:160px">
+          <input type="text" id="np-prompt" class="grow" placeholder="問句（不要出現工研院）">
+          <button class="btn btn-outline" onclick="savePrompt()"><i class="ti ti-plus"></i> 新增</button>
+        </div>
+      </details>
     </details>
   </div>
 
@@ -358,34 +395,53 @@ function renderEvents(events){
   const box = document.getElementById('events');
   if(!events || !events.length){ box.innerHTML = '<div class="empty">還沒有事件標記。到下方「事件標記」把記者會日期加進來。</div>'; return; }
   box.innerHTML = `<table><thead><tr>
-      <th>#</th><th>日期</th><th>事件</th><th>鎖定關鍵字</th>
+      <th>#</th><th>日期</th><th>事件</th><th>鎖定議題</th>
       <th>事前基線</th><th>峰值</th><th>半衰期</th><th>基線抬升</th></tr></thead><tbody>` +
     events.map((e,i)=>{
       const lift = e.lift===null ? (e.settled?'—':'<span class="flat">觀察中</span>')
         : `<span class="${e.lift>0?'up':e.lift<0?'down':'flat'}">${e.lift>0?'+':''}${e.lift}</span>`;
-      return `<tr>
+      return `<tr class="clickable" onclick="toggleFinds(this)">
         <td><span class="pill" style="background:#fef3c7;color:#92400e">${i+1}</span></td>
         <td>${e.date}</td><td><b>${esc(e.title)}</b>${e.type?`<br><span style="color:var(--muted);font-size:.76rem">${esc(e.type)}</span>`:''}</td>
         <td>${e.matchedKeyword?esc(e.matchedKeyword):'<span class="flat">整體</span>'}</td>
         <td class="num-cell">${e.baseline??'—'}</td>
         <td class="num-cell">${e.peak??'—'}${e.peakDate?`<br><span style="color:var(--muted);font-size:.72rem;font-weight:400">${e.peakDate.slice(5)}</span>`:''}</td>
         <td class="num-cell">${e.halfLifeDays===null?'<span class="flat">未回落</span>':e.halfLifeDays+' 天'}</td>
-        <td class="num-cell">${lift}</td></tr>`;
+        <td class="num-cell">${lift}</td></tr>
+        <tr class="find-row" style="display:none"><td colspan="8">${findsHtml(e.findings, e.windowSamples)}</td></tr>`;
     }).join('') + '</tbody></table>';
+}
+
+function findsHtml(finds, samples){
+  if(!finds || !finds.length) return '<div class="finds"><div class="empty">尚無建議</div></div>';
+  return `<div class="finds">${finds.map(f=>`
+    <div class="find ${esc(f.level)}">
+      <div class="t">${esc(f.title)}</div>
+      <div class="w">${esc(f.why)}</div>
+      <div class="d">${esc(f.todo).replace(/\*\*(.+?)\*\*/g,'<b>$1</b>')}</div>
+    </div>`).join('')}${samples!==undefined?`<div style="font-size:.74rem;color:var(--muted);margin-top:8px">依據 ${samples} 筆樣本</div>`:''}</div>`;
+}
+
+function toggleFinds(tr){
+  const next = tr.nextElementSibling;
+  const open = next.style.display !== 'none';
+  next.style.display = open ? 'none' : 'table-row';
+  tr.classList.toggle('open', !open);
 }
 
 /* ── 關鍵字排行 ── */
 function renderBoard(board){
   const box = document.getElementById('board');
   if(!board || !board.length){ box.innerHTML = '<div class="empty">尚無資料</div>'; return; }
-  box.innerHTML = `<table><thead><tr><th>關鍵字</th><th>能見度指數</th><th>變化</th><th>提及率</th><th>自家網域引用率</th><th>樣本</th></tr></thead><tbody>` +
-    board.map(b=>`<tr>
+  box.innerHTML = `<table><thead><tr><th>議題</th><th>能見度指數</th><th>變化</th><th>提及率</th><th>自家網域引用率</th><th>樣本</th></tr></thead><tbody>` +
+    board.map(b=>`<tr class="clickable" onclick="toggleFinds(this)">
       <td><b>${esc(b.keyword)}</b></td>
       <td class="num-cell">${b.score??'—'}</td>
       <td class="num-cell ${b.delta>0?'up':b.delta<0?'down':'flat'}">${b.delta===null?'—':(b.delta>0?'▲ +':b.delta<0?'▼ ':'')+Math.abs(b.delta)}</td>
       <td class="num-cell">${b.mentionRate===null?'—':b.mentionRate+'%'}</td>
       <td class="num-cell">${b.citedRate===null?'—':b.citedRate+'%'}</td>
-      <td style="color:var(--muted)">${b.samples}</td></tr>`).join('') + '</tbody></table>';
+      <td style="color:var(--muted)">${b.samples}</td></tr>
+      <tr class="find-row" style="display:none"><td colspan="6">${findsHtml(b.findings)}</td></tr>`).join('') + '</tbody></table>';
 }
 
 /* ── 掃描（分批直到跑完） ── */
@@ -462,16 +518,56 @@ async function loadPrompts(){
       <td><button class="btn btn-ghost" onclick="delPrompt('${p.id}')"><i class="ti ti-trash"></i></button></td>
     </tr>`).join('') + '</tbody></table>';
 }
+async function genPrompts(){
+  const kw = document.getElementById('gen-kw').value.trim();
+  if(!kw) return toast('先打一個關鍵字');
+  const btn = document.getElementById('gen-btn'), out = document.getElementById('gen-out');
+  btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader-2"></i> 想題目中…';
+  out.innerHTML = '<div class="empty">約 5–15 秒…</div>';
+  try{
+    const d = await post({ action:'prompt_generate', keyword:kw });
+    if(d.error){ out.innerHTML = `<div class="empty down">${esc(d.error)}</div>`; }
+    else{
+      out.innerHTML = d.candidates.map((c,i)=>`
+        <label class="cand">
+          <input type="checkbox" checked data-i="${i}">
+          <span class="body">
+            <span class="angle">${esc(c.angle)}</span>
+            <textarea rows="2">${esc(c.prompt)}</textarea>
+          </span>
+        </label>`).join('') + `
+        <div class="row" style="margin-top:4px">
+          <button class="btn btn-primary" onclick="saveCandidates('${esc(d.keyword).replace(/'/g,"\\'")}')">
+            <i class="ti ti-check"></i> 加入題庫</button>
+          <button class="btn btn-outline" onclick="genPrompts()"><i class="ti ti-refresh"></i> 換一批</button>
+          <span style="font-size:.76rem;color:var(--muted)">可以直接改文字，改完再加入</span>
+        </div>`;
+    }
+  }catch(e){ out.innerHTML = `<div class="empty down">${esc(e.message)}</div>`; }
+  btn.disabled = false; btn.innerHTML = '<i class="ti ti-wand"></i> 產生題目';
+}
+
+async function saveCandidates(keyword){
+  const picked = [...document.querySelectorAll('#gen-out .cand')]
+    .filter(el=>el.querySelector('input[type=checkbox]').checked)
+    .map(el=>el.querySelector('textarea').value.trim())
+    .filter(Boolean);
+  if(!picked.length) return toast('至少勾一題');
+  const r = await post({ action:'prompt_save_many', keyword, prompts:picked });
+  if(r.error) return toast(r.error);
+  document.getElementById('gen-out').innerHTML = '';
+  document.getElementById('gen-kw').value = '';
+  toast(`已加入 ${r.added} 題`); loadPrompts();
+}
+
 async function savePrompt(){
   const prompt = document.getElementById('np-prompt').value.trim();
   if(!prompt) return toast('請填問句');
   if(/工研院|ITRI/i.test(prompt) && !confirm('這句話裡出現「工研院」，那等於自問自答，量到的分數會虛高。仍要新增嗎？')) return;
-  const r = await post({ action:'prompt_save', prompt:{
-    topic: document.getElementById('np-topic').value.trim() || '未分類',
-    keyword: document.getElementById('np-keyword').value.trim(),
-    prompt }});
+  const kw = document.getElementById('np-keyword').value.trim();
+  const r = await post({ action:'prompt_save', prompt:{ topic: kw || '未分類', keyword: kw, prompt }});
   if(r.error) return toast(r.error);
-  ['np-topic','np-keyword','np-prompt'].forEach(id=>document.getElementById(id).value='');
+  ['np-keyword','np-prompt'].forEach(id=>document.getElementById(id).value='');
   toast('已新增'); loadPrompts();
 }
 async function togglePrompt(id){

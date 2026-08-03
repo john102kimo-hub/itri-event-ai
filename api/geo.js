@@ -298,13 +298,13 @@ function parseJudge(text) {
   }
 }
 
-async function judgeAnthropic(prompt) {
-  const base = { model: JUDGE_MODEL, max_tokens: 1000, messages: [{ role: 'user', content: prompt }] };
+async function askAnthropic(prompt, schema, maxTokens) {
+  const base = { model: JUDGE_MODEL, max_tokens: maxTokens, messages: [{ role: 'user', content: prompt }] };
   let data;
   try {
     data = await anthropic({
       ...base,
-      output_config: { effort: 'low', format: { type: 'json_schema', schema: JUDGE_SCHEMA } },
+      output_config: { effort: 'low', format: { type: 'json_schema', schema } },
     });
   } catch (err) {
     // 這個模型不吃結構化輸出就退回純文字，靠 parseJudge 救回來
@@ -317,19 +317,114 @@ async function judgeAnthropic(prompt) {
   return parseJudge((data.content || []).filter((b) => b.type === 'text').map((b) => b.text).join(''));
 }
 
-async function judgeGemini(prompt) {
-  const data = await gemini({
+/**
+ * Gemini 3.x 的思考 token 是算在 maxOutputTokens 裡的。實測一題 1,500 的預算，
+ * 思考就吃掉 1,436，JSON 只寫到一半就 MAX_TOKENS 截斷 —— 表面症狀是「回傳不是 JSON」，
+ * 而且會隨機發生。所以要壓低思考層級，同時把上限開大。
+ */
+async function askGemini(prompt, maxTokens) {
+  const budget = Math.max(maxTokens * 3, 6000);
+  const base = {
     contents: [{ role: 'user', parts: [{ text: prompt }] }],
-    generationConfig: { responseMimeType: 'application/json', temperature: 0 },
-  }, JUDGE_MODEL);
-  const text = (data.candidates?.[0]?.content?.parts || []).map((p) => p.text || '').join('');
+    generationConfig: { responseMimeType: 'application/json', temperature: 0, maxOutputTokens: budget },
+  };
+
+  let data;
+  try {
+    data = await gemini({
+      ...base,
+      generationConfig: { ...base.generationConfig, thinkingConfig: { thinkingLevel: 'low' } },
+    }, JUDGE_MODEL);
+  } catch (err) {
+    // 舊機型不吃 thinkingLevel，就純靠放大上限
+    if (!/thinking|invalid argument/i.test(err.message)) throw err;
+    data = await gemini(base, JUDGE_MODEL);
+  }
+
+  const c = data.candidates?.[0] || {};
+  const text = (c.content?.parts || []).map((p) => p.text || '').join('');
+  if (c.finishReason === 'MAX_TOKENS') {
+    throw new Error(`回應被 token 上限截斷（思考用了 ${data.usageMetadata?.thoughtsTokenCount ?? '?'} tokens），請再試一次`);
+  }
   return parseJudge(text);
 }
 
-async function judge(args) {
-  if (!JUDGE_ENGINE) throw new Error('沒有可用的判官：請設 ANTHROPIC_API_KEY 或 GEMINI_API_KEY');
-  const prompt = judgePrompt(args);
-  return JUDGE_ENGINE === 'gemini' ? judgeGemini(prompt) : judgeAnthropic(prompt);
+/** 要 JSON 的內部呼叫都走這裡，路由到判官那顆模型（通常是免費的 Gemini） */
+async function askJSON(prompt, schema, maxTokens = 1000) {
+  if (!JUDGE_ENGINE) throw new Error('沒有可用的模型：請設 ANTHROPIC_API_KEY 或 GEMINI_API_KEY');
+  return JUDGE_ENGINE === 'gemini'
+    ? askGemini(prompt, maxTokens)
+    : askAnthropic(prompt, schema, maxTokens);
+}
+
+const judge = (args) => askJSON(judgePrompt(args), JUDGE_SCHEMA);
+
+/* ── 由關鍵字生題 ── */
+// 四種問法直接來自 2026-08-02 那次 30 題實測：指名問幾乎滿分，
+// 一旦不指名就掉到接近 0——而那才是新廠商、新記者、新人真正會問的那一層。
+
+const ANGLES = [
+  { id: 'who', label: '找單位', hint: '這個領域有哪些研發單位／誰做得比較前面' },
+  { id: 'partner', label: '找合作', hint: '我想做這件事，可以找誰合作' },
+  { id: 'bottleneck', label: '找解方', hint: '這個技術的瓶頸是什麼、誰在解' },
+  { id: 'news', label: '找新聞', hint: '最近有什麼突破或進展' },
+];
+
+const GEN_SCHEMA = {
+  type: 'object',
+  properties: {
+    prompts: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: { angle: { type: 'string' }, prompt: { type: 'string' } },
+        required: ['angle', 'prompt'],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ['prompts'],
+  additionalProperties: false,
+};
+
+const BRAND_RE = /工研院|工業技術研究院|ITRI/i;
+
+function genPrompt(keyword) {
+  return `你要為「AI 搜尋能見度追蹤」設計探測問句。
+
+【關鍵字】${keyword}
+
+請產生 4 個問句，模擬台灣的記者、廠商、想找合作對象的人，真的會拿去問 AI 的話。
+
+四個問句各對應一種角度（angle 欄請填對應代號）：
+${ANGLES.map((a) => `- ${a.id}（${a.label}）：${a.hint}`).join('\n')}
+
+規則：
+- **問句裡絕對不能出現「工研院」「工業技術研究院」「ITRI」**。指名就變成自問自答，量到的分數沒有意義。
+- 也不要出現任何特定機構名稱，要讓 AI 自己決定講誰。
+- 用繁體中文，口語、像真人在打字問問題，不要寫成考題或標題。
+- 每句 15～45 字。
+- 貼著台灣的產業情境問，不要問成國際泛論。
+
+輸出 JSON：{"prompts":[{"angle":"who","prompt":"…"}, …]}`;
+}
+
+async function generatePrompts(keyword) {
+  const out = await askJSON(genPrompt(keyword), GEN_SCHEMA, 1500);
+  const seen = new Set();
+  const clean = (out.prompts || [])
+    .map((p) => ({
+      angle: ANGLES.find((a) => a.id === p.angle)?.label || '其他',
+      prompt: String(p.prompt || '').trim(),
+    }))
+    // 保險：模型還是寫進品牌名的話直接丟掉，不要讓它污染題庫
+    .filter((p) => p.prompt.length >= 8 && !BRAND_RE.test(p.prompt))
+    .filter((p) => !seen.has(p.prompt) && seen.add(p.prompt));
+
+  if (clean.length < 2) {
+    throw new Error('生出來的題目不合格（可能都提到了工研院），請再按一次或換個關鍵字');
+  }
+  return clean;
 }
 
 /** 能見度指數 0–100：提及 45 ＋ 位置 20 ＋ 自家網域被引 20 ＋ 有具體內容 15 */
@@ -541,14 +636,125 @@ function eventEffects(events, runs) {
     const after = rangeAvg(addDays(ev.date, 15), addDays(ev.date, 30), kw);
     const round = (v) => (v === null ? null : Math.round(v * 10) / 10);
 
-    return {
+    const result = {
       ...ev, matchedKeyword: kw,
       baseline: round(baseline), peak: round(peak), peakDate,
       halfLifeDays: halfLife,
       lift: baseline !== null && after !== null ? round(after - baseline) : null,
       settled: after !== null,
     };
+
+    // 這場活動窗期內的實際樣本 → 給診斷用
+    const to = addDays(ev.date, 30);
+    const windowRuns = runs.filter((r) =>
+      r.score !== null && r.date >= ev.date && r.date <= to && (!kw || r.keyword === kw));
+
+    result.findings = [...diagnoseEvent(result), ...diagnose(windowRuns)];
+    result.windowSamples = windowRuns.length;
+    return result;
   });
+}
+
+/* ────────────────────────────── 診斷與建議 ────────────────────────────── */
+/**
+ * 把觀察到的失分模式，對應到 2026-08-02 那次 30 題實測整理出的「發稿前八個勾」。
+ * 全部用規則算，不叫模型寫建議：一來免費，二來不會每次講得不一樣，
+ * 三來每條建議都能追回到是哪個數字觸發的。
+ */
+function diagnose(rs) {
+  const n = rs.length;
+  if (n < 3) return [{ level: 'info', title: '樣本還不夠', why: `目前只有 ${n} 筆，至少累積 3 筆再看結論。`, todo: '再掃幾天。' }];
+
+  const pct = (f) => Math.round((rs.filter(f).length / n) * 100);
+  const mention = pct((r) => r.mentioned);
+  const cited = pct((r) => r.cited);
+  const mentionedRuns = rs.filter((r) => r.mentioned);
+  const specifics = mentionedRuns.length
+    ? Math.round((mentionedRuns.filter((r) => r.specifics).length / mentionedRuns.length) * 100) : null;
+  const ranks = mentionedRuns.map((r) => r.rank).filter((x) => x > 0);
+  const avgRank = ranks.length ? ranks.reduce((a, b) => a + b, 0) / ranks.length : null;
+
+  const out = [];
+
+  if (mention < 30) {
+    out.push({
+      level: 'bad', title: `不指名就幾乎不存在（提及率 ${mention}%）`,
+      why: '這一層正是新廠商、新記者、新人才會問的問法。指名問答得很好，不代表這裡拿得到分。',
+      todo: '下次發稿把工研院寫成**主詞**，不要被「攜手」成受詞；動詞用開發／建立／技轉／量產，不要用「共同推動」。',
+    });
+  } else if (mention < 60) {
+    out.push({
+      level: 'warn', title: `提及率偏低（${mention}%）`,
+      why: '一半以上的問法答不到工研院。',
+      todo: '檢查這個主題的新聞稿，關鍵那句話拿掉上下文還看不看得懂。',
+    });
+  }
+
+  if (specifics !== null && specifics < 40 && mention >= 30) {
+    out.push({
+      level: 'bad', title: `名字進去了，內容沒進去（具體度 ${specifics}%）`,
+      why: '被寫成「工研院、A、B、C」的並列名單，AI 複述得出名字卻講不出你做了什麼。這是最常見的失分。',
+      todo: '每則稿至少放一個**可查證的數字**（成本、功耗、良率、時程），技術寫正式名稱，並在並列句後補一句區辨語。',
+    });
+  }
+
+  if (cited < 20) {
+    out.push({
+      level: 'bad', title: `自家網域幾乎沒被引用（${cited}%）`,
+      why: 'AI 引的是別人的頁面在講你，主體很容易被寫成「台灣研發團隊」，名字就掉了。',
+      todo: '這個主題要有一個**獨立單一主題頁**可以連，乾淨語意化網址，優先投 i創（itritech.itri.org.tw）。',
+    });
+  } else if (cited < 50) {
+    out.push({
+      level: 'warn', title: `自家網域引用率 ${cited}%`,
+      why: '有被引到，但不穩定。',
+      todo: '確認那頁有一句可以整句抄走的話。',
+    });
+  }
+
+  if (avgRank !== null && avgRank > 2.5) {
+    out.push({
+      level: 'warn', title: `被排在別人後面（平均第 ${avgRank.toFixed(1)} 個提到）`,
+      why: '排序反映的是 AI 覺得誰比較是這題的答案。',
+      todo: '把工研院的角色寫得比同框單位更具體，不要只掛名。',
+    });
+  }
+
+  if (!out.length) {
+    out.push({
+      level: 'good', title: '這個主題目前守得住',
+      why: `提及率 ${mention}%、自家網域引用率 ${cited}%${specifics !== null ? `、具體度 ${specifics}%` : ''}。`,
+      todo: '維持現況，把這個主題的寫法當範本套到其他主題。',
+    });
+  }
+  return out;
+}
+
+/** 針對單一事件的額外建議：看的是留存，不是當下聲量 */
+function diagnoseEvent(ev) {
+  const out = [];
+  if (ev.halfLifeDays !== null && ev.halfLifeDays <= 7) {
+    out.push({
+      level: 'warn', title: `聲量掉得快（半衰期 ${ev.halfLifeDays} 天）`,
+      why: '衝上去又掉回來，通常代表只有活動當天的即時新聞，沒有留下可被反覆引用的頁面。',
+      todo: '活動後 3 天內補一頁獨立技術頁，並回頭確認關鍵那句話有沒有被寫進報導。',
+    });
+  }
+  if (ev.settled && ev.lift !== null && ev.lift <= 0) {
+    out.push({
+      level: 'bad', title: '這場沒有留下基線抬升',
+      why: '30 天後回到原點，等於這場記者會對 AI 的長期記憶沒有貢獻。',
+      todo: '下一場改變作法：發稿當天同步上線一個獨立主題頁，不要只靠媒體轉載。',
+    });
+  }
+  if (ev.settled && ev.lift !== null && ev.lift > 5) {
+    out.push({
+      level: 'good', title: `基線被抬升了 +${ev.lift}`,
+      why: '這場真的改變了 AI 對這個主題的長期認知，不只是當天熱度。',
+      todo: '把這場的發稿與落地頁作法記錄下來，當成之後的範本。',
+    });
+  }
+  return out;
 }
 
 /** 關鍵字排行：近期均分、提及率、自家網域引用率、與前一期相比的變化 */
@@ -574,6 +780,7 @@ function keywordBoard(runs, days) {
       citedRate: recent.length
         ? Math.round((recent.filter((r) => r.cited).length / recent.length) * 100) : null,
       samples: rs.length,
+      findings: diagnose(recent.length >= 3 ? recent : rs),
     };
   }).sort((x, y) => (y.score ?? -1) - (x.score ?? -1));
 }
@@ -766,6 +973,34 @@ export default async function handler(req, res) {
       const gap = readyCheck();
       if (gap) return res.status(500).json({ error: gap });
       return ok(res, await runBatch({ force: !!body.force }));
+    }
+
+    if (body.action === 'prompt_generate') {
+      const keyword = String(body.keyword || '').trim();
+      if (!keyword) return res.status(400).json({ error: '請先輸入一個關鍵字' });
+      if (keyword.length > 40) return res.status(400).json({ error: '關鍵字太長了，給一個技術或主題名稱就好' });
+      return ok(res, { keyword, candidates: await generatePrompts(keyword) });
+    }
+
+    // 一次存多題（生完題目勾選後送出）
+    if (body.action === 'prompt_save_many') {
+      await ensureSheets(SHEETS);
+      const keyword = String(body.keyword || '').trim() || '未分類';
+      const list = (body.prompts || [])
+        .map((s) => String(s || '').trim())
+        .filter((s) => s.length >= 8);
+      if (!list.length) return res.status(400).json({ error: '沒有選到任何題目' });
+
+      const bad = list.filter((s) => BRAND_RE.test(s));
+      if (bad.length) {
+        return res.status(400).json({ error: `有 ${bad.length} 題出現「工研院」，那會變成自問自答。請先改掉。` });
+      }
+
+      const stamp = nowTW();
+      await appendRows('geo_prompts!A:H', list.map((p) => [
+        uid('gp'), keyword, p, keyword, BRAND_DEFAULT, COMPETITORS, 'TRUE', stamp,
+      ]));
+      return ok(res, { success: true, added: list.length });
     }
 
     if (body.action === 'prompt_save') {
