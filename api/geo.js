@@ -21,22 +21,41 @@ const SHEETS = {
   geo_prompts: ['id', 'topic', 'prompt', 'keyword', 'brand', 'competitors', 'active', 'created_at'],
   geo_runs: ['date', 'run_at', 'prompt_id', 'topic', 'keyword', 'engine', 'mentioned', 'rank',
     'cited', 'citations', 'specifics', 'score', 'competitors_found', 'excerpt', 'error'],
-  geo_events: ['id', 'date', 'title', 'type', 'keywords', 'note'],
+  geo_events: ['id', 'date', 'title', 'type', 'keywords', 'note', 'itri_event_id'],
+  geo_settings: ['key', 'value'],
 };
 
 const PROBE_MODEL = process.env.GEO_MODEL || 'claude-opus-5';
 // 3.6 是目前的 GA Flash。3.5-flash 有回報 generateContent 偶爾漏掉 groundingMetadata 的問題，
 // 所以預設不用它。
 const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-3.6-flash';
-
-// 判官（打分的那顆）可以跟探測分開走。沒設 ANTHROPIC_API_KEY 就自動改用 Gemini，
-// 整套可以只靠 Gemini 免費額度跑，不必開 Anthropic API 帳。
-const JUDGE_ENGINE = process.env.GEO_JUDGE_ENGINE
-  || (process.env.ANTHROPIC_API_KEY ? 'anthropic' : process.env.GEMINI_API_KEY ? 'gemini' : null);
-const JUDGE_MODEL = process.env.GEO_JUDGE_MODEL
-  || (JUDGE_ENGINE === 'gemini' ? GEMINI_MODEL : PROBE_MODEL);
+const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-5';
 
 const BRAND_DEFAULT = '工研院';
+
+/**
+ * 設定放在試算表，不放環境變數 —— Vercel 只需要填 API 金鑰，其餘都在網頁上點。
+ * CFG 在每次請求開頭載入一次。
+ */
+const CFG = { engines: null, judge: null, loaded: false };
+
+async function loadSettings() {
+  if (CFG.loaded) return CFG;
+  try {
+    const rows = await readRange('geo_settings!A2:B');
+    rows.forEach(([k, v]) => {
+      if (k === 'engines') CFG.engines = String(v || '').split(',').map((s) => s.trim()).filter(Boolean);
+      if (k === 'judge') CFG.judge = String(v || '').trim() || null;
+    });
+  } catch { /* 分頁還沒建就用預設 */ }
+  CFG.loaded = true;
+  return CFG;
+}
+
+/** 判官預設挑免費的那顆：有 Gemini 金鑰就用 Gemini，沒有才退回 Anthropic */
+const judgeEngine = () =>
+  CFG.judge || (process.env.GEMINI_API_KEY ? 'gemini' : process.env.ANTHROPIC_API_KEY ? 'anthropic' : null);
+const judgeModel = () => (judgeEngine() === 'gemini' ? GEMINI_MODEL : PROBE_MODEL);
 const OWNED_DOMAINS = ['itri.org.tw', 'itritech.itri.org.tw'];
 
 // Vercel function maxDuration 60s。一波（4 題）含搜尋約 15–20s，
@@ -64,21 +83,18 @@ const ENGINES = [
   { id: 'perplexity', label: 'Perplexity', env: 'PERPLEXITY_API_KEY', grounded: true, run: probePerplexity },
 ];
 
-// GEO_ENGINES 明確指定要掃哪幾個引擎（逗號分隔）。不設就是「有金鑰就掃」。
-// 這個開關存在的理由：ANTHROPIC_API_KEY 是記者問答在用的，不能拿掉，
-// 但你可能不想讓 GEO 也去燒 Anthropic 的 API 錢 —— 設 GEO_ENGINES=gemini 即可。
-const ENGINE_ALLOW = (process.env.GEO_ENGINES || '')
-  .split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
-
+/** 要掃哪些引擎：網頁上勾選的優先，沒設定過就是「有金鑰的全開」 */
 const activeEngines = () => ENGINES.filter((e) =>
-  process.env[e.env] && (!ENGINE_ALLOW.length || ENGINE_ALLOW.includes(e.id)));
+  process.env[e.env] && (!CFG.engines || !CFG.engines.length || CFG.engines.includes(e.id)));
 
 /** 掃描前的前置檢查：至少要有一個探測引擎，加上一個能打分的判官 */
 function readyCheck() {
-  if (!activeEngines().length) {
-    return '沒有任何可用引擎：請至少設定 ANTHROPIC_API_KEY 或 GEMINI_API_KEY';
+  const withKey = ENGINES.filter((e) => process.env[e.env]);
+  if (!withKey.length) {
+    return '還沒有任何 API 金鑰。到 Vercel 環境變數填 GEMINI_API_KEY 或 OPENAI_API_KEY（ANTHROPIC_API_KEY 已經有了）。';
   }
-  if (!JUDGE_ENGINE) return '沒有可用的判官：請設 ANTHROPIC_API_KEY 或 GEMINI_API_KEY';
+  if (!activeEngines().length) return '所有引擎都被關掉了，到下方「設定」至少打開一個。';
+  if (!judgeEngine()) return '沒有可用的判官模型。';
   return null;
 }
 
@@ -299,7 +315,7 @@ function parseJudge(text) {
 }
 
 async function askAnthropic(prompt, schema, maxTokens) {
-  const base = { model: JUDGE_MODEL, max_tokens: maxTokens, messages: [{ role: 'user', content: prompt }] };
+  const base = { model: judgeModel(), max_tokens: maxTokens, messages: [{ role: 'user', content: prompt }] };
   let data;
   try {
     data = await anthropic({
@@ -334,11 +350,11 @@ async function askGemini(prompt, maxTokens) {
     data = await gemini({
       ...base,
       generationConfig: { ...base.generationConfig, thinkingConfig: { thinkingLevel: 'low' } },
-    }, JUDGE_MODEL);
+    }, judgeModel());
   } catch (err) {
     // 舊機型不吃 thinkingLevel，就純靠放大上限
     if (!/thinking|invalid argument/i.test(err.message)) throw err;
-    data = await gemini(base, JUDGE_MODEL);
+    data = await gemini(base, judgeModel());
   }
 
   const c = data.candidates?.[0] || {};
@@ -351,8 +367,8 @@ async function askGemini(prompt, maxTokens) {
 
 /** 要 JSON 的內部呼叫都走這裡，路由到判官那顆模型（通常是免費的 Gemini） */
 async function askJSON(prompt, schema, maxTokens = 1000) {
-  if (!JUDGE_ENGINE) throw new Error('沒有可用的模型：請設 ANTHROPIC_API_KEY 或 GEMINI_API_KEY');
-  return JUDGE_ENGINE === 'gemini'
+  if (!judgeEngine()) throw new Error('沒有可用的模型：請先在 Vercel 填一把 API 金鑰');
+  return judgeEngine() === 'gemini'
     ? askGemini(prompt, maxTokens)
     : askAnthropic(prompt, schema, maxTokens);
 }
@@ -793,7 +809,10 @@ const parseRun = (r) => ({
   competitors: r[12] || '', excerpt: r[13] || '', error: r[14] || '',
 });
 
-const parseEvent = (r) => ({ id: r[0], date: r[1], title: r[2], type: r[3] || '記者會', keywords: r[4] || '', note: r[5] || '' });
+const parseEvent = (r) => ({
+  id: r[0], date: r[1], title: r[2], type: r[3] || '記者會',
+  keywords: r[4] || '', note: r[5] || '', itri_event_id: r[6] || '',
+});
 
 /* ────────────────────────────── 預設題庫 ────────────────────────────── */
 // 依 2026-08-02 那次 30 題實測的結論設計：真正會掉分的是「不指名」那一層，
@@ -830,14 +849,21 @@ export default async function handler(req, res) {
   const admin = process.env.ADMIN_PASSWORD;
 
   try {
-    /* ── 排程：Vercel Cron 會帶 Authorization: Bearer $CRON_SECRET ── */
+    await loadSettings();
+
+    /* ── 排程 ──
+     * 有設 CRON_SECRET 就照它驗（最嚴謹）。沒設的話，認 Vercel 排程自己帶的
+     * user-agent —— 這樣使用者不必為了讓排程能動而多填一個環境變數。
+     * 這個端點只會回傳掃描筆數，不吐任何資料。 */
     const secret = process.env.CRON_SECRET;
     const bearer = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+    const fromVercelCron = /vercel-cron/i.test(req.headers['user-agent'] || '');
     const cronCall = req.query.action === 'cron' || (!!secret && bearer === secret);
 
     if (cronCall) {
-      const passed = secret ? (bearer === secret || req.query.secret === secret)
-        : req.query.password === admin;
+      const passed = secret
+        ? (bearer === secret || req.query.secret === secret)
+        : (fromVercelCron || req.query.password === admin);
       if (!passed) return res.status(401).json({ error: '未授權' });
       const gap = readyCheck();
       if (gap) return res.status(500).json({ error: gap });
@@ -857,8 +883,18 @@ export default async function handler(req, res) {
       }
 
       if (action === 'events') {
-        const rows = await safeRead('geo_events!A2:F');
+        const rows = await safeRead('geo_events!A2:G');
         return ok(res, { events: rows.filter((r) => r[0]).map(parseEvent) });
+      }
+
+      // ITRI EVENT AI 的活動清單，給「選一場活動」下拉用
+      if (action === 'itri_events') {
+        const rows = await safeRead('events!A2:K');
+        return ok(res, {
+          events: rows.filter((r) => r[0] && r[4] !== 'archived')
+            .map((r) => ({ id: r[0], name: r[1] || r[0], created_at: (r[5] || '').slice(0, 10) }))
+            .reverse().slice(0, 60),
+        });
       }
 
       if (action === 'status') {
@@ -871,7 +907,9 @@ export default async function handler(req, res) {
             hasKey: !!process.env[e.env],
           })),
           model: activeEngines().some((e) => e.id === 'claude') ? PROBE_MODEL : GEMINI_MODEL,
-          judge: JUDGE_ENGINE ? `${JUDGE_ENGINE} / ${JUDGE_MODEL}` : '（未設定）',
+          judge: judgeEngine() ? `${judgeEngine()} / ${judgeModel()}` : '（未設定）',
+          judgeEngine: judgeEngine(),
+          cronSecretSet: !!process.env.CRON_SECRET,
           ready: readyCheck(),
         });
       }
@@ -879,7 +917,7 @@ export default async function handler(req, res) {
       if (action === 'series') {
         const n = Math.min(Math.max(parseInt(days, 10) || 90, 7), 365);
         const [runRows, evRows] = await Promise.all([
-          safeRead('geo_runs!A2:O'), safeRead('geo_events!A2:F'),
+          safeRead('geo_runs!A2:O'), safeRead('geo_events!A2:G'),
         ]);
         const runs = runRows.filter((r) => r[0]).map(parseRun);
         const events = evRows.filter((r) => r[0]).map(parseEvent)
@@ -936,7 +974,7 @@ export default async function handler(req, res) {
 
         return ok(res, {
           prompt: { id: p.id, topic: p.topic, prompt: p.prompt, keyword: p.keyword },
-          judge: `${JUDGE_ENGINE} / ${JUDGE_MODEL}`, results,
+          judge: `${judgeEngine()} / ${judgeModel()}`, results,
         });
       }
 
@@ -973,6 +1011,58 @@ export default async function handler(req, res) {
       const gap = readyCheck();
       if (gap) return res.status(500).json({ error: gap });
       return ok(res, await runBatch({ force: !!body.force }));
+    }
+
+    /**
+     * 一鍵開始追蹤一場活動：把選好的題目寫進題庫，同時建立一筆事件標記，
+     * 並綁定 ITRI EVENT AI 的活動 ID（有選的話）。同仁只要做這一步。
+     */
+    if (body.action === 'track_start') {
+      await ensureSheets(SHEETS);
+      const keyword = String(body.keyword || '').trim();
+      if (!keyword) return res.status(400).json({ error: '請填這場活動的關鍵字' });
+
+      const list = (body.prompts || []).map((s) => String(s || '').trim()).filter((s) => s.length >= 8);
+      if (!list.length) return res.status(400).json({ error: '至少要留一題' });
+      const bad = list.filter((s) => BRAND_RE.test(s));
+      if (bad.length) return res.status(400).json({ error: `有 ${bad.length} 題出現「工研院」，那會變成自問自答，請先改掉。` });
+
+      // 綁定活動：日期與名稱直接沿用 ITRI EVENT AI 那筆，不用重打
+      let title = String(body.title || '').trim();
+      let date = String(body.date || '').trim();
+      const refId = String(body.itri_event_id || '').trim();
+      if (refId) {
+        const evRow = (await safeRead('events!A2:K')).find((r) => r[0] === refId);
+        if (!evRow) return res.status(404).json({ error: '找不到這場活動，請重新選一次' });
+        title = title || evRow[1] || refId;
+        date = date || (evRow[5] || '').slice(0, 10);
+      }
+      if (!title) title = keyword;
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) date = todayTW();
+
+      const stamp = nowTW();
+      await appendRows('geo_prompts!A:H', list.map((p) => [
+        uid('gp'), keyword, p, keyword, BRAND_DEFAULT, COMPETITORS, 'TRUE', stamp,
+      ]));
+
+      const evId = uid('ge');
+      await appendRows('geo_events!A:G', [[
+        evId, date, title, body.type || '記者會', keyword, '', refId,
+      ]]);
+
+      return ok(res, { success: true, added: list.length, event: { id: evId, date, title, keyword } });
+    }
+
+    if (body.action === 'settings_save') {
+      await ensureSheets(SHEETS);
+      const engines = (body.engines || []).map((s) => String(s).trim()).filter(Boolean);
+      const judge = String(body.judge || '').trim();
+      await updateRange('geo_settings!A2:B3', [
+        ['engines', engines.join(',')],
+        ['judge', judge],
+      ]);
+      CFG.engines = engines; CFG.judge = judge || null;
+      return ok(res, { success: true });
     }
 
     if (body.action === 'prompt_generate') {
@@ -1031,19 +1121,19 @@ export default async function handler(req, res) {
       await ensureSheets(SHEETS);
       const e = body.event || {};
       if (!e.date || !e.title) return res.status(400).json({ error: '日期與名稱為必填' });
-      const rows = await safeRead('geo_events!A2:F');
+      const rows = await safeRead('geo_events!A2:G');
       const idx = rows.findIndex((r) => r[0] === e.id);
       const row = [e.id || uid('ge'), e.date, e.title, e.type || '記者會', e.keywords || '', e.note || ''];
       if (idx >= 0) await updateRange(`geo_events!A${idx + 2}:F${idx + 2}`, [row]);
-      else await appendRows('geo_events!A:F', [row]);
+      else await appendRows('geo_events!A:G', [row]);
       return ok(res, { success: true, id: row[0] });
     }
 
     if (body.action === 'event_delete') {
-      const rows = await safeRead('geo_events!A2:F');
+      const rows = await safeRead('geo_events!A2:G');
       const kept = rows.filter((r) => r[0] && r[0] !== body.id);
-      if (rows.length) await updateRange(`geo_events!A2:F${rows.length + 1}`, rows.map(() => new Array(6).fill('')));
-      if (kept.length) await updateRange(`geo_events!A2:F${kept.length + 1}`, kept);
+      if (rows.length) await updateRange(`geo_events!A2:G${rows.length + 1}`, rows.map(() => new Array(7).fill('')));
+      if (kept.length) await updateRange(`geo_events!A2:G${kept.length + 1}`, kept);
       return ok(res, { success: true });
     }
 

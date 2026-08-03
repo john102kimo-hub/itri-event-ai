@@ -89,8 +89,12 @@
   details summary::-webkit-details-marker{display:none}
   details summary::before{content:'\203A';display:inline-block;transition:transform .15s;font-size:1.2rem;color:var(--muted)}
   details[open] summary::before{transform:rotate(90deg)}
-  .gen-box{background:var(--primary-light);border:1px solid rgba(15,158,122,.25);border-radius:12px;padding:14px 16px;margin-top:16px}
-  .gen-title{font-size:.88rem;font-weight:700;color:var(--primary-dark);margin-bottom:10px;display:flex;align-items:center;gap:7px}
+  .start-card{border:2px solid var(--primary);box-shadow:0 4px 20px rgba(15,158,122,.10)}
+  .start-grid{display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap}
+  .fld{display:flex;flex-direction:column;gap:5px;flex:1 1 240px;min-width:0}
+  .fld > span{font-size:.8rem;font-weight:700;color:var(--primary-dark)}
+  .fld select,.fld input{width:100%;padding:11px 12px;font-size:.92rem}
+  .btn-lg{padding:12px 22px;font-size:.94rem;flex:0 0 auto}
   .cand{display:flex;gap:10px;align-items:flex-start;background:#fff;border:1px solid var(--border);border-radius:10px;padding:10px 12px;margin-bottom:8px}
   .cand input[type=checkbox]{margin-top:9px;width:17px;height:17px;flex:0 0 auto;accent-color:var(--primary)}
   .cand .body{flex:1 1 auto;min-width:0}
@@ -140,9 +144,37 @@
     </div>
   </div>
 
+  <!-- 主要動作：同仁只需要做這一件事 -->
+  <div class="card start-card">
+    <h2><i class="ti ti-wand" style="color:var(--primary)"></i> 追蹤一場活動</h2>
+    <div class="desc">選一場活動、打一個關鍵字，題目我幫你想好。之後每天自動去問 AI，看發稿後各家有沒有提到工研院。</div>
+
+    <div class="start-grid">
+      <label class="fld">
+        <span>① 這是哪一場活動？</span>
+        <select id="s-event" onchange="onPickEvent()"><option value="">載入中…</option></select>
+      </label>
+      <label class="fld">
+        <span>② 這場的主打技術／議題關鍵字</span>
+        <input type="text" id="s-kw" placeholder="例如：固態電池、矽光子、碳捕捉"
+               onkeydown="if(event.key==='Enter')genPrompts()">
+      </label>
+      <button class="btn btn-primary btn-lg" id="gen-btn" onclick="genPrompts()">
+        <i class="ti ti-wand"></i> 產生題目
+      </button>
+    </div>
+
+    <div id="s-manual" class="row" style="display:none">
+      <input type="text" id="s-title" class="grow" placeholder="活動名稱">
+      <input type="date" id="s-date">
+    </div>
+
+    <div id="gen-out"></div>
+  </div>
+
   <div class="caveat">
-    <b>這份數字量的是什麼：</b>用「不指名工研院」的問法去問可用 API 的 AI 答案引擎，記錄它會不會提到工研院、第幾個提到、有沒有引到自家網域、有沒有講出具體內容。
-    它是<b>代理指標</b>——趨勢與相對變化可用，但不等同 ChatGPT 或 Google AI Overviews 消費端畫面，對外引用時務必註明。單次查詢有隨機性，看趨勢請以<b>七日均線</b>為準。
+    <b>這份數字量的是什麼：</b>用「不指名工研院」的問法去問 AI，記錄它會不會提到工研院、第幾個提到、有沒有引到自家網域、有沒有講出具體內容。
+    它是<b>代理指標</b>——趨勢可用，但不等同 ChatGPT 或 Google AI Overviews 消費端畫面，對外引用務必註明。看趨勢請以<b>七日均線</b>為準。
   </div>
 
   <div class="card" id="test-card" style="display:none">
@@ -177,52 +209,25 @@
 
   <div class="card">
     <details>
-      <summary><i class="ti ti-help-circle"></i> 題庫（<span id="prompt-count">0</span> 題）</summary>
-      <div class="desc" style="margin-top:10px">題目裡刻意不出現「工研院」——一旦指名就是自問自答。停用的題目不會被掃描，也不會計費。</div>
+      <summary><i class="ti ti-settings"></i> 設定</summary>
+
+      <div class="desc" style="margin-top:12px"><b>要問哪幾家 AI</b>（有填金鑰的才能打開）</div>
+      <div id="engine-toggles" class="chips"></div>
+      <div id="engine-hint" style="font-size:.78rem;color:var(--muted)"></div>
+
+      <div class="desc" style="margin-top:18px"><b>題庫</b>（<span id="prompt-count">0</span> 題）— 停用的不會掃、也不計費</div>
       <div id="prompts" class="tbl"></div>
-
-      <div class="gen-box">
-        <div class="gen-title"><i class="ti ti-wand"></i> 只要打一個關鍵字，題目我幫你想</div>
-        <div class="row" style="margin-top:0">
-          <input type="text" id="gen-kw" class="grow" placeholder="例如：固態電池、碳捕捉、矽光子、智慧製造"
-                 onkeydown="if(event.key==='Enter')genPrompts()">
-          <button class="btn btn-primary" id="gen-btn" onclick="genPrompts()"><i class="ti ti-wand"></i> 產生題目</button>
-          <button class="btn btn-outline" onclick="seed()"><i class="ti ti-seeding"></i> 帶入預設 12 題</button>
-        </div>
-        <div id="gen-out"></div>
-      </div>
-
-      <details style="margin-top:14px">
-        <summary style="font-size:.84rem;color:var(--muted)">自己寫一題</summary>
+      <details style="margin-top:10px">
+        <summary style="font-size:.84rem;color:var(--muted)">自己加一題</summary>
         <div class="row">
-          <input type="text" id="np-keyword" placeholder="關鍵字" style="width:160px">
+          <input type="text" id="np-keyword" placeholder="關鍵字" style="width:150px">
           <input type="text" id="np-prompt" class="grow" placeholder="問句（不要出現工研院）">
           <button class="btn btn-outline" onclick="savePrompt()"><i class="ti ti-plus"></i> 新增</button>
         </div>
       </details>
-    </details>
-  </div>
 
-  <div class="card">
-    <details>
-      <summary><i class="ti ti-calendar-event"></i> 事件標記（<span id="event-count">0</span> 筆）</summary>
-      <div class="desc" style="margin-top:10px">記者會日、發稿日標在這裡，曲線圖才會畫出對照線，半衰期與抬升才算得出來。關鍵字要和題庫的關鍵字標籤一致，才會鎖定那條線計算。</div>
+      <div class="desc" style="margin-top:18px"><b>追蹤中的活動</b>（<span id="event-count">0</span> 場）</div>
       <div id="event-list" class="tbl"></div>
-      <div class="row">
-        <input type="date" id="ne-date">
-        <input type="text" id="ne-title" class="grow" placeholder="事件名稱（如 0626 AI 智慧醫療大平台記者會）">
-        <input type="text" id="ne-keywords" placeholder="關鍵字（對應題庫標籤）" style="width:180px">
-        <button class="btn btn-primary" onclick="saveEvent()"><i class="ti ti-plus"></i> 新增</button>
-      </div>
-    </details>
-  </div>
-
-  <div class="card">
-    <details onclick="if(this.open===false)loadDetail()">
-      <summary><i class="ti ti-file-text"></i> 原始回答（人工複核）</summary>
-      <div class="desc" style="margin-top:10px">分數是機器判的，對外引用前抽幾筆看原文。</div>
-      <div id="detail" class="tbl"><div class="empty">展開後點「載入最近 60 筆」</div></div>
-      <div class="row"><button class="btn btn-outline" onclick="loadDetail()"><i class="ti ti-download"></i> 載入最近 60 筆</button></div>
     </details>
   </div>
 
@@ -232,7 +237,7 @@
 
 <script>
 const PALETTE = ['#0F9E7A','#3b82f6','#8b5cf6','#ec4899','#f97316','#14b8a6','#6366f1','#84cc16'];
-let S = { pwd:'', data:null, on:new Set(['__overall__']), prompts:[], events:[] };
+let S = { pwd:'', data:null, status:null, on:new Set(['__overall__']), prompts:[], events:[] };
 
 /* ── 登入 ── */
 function toast(m){const t=document.getElementById('toast');t.textContent=m;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2600);}
@@ -254,12 +259,54 @@ const api = (qs) => fetch(`/api/geo?${qs}&password=${encodeURIComponent(S.pwd)}`
 const post = (body) => fetch('/api/geo',{method:'POST',headers:{'Content-Type':'application/json'},
   body:JSON.stringify({...body, password:S.pwd})}).then(r=>r.json());
 
-async function loadAll(){ await Promise.all([loadStatus(), loadSeries(), loadPrompts(), loadEvents()]); }
+async function loadAll(){
+  await Promise.all([loadStatus(), loadSeries(), loadPrompts(), loadEvents(), loadItriEvents()]);
+}
+
+/* ── 活動下拉：直接讀 ITRI EVENT AI 的活動清單 ── */
+async function loadItriEvents(){
+  const sel = document.getElementById('s-event');
+  try{
+    const d = await api('action=itri_events');
+    const opts = (d.events||[]).map(e=>
+      `<option value="${esc(e.id)}" data-name="${esc(e.name)}" data-date="${esc(e.created_at)}">${esc(e.name)}</option>`).join('');
+    sel.innerHTML = `<option value="">— 選一場活動 —</option>${opts}<option value="__other__">其他／不綁活動</option>`;
+  }catch{ sel.innerHTML = '<option value="__other__">其他／不綁活動</option>'; }
+}
+function onPickEvent(){
+  const sel = document.getElementById('s-event');
+  document.getElementById('s-manual').style.display = sel.value === '__other__' ? 'flex' : 'none';
+}
 
 /* ── 狀態列 ── */
+/* ── 引擎開關（存試算表，不用碰環境變數） ── */
+function renderEngines(s){
+  const box = document.getElementById('engine-toggles');
+  box.innerHTML = s.engines.map(e=>{
+    const on = e.enabled, can = e.hasKey;
+    return `<button class="chip ${on?'on':''}" ${can?'':'disabled style="opacity:.45;cursor:not-allowed"'}
+      ${on?'style="background:var(--primary)"':''}
+      onclick="${can?`toggleEngine('${e.id}')`:''}"><span class="dot"></span>${esc(e.label)}</button>`;
+  }).join('');
+  const missing = s.engines.filter(e=>!e.hasKey);
+  document.getElementById('engine-hint').innerHTML = missing.length
+    ? `灰掉的還沒有金鑰。到 Vercel → Settings → Environment Variables 填 ${missing.map(e=>`<code>${esc(e.env)}</code>`).join('、')}，Redeploy 後就能打開。`
+    : '全部都有金鑰了。';
+}
+async function toggleEngine(id){
+  const cur = new Set(S.status.engines.filter(e=>e.enabled).map(e=>e.id));
+  cur.has(id) ? cur.delete(id) : cur.add(id);
+  if(!cur.size) return toast('至少要留一個');
+  const r = await post({ action:'settings_save', engines:[...cur], judge:S.status.judgeEngine||'' });
+  if(r.error) return toast(r.error);
+  toast('已更新'); loadStatus();
+}
+
 async function loadStatus(){
   const s = await api('action=status');
   if(s.error) return;
+  S.status = s;
+  renderEngines(s);
   const live = s.engines.filter(e=>e.enabled).map(e=>e.label);
   // 有金鑰但被 GEO_ENGINES 關掉的，要跟「根本沒設金鑰」分開講，不然會以為是壞了
   const muted = s.engines.filter(e=>!e.enabled && e.hasKey).map(e=>e.id);
@@ -519,7 +566,7 @@ async function loadPrompts(){
     </tr>`).join('') + '</tbody></table>';
 }
 async function genPrompts(){
-  const kw = document.getElementById('gen-kw').value.trim();
+  const kw = document.getElementById('s-kw').value.trim();
   if(!kw) return toast('先打一個關鍵字');
   const btn = document.getElementById('gen-btn'), out = document.getElementById('gen-out');
   btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader-2"></i> 想題目中…';
@@ -528,36 +575,58 @@ async function genPrompts(){
     const d = await post({ action:'prompt_generate', keyword:kw });
     if(d.error){ out.innerHTML = `<div class="empty down">${esc(d.error)}</div>`; }
     else{
-      out.innerHTML = d.candidates.map((c,i)=>`
+      out.innerHTML = `<div class="desc" style="margin-top:16px"><b>③ 確認要問 AI 的題目</b>
+          — 可以直接改文字、勾掉不要的。題目裡不能出現「工研院」，不然等於自問自答。</div>` +
+        d.candidates.map(c=>`
         <label class="cand">
-          <input type="checkbox" checked data-i="${i}">
+          <input type="checkbox" checked>
           <span class="body">
             <span class="angle">${esc(c.angle)}</span>
             <textarea rows="2">${esc(c.prompt)}</textarea>
           </span>
         </label>`).join('') + `
         <div class="row" style="margin-top:4px">
-          <button class="btn btn-primary" onclick="saveCandidates('${esc(d.keyword).replace(/'/g,"\\'")}')">
-            <i class="ti ti-check"></i> 加入題庫</button>
-          <button class="btn btn-outline" onclick="genPrompts()"><i class="ti ti-refresh"></i> 換一批</button>
-          <span style="font-size:.76rem;color:var(--muted)">可以直接改文字，改完再加入</span>
+          <button class="btn btn-primary btn-lg" onclick="startTracking()">
+            <i class="ti ti-player-play"></i> 開始追蹤這場活動</button>
+          <button class="btn btn-outline" onclick="genPrompts()"><i class="ti ti-refresh"></i> 換一批題目</button>
         </div>`;
     }
   }catch(e){ out.innerHTML = `<div class="empty down">${esc(e.message)}</div>`; }
   btn.disabled = false; btn.innerHTML = '<i class="ti ti-wand"></i> 產生題目';
 }
 
-async function saveCandidates(keyword){
+/** 一鍵：存題目 ＋ 建立活動標記（綁 ITRI EVENT AI 活動）＋ 立刻先掃一次 */
+async function startTracking(){
   const picked = [...document.querySelectorAll('#gen-out .cand')]
     .filter(el=>el.querySelector('input[type=checkbox]').checked)
-    .map(el=>el.querySelector('textarea').value.trim())
-    .filter(Boolean);
-  if(!picked.length) return toast('至少勾一題');
-  const r = await post({ action:'prompt_save_many', keyword, prompts:picked });
+    .map(el=>el.querySelector('textarea').value.trim()).filter(Boolean);
+  if(!picked.length) return toast('至少留一題');
+
+  const sel = document.getElementById('s-event');
+  const opt = sel.selectedOptions[0];
+  const bound = sel.value && sel.value !== '__other__';
+  const body = {
+    action:'track_start',
+    keyword: document.getElementById('s-kw').value.trim(),
+    prompts: picked,
+    itri_event_id: bound ? sel.value : '',
+    title: bound ? (opt?.dataset.name||'') : document.getElementById('s-title').value.trim(),
+    date:  bound ? (opt?.dataset.date||'') : document.getElementById('s-date').value,
+  };
+
+  const r = await post(body);
   if(r.error) return toast(r.error);
-  document.getElementById('gen-out').innerHTML = '';
-  document.getElementById('gen-kw').value = '';
-  toast(`已加入 ${r.added} 題`); loadPrompts();
+
+  document.getElementById('gen-out').innerHTML =
+    `<div class="find good" style="margin-top:14px">
+       <div class="t">已開始追蹤「${esc(r.event.title)}」</div>
+       <div class="w">加入 ${r.added} 題，議題標籤「${esc(r.event.keyword)}」，事件日 ${esc(r.event.date)}。</div>
+       <div class="d">現在幫你先掃第一次，之後每天早上自動跑。</div>
+     </div>`;
+  document.getElementById('s-kw').value = '';
+  sel.value = ''; onPickEvent();
+  loadPrompts(); loadEvents();
+  scan();
 }
 
 async function savePrompt(){
@@ -582,52 +651,23 @@ async function delPrompt(id){
   if(r.error) return toast(r.error);
   toast('已刪除'); loadPrompts();
 }
-async function seed(){
-  const r = await post({ action:'seed' });
-  if(r.error) return toast(r.error);
-  toast(`已帶入 ${r.added} 題`); loadPrompts();
-}
-
-/* ── 事件標記 ── */
+/* ── 追蹤中的活動 ── */
 async function loadEvents(){
   const d = await api('action=events');
   S.events = (d.events||[]).sort((a,b)=>b.date.localeCompare(a.date));
   document.getElementById('event-count').textContent = S.events.length;
   const box = document.getElementById('event-list');
-  if(!S.events.length){ box.innerHTML = '<div class="empty">還沒有事件標記</div>'; return; }
-  box.innerHTML = `<table><thead><tr><th>日期</th><th>事件</th><th>類型</th><th>關鍵字</th><th></th></tr></thead><tbody>` +
-    S.events.map(e=>`<tr><td>${e.date}</td><td>${esc(e.title)}</td><td>${esc(e.type)}</td><td>${esc(e.keywords)}</td>
+  if(!S.events.length){ box.innerHTML = '<div class="empty">還沒有追蹤中的活動</div>'; return; }
+  box.innerHTML = `<table><thead><tr><th>日期</th><th>活動</th><th>議題</th><th>綁定</th><th></th></tr></thead><tbody>` +
+    S.events.map(e=>`<tr><td>${e.date}</td><td>${esc(e.title)}</td><td>${esc(e.keywords)}</td>
+      <td>${e.itri_event_id?'<span class="pill">已綁活動</span>':'<span class="flat">—</span>'}</td>
       <td><button class="btn btn-ghost" onclick="delEvent('${e.id}')"><i class="ti ti-trash"></i></button></td></tr>`).join('') + '</tbody></table>';
 }
-async function saveEvent(){
-  const date = document.getElementById('ne-date').value;
-  const title = document.getElementById('ne-title').value.trim();
-  if(!date || !title) return toast('請填日期與名稱');
-  const r = await post({ action:'event_save', event:{ date, title,
-    keywords: document.getElementById('ne-keywords').value.trim() }});
-  if(r.error) return toast(r.error);
-  ['ne-title','ne-keywords'].forEach(id=>document.getElementById(id).value='');
-  toast('已新增'); loadEvents(); loadSeries();
-}
 async function delEvent(id){
-  if(!confirm('刪掉這個事件標記？')) return;
+  if(!confirm('停止追蹤這場活動？（已掃到的歷史資料會保留）')) return;
   const r = await post({ action:'event_delete', id });
   if(r.error) return toast(r.error);
   loadEvents(); loadSeries();
-}
-
-/* ── 原始回答 ── */
-async function loadDetail(){
-  const d = await api('action=detail');
-  const box = document.getElementById('detail');
-  if(!d.runs || !d.runs.length){ box.innerHTML = '<div class="empty">尚無紀錄</div>'; return; }
-  box.innerHTML = `<table><thead><tr><th>日期</th><th>引擎</th><th>關鍵字</th><th>分數</th><th>回答摘錄 / 錯誤</th></tr></thead><tbody>` +
-    d.runs.map(r=>`<tr>
-      <td>${r.date}</td><td>${esc(r.engine)}</td><td>${esc(r.keyword)}</td>
-      <td class="num-cell">${r.error?'<span class="down">失敗</span>':r.score}</td>
-      <td class="excerpt">${r.error ? '<span class="down">'+esc(r.error)+'</span>' : esc(r.excerpt)}
-        ${r.citations?`<br><span style="font-size:.72rem;opacity:.7">來源：${esc(r.citations)}</span>`:''}</td>
-    </tr>`).join('') + '</tbody></table>';
 }
 
 function esc(s){ return String(s??'').replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
