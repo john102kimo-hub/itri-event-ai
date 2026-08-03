@@ -779,6 +779,10 @@ async function genPrompts(){
             <textarea rows="2">${esc(c.prompt)}</textarea>
           </span>
         </label>`).join('') + `
+        <label class="fld" style="margin-top:10px">
+          <span>對照單位（這領域會跟工研院同框的，用頓號分隔）</span>
+          <input type="text" id="gen-comp" value="${esc((d.competitors||[]).join('、'))}">
+        </label>
         <div class="row" style="margin-top:4px">
           <button class="btn btn-primary btn-lg" onclick="startTracking()">
             <i class="ti ti-player-play"></i> 開始追蹤這場活動</button>
@@ -806,6 +810,8 @@ async function startTracking(){
     itri_event_id: bound ? sel.value : '',
     title: bound ? (opt?.dataset.name||'') : document.getElementById('s-title').value.trim(),
     date:  document.getElementById('s-date').value,   // 一律以畫面上那格為準
+    competitors: (document.getElementById('gen-comp')?.value||'')
+      .split(/[、,，]/).map(s=>s.trim()).filter(Boolean),
   };
 
   const r = await post(body);

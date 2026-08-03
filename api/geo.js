@@ -435,8 +435,9 @@ const GEN_SCHEMA = {
         additionalProperties: false,
       },
     },
+    competitors: { type: 'array', items: { type: 'string' } },
   },
-  required: ['prompts'],
+  required: ['prompts', 'competitors'],
   additionalProperties: false,
 };
 
@@ -459,7 +460,12 @@ ${ANGLES.map((a) => `- ${a.id}（${a.label}）：${a.hint}`).join('\n')}
 - 每句 15～45 字。
 - 貼著台灣的產業情境問，不要問成國際泛論。
 
-輸出 JSON：{"prompts":[{"angle":"who","prompt":"…"}, …]}`;
+另外列出 competitors：在這個關鍵字領域，**台灣本地**最常和工研院被相提並論的
+4～8 個單位（法人、大學研究中心、企業研究院都算）。要具體到會出現在報導裡的名稱，
+例如「陽明交大」「成大晶體研究中心」「鴻海研究院」，不要寫「各大學」這種泛稱。
+不要把工研院自己列進去。
+
+輸出 JSON：{"prompts":[{"angle":"who","prompt":"…"}, …],"competitors":["…","…"]}`;
 }
 
 async function generatePrompts(keyword) {
@@ -477,7 +483,13 @@ async function generatePrompts(keyword) {
   if (clean.length < 2) {
     throw new Error('生出來的題目不合格（可能都提到了工研院），請再按一次或換個關鍵字');
   }
-  return clean;
+
+  // 對照單位若沒生出來就退回通用名單，總比空的好
+  const competitors = (out.competitors || [])
+    .map((s) => String(s || '').trim())
+    .filter((s) => s && s.length <= 20 && !BRAND_RE.test(s));
+
+  return { prompts: clean, competitors: competitors.length ? competitors : COMPETITORS.split('、') };
 }
 
 /** 能見度指數 0–100：提及 45 ＋ 位置 20 ＋ 自家網域被引 20 ＋ 有具體內容 15 */
@@ -1176,9 +1188,13 @@ export default async function handler(req, res) {
       if (!title) title = keyword;
       if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) date = todayTW();
 
+      // 對照單位隨題目一起存：通用名單對不上題目領域的話，那一欄永遠是空的
+      const comps = (body.competitors || []).map((s) => String(s || '').trim()).filter(Boolean);
+      const compStr = comps.length ? comps.join('、') : COMPETITORS;
+
       const stamp = nowTW();
       await appendRows('geo_prompts!A:H', list.map((p) => [
-        uid('gp'), keyword, p, keyword, BRAND_DEFAULT, COMPETITORS, 'TRUE', stamp,
+        uid('gp'), keyword, p, keyword, BRAND_DEFAULT, compStr, 'TRUE', stamp,
       ]));
 
       const evId = uid('ge');
@@ -1257,7 +1273,8 @@ export default async function handler(req, res) {
       const keyword = String(body.keyword || '').trim();
       if (!keyword) return res.status(400).json({ error: '請先輸入一個關鍵字' });
       if (keyword.length > 40) return res.status(400).json({ error: '關鍵字太長了，給一個技術或主題名稱就好' });
-      return ok(res, { keyword, candidates: await generatePrompts(keyword) });
+      const gen = await generatePrompts(keyword);
+      return ok(res, { keyword, candidates: gen.prompts, competitors: gen.competitors });
     }
 
     // 一次存多題（生完題目勾選後送出）
