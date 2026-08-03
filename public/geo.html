@@ -164,9 +164,15 @@
       </button>
     </div>
 
-    <div id="s-manual" class="row" style="display:none">
-      <input type="text" id="s-title" class="grow" placeholder="活動名稱">
-      <input type="date" id="s-date">
+    <div id="s-manual" class="row">
+      <label class="fld" id="s-title-fld" style="display:none">
+        <span>活動名稱</span>
+        <input type="text" id="s-title" placeholder="例如：0910 淨零技術發表會">
+      </label>
+      <label class="fld" style="flex:0 0 200px">
+        <span>活動／發稿日 <span id="s-date-hint" style="font-weight:400;color:var(--muted)"></span></span>
+        <input type="date" id="s-date">
+      </label>
     </div>
 
     <div id="gen-out"></div>
@@ -275,7 +281,21 @@ async function loadItriEvents(){
 }
 function onPickEvent(){
   const sel = document.getElementById('s-event');
-  document.getElementById('s-manual').style.display = sel.value === '__other__' ? 'flex' : 'none';
+  const opt = sel.selectedOptions[0];
+  const other = sel.value === '__other__';
+  document.getElementById('s-title-fld').style.display = other ? 'flex' : 'none';
+
+  // ITRI EVENT AI 的活動沒有「活動日期」欄位，只有建立日期。基線與抬升都靠這個日期算，
+  // 所以一律讓人看得到、改得動，並講清楚帶進來的是什麼。
+  const d = document.getElementById('s-date');
+  const hint = document.getElementById('s-date-hint');
+  if(sel.value && !other && opt?.dataset.date){
+    d.value = opt.dataset.date;
+    hint.textContent = '（帶入建立日，請改成實際活動日）';
+  }else{
+    hint.textContent = '';
+    if(other) d.value = d.value || new Date().toISOString().slice(0,10);
+  }
 }
 
 /* ── 狀態列 ── */
@@ -611,7 +631,7 @@ async function startTracking(){
     prompts: picked,
     itri_event_id: bound ? sel.value : '',
     title: bound ? (opt?.dataset.name||'') : document.getElementById('s-title').value.trim(),
-    date:  bound ? (opt?.dataset.date||'') : document.getElementById('s-date').value,
+    date:  document.getElementById('s-date').value,   // 一律以畫面上那格為準
   };
 
   const r = await post(body);

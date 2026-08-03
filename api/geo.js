@@ -1035,6 +1035,7 @@ export default async function handler(req, res) {
         const evRow = (await safeRead('events!A2:K')).find((r) => r[0] === refId);
         if (!evRow) return res.status(404).json({ error: '找不到這場活動，請重新選一次' });
         title = title || evRow[1] || refId;
+        // events 分頁沒有「活動日期」欄，只有建立日期；畫面上填的優先，這裡只是保底
         date = date || (evRow[5] || '').slice(0, 10);
       }
       if (!title) title = keyword;
