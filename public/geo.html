@@ -70,6 +70,10 @@
   .pill{display:inline-block;border-radius:20px;padding:2px 9px;font-size:.72rem;font-weight:700;background:var(--primary-light);color:var(--primary-dark)}
   .empty{color:var(--muted);font-size:.85rem;padding:26px 0;text-align:center}
 
+  .linkbtn{background:none;border:none;padding:2px 0;margin-top:3px;font-family:var(--font);
+    font-size:.74rem;color:var(--down);cursor:pointer;display:inline-flex;align-items:center;gap:3px}
+  .linkbtn:hover{text-decoration:underline}
+
   tr.clickable{cursor:pointer}
   tr.clickable td:first-child::before{content:'\203A';display:inline-block;margin-right:6px;color:var(--muted);transition:transform .15s}
   tr.clickable.open td:first-child::before{transform:rotate(90deg)}
@@ -116,7 +120,7 @@
   .cand textarea:focus{border-color:var(--border);background:#fff;outline:none}
 
   .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:12px}
-  .row > *{flex:0 0 auto}
+  .row > *{flex:0 0 auto;min-width:0;max-width:100%}
   .grow{flex:1 1 220px}
   .excerpt{color:var(--muted);font-size:.78rem;max-width:min(520px,62vw)}
   #toast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%) translateY(20px);background:#1a1a2e;color:#fff;padding:11px 20px;border-radius:10px;font-size:.86rem;opacity:0;transition:.2s;z-index:99;pointer-events:none}
@@ -244,7 +248,7 @@
       <div class="row">
         <button class="btn btn-outline" id="kc-btn" onclick="keycheck()">
           <i class="ti ti-key"></i> 檢查金鑰狀態</button>
-        <span style="font-size:.76rem;color:var(--muted)">填了金鑰卻不能用？按這個，它會告訴你是金鑰的問題還是額度的問題</span>
+        <span class="grow" style="font-size:.76rem;color:var(--muted)">填了金鑰卻不能用？按這個，它會告訴你是金鑰的問題還是額度的問題</span>
       </div>
       <div id="kc-out"></div>
       <div id="key-howto"></div>
@@ -608,25 +612,28 @@ function renderChart(){
 /* ── 事件效應 ── */
 function renderEvents(events){
   const box = document.getElementById('events');
-  if(!events || !events.length){ box.innerHTML = '<div class="empty">還沒有事件標記。到下方「事件標記」把記者會日期加進來。</div>'; return; }
+  if(!events || !events.length){
+    box.innerHTML = '<div class="empty">還沒有追蹤中的活動。用最上面那張綠框卡片「追蹤一場活動」開始。</div>';
+    return;
+  }
   box.innerHTML = `<table><thead><tr>
       <th>#</th><th>日期</th><th>活動</th><th>鎖定議題</th>
-      <th>事前基線</th><th>峰值</th><th>半衰期</th><th>基線抬升</th><th></th></tr></thead><tbody>` +
+      <th>事前基線</th><th>峰值</th><th>半衰期</th><th>基線抬升</th></tr></thead><tbody>` +
     events.map((e,i)=>{
       const lift = e.lift===null ? (e.settled?'—':'<span class="flat">觀察中</span>')
         : `<span class="${e.lift>0?'up':e.lift<0?'down':'flat'}">${e.lift>0?'+':''}${e.lift}</span>`;
       return `<tr class="clickable" onclick="toggleFinds(this)">
         <td><span class="pill" style="background:#fef3c7;color:#92400e">${i+1}</span></td>
-        <td>${e.date}</td><td><b>${esc(e.title)}</b>${e.type?`<br><span style="color:var(--muted);font-size:.76rem">${esc(e.type)}</span>`:''}</td>
+        <td>${e.date}</td>
+        <td><b>${esc(e.title)}</b>
+          <br><button class="linkbtn" onclick="event.stopPropagation();stopTracking('${e.id}','${esc(e.title).replace(/'/g,"\\'")}')">
+            <i class="ti ti-trash"></i> 停止追蹤</button></td>
         <td>${e.matchedKeyword?esc(e.matchedKeyword):'<span class="flat">整體</span>'}</td>
         <td class="num-cell">${e.baseline??'—'}</td>
         <td class="num-cell">${e.peak??'—'}${e.peakDate?`<br><span style="color:var(--muted);font-size:.72rem;font-weight:400">${e.peakDate.slice(5)}</span>`:''}</td>
         <td class="num-cell">${e.halfLifeDays===null?'<span class="flat">未回落</span>':e.halfLifeDays+' 天'}</td>
-        <td class="num-cell">${lift}</td>
-        <td><button class="btn btn-ghost" title="停止追蹤"
-            onclick="event.stopPropagation();stopTracking('${e.id}','${esc(e.title).replace(/'/g,"\\'")}')">
-            <i class="ti ti-trash"></i></button></td></tr>
-        <tr class="find-row" style="display:none"><td colspan="9">${findsHtml(e.findings, e.windowSamples)}</td></tr>`;
+        <td class="num-cell">${lift}</td></tr>
+        <tr class="find-row" style="display:none"><td colspan="8">${findsHtml(e.findings, e.windowSamples)}</td></tr>`;
     }).join('') + '</tbody></table>';
 }
 
@@ -834,7 +841,8 @@ async function loadEvents(){
   box.innerHTML = `<table><thead><tr><th>日期</th><th>活動</th><th>議題</th><th>綁定</th><th></th></tr></thead><tbody>` +
     S.events.map(e=>`<tr><td>${e.date}</td><td>${esc(e.title)}</td><td>${esc(e.keywords)}</td>
       <td>${e.itri_event_id?'<span class="pill">已綁活動</span>':'<span class="flat">—</span>'}</td>
-      <td><button class="btn btn-ghost" onclick="delEvent('${e.id}')"><i class="ti ti-trash"></i></button></td></tr>`).join('') + '</tbody></table>';
+      <td><button class="linkbtn" onclick="stopTracking('${e.id}','${esc(e.title).replace(/'/g,"\\'")}')">
+        <i class="ti ti-trash"></i> 停止追蹤</button></td></tr>`).join('') + '</tbody></table>';
 }
 async function stopTracking(id, title){
   if(!confirm(`停止追蹤「${title}」？\n\n該議題的題目會全部停用、不再掃描也不再計費。\n已經掃到的歷史資料會保留。`)) return;
