@@ -83,6 +83,7 @@
   .find .w{font-size:.8rem;color:var(--muted);margin-bottom:5px}
   .find .d{font-size:.82rem}
   .find .d::before{content:'要做的事：';font-weight:700;color:var(--primary-dark)}
+  .find .d.plain::before{content:none}
   .find .d b{background:var(--primary-light);padding:0 3px;border-radius:3px}
 
   details summary{cursor:pointer;font-weight:700;font-size:.95rem;list-style:none;display:flex;align-items:center;gap:7px}
@@ -240,6 +241,12 @@
       <div class="desc" style="margin-top:12px"><b>要問哪幾家 AI</b>（有填金鑰的才能打開）</div>
       <div id="engine-toggles" class="chips"></div>
       <div id="engine-hint" style="font-size:.78rem;color:var(--muted)"></div>
+      <div class="row">
+        <button class="btn btn-outline" id="kc-btn" onclick="keycheck()">
+          <i class="ti ti-key"></i> 檢查金鑰狀態</button>
+        <span style="font-size:.76rem;color:var(--muted)">填了金鑰卻不能用？按這個，它會告訴你是金鑰的問題還是額度的問題</span>
+      </div>
+      <div id="kc-out"></div>
       <div id="key-howto"></div>
 
       <div class="desc" style="margin-top:18px"><b>同仁專用連結</b>
@@ -399,6 +406,38 @@ function renderEngines(s){
         Gemini 金鑰在 <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a> 免費申請。
       </div>
     </div>`;
+}
+
+/* ── 金鑰健檢 ── */
+const KC = {
+  ok:       { icon:'ti-circle-check',  cls:'good', label:'可用' },
+  nokey:    { icon:'ti-circle-minus',  cls:'info', label:'未填' },
+  noquota:  { icon:'ti-alert-triangle',cls:'warn', label:'額度未開通' },
+  nosearch: { icon:'ti-alert-triangle',cls:'warn', label:'沒帶回來源' },
+  badkey:   { icon:'ti-circle-x',      cls:'bad',  label:'金鑰無效' },
+  badmodel: { icon:'ti-circle-x',      cls:'bad',  label:'模型名稱有問題' },
+  error:    { icon:'ti-circle-x',      cls:'bad',  label:'失敗' },
+};
+async function keycheck(){
+  const btn = document.getElementById('kc-btn'), out = document.getElementById('kc-out');
+  btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader-2"></i> 檢查中…';
+  out.innerHTML = '<div class="empty">每家各打一次最便宜的呼叫，約 10–30 秒…</div>';
+  try{
+    const d = await api('action=keycheck');
+    if(d.error){ out.innerHTML = `<div class="empty down">${esc(d.error)}</div>`; }
+    else{
+      out.innerHTML = `<div class="keybox" style="margin-top:8px">` +
+        d.results.map(r=>{
+          const k = KC[r.state] || KC.error;
+          return `<div class="find ${k.cls}" style="margin-bottom:8px">
+            <div class="t"><i class="ti ${k.icon}"></i> ${esc(r.label)} — ${esc(k.label)}</div>
+            <div class="w"><code>${esc(r.env)}</code></div>
+            <div class="d plain">${esc(r.msg)}</div></div>`;
+        }).join('') +
+        `<div style="font-size:.76rem;color:var(--muted);margin-top:4px">判官：${esc(d.judge)}</div></div>`;
+    }
+  }catch(e){ out.innerHTML = `<div class="empty down">${esc(e.message)}</div>`; }
+  btn.disabled = false; btn.innerHTML = '<i class="ti ti-key"></i> 檢查金鑰狀態';
 }
 
 /* ── 同仁專用連結 ── */

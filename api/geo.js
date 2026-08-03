@@ -893,7 +893,7 @@ export default async function handler(req, res) {
     if (!role) return res.status(401).json({ error: code ? '這條連結已失效，請向承辦人索取新的' : '密碼錯誤' });
 
     const ADMIN_ONLY = new Set([
-      'settings_save', 'staff_link', 'prompt_delete', 'event_delete', 'seed', 'detail',
+      'settings_save', 'staff_link', 'prompt_delete', 'event_delete', 'seed', 'detail', 'keycheck',
     ]);
     const wanted = req.method === 'GET' ? q.action : q.action;
     if (role !== 'admin' && ADMIN_ONLY.has(wanted)) {
@@ -947,6 +947,49 @@ export default async function handler(req, res) {
           }),
           findings: diagnose(scored),
         });
+      }
+
+      /**
+       * 金鑰健檢：每個有金鑰的引擎各打一次最便宜的呼叫，把「金鑰有沒有效」和
+       * 「搜尋接地有沒有開通」分開講清楚。
+       * 這兩件事的症狀都是「不能用」，但一個要換金鑰、一個要去綁帳單，
+       * 沒分開就只能瞎猜。
+       */
+      if (action === 'keycheck') {
+        const results = await Promise.all(ENGINES.map(async (e) => {
+          if (!process.env[e.env]) {
+            return { engine: e.id, label: e.label, env: e.env, state: 'nokey',
+              msg: '還沒填金鑰' };
+          }
+          try {
+            const r = await e.run('台灣有哪些研發單位？一句話就好。');
+            if (!r.citations.length) {
+              return { engine: e.id, label: e.label, env: e.env, state: 'nosearch',
+                msg: '金鑰有效，但這次回應沒有帶任何搜尋來源' };
+            }
+            return { engine: e.id, label: e.label, env: e.env, state: 'ok',
+              msg: `正常，取得 ${r.citations.length} 筆來源` };
+          } catch (err) {
+            const m = String(err.message || '');
+            let state = 'error', msg = m.slice(0, 220);
+
+            if (/RESOURCE_EXHAUSTED|quota|429/i.test(m)) {
+              state = 'noquota';
+              msg = e.id === 'gemini'
+                ? '金鑰有效，但「Google 搜尋接地」沒有額度。Gemini 免費層不含接地，'
+                  + '要到 Google Cloud 把這個專案綁上帳單帳戶才會開通（綁了之後每月前 5,000 次仍免費）。'
+                : '這個引擎的額度用完了，或帳戶尚未開通付費。';
+            } else if (/401|403|API key|invalid|UNAUTHENTICATED|permission/i.test(m)) {
+              state = 'badkey';
+              msg = '金鑰無效或權限不足，請重新產生一把再貼一次。';
+            } else if (/not found|404|模型/i.test(m)) {
+              state = 'badmodel';
+              msg = `找不到模型，可能是模型名稱過期。${m.slice(0, 120)}`;
+            }
+            return { engine: e.id, label: e.label, env: e.env, state, msg };
+          }
+        }));
+        return ok(res, { results, judge: `${judgeEngine()} / ${judgeModel()}` });
       }
 
       // ITRI EVENT AI 的活動清單，給「選一場活動」下拉用
