@@ -94,6 +94,42 @@
   details summary::-webkit-details-marker{display:none}
   details summary::before{content:'\203A';display:inline-block;transition:transform .15s;font-size:1.2rem;color:var(--muted)}
   details[open] summary::before{transform:rotate(90deg)}
+  /* ── 一頁報告 ── */
+  .rep-head{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:4px}
+  .rep-sub{font-size:.8rem;color:var(--muted);margin-bottom:16px}
+  .rep-headline{font-size:1.12rem;font-weight:700;line-height:1.65;background:var(--primary-light);
+    border-left:4px solid var(--primary);border-radius:0 10px 10px 0;padding:14px 16px;margin-bottom:18px}
+  .rep-h3{font-size:.82rem;font-weight:700;color:var(--primary-dark);letter-spacing:.03em;
+    margin:20px 0 8px;padding-bottom:5px;border-bottom:1px solid var(--border)}
+  .rep-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px}
+  .rep-stat{border:1px solid var(--border);border-radius:12px;padding:14px}
+  .rep-stat .l{font-size:.78rem;color:var(--muted);line-height:1.5;margin-bottom:6px}
+  .rep-stat .v{font-size:1.3rem;font-weight:800;color:var(--text)}
+  .rep-stat .p{font-size:.76rem;font-weight:700;margin-top:2px}
+  .quote{border:1px solid var(--border);border-radius:12px;padding:14px 16px;margin-bottom:10px}
+  .quote.miss{background:#fef2f2;border-color:#fecaca}
+  .quote .q{font-size:.82rem;font-weight:700;margin-bottom:6px}
+  .quote .meta{font-size:.72rem;color:var(--muted);margin-bottom:8px}
+  .quote .t{font-size:.86rem;line-height:1.75;white-space:pre-wrap}
+  .dom{display:inline-block;font-size:.78rem;border:1px solid var(--border);border-radius:20px;
+    padding:3px 11px;margin:0 6px 6px 0}
+  .dom.own{background:var(--primary);color:#fff;border-color:transparent;font-weight:700}
+  .act{counter-increment:act;border-left:3px solid var(--primary);padding:8px 0 8px 12px;margin-bottom:12px}
+  .act .t{font-weight:700;font-size:.88rem;margin-bottom:3px}
+  .act .t::before{content:counter(act) '. '}
+  .act .d{font-size:.84rem;line-height:1.7}
+  #rep-out{counter-reset:act}
+
+  @media print{
+    body{background:#fff}
+    .wrap{max-width:none;padding:0}
+    #gate,.no-print,.head,.caveat,.kpi-grid,#snap-card,.start-card,
+    .card:not(#rep-card),#toast{display:none!important}
+    #rep-card{border:none;box-shadow:none;padding:0;margin:0}
+    .rep-headline{background:#f3f4f6}
+    .quote,.rep-stat{break-inside:avoid}
+  }
+
   .snap-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin-bottom:14px}
   .snap{border:1px solid var(--border);border-radius:12px;padding:12px 14px}
   .snap.dead{background:#fef2f2;border-color:#fecaca}
@@ -154,8 +190,9 @@
         <option value="180">近 180 天</option>
         <option value="365">近 365 天</option>
       </select>
+      <button class="btn btn-primary" onclick="openReport('')"><i class="ti ti-file-description"></i> 一頁報告</button>
       <button class="btn btn-outline" onclick="loadAll()"><i class="ti ti-refresh"></i> 重整</button>
-      <button class="btn btn-outline" id="test-btn" onclick="selftest()"><i class="ti ti-stethoscope"></i> 測 1 題</button>
+      <button class="btn btn-outline admin-only" id="test-btn" onclick="selftest()"><i class="ti ti-stethoscope"></i> 測 1 題</button>
       <button class="btn btn-primary" id="scan-btn" onclick="scan()"><i class="ti ti-player-play"></i> 立即掃描</button>
       <a class="btn btn-ghost admin-only" href="/admin"><i class="ti ti-arrow-left"></i> 回後台</a>
     </div>
@@ -204,6 +241,18 @@
     <h2><i class="ti ti-stethoscope" style="color:var(--primary)"></i> 自我測試（不入庫）</h2>
     <div class="desc">拿一題實跑到底，確認引擎跟判官真的通了、判分合理。上線後先按這個再開始掃。</div>
     <div id="test-out"></div>
+  </div>
+
+  <!-- 給主管看的一頁報告 -->
+  <div class="card" id="rep-card" style="display:none">
+    <div class="rep-head">
+      <h2><i class="ti ti-file-description" style="color:var(--primary)"></i> 一頁報告</h2>
+      <div class="no-print" style="display:flex;gap:8px">
+        <button class="btn btn-outline" onclick="window.print()"><i class="ti ti-printer"></i> 列印／存 PDF</button>
+        <button class="btn btn-ghost" onclick="document.getElementById('rep-card').style.display='none'">關閉</button>
+      </div>
+    </div>
+    <div id="rep-out"></div>
   </div>
 
   <div class="card" id="snap-card" style="display:none">
@@ -326,6 +375,80 @@ const post = (body) => fetch('/api/geo',{method:'POST',headers:{'Content-Type':'
 
 async function loadAll(){
   await Promise.all([loadStatus(), loadSeries(), loadPrompts(), loadEvents(), loadItriEvents(), loadSnapshot()]);
+}
+
+/* ── 一頁報告（給同仁與主管） ── */
+async function openReport(keyword){
+  const card = document.getElementById('rep-card'), out = document.getElementById('rep-out');
+  card.style.display = 'block';
+  card.scrollIntoView({behavior:'smooth', block:'start'});
+  out.innerHTML = '<div class="empty">整理中…</div>';
+
+  const d = await api(`action=report&days=30${keyword?`&keyword=${encodeURIComponent(keyword)}`:''}`);
+  if(d.error){ out.innerHTML = `<div class="empty down">${esc(d.error)}</div>`; return; }
+  if(!d.ready){ out.innerHTML = `<div class="empty">${esc(d.msg)}</div>`; return; }
+
+  const max = Math.max(...d.voiceBoard.map(x=>x.n), 1);
+  const bars = d.voiceBoard.map(x=>`
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:7px">
+      <div style="flex:0 0 130px;font-size:.84rem;${x.self?'font-weight:800':'color:var(--muted)'}">${esc(x.name)}</div>
+      <div style="flex:1 1 auto;background:#f1f3f5;border-radius:5px;height:20px;overflow:hidden">
+        <div style="width:${Math.round(x.n/max*100)}%;height:100%;background:${x.self?'var(--primary)':'#cbd5e1'}"></div>
+      </div>
+      <div style="flex:0 0 52px;text-align:right;font-size:.84rem;${x.self?'font-weight:800':'color:var(--muted)'}">${x.n} 次</div>
+    </div>`).join('');
+
+  const q = (o,miss)=>!o?'':`
+    <div class="quote ${miss?'miss':''}">
+      <div class="q">${esc(o.question)}</div>
+      <div class="meta">${esc(o.engine)}｜${esc(o.date)}${miss?'　← 這一題完全沒提到工研院':''}</div>
+      <div class="t">${esc(o.text)}</div>
+    </div>`;
+
+  out.innerHTML = `
+    <div class="rep-sub">議題：<b>${esc(d.keyword||'全部')}</b>｜
+      ${esc(d.dateRange[0])} ～ ${esc(d.dateRange[1])}｜
+      共 ${d.samples} 次問答｜問的對象：${d.engines.map(esc).join('、')}</div>
+
+    <div class="rep-headline">${esc(d.headline)}</div>
+
+    <div class="rep-h3">誰是這個議題的答案</div>
+    <div style="font-size:.78rem;color:var(--muted);margin-bottom:10px">
+      同一批問題、不指名任何單位，AI 各提到誰幾次</div>
+    ${bars}
+
+    <div class="rep-h3">三個數字</div>
+    <div class="rep-stats">${d.stats.map(s=>`
+      <div class="rep-stat">
+        <div class="l">${esc(s.label)}</div>
+        <div class="v">${esc(s.value)}</div>
+        ${s.pct===null?'':`<div class="p" style="color:${s.pct>=60?'var(--up)':s.pct>=30?'var(--event)':'var(--down)'}">${s.pct}%</div>`}
+        <div class="l" style="margin:6px 0 0;font-size:.72rem">${esc(s.hint)}</div>
+      </div>`).join('')}</div>
+
+    <div class="rep-h3">AI 實際上是怎麼講的</div>
+    ${q(d.quote,false)}${q(d.missed,true)}
+    ${!d.quote&&!d.missed?'<div class="empty">尚無可引用的原文</div>':''}
+
+    <div class="rep-h3">下一步</div>
+    ${d.actions.length ? d.actions.map(a=>`
+      <div class="act"><div class="t">${esc(a.title)}</div>
+        <div class="d">${esc(a.todo).replace(/\*\*(.+?)\*\*/g,'<b>$1</b>')}</div></div>`).join('')
+      : '<div class="empty">目前沒有需要處理的問題</div>'}
+
+    <details style="margin-top:18px">
+      <summary style="font-size:.8rem;color:var(--muted)">技術細節（AI 引用了誰的網頁）</summary>
+      <div style="margin-top:10px;font-size:.8rem">
+        <div style="margin-bottom:8px">${d.samples} 次裡有 ${Math.round(d.citedRate*d.samples/100)} 次引到工研院自己的網頁（${d.citedRate}%）</div>
+        ${d.ownedDomains.map(x=>`<span class="dom own">${esc(x.d)} ×${x.n}</span>`).join('')}
+        ${d.otherDomains.map(x=>`<span class="dom">${esc(x.d)} ×${x.n}</span>`).join('')}
+      </div>
+    </details>
+
+    <div style="font-size:.72rem;color:var(--muted);margin-top:18px;border-top:1px solid var(--border);padding-top:10px">
+      量測方式：以不指名工研院的問法詢問 AI 答案引擎，記錄回答內容。屬代理指標，
+      不等同 ChatGPT／Google AI Overviews 消費端畫面，對外引用請註明。
+    </div>`;
 }
 
 /* ── 現況快照：掃完立刻能看，不用等趨勢累積 ── */
@@ -676,7 +799,10 @@ function renderBoard(board){
   if(!board || !board.length){ box.innerHTML = '<div class="empty">尚無資料</div>'; return; }
   box.innerHTML = `<table><thead><tr><th>議題</th><th>能見度指數</th><th>變化</th><th>提及率</th><th>自家網域引用率</th><th>樣本</th></tr></thead><tbody>` +
     board.map(b=>`<tr class="clickable" onclick="toggleFinds(this)">
-      <td><b>${esc(b.keyword)}</b></td>
+      <td><b>${esc(b.keyword)}</b>
+        <br><button class="linkbtn" style="color:var(--primary-dark)"
+          onclick="event.stopPropagation();openReport('${esc(b.keyword).replace(/'/g,"\\'")}')">
+          <i class="ti ti-file-description"></i> 一頁報告</button></td>
       <td class="num-cell">${b.score??'—'}</td>
       <td class="num-cell ${b.delta>0?'up':b.delta<0?'down':'flat'}">${b.delta===null?'—':(b.delta>0?'▲ +':b.delta<0?'▼ ':'')+Math.abs(b.delta)}</td>
       <td class="num-cell">${b.mentionRate===null?'—':b.mentionRate+'%'}</td>

@@ -1034,6 +1034,115 @@ export default async function handler(req, res) {
         return ok(res, { results, judge: `${judgeEngine()} / ${judgeModel()}` });
       }
 
+      /**
+       * 一頁報告：給同仁與主管看的。
+       *
+       * 刻意不出現「能見度指數」「半衰期」這類詞 —— 主管不需要學我們的計分法，
+       * 他需要的是「AI 現在怎麼講工研院」「它引誰的網頁」「所以我們要改什麼」。
+       * 最有說服力的是 AI 的原話，所以原話一定要在裡面。
+       */
+      if (action === 'report') {
+        const kw = String(req.query.keyword || '').trim();
+        const days = Math.min(Math.max(parseInt(req.query.days, 10) || 30, 7), 365);
+        const from = addDays(todayTW(), -days + 1);
+
+        const all = (await safeRead('geo_runs!A2:O')).filter((r) => r[0]).map(parseRun)
+          .filter((r) => r.date >= from && (!kw || r.keyword === kw));
+        const scored = all.filter((r) => r.score !== null);
+
+        if (scored.length < 1) {
+          return ok(res, { keyword: kw, days, ready: false,
+            msg: '這個議題還沒有掃描結果，先按「立即掃描」。' });
+        }
+
+        const hit = scored.filter((r) => r.mentioned);
+        const mentionRate = Math.round((hit.length / scored.length) * 100);
+        const citedRate = Math.round((scored.filter((r) => r.cited).length / scored.length) * 100);
+        const ranks = hit.map((r) => r.rank).filter((x) => x > 0);
+        const avgRank = ranks.length ? Math.round(avg(ranks) * 10) / 10 : null;
+
+        // 同框單位出現次數
+        const compCount = {};
+        scored.forEach((r) => String(r.competitors || '').split(/[、,，]/)
+          .map((s) => s.trim()).filter(Boolean)
+          .forEach((c) => { compCount[c] = (compCount[c] || 0) + 1; }));
+
+        // 被引用的網域，分成自家與別人
+        const owned = {}, others = {};
+        scored.forEach((r) => String(r.citations || '').split('|').map((s) => s.trim()).filter(Boolean)
+          .forEach((c) => {
+            const host = c.includes('://') ? hostOf(c) : c.toLowerCase();
+            const bucket = matchesOwned(host) ? owned : others;
+            bucket[host] = (bucket[host] || 0) + 1;
+          }));
+
+        const latest = [...scored].reverse();
+        const quote = latest.find((r) => r.mentioned && r.excerpt);
+        const missed = latest.find((r) => !r.mentioned && r.excerpt);
+
+        const pRows = (await safeRead('geo_prompts!A2:H')).filter((r) => r[0]).map(parsePrompt);
+        const qOf = (id) => pRows.find((p) => p.id === id)?.prompt || '';
+
+        /* ── 話語權排行 ──
+         * 主管真正要看的是「這個議題被問到時，AI 認為誰是答案」，
+         * 不是我們的技術衛生指標。工研院和對手放同一張表比次數，位次自然浮出來。 */
+        const board = [
+          { name: '工研院', n: hit.length, self: true },
+          ...Object.entries(compCount).map(([name, n]) => ({ name, n, self: false })),
+        ].sort((a, b) => b.n - a.n || (b.self ? 1 : -1));
+
+        const myRank = board.findIndex((x) => x.self) + 1;
+        const top = board[0];
+        const rival = board.find((x) => !x.self) || null;
+        const gap = rival ? hit.length - rival.n : null;
+        const firstRate = hit.length
+          ? Math.round((hit.filter((r) => r.rank === 1).length / hit.length) * 100) : 0;
+
+        // 一句話結論：先講地位，再講差距
+        const topic = kw || '這些議題';
+        let headline;
+        if (!hit.length) {
+          headline = `問「${topic}」時，AI ${scored.length} 次全部沒有提到工研院。`
+            + (rival ? `它提到的是${board.filter((x) => !x.self).slice(0, 3).map((x) => x.name).join('、')}。` : '');
+        } else if (myRank === 1 && gap !== null && gap <= 1) {
+          headline = `「${topic}」上工研院目前排第一，但只領先${rival.name} ${gap} 次，隨時會被追過。`;
+        } else if (myRank === 1) {
+          headline = `「${topic}」上工研院是 AI 的首選答案：${scored.length} 次問答裡被提到 ${hit.length} 次，`
+            + (rival ? `第二名的${rival.name}是 ${rival.n} 次。` : '沒有其他單位被穩定提到。');
+        } else {
+          headline = `「${topic}」上工研院排第 ${myRank}，被提到 ${hit.length} 次，`
+            + `排在前面的是${board.slice(0, myRank - 1).map((x) => x.name).join('、')}（${top.n} 次）。`;
+        }
+
+        return ok(res, {
+          ready: true, keyword: kw, days, samples: scored.length,
+          dateRange: [scored[0].date, scored[scored.length - 1].date],
+          engines: [...new Set(scored.map((r) => r.engine))],
+          headline,
+          voiceBoard: board.slice(0, 8),
+          myRank,
+          stats: [
+            { label: '問到這個議題時，AI 提到工研院的比例',
+              value: `${scored.length} 次裡 ${hit.length} 次`, pct: mentionRate,
+              hint: '這是話語權的基本盤：不提到，後面都不用談' },
+            { label: '被提到時，工研院是第一個被講到的比例',
+              value: hit.length ? `${hit.filter((r) => r.rank === 1).length} / ${hit.length} 次` : '沒被提到過',
+              pct: hit.length ? firstRate : null,
+              hint: '排第一代表 AI 把我們當成這題的代表答案' },
+            { label: '和最強對手的差距',
+              value: rival ? `${gap > 0 ? '領先' : gap < 0 ? '落後' : '打平'} ${Math.abs(gap)} 次（${rival.name}）` : '沒有對手被穩定提到',
+              pct: null, hint: '同一批問題裡，誰被提到的次數多' },
+          ],
+          quote: quote ? { question: qOf(quote.prompt_id), engine: quote.engine, date: quote.date, text: quote.excerpt } : null,
+          missed: missed ? { question: qOf(missed.prompt_id), engine: missed.engine, date: missed.date, text: missed.excerpt } : null,
+          citedRate,
+          ownedDomains: Object.entries(owned).sort((a, b) => b[1] - a[1]).map(([d, n]) => ({ d, n })),
+          otherDomains: Object.entries(others).sort((a, b) => b[1] - a[1]).slice(0, 8)
+            .map(([d, n]) => ({ d, n })),
+          actions: diagnose(scored).filter((f) => f.level !== 'info').slice(0, 3),
+        });
+      }
+
       // ITRI EVENT AI 的活動清單，給「選一場活動」下拉用
       if (action === 'itri_events') {
         const rows = await safeRead('events!A2:K');
