@@ -96,7 +96,12 @@
   details[open] summary::before{transform:rotate(90deg)}
   /* ── 一頁報告 ── */
   .rep-head{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:4px}
-  .rep-sub{font-size:.8rem;color:var(--muted);margin-bottom:16px}
+  .doc-title{font-size:1.5rem;font-weight:800;letter-spacing:.02em;padding-bottom:10px;
+    border-bottom:3px solid var(--primary);margin-bottom:10px}
+  .doc-meta{display:flex;flex-wrap:wrap;gap:4px 18px;font-size:.78rem;color:var(--muted);margin-bottom:20px}
+  .rep-lead{font-size:.88rem;line-height:1.85;margin-bottom:4px}
+  .doc-note{font-size:.72rem;color:var(--muted);line-height:1.8;margin-top:20px;
+    border-top:1px solid var(--border);padding-top:10px}
   .rep-headline{font-size:1.12rem;font-weight:700;line-height:1.65;background:var(--primary-light);
     border-left:4px solid var(--primary);border-radius:0 10px 10px 0;padding:14px 16px;margin-bottom:18px}
   .rep-h3{font-size:.82rem;font-weight:700;color:var(--primary-dark);letter-spacing:.03em;
@@ -246,9 +251,12 @@
 
   <!-- 給主管看的一頁報告 -->
   <div class="card" id="rep-card" style="display:none">
-    <div class="rep-head">
+    <div class="rep-head no-print">
       <h2><i class="ti ti-file-description" style="color:var(--primary)"></i> 一頁報告</h2>
-      <div class="no-print" style="display:flex;gap:8px">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <input type="text" id="rep-by" placeholder="製表單位／人（會印出來）" style="width:210px"
+               oninput="localStorage.setItem('geo_by',this.value);document.getElementById('rep-by-line').textContent=this.value">
+        <button class="btn btn-primary" onclick="copySlide()"><i class="ti ti-presentation"></i> 複製簡報素材</button>
         <button class="btn btn-outline" onclick="window.print()"><i class="ti ti-printer"></i> 列印／存 PDF</button>
         <button class="btn btn-ghost" onclick="document.getElementById('rep-card').style.display='none'">關閉</button>
       </div>
@@ -378,10 +386,60 @@ async function loadAll(){
   await Promise.all([loadStatus(), loadSeries(), loadPrompts(), loadEvents(), loadItriEvents(), loadSnapshot()]);
 }
 
+/* ── 簡報素材：一頁報告太長，簡報要的是一張投影片的份量 ── */
+let LAST_REPORT = null;
+function copySlide(){
+  const d = LAST_REPORT;
+  if(!d) return toast('先產生報告');
+  const p = d.performance;
+  const L = [];
+
+  L.push(`【投影片標題】`);
+  L.push(p && p.ready
+    ? `${d.keyword||'重點議題'}：發稿後 AI 提及率由 ${p.before.mentionRate}% 升至 ${p.after.mentionRate}%`
+    : `AI 搜尋能見度盤點：${d.keyword||'重點議題'}`);
+  L.push('');
+
+  L.push(`【一句話結論】`);
+  L.push(d.headline);
+  L.push('');
+
+  if(p && p.ready){
+    L.push(`【前後對比】（發稿前 14 天 → 發稿後 15–30 天）`);
+    L.push(`・AI 提到工研院的比例：${p.before.mentionRate}% → ${p.after.mentionRate}%（${p.delta.mentionRate>0?'+':''}${p.delta.mentionRate}）`);
+    L.push(`・被提到時排第一的比例：${p.before.firstRate}% → ${p.after.firstRate}%（${p.delta.firstRate>0?'+':''}${p.delta.firstRate}）`);
+    L.push(`・議題位次：第 ${p.before.rank} 名 → 第 ${p.after.rank} 名`);
+    L.push('');
+  }
+
+  L.push(`【話語權排行】同一批問題、不指名任何單位，AI 分別提到幾次`);
+  d.voiceBoard.forEach((x,i)=>L.push(`${i+1}. ${x.name}　${x.n} 次${x.self?'　←　工研院':''}`));
+  L.push('');
+
+  L.push(`【關鍵數字】`);
+  d.stats.forEach(s=>L.push(`・${s.label}：${s.value}${s.pct!==null?`（${s.pct}%）`:''}`));
+  L.push('');
+
+  if(d.missed){
+    L.push(`【證據：這一題 AI 完全沒提到工研院】`);
+    L.push(`Q：${d.missed.question}`);
+    L.push(`A：${d.missed.text.slice(0,150)}…`);
+    L.push('');
+  }
+
+  L.push(`【備註（建議放小字）】`);
+  L.push(`調查期間 ${d.dateRange[0]}～${d.dateRange[1]}，${d.samples} 次問答，對象：${d.engines.join('、')}。`);
+  L.push(`以不指名工研院的問法詢問具網路搜尋能力之 AI 答案引擎，屬代理指標，不等同 ChatGPT／Google AI Overviews 消費端畫面。`);
+
+  navigator.clipboard.writeText(L.join('\n'))
+    .then(()=>toast('簡報素材已複製，可直接貼進投影片'))
+    .catch(()=>toast('複製失敗，請手動選取'));
+}
+
 /* ── 績效區塊：發稿前 vs 發稿後 ── */
-function perfHtml(p){
+function perfHtml(p, no){
   if(!p) return '';
-  const head = `<div class="rep-h3">這一場帶來的變化：${esc(p.event.title)}（${esc(p.event.date)}）</div>`;
+  const head = `<div class="rep-h3">${no}這一場帶來的變化：${esc(p.event.title)}（${esc(p.event.date)}）</div>`;
 
   if(!p.ready){
     return head + `<div class="perf-wait">
@@ -419,6 +477,7 @@ function perfHtml(p){
 /* ── 一頁報告（給同仁與主管） ── */
 async function openReport(keyword){
   const card = document.getElementById('rep-card'), out = document.getElementById('rep-out');
+  document.getElementById('rep-by').value = localStorage.getItem('geo_by') || '';
   card.style.display = 'block';
   card.scrollIntoView({behavior:'smooth', block:'start'});
   out.innerHTML = '<div class="empty">整理中…</div>';
@@ -426,6 +485,7 @@ async function openReport(keyword){
   const d = await api(`action=report&days=30${keyword?`&keyword=${encodeURIComponent(keyword)}`:''}`);
   if(d.error){ out.innerHTML = `<div class="empty down">${esc(d.error)}</div>`; return; }
   if(!d.ready){ out.innerHTML = `<div class="empty">${esc(d.msg)}</div>`; return; }
+  LAST_REPORT = d;
 
   const max = Math.max(...d.voiceBoard.map(x=>x.n), 1);
   const bars = d.voiceBoard.map(x=>`
@@ -444,21 +504,44 @@ async function openReport(keyword){
       <div class="t">${esc(o.text)}</div>
     </div>`;
 
-  out.innerHTML = `
-    <div class="rep-sub">議題：<b>${esc(d.keyword||'全部')}</b>｜
-      ${esc(d.dateRange[0])} ～ ${esc(d.dateRange[1])}｜
-      共 ${d.samples} 次問答｜問的對象：${d.engines.map(esc).join('、')}</div>
+  // 有前後對比才叫績效報告；沒有就是基準調查，標題自動切換，避免名實不符
+  const isPerf = !!(d.performance && d.performance.ready);
+  const title  = isPerf ? 'AI 搜尋能見度　成果績效報告' : 'AI 搜尋能見度　基準調查';
+  const by = localStorage.getItem('geo_by') || '';
+  const today = new Date().toLocaleDateString('sv-SE');
 
+  // 章節編號用計數器，不要各自寫死——績效區塊會依資料有無出現，寫死就會撞號
+  const CN = ['一','二','三','四','五','六','七','八','九'];
+  let _s = 0;
+  const sec = () => `${CN[_s++]}、`;   // 不要叫 S，全域狀態物件已經叫 S 了
+
+  out.innerHTML = `
+    <div class="doc-title">${title}</div>
+    <div class="doc-meta">
+      <span>議題：<b>${esc(d.keyword||'全部議題')}</b></span>
+      <span>調查期間：${esc(d.dateRange[0])} ～ ${esc(d.dateRange[1])}</span>
+      <span>樣本：${d.samples} 次問答</span>
+      <span>對象：${d.engines.map(esc).join('、')}</span>
+      <span>製表：${today}　<span id="rep-by-line">${esc(by)}</span></span>
+    </div>
+
+    <div class="rep-h3">${sec()}為什麼要看這件事</div>
+    <div class="rep-lead">記者找題目、廠商找合作對象、人才找去處，現在多半先問 AI 再決定要不要接觸。
+      而他們問的時候<b>不會先講「工研院」</b>——只會問「這個領域誰做得比較前面」。
+      這份調查量的就是：在那種不指名的問法下，AI 會不會把工研院講出來、排在第幾個、
+      以及同一批問題裡它把誰當成答案。</div>
+
+    <div class="rep-h3">${sec()}結論</div>
     <div class="rep-headline">${esc(d.headline)}</div>
 
-    ${perfHtml(d.performance)}
+    ${d.performance ? perfHtml(d.performance, sec()) : ''}
 
-    <div class="rep-h3">誰是這個議題的答案</div>
+    <div class="rep-h3">${sec()}這個議題上，AI 認為誰是答案</div>
     <div style="font-size:.78rem;color:var(--muted);margin-bottom:10px">
-      同一批問題、不指名任何單位，AI 各提到誰幾次</div>
+      同一批問題、不指名任何單位，AI 分別提到各單位幾次</div>
     ${bars}
 
-    <div class="rep-h3">三個數字</div>
+    <div class="rep-h3">${sec()}關鍵數字</div>
     <div class="rep-stats">${d.stats.map(s=>`
       <div class="rep-stat">
         <div class="l">${esc(s.label)}</div>
@@ -467,18 +550,19 @@ async function openReport(keyword){
         <div class="l" style="margin:6px 0 0;font-size:.72rem">${esc(s.hint)}</div>
       </div>`).join('')}</div>
 
-    <div class="rep-h3">AI 實際上是怎麼講的</div>
+    <div class="rep-h3">${sec()}AI 實際上是怎麼講的</div>
+    <div style="font-size:.78rem;color:var(--muted);margin-bottom:10px">以下為 AI 回答原文節錄，未經改寫</div>
     ${q(d.quote,false)}${q(d.missed,true)}
     ${!d.quote&&!d.missed?'<div class="empty">尚無可引用的原文</div>':''}
 
-    <div class="rep-h3">下一步</div>
+    <div class="rep-h3">${sec()}建議下一步</div>
     ${d.actions.length ? d.actions.map(a=>`
       <div class="act"><div class="t">${esc(a.title)}</div>
         <div class="d">${esc(a.todo).replace(/\*\*(.+?)\*\*/g,'<b>$1</b>')}</div></div>`).join('')
       : '<div class="empty">目前沒有需要處理的問題</div>'}
 
     <details style="margin-top:18px">
-      <summary style="font-size:.8rem;color:var(--muted)">技術細節（AI 引用了誰的網頁）</summary>
+      <summary style="font-size:.8rem;color:var(--muted)">附錄：AI 引用了誰的網頁</summary>
       <div style="margin-top:10px;font-size:.8rem">
         <div style="margin-bottom:8px">${d.samples} 次裡有 ${Math.round(d.citedRate*d.samples/100)} 次引到工研院自己的網頁（${d.citedRate}%）</div>
         ${d.ownedDomains.map(x=>`<span class="dom own">${esc(x.d)} ×${x.n}</span>`).join('')}
@@ -486,9 +570,11 @@ async function openReport(keyword){
       </div>
     </details>
 
-    <div style="font-size:.72rem;color:var(--muted);margin-top:18px;border-top:1px solid var(--border);padding-top:10px">
-      量測方式：以不指名工研院的問法詢問 AI 答案引擎，記錄回答內容。屬代理指標，
-      不等同 ChatGPT／Google AI Overviews 消費端畫面，對外引用請註明。
+    <div class="doc-note">
+      <b>量測方法</b>：以不指名工研院的問句詢問具備網路搜尋能力的 AI 答案引擎，
+      逐次記錄回答內容、提及單位與引用來源，分數由程式依固定規則計算，非人工評分。<br>
+      <b>限制</b>：本數據為代理指標，不等同 ChatGPT 或 Google AI Overviews 消費端畫面；
+      單次查詢具隨機性，趨勢判讀以七日均線為準。對外引用請一併載明本限制。
     </div>`;
 }
 
