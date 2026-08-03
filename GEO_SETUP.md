@@ -32,9 +32,15 @@
 
 | 變數 | 說明 | 去哪拿 |
 |---|---|---|
-| `GEMINI_API_KEY` | 判官（打分）走它，這段免費 | [aistudio.google.com/apikey](https://aistudio.google.com/apikey) |
-| `OPENAI_API_KEY` | 想讓 ChatGPT 也入列才要填 | platform.openai.com |
+| `GEMINI_API_KEY` | 判官（打分）走它 | [aistudio.google.com/apikey](https://aistudio.google.com/apikey) |
+| `OPENAI_API_KEY` | 想讓 ChatGPT 也入列才要填 | [platform.openai.com/api-keys](https://platform.openai.com/api-keys) |
 | `PERPLEXITY_API_KEY` | 想讓 Perplexity 也入列才要填 | perplexity.ai/settings/api |
+
+> ⚠️ **三家是三間不同公司、三個帳號、三筆帳單。** 在 Google 儲值只會開通 Gemini，
+> 不會讓 ChatGPT 或 Claude 能用。每一家都要各自去它自己的平台開帳號、儲值、拿金鑰。
+>
+> **ChatGPT Plus／Claude Pro 訂閱不含 API 額度**——訂閱是給網頁版聊天用的，
+> API 要在 platform.openai.com／console.anthropic.com 另外儲值。
 
 `ANTHROPIC_API_KEY`、`ADMIN_PASSWORD`、Google 三把鑰匙沿用現有的，不用動。
 
@@ -118,11 +124,19 @@ Google 試算表的 `geo_prompts`／`geo_runs`／`geo_events`／`geo_settings` �
 **已實測：Gemini 免費層不提供 Google 搜尋接地**（定價頁寫 Not available，
 實測接地一律回 429、純文字正常）。那 5,000 次／月免費接地要先綁帳單帳戶。
 
-| 設定 | 每月概估 | 綁信用卡 |
+| 設定 | 每月概估 | 要儲值嗎 |
 |---|---|---|
-| 探測 Claude ＋ 判官 Gemini（**預設**） | 約 NT$450–900 | 不用 |
-| 探測 Gemini ＋ 判官 Gemini | ≈NT$0 | 要 |
-| 加開 ChatGPT／Perplexity | 各自再往上加 | 依各家 |
+| 探測 Claude ＋ 判官 Gemini | 約 NT$450–900 | Anthropic 要 |
+| 探測 Gemini ＋ 判官 Gemini | 儲值後 ≈NT$0（360／5,000 次免費額度內） | Google 要 |
+| **加開 ChatGPT** | **再加約 NT$250–400** | OpenAI 要另外儲值 |
+
+**加開 ChatGPT 的費用怎麼來的**：OpenAI 的網路搜尋工具是每 1,000 次 US$10，
+外加每次搜尋固定計 8,000 個 input token。本工具每月約 360 次搜尋 ≈ US$3.6
+＋ 約 288 萬 input token，合計大約 US$8–12。這是估算，實際以 OpenAI 帳單為準。
+
+對照：Gemini 接地是每 1,000 次 US$14，但**每月前 5,000 次免費**，
+所以 360 次落在免費額度內、實際不扣。這就是為什麼 Gemini 儲值一次之後幾乎不再花錢，
+而 ChatGPT 是每個月都在燒。
 
 判官走 Gemini 免費層已實測可用。控成本最快的方法是**到「設定」把用不到的引擎關掉、
 把過期活動的題目停用**（停用的不掃、不計費）。

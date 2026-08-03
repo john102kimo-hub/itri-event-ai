@@ -406,8 +406,24 @@ function renderEngines(s){
         <li>回 <b>Deployments</b> → 最新一筆 <b>⋯</b> → <b>Redeploy</b></li>
         <li>回來這頁按「重整」，灰掉的就會亮起來</li>
       </ol>
-      <div style="margin-top:8px;color:var(--muted)">
-        Gemini 金鑰在 <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a> 免費申請。
+
+      <div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border)">
+        <b>金鑰各自去哪拿</b>
+        <div style="color:var(--muted);margin:4px 0 8px">
+          三家是三間不同公司、三個帳號、三筆帳單。在其中一家儲值，<b>不會</b>讓另外兩家能用。</div>
+        <table style="font-size:.8rem">
+          <tr><td><code>ANTHROPIC_API_KEY</code></td>
+              <td>Claude</td>
+              <td><a href="https://console.anthropic.com" target="_blank" rel="noopener">console.anthropic.com</a></td></tr>
+          <tr><td><code>GEMINI_API_KEY</code></td>
+              <td>Gemini</td>
+              <td><a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a></td></tr>
+          <tr><td><code>OPENAI_API_KEY</code></td>
+              <td>ChatGPT</td>
+              <td><a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener">platform.openai.com/api-keys</a></td></tr>
+        </table>
+        <div style="color:var(--muted);margin-top:8px">
+          ⚠️ <b>ChatGPT Plus／Claude Pro 訂閱不含 API 額度</b>，要在各自的 platform／console 另外儲值。</div>
       </div>
     </div>`;
 }
