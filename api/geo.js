@@ -324,8 +324,8 @@ function parseJudge(text) {
   }
 }
 
-async function askAnthropic(prompt, schema, maxTokens) {
-  const base = { model: judgeModel(), max_tokens: maxTokens, messages: [{ role: 'user', content: prompt }] };
+async function askAnthropic(prompt, schema, maxTokens, model = judgeModel()) {
+  const base = { model, max_tokens: maxTokens, messages: [{ role: 'user', content: prompt }] };
   let data;
   try {
     data = await anthropic({
@@ -348,7 +348,7 @@ async function askAnthropic(prompt, schema, maxTokens) {
  * 思考就吃掉 1,436，JSON 只寫到一半就 MAX_TOKENS 截斷 —— 表面症狀是「回傳不是 JSON」，
  * 而且會隨機發生。所以要壓低思考層級，同時把上限開大。
  */
-async function askGemini(prompt, maxTokens) {
+async function askGemini(prompt, maxTokens, model = judgeModel()) {
   const budget = Math.max(maxTokens * 3, 6000);
   const base = {
     contents: [{ role: 'user', parts: [{ text: prompt }] }],
@@ -360,11 +360,11 @@ async function askGemini(prompt, maxTokens) {
     data = await gemini({
       ...base,
       generationConfig: { ...base.generationConfig, thinkingConfig: { thinkingLevel: 'low' } },
-    }, judgeModel());
+    }, model);
   } catch (err) {
     // 舊機型不吃 thinkingLevel，就純靠放大上限
     if (!/thinking|invalid argument/i.test(err.message)) throw err;
-    data = await gemini(base, judgeModel());
+    data = await gemini(base, model);
   }
 
   const c = data.candidates?.[0] || {};
@@ -375,12 +375,39 @@ async function askGemini(prompt, maxTokens) {
   return parseJudge(text);
 }
 
-/** 要 JSON 的內部呼叫都走這裡，路由到判官那顆模型（通常是免費的 Gemini） */
+/** 這類錯誤換一家就有機會成功（額度用完、金鑰失效、服務暫時掛掉） */
+const isSwitchable = (m) =>
+  /RESOURCE_EXHAUSTED|quota|credit|429|401|403|UNAUTHENTICATED|permission|5\d\d/i.test(String(m));
+
+/**
+ * 要 JSON 的內部呼叫都走這裡。
+ *
+ * 會自動換一家的理由：判官掛掉會讓整批掃描全滅，而不是少一筆。
+ * 實際踩過 —— Gemini 預付額度用完，連純文字都 429，如果不退回 Anthropic，
+ * 那天的資料就整天都是空的。
+ */
 async function askJSON(prompt, schema, maxTokens = 1000) {
-  if (!judgeEngine()) throw new Error('沒有可用的模型：請先在 Vercel 填一把 API 金鑰');
-  return judgeEngine() === 'gemini'
-    ? askGemini(prompt, maxTokens)
-    : askAnthropic(prompt, schema, maxTokens);
+  const primary = judgeEngine();
+  if (!primary) throw new Error('沒有可用的模型：請先在 Vercel 填一把 API 金鑰');
+
+  const run = (eng) => (eng === 'gemini'
+    ? askGemini(prompt, maxTokens, GEMINI_MODEL)
+    : askAnthropic(prompt, schema, maxTokens, PROBE_MODEL));
+
+  try {
+    return await run(primary);
+  } catch (err) {
+    const alt = primary === 'gemini' ? 'anthropic' : 'gemini';
+    const altKey = alt === 'gemini' ? 'GEMINI_API_KEY' : 'ANTHROPIC_API_KEY';
+    if (!process.env[altKey] || !isSwitchable(err.message)) throw err;
+
+    try {
+      return await run(alt);
+    } catch (err2) {
+      throw new Error(`${primary} 判官失敗（${String(err.message).slice(0, 90)}），`
+        + `改用 ${alt} 也失敗（${String(err2.message).slice(0, 90)}）`);
+    }
+  }
 }
 
 const judge = (args) => askJSON(judgePrompt(args), JUDGE_SCHEMA);
@@ -973,11 +1000,14 @@ export default async function handler(req, res) {
             const m = String(err.message || '');
             let state = 'error', msg = m.slice(0, 220);
 
-            if (/RESOURCE_EXHAUSTED|quota|429/i.test(m)) {
+            if (/RESOURCE_EXHAUSTED|quota|429|prepay|credit/i.test(m)) {
               state = 'noquota';
               msg = e.id === 'gemini'
-                ? '金鑰有效，但「Google 搜尋接地」沒有額度。Gemini 免費層不含接地，'
-                  + '要到 Google Cloud 把這個專案綁上帳單帳戶才會開通（綁了之後每月前 5,000 次仍免費）。'
+                ? '金鑰有效，但「Google 搜尋接地」沒有額度可用。兩種可能：'
+                  + '(1) 專案還在免費層——免費層不含搜尋接地；'
+                  + '(2) 已經是付費層但預付額度用完了。'
+                  + '兩種都是到 ai.studio/projects 的 Billing 處理（儲值或啟用付費）。'
+                  + '開通後每月前 5,000 次接地免費，本工具每月約用 360 次。'
                 : '這個引擎的額度用完了，或帳戶尚未開通付費。';
             } else if (/401|403|API key|invalid|UNAUTHENTICATED|permission/i.test(m)) {
               state = 'badkey';
