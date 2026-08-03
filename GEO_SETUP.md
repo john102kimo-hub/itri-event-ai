@@ -21,18 +21,32 @@
 
 ## 二、上線設定（只要填 API 金鑰）
 
-Vercel → Settings → Environment Variables：
+進 `/geo` → 最下面「設定」，會直接列出**還缺哪些金鑰、以及一步一步該點哪裡**。
+照著做就好，這裡是同一份說明：
 
-| 變數 | 說明 |
-|---|---|
-| `GEMINI_API_KEY` | Google AI Studio 免費申請。判官（打分）走它，這段免費 |
-| `OPENAI_API_KEY` | 想讓 ChatGPT 也入列才要填 |
-| `PERPLEXITY_API_KEY` | 想讓 Perplexity 也入列才要填 |
+1. 開 [vercel.com/dashboard](https://vercel.com/dashboard) → 專案 `itri-event-ai`
+2. 上方 **Settings** → 左側 **Environment Variables**
+3. Key 填變數名，Value 貼金鑰，Environments 三個都勾，按 **Save**
+4. 回 **Deployments** → 最新一筆 **⋯** → **Redeploy**
+5. 回 `/geo` 按「重整」，灰掉的引擎就會亮起來
+
+| 變數 | 說明 | 去哪拿 |
+|---|---|---|
+| `GEMINI_API_KEY` | 判官（打分）走它，這段免費 | [aistudio.google.com/apikey](https://aistudio.google.com/apikey) |
+| `OPENAI_API_KEY` | 想讓 ChatGPT 也入列才要填 | platform.openai.com |
+| `PERPLEXITY_API_KEY` | 想讓 Perplexity 也入列才要填 | perplexity.ai/settings/api |
 
 `ANTHROPIC_API_KEY`、`ADMIN_PASSWORD`、Google 三把鑰匙沿用現有的，不用動。
 
-**其餘都不用設。** 要問哪幾家 AI、誰來打分，全部在網頁「設定」裡點——
-沒填金鑰的引擎會是灰的，填了金鑰 Redeploy 後就能打開。
+**其餘都不用設。** 要問哪幾家 AI 在網頁「設定」裡點就好。
+
+### 同仁專用連結
+
+「設定」裡有一條 `…/geo?code=xxxx` 的連結，複製給同仁即可。
+
+- 同仁**能**：開新追蹤、看曲線與建議、手動掃描
+- 同仁**不能**：改設定、刪題目、看後台其他活動的問答資料，也拿不到後台密碼
+- 連結外流就按「換一組」，舊連結立刻失效
 
 Google 試算表的 `geo_prompts`／`geo_runs`／`geo_events`／`geo_settings` 四個分頁會自動建立。
 
@@ -42,6 +56,10 @@ Google 試算表的 `geo_prompts`／`geo_runs`／`geo_events`／`geo_settings` �
 ---
 
 ## 三、看什麼
+
+### 現況快照 ← 掃完就有，不用等
+最近一次掃描，各家 AI 各給幾分、幾題提到工研院、幾題引到自家網頁，加上診斷建議。
+**這一段第一天就看得到。**
 
 ### 上面四個數字
 近 14 天的能見度指數、提及率、自家網域引用率、累計樣本。
@@ -70,11 +88,26 @@ Google 試算表的 `geo_prompts`／`geo_runs`／`geo_events`／`geo_settings` �
 
 ---
 
-## 四、重要：要在活動前兩週就開始追蹤
+## 四、什麼馬上有、什麼要等
 
-沒有事前基線，就算不出抬升——你只會看到一根衝高的線，卻不知道它比原本高多少。
+| 你想知道 | 什麼時候有 |
+|---|---|
+| 現在 AI 怎麼回答、有沒有提到工研院、引誰的網頁 | **掃完就有**（現況快照） |
+| 該改什麼（診斷建議） | **掃完就有** |
+| 各議題的相對強弱（議題排行） | 掃完就有 |
+| 趨勢曲線 | 累積幾天才看得出形狀，七日均線要 7 天 |
+| **半衰期、基線抬升** | **必須事前累積，做不到回溯** |
 
-所以大場的流程是：**發稿前兩週**開好追蹤 → 系統自己累積基線 → 活動後看抬升。
+**趨勢不能回溯的原因**：沒有任何地方保存「上個月 ChatGPT 怎麼回答固態電池」這種歷史，
+只能從開始追蹤那天起一天一筆地量。這不是設計問題，是這類資料的本質。
+
+所以大場的流程是：**發稿前兩週**開好追蹤 → 系統自己累積基線 → 活動後才算得出抬升。
+臨時才開也不是不能用——現況快照與建議照樣有，只是那一場的「留下多少」算不出來。
+
+### 不追了怎麼辦
+
+事件效應表每一列右邊有垃圾桶：**停止追蹤**。該議題的題目會全部停用、不再掃也不再計費，
+已經掃到的歷史資料保留。
 
 ---
 

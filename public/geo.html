@@ -89,6 +89,18 @@
   details summary::-webkit-details-marker{display:none}
   details summary::before{content:'\203A';display:inline-block;transition:transform .15s;font-size:1.2rem;color:var(--muted)}
   details[open] summary::before{transform:rotate(90deg)}
+  .snap-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin-bottom:14px}
+  .snap{border:1px solid var(--border);border-radius:12px;padding:12px 14px}
+  .snap.dead{background:#fef2f2;border-color:#fecaca}
+  .snap-name{font-size:.78rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.03em}
+  .snap-score{font-size:1.8rem;font-weight:800;color:var(--primary);line-height:1.2}
+  .snap.dead .snap-score{color:var(--down)}
+  .snap-sub{font-size:.76rem;color:var(--muted)}
+  .snap-err{font-size:.72rem;color:var(--down);margin-top:5px;word-break:break-word}
+  .keybox{background:#f9fafb;border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-top:10px;font-size:.82rem}
+  .keybox code{background:#fff;border:1px solid var(--border);border-radius:5px;padding:1px 6px;font-size:.86em}
+  .keybox ol{margin:8px 0 0 18px;line-height:1.9}
+
   .start-card{border:2px solid var(--primary);box-shadow:0 4px 20px rgba(15,158,122,.10)}
   .start-grid{display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap}
   .fld{display:flex;flex-direction:column;gap:5px;flex:1 1 240px;min-width:0}
@@ -140,7 +152,7 @@
       <button class="btn btn-outline" onclick="loadAll()"><i class="ti ti-refresh"></i> 重整</button>
       <button class="btn btn-outline" id="test-btn" onclick="selftest()"><i class="ti ti-stethoscope"></i> 測 1 題</button>
       <button class="btn btn-primary" id="scan-btn" onclick="scan()"><i class="ti ti-player-play"></i> 立即掃描</button>
-      <a class="btn btn-ghost" href="/admin"><i class="ti ti-arrow-left"></i> 回後台</a>
+      <a class="btn btn-ghost admin-only" href="/admin"><i class="ti ti-arrow-left"></i> 回後台</a>
     </div>
   </div>
 
@@ -189,11 +201,18 @@
     <div id="test-out"></div>
   </div>
 
+  <div class="card" id="snap-card" style="display:none">
+    <h2><i class="ti ti-bolt" style="color:var(--primary)"></i> 現況快照 <span id="snap-kw" class="pill"></span></h2>
+    <div class="desc">最近一次掃描的結果。<b>這一段掃完就有，不用等。</b></div>
+    <div id="snap-out"></div>
+  </div>
+
   <div class="kpi-grid" id="kpis"></div>
 
   <div class="card">
     <h2><i class="ti ti-chart-line" style="color:var(--primary)"></i> 能見度指數走勢</h2>
-    <div class="desc">0–100。提及 45＋位置 20＋自家網域被引用 20＋有具體內容 15。實線為七日均線，淡點為單日原始值，橘色虛線為記者會／發稿事件。</div>
+    <div class="desc">0–100。提及 45＋位置 20＋自家網域被引用 20＋有具體內容 15。實線為七日均線，淡點為單日原始值，橘色虛線為活動日。
+      <b>這張圖需要時間累積</b>——沒有人保存「上個月 AI 怎麼回答」的歷史，只能從開始追蹤那天起一天一筆。</div>
     <div class="chips" id="chips"></div>
     <div class="chart-box">
       <svg id="chart" viewBox="0 0 920 340" preserveAspectRatio="none"></svg>
@@ -203,7 +222,8 @@
 
   <div class="card">
     <h2><i class="ti ti-flag" style="color:var(--event)"></i> 事件效應：這一場替你留下幾天記憶</h2>
-    <div class="desc">半衰期＝峰值掉回「峰值與基線的中點」要幾天；基線抬升＝事件後第 15–30 天的均分減掉事前 14 天基線。抬升是真正能寫進績效的數字。<b>點任一列看這場的診斷與下一步。</b></div>
+    <div class="desc">半衰期＝峰值掉回「峰值與基線的中點」要幾天；基線抬升＝事件後第 15–30 天的均分減掉事前 14 天基線。抬升是真正能寫進績效的數字。<b>點任一列看這場的診斷與下一步。</b>
+      這兩個數字<b>做不到回溯</b>：要在活動前兩週就開始追蹤，才算得出基線。</div>
     <div id="events" class="tbl"></div>
   </div>
 
@@ -213,13 +233,18 @@
     <div id="board" class="tbl"></div>
   </div>
 
-  <div class="card">
+  <div class="card admin-only">
     <details>
       <summary><i class="ti ti-settings"></i> 設定</summary>
 
       <div class="desc" style="margin-top:12px"><b>要問哪幾家 AI</b>（有填金鑰的才能打開）</div>
       <div id="engine-toggles" class="chips"></div>
       <div id="engine-hint" style="font-size:.78rem;color:var(--muted)"></div>
+      <div id="key-howto"></div>
+
+      <div class="desc" style="margin-top:18px"><b>同仁專用連結</b>
+        — 同仁用這條連結不必知道後台密碼，也看不到後台其他東西</div>
+      <div id="staff-link-box"></div>
 
       <div class="desc" style="margin-top:18px"><b>題庫</b>（<span id="prompt-count">0</span> 題）— 停用的不會掃、也不計費</div>
       <div id="prompts" class="tbl"></div>
@@ -234,6 +259,8 @@
 
       <div class="desc" style="margin-top:18px"><b>追蹤中的活動</b>（<span id="event-count">0</span> 場）</div>
       <div id="event-list" class="tbl"></div>
+      <div style="font-size:.76rem;color:var(--muted);margin-top:6px">
+        停止追蹤＝該議題的題目全部停用、不再計費，已掃到的歷史資料保留。</div>
     </details>
   </div>
 
@@ -243,7 +270,8 @@
 
 <script>
 const PALETTE = ['#0F9E7A','#3b82f6','#8b5cf6','#ec4899','#f97316','#14b8a6','#6366f1','#84cc16'];
-let S = { pwd:'', data:null, status:null, on:new Set(['__overall__']), prompts:[], events:[] };
+let S = { pwd:'', code:'', role:'admin', data:null, status:null,
+          on:new Set(['__overall__']), prompts:[], events:[] };
 
 /* ── 登入 ── */
 function toast(m){const t=document.getElementById('toast');t.textContent=m;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2600);}
@@ -259,14 +287,56 @@ async function unlock(){
   loadAll();
 }
 document.getElementById('gate-input').addEventListener('keydown', e=>{ if(e.key==='Enter') unlock(); });
-(function(){ const p = sessionStorage.getItem('itri_pwd'); if(p){ document.getElementById('gate-input').value = p; unlock(); } })();
 
-const api = (qs) => fetch(`/api/geo?${qs}&password=${encodeURIComponent(S.pwd)}`).then(r=>r.json());
+/* 同仁專用連結：網址帶 ?code=… 就免密碼進場，但只看得到追蹤相關的東西 */
+(async function(){
+  const code = new URLSearchParams(location.search).get('code');
+  if(code){
+    const res = await fetch(`/api/geo?action=status&code=${encodeURIComponent(code)}`);
+    if(res.ok){
+      S.code = code; S.role = 'staff';
+      document.querySelectorAll('.admin-only').forEach(el=>el.remove());
+      document.getElementById('gate').style.display='none';
+      document.getElementById('app').style.display='block';
+      return loadAll();
+    }
+    document.getElementById('gate-err').textContent = '這條連結已失效，請向承辦人索取新的';
+    return;
+  }
+  const p = sessionStorage.getItem('itri_pwd');
+  if(p){ document.getElementById('gate-input').value = p; unlock(); }
+})();
+
+const auth = () => S.role==='staff'
+  ? `code=${encodeURIComponent(S.code)}` : `password=${encodeURIComponent(S.pwd)}`;
+const api = (qs) => fetch(`/api/geo?${qs}&${auth()}`).then(r=>r.json());
 const post = (body) => fetch('/api/geo',{method:'POST',headers:{'Content-Type':'application/json'},
-  body:JSON.stringify({...body, password:S.pwd})}).then(r=>r.json());
+  body:JSON.stringify(S.role==='staff' ? {...body, code:S.code} : {...body, password:S.pwd})}).then(r=>r.json());
 
 async function loadAll(){
-  await Promise.all([loadStatus(), loadSeries(), loadPrompts(), loadEvents(), loadItriEvents()]);
+  await Promise.all([loadStatus(), loadSeries(), loadPrompts(), loadEvents(), loadItriEvents(), loadSnapshot()]);
+}
+
+/* ── 現況快照：掃完立刻能看，不用等趨勢累積 ── */
+async function loadSnapshot(keyword){
+  const d = await api(`action=snapshot${keyword?`&keyword=${encodeURIComponent(keyword)}`:''}`);
+  const card = document.getElementById('snap-card'), out = document.getElementById('snap-out');
+  if(d.error || !d.engines || !d.engines.length){ card.style.display='none'; return; }
+  card.style.display='block';
+  document.getElementById('snap-kw').textContent = d.keyword ? d.keyword : '全部議題';
+
+  out.innerHTML = `<div style="font-size:.78rem;color:var(--muted);margin-bottom:10px">掃描日 ${esc(d.date)}</div>` +
+    `<div class="snap-grid">` + d.engines.map(e=>{
+      const dead = e.score===null;
+      return `<div class="snap ${dead?'dead':''}">
+        <div class="snap-name">${esc(e.engine)}</div>
+        <div class="snap-score">${dead?'—':e.score}</div>
+        <div class="snap-sub">${dead
+          ? `<span class="down">全部失敗</span>`
+          : `${e.total} 題中提到 <b>${e.mentioned}</b> 次｜引到自家網頁 <b>${e.cited}</b> 次`}</div>
+        ${e.sampleError?`<div class="snap-err">${esc(e.sampleError)}</div>`:''}
+      </div>`;
+    }).join('') + `</div>` + findsHtml(d.findings, d.scored);
 }
 
 /* ── 活動下拉：直接讀 ITRI EVENT AI 的活動清單 ── */
@@ -310,8 +380,47 @@ function renderEngines(s){
   }).join('');
   const missing = s.engines.filter(e=>!e.hasKey);
   document.getElementById('engine-hint').innerHTML = missing.length
-    ? `灰掉的還沒有金鑰。到 Vercel → Settings → Environment Variables 填 ${missing.map(e=>`<code>${esc(e.env)}</code>`).join('、')}，Redeploy 後就能打開。`
-    : '全部都有金鑰了。';
+    ? `灰掉的還沒有金鑰。` : '全部都有金鑰了。';
+
+  document.getElementById('key-howto').innerHTML = !missing.length ? '' : `
+    <div class="keybox">
+      <b>金鑰放這裡：</b>
+      <ol>
+        <li>開 <a href="https://vercel.com/dashboard" target="_blank" rel="noopener">vercel.com/dashboard</a>
+            → 專案 <code>itri-event-ai</code></li>
+        <li>上方 <b>Settings</b> → 左側 <b>Environment Variables</b></li>
+        <li>Key 填下面這個名字，Value 貼金鑰，Environments 三個都勾，按 <b>Save</b>：
+          <div style="margin-top:6px">${missing.map(e=>
+            `<code>${esc(e.env)}</code> <span style="color:var(--muted)">← ${esc(e.label)}</span>`).join('<br>')}</div></li>
+        <li>回 <b>Deployments</b> → 最新一筆 <b>⋯</b> → <b>Redeploy</b></li>
+        <li>回來這頁按「重整」，灰掉的就會亮起來</li>
+      </ol>
+      <div style="margin-top:8px;color:var(--muted)">
+        Gemini 金鑰在 <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a> 免費申請。
+      </div>
+    </div>`;
+}
+
+/* ── 同仁專用連結 ── */
+async function loadStaffLink(regenerate){
+  const box = document.getElementById('staff-link-box');
+  if(!box) return;
+  const r = await post({ action:'staff_link', regenerate:!!regenerate });
+  if(r.error) return void(box.innerHTML = `<div class="empty down">${esc(r.error)}</div>`);
+  const url = `${location.origin}/geo?code=${r.code}`;
+  box.innerHTML = `
+    <div class="row" style="margin-top:6px">
+      <input type="text" class="grow" id="staff-url" readonly value="${esc(url)}">
+      <button class="btn btn-primary" onclick="copyStaffLink()"><i class="ti ti-copy"></i> 複製</button>
+      <button class="btn btn-outline" onclick="loadStaffLink(true)"><i class="ti ti-refresh"></i> 換一組（舊的失效）</button>
+    </div>
+    <div style="font-size:.76rem;color:var(--muted);margin-top:6px">
+      同仁用這條連結可以：開新追蹤、看曲線與建議、手動掃描。
+      不能：改設定、刪題目、看後台其他活動的問答資料。</div>`;
+}
+function copyStaffLink(){
+  const el = document.getElementById('staff-url');
+  navigator.clipboard.writeText(el.value).then(()=>toast('連結已複製'));
 }
 async function toggleEngine(id){
   const cur = new Set(S.status.engines.filter(e=>e.enabled).map(e=>e.id));
@@ -326,7 +435,7 @@ async function loadStatus(){
   const s = await api('action=status');
   if(s.error) return;
   S.status = s;
-  renderEngines(s);
+  if(S.role === 'admin'){ renderEngines(s); loadStaffLink(false); }
   const live = s.engines.filter(e=>e.enabled).map(e=>e.label);
   // 有金鑰但被 GEO_ENGINES 關掉的，要跟「根本沒設金鑰」分開講，不然會以為是壞了
   const muted = s.engines.filter(e=>!e.enabled && e.hasKey).map(e=>e.id);
@@ -462,8 +571,8 @@ function renderEvents(events){
   const box = document.getElementById('events');
   if(!events || !events.length){ box.innerHTML = '<div class="empty">還沒有事件標記。到下方「事件標記」把記者會日期加進來。</div>'; return; }
   box.innerHTML = `<table><thead><tr>
-      <th>#</th><th>日期</th><th>事件</th><th>鎖定議題</th>
-      <th>事前基線</th><th>峰值</th><th>半衰期</th><th>基線抬升</th></tr></thead><tbody>` +
+      <th>#</th><th>日期</th><th>活動</th><th>鎖定議題</th>
+      <th>事前基線</th><th>峰值</th><th>半衰期</th><th>基線抬升</th><th></th></tr></thead><tbody>` +
     events.map((e,i)=>{
       const lift = e.lift===null ? (e.settled?'—':'<span class="flat">觀察中</span>')
         : `<span class="${e.lift>0?'up':e.lift<0?'down':'flat'}">${e.lift>0?'+':''}${e.lift}</span>`;
@@ -474,8 +583,11 @@ function renderEvents(events){
         <td class="num-cell">${e.baseline??'—'}</td>
         <td class="num-cell">${e.peak??'—'}${e.peakDate?`<br><span style="color:var(--muted);font-size:.72rem;font-weight:400">${e.peakDate.slice(5)}</span>`:''}</td>
         <td class="num-cell">${e.halfLifeDays===null?'<span class="flat">未回落</span>':e.halfLifeDays+' 天'}</td>
-        <td class="num-cell">${lift}</td></tr>
-        <tr class="find-row" style="display:none"><td colspan="8">${findsHtml(e.findings, e.windowSamples)}</td></tr>`;
+        <td class="num-cell">${lift}</td>
+        <td><button class="btn btn-ghost" title="停止追蹤"
+            onclick="event.stopPropagation();stopTracking('${e.id}','${esc(e.title).replace(/'/g,"\\'")}')">
+            <i class="ti ti-trash"></i></button></td></tr>
+        <tr class="find-row" style="display:none"><td colspan="9">${findsHtml(e.findings, e.windowSamples)}</td></tr>`;
     }).join('') + '</tbody></table>';
 }
 
@@ -528,7 +640,7 @@ async function scan(){
   }catch(e){ toast('掃描失敗：'+e.message); }
   btn.disabled = false;
   btn.innerHTML = '<i class="ti ti-player-play"></i> 立即掃描';
-  loadStatus(); loadSeries();
+  loadStatus(); loadSeries(); loadSnapshot();
 }
 
 /* ── 自我測試 ── */
@@ -637,16 +749,18 @@ async function startTracking(){
   const r = await post(body);
   if(r.error) return toast(r.error);
 
+  const kw = r.event.keyword;
   document.getElementById('gen-out').innerHTML =
     `<div class="find good" style="margin-top:14px">
        <div class="t">已開始追蹤「${esc(r.event.title)}」</div>
-       <div class="w">加入 ${r.added} 題，議題標籤「${esc(r.event.keyword)}」，事件日 ${esc(r.event.date)}。</div>
-       <div class="d">現在幫你先掃第一次，之後每天早上自動跑。</div>
+       <div class="w">加入 ${r.added} 題，議題「${esc(kw)}」，活動日 ${esc(r.event.date)}。</div>
+       <div class="d">正在跑第一次掃描，結果會出現在下面「現況快照」。之後每天早上自動跑。</div>
      </div>`;
   document.getElementById('s-kw').value = '';
   sel.value = ''; onPickEvent();
   loadPrompts(); loadEvents();
-  scan();
+  await scan();
+  loadSnapshot(kw);   // 掃完立刻把結果攤出來
 }
 
 async function savePrompt(){
@@ -683,12 +797,14 @@ async function loadEvents(){
       <td>${e.itri_event_id?'<span class="pill">已綁活動</span>':'<span class="flat">—</span>'}</td>
       <td><button class="btn btn-ghost" onclick="delEvent('${e.id}')"><i class="ti ti-trash"></i></button></td></tr>`).join('') + '</tbody></table>';
 }
-async function delEvent(id){
-  if(!confirm('停止追蹤這場活動？（已掃到的歷史資料會保留）')) return;
-  const r = await post({ action:'event_delete', id });
+async function stopTracking(id, title){
+  if(!confirm(`停止追蹤「${title}」？\n\n該議題的題目會全部停用、不再掃描也不再計費。\n已經掃到的歷史資料會保留。`)) return;
+  const r = await post({ action:'track_stop', id });
   if(r.error) return toast(r.error);
-  loadEvents(); loadSeries();
+  toast(`已停止追蹤，停用 ${r.disabled} 題`);
+  loadEvents(); loadPrompts(); loadSeries();
 }
+const delEvent = (id) => stopTracking(id, '這場活動');
 
 function esc(s){ return String(s??'').replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 </script>

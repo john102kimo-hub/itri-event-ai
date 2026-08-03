@@ -46,10 +46,20 @@ async function loadSettings() {
     rows.forEach(([k, v]) => {
       if (k === 'engines') CFG.engines = String(v || '').split(',').map((s) => s.trim()).filter(Boolean);
       if (k === 'judge') CFG.judge = String(v || '').trim() || null;
+      if (k === 'staff_code') CFG.staffCode = String(v || '').trim() || null;
     });
   } catch { /* 分頁還沒建就用預設 */ }
   CFG.loaded = true;
   return CFG;
+}
+
+/** 設定分頁用 key 定位寫入，避免不同設定互相覆蓋 */
+async function saveSetting(key, value) {
+  await ensureSheets(SHEETS);
+  const rows = await safeRead('geo_settings!A2:B');
+  const idx = rows.findIndex((r) => r[0] === key);
+  if (idx >= 0) await updateRange(`geo_settings!A${idx + 2}:B${idx + 2}`, [[key, value]]);
+  else await appendRows('geo_settings!A:B', [[key, value]]);
 }
 
 /** 判官預設挑免費的那顆：有 Gemini 金鑰就用 Gemini，沒有才退回 Anthropic */
@@ -870,9 +880,25 @@ export default async function handler(req, res) {
       return ok(res, await runBatch());
     }
 
-    /* ── 其餘一律要管理員密碼 ── */
-    const password = req.method === 'GET' ? req.query.password : (req.body || {}).password;
-    if (!admin || password !== admin) return res.status(401).json({ error: '密碼錯誤' });
+    /* ── 身分：管理員（密碼）或同仁（專用連結的 code）──
+     * 同仁能開追蹤、能掃、能看結果與建議；不能改設定、不能刪東西、
+     * 也拿不到後台密碼。 */
+    const q = req.method === 'GET' ? req.query : (req.body || {});
+    const password = q.password;
+    const code = String(q.code || '').trim();
+
+    let role = null;
+    if (admin && password === admin) role = 'admin';
+    else if (code && CFG.staffCode && code === CFG.staffCode) role = 'staff';
+    if (!role) return res.status(401).json({ error: code ? '這條連結已失效，請向承辦人索取新的' : '密碼錯誤' });
+
+    const ADMIN_ONLY = new Set([
+      'settings_save', 'staff_link', 'prompt_delete', 'event_delete', 'seed', 'detail',
+    ]);
+    const wanted = req.method === 'GET' ? q.action : q.action;
+    if (role !== 'admin' && ADMIN_ONLY.has(wanted)) {
+      return res.status(403).json({ error: '這個動作只有承辦人可以做' });
+    }
 
     if (req.method === 'GET') {
       const { action, days = '90' } = req.query;
@@ -885,6 +911,42 @@ export default async function handler(req, res) {
       if (action === 'events') {
         const rows = await safeRead('geo_events!A2:G');
         return ok(res, { events: rows.filter((r) => r[0]).map(parseEvent) });
+      }
+
+      /**
+       * 現況快照：今天這個議題各家 AI 怎麼回答。
+       * 存在的理由 —— 趨勢圖沒辦法回溯（沒有人保存「上個月 AI 怎麼講」的歷史），
+       * 但「現在的狀況＋該改什麼」掃一次就有，不必等好幾天。
+       */
+      if (action === 'snapshot') {
+        const kw = String(req.query.keyword || '').trim();
+        const rows = (await safeRead('geo_runs!A2:O')).filter((r) => r[0]).map(parseRun)
+          .filter((r) => !kw || r.keyword === kw);
+        if (!rows.length) return ok(res, { keyword: kw, engines: [], findings: [], scored: 0 });
+
+        const latestDate = rows[rows.length - 1].date;
+        const today = rows.filter((r) => r.date === latestDate);
+        const scored = today.filter((r) => r.score !== null);
+
+        const byEngine = {};
+        today.forEach((r) => { (byEngine[r.engine] ||= []).push(r); });
+
+        return ok(res, {
+          keyword: kw, date: latestDate, scored: scored.length,
+          engines: Object.entries(byEngine).map(([engine, list]) => {
+            const good = list.filter((r) => r.score !== null);
+            return {
+              engine,
+              score: good.length ? Math.round(avg(good.map((r) => r.score))) : null,
+              mentioned: good.filter((r) => r.mentioned).length,
+              cited: good.filter((r) => r.cited).length,
+              total: list.length,
+              failed: list.filter((r) => r.error).length,
+              sampleError: list.find((r) => r.error)?.error || '',
+            };
+          }),
+          findings: diagnose(scored),
+        });
       }
 
       // ITRI EVENT AI 的活動清單，給「選一場活動」下拉用
@@ -1055,15 +1117,63 @@ export default async function handler(req, res) {
     }
 
     if (body.action === 'settings_save') {
-      await ensureSheets(SHEETS);
       const engines = (body.engines || []).map((s) => String(s).trim()).filter(Boolean);
-      const judge = String(body.judge || '').trim();
-      await updateRange('geo_settings!A2:B3', [
-        ['engines', engines.join(',')],
-        ['judge', judge],
-      ]);
-      CFG.engines = engines; CFG.judge = judge || null;
+      await saveSetting('engines', engines.join(','));
+      if (body.judge !== undefined) {
+        await saveSetting('judge', String(body.judge || '').trim());
+        CFG.judge = String(body.judge || '').trim() || null;
+      }
+      CFG.engines = engines;
       return ok(res, { success: true });
+    }
+
+    /** 同仁專用連結：產生／重新產生一組 code。舊連結會立刻失效。 */
+    if (body.action === 'staff_link') {
+      if (body.revoke) {
+        await saveSetting('staff_code', '');
+        CFG.staffCode = null;
+        return ok(res, { success: true, code: null });
+      }
+      let c = CFG.staffCode;
+      if (!c || body.regenerate) {
+        c = Math.random().toString(36).slice(2, 8) + Math.random().toString(36).slice(2, 6);
+        await saveSetting('staff_code', c);
+        CFG.staffCode = c;
+      }
+      return ok(res, { success: true, code: c });
+    }
+
+    /**
+     * 停止追蹤一場活動：把該議題的題目停用（不再掃、不再計費）並移除活動標記。
+     * 已經掃到的歷史資料一律保留 —— 那是花錢換來的，刪掉就回不來了。
+     */
+    if (body.action === 'track_stop') {
+      const evRows = await safeRead('geo_events!A2:G');
+      const target = evRows.find((r) => r[0] === body.id);
+      if (!target) return res.status(404).json({ error: '找不到這場追蹤' });
+      const keyword = target[4] || '';
+
+      // 停用同議題的題目
+      let disabled = 0;
+      if (keyword) {
+        const pRows = await safeRead('geo_prompts!A2:H');
+        const next = pRows.map((r) => {
+          if (r[0] && r[3] === keyword && String(r[6]).toUpperCase() !== 'FALSE') {
+            disabled++;
+            return [...r.slice(0, 6), 'FALSE', r[7] || ''];
+          }
+          return r;
+        });
+        if (next.length) await updateRange(`geo_prompts!A2:H${next.length + 1}`, next);
+      }
+
+      const kept = evRows.filter((r) => r[0] && r[0] !== body.id);
+      if (evRows.length) {
+        await updateRange(`geo_events!A2:G${evRows.length + 1}`, evRows.map(() => new Array(7).fill('')));
+      }
+      if (kept.length) await updateRange(`geo_events!A2:G${kept.length + 1}`, kept);
+
+      return ok(res, { success: true, disabled, keyword });
     }
 
     if (body.action === 'prompt_generate') {
