@@ -1187,8 +1187,10 @@ export default async function handler(req, res) {
     }
 
     /**
-     * 停止追蹤一場活動：把該議題的題目停用（不再掃、不再計費）並移除活動標記。
-     * 已經掃到的歷史資料一律保留 —— 那是花錢換來的，刪掉就回不來了。
+     * 停止追蹤一場活動：把該議題的題目從題庫刪掉，並移除活動標記。
+     *
+     * 刻意只刪題庫、不動 geo_runs —— 曲線、事件效應、議題排行全部是從
+     * geo_runs 算出來的，所以歷史資料與圖表都還在。那是花錢換來的，刪掉回不來。
      */
     if (body.action === 'track_stop') {
       const evRows = await safeRead('geo_events!A2:G');
@@ -1196,18 +1198,20 @@ export default async function handler(req, res) {
       if (!target) return res.status(404).json({ error: '找不到這場追蹤' });
       const keyword = target[4] || '';
 
-      // 停用同議題的題目
-      let disabled = 0;
+      // 刪掉同議題的題目
+      let removed = 0;
       if (keyword) {
         const pRows = await safeRead('geo_prompts!A2:H');
-        const next = pRows.map((r) => {
-          if (r[0] && r[3] === keyword && String(r[6]).toUpperCase() !== 'FALSE') {
-            disabled++;
-            return [...r.slice(0, 6), 'FALSE', r[7] || ''];
-          }
-          return r;
+        const keptPrompts = pRows.filter((r) => {
+          if (r[0] && r[3] === keyword) { removed++; return false; }
+          return !!r[0];
         });
-        if (next.length) await updateRange(`geo_prompts!A2:H${next.length + 1}`, next);
+        if (pRows.length) {
+          await updateRange(`geo_prompts!A2:H${pRows.length + 1}`, pRows.map(() => new Array(8).fill('')));
+        }
+        if (keptPrompts.length) {
+          await updateRange(`geo_prompts!A2:H${keptPrompts.length + 1}`, keptPrompts);
+        }
       }
 
       const kept = evRows.filter((r) => r[0] && r[0] !== body.id);
@@ -1216,7 +1220,7 @@ export default async function handler(req, res) {
       }
       if (kept.length) await updateRange(`geo_events!A2:G${kept.length + 1}`, kept);
 
-      return ok(res, { success: true, disabled, keyword });
+      return ok(res, { success: true, removed, keyword });
     }
 
     if (body.action === 'prompt_generate') {
