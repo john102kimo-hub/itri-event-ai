@@ -1153,6 +1153,42 @@ export default async function handler(req, res) {
           };
 
           const b = profile(before), a = profile(after), dur = profile(during);
+
+          /* ── 這個差距大到可以宣稱嗎？ ──
+           * 同一天問的是同一批題目，彼此高度相關，把每一次問答都當獨立樣本會高估精確度。
+           * 所以先把每天收斂成「當天提及率」一個觀測，再比較兩段的日均值。
+           * 差距小於兩倍標準誤就不宣稱——寧可說「還看不出來」，也不要讓他被長官問倒。 */
+          const dailyRates = (rs) => {
+            const byDay = {};
+            rs.forEach((r) => { (byDay[r.date] ||= []).push(r); });
+            return Object.values(byDay).map((list) =>
+              (list.filter((r) => r.mentioned).length / list.length) * 100);
+          };
+          const meanOf = (xs) => xs.reduce((s, x) => s + x, 0) / xs.length;
+          const varOf = (xs) => {
+            if (xs.length < 2) return null;
+            const m = meanOf(xs);
+            return xs.reduce((s, x) => s + (x - m) ** 2, 0) / (xs.length - 1);
+          };
+
+          const rb = b ? dailyRates(before) : [], ra = a ? dailyRates(after) : [];
+          let verdict = null;
+          if (rb.length >= 2 && ra.length >= 2) {
+            const vb = varOf(rb), va = varOf(ra);
+            const se = Math.sqrt(vb / rb.length + va / ra.length);
+            const diff = meanOf(ra) - meanOf(rb);
+            // 下限 5 個百分點：資料剛好每天一樣時標準誤會是 0，那會把任何微小差距
+            // 都判成顯著。實務上不到 5 個百分點的變化也不值得拿去跟長官宣稱。
+            const margin = Math.max(2 * se, 5);
+            verdict = {
+              diff: Math.round(diff * 10) / 10,
+              margin: Math.round(margin * 10) / 10,
+              days: [rb.length, ra.length],
+              call: Math.abs(diff) < margin ? 'inconclusive' : diff > 0 ? 'lifted' : 'dropped',
+            };
+          } else {
+            verdict = { call: 'too_few', days: [rb.length, ra.length] };
+          }
           const daysSince = dayDiff(ev.date, todayTW());
 
           // 掉了多少 vs 留下多少 —— 這兩個數字是分開的，別混在一起講
@@ -1169,7 +1205,25 @@ export default async function handler(req, res) {
 
           performance = {
             event: { title: ev.title, date: ev.date, keyword: ev.keywords },
-            before: b, during: dur, after: a, decay, daysSince,
+            before: b, during: dur, after: a, decay, verdict, daysSince,
+            // 事件前 14 天到事件後 30 天的逐日提及率，給「墊高」那張圖用。
+            // 沒有圖的話，基線墊高只是表格裡的一個數字，看不出來。
+            dailySeries: (() => {
+              const byDay = {};
+              slice(addDays(ev.date, -14), addDays(ev.date, 30))
+                .forEach((r) => { (byDay[r.date] ||= []).push(r); });
+              const out = [];
+              for (let i = -14; i <= 30; i++) {
+                const d = addDays(ev.date, i);
+                if (d > todayTW()) break;
+                const list = byDay[d];
+                out.push({
+                  offset: i,
+                  rate: list ? Math.round((list.filter((r) => r.mentioned).length / list.length) * 100) : null,
+                });
+              }
+              return out;
+            })(),
             ready: !!(b && a),
             waitingFor: !b ? '事件前 14 天沒有資料——追蹤是活動之後才開始的，這一場算不出前後對比'
               : !a ? `還要等 ${Math.max(0, 30 - daysSince)} 天（活動後滿 30 天才結算）` : null,

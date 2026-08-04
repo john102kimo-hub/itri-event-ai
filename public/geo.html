@@ -114,6 +114,14 @@
   .perf-wait{background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:12px 14px;font-size:.84rem;line-height:1.7}
   .decay{background:var(--primary-light);border-left:4px solid var(--primary);border-radius:0 10px 10px 0;
     padding:12px 14px;font-size:.85rem;line-height:1.8}
+  .lift-wrap{margin:14px 0 10px}
+  .lift-svg{width:100%;display:block}
+  .lift-svg text{font-family:var(--font);fill:var(--muted)}
+  .lift-cap{font-size:.74rem;color:var(--muted);line-height:1.7;margin-top:4px}
+  .verdict{border-radius:10px;padding:11px 14px;font-size:.85rem;line-height:1.8;margin-bottom:10px}
+  .verdict.good{background:var(--primary-light);border:1px solid rgba(15,158,122,.35)}
+  .verdict.warn{background:#fffbeb;border:1px solid #fde68a}
+  .verdict.bad{background:#fef2f2;border:1px solid #fecaca}
   .quote{border:1px solid var(--border);border-radius:12px;padding:14px 16px;margin-bottom:10px}
   .quote.miss{background:#fef2f2;border-color:#fecaca}
   .quote .q{font-size:.82rem;font-weight:700;margin-bottom:6px}
@@ -439,6 +447,90 @@ function copySlide(){
     .catch(()=>toast('複製失敗，請手動選取'));
 }
 
+/** 這個差距大到可以拿出去講嗎——講不得的時候要擋住，不要讓他被長官問倒 */
+function verdictLine(p){
+  const v = p.verdict;
+  if(!v) return '';
+  if(v.call==='too_few'){
+    return `<div class="verdict warn">資料天數還太少（事前 ${v.days[0]} 天、事後 ${v.days[1]} 天），
+      現在只能看方向，還不能宣稱基線變了。</div>`;
+  }
+  if(v.call==='inconclusive'){
+    return `<div class="verdict warn"><b>差異還看不出來。</b>
+      日均提及率相差 ${v.diff} 個百分點，但每日波動造成的誤差就有 ±${v.margin} 個百分點——
+      這個差距還在雜訊範圍內。<b>先不要拿去宣稱基線被墊高</b>，再多累積幾天。</div>`;
+  }
+  if(v.call==='lifted'){
+    return `<div class="verdict good"><b>基線確實被墊高了。</b>
+      日均提及率高出 ${v.diff} 個百分點，超過每日波動的誤差範圍（±${v.margin}）——
+      這個差距講得出去。</div>`;
+  }
+  return `<div class="verdict bad"><b>基線反而掉了。</b>
+    日均提及率低了 ${Math.abs(v.diff)} 個百分點，超過誤差範圍（±${v.margin}）。</div>`;
+}
+
+/**
+ * 「基線被墊高」那張圖。
+ *
+ * 這是視覺主張：一條線在事件後穩定在比事件前更高的位置。
+ * 光看表格上的三個數字，讀者要自己在腦中做減法才知道有沒有變好，
+ * 所以這裡把舊基線與新基線各畫一條水平線，中間填色 —— 那塊色帶就是「墊高的幅度」。
+ * 黑白列印時靠虛線／實線與文字標註區分，不依賴顏色。
+ */
+function liftChart(p){
+  const s = p.dailySeries;
+  if(!s || !s.length || !p.before || !p.after) return '';
+
+  const W=680, H=210, L=42, R=96, T=16, B=26;
+  const x = (o) => L + (o + 14) / 44 * (W - L - R);
+  const y = (v) => T + (1 - v/100) * (H - T - B);
+
+  const oldB = p.before.mentionRate, newB = p.after.mentionRate;
+  const lifted = newB > oldB;
+
+  let g = '';
+  // 墊高的色帶：舊基線到新基線之間
+  g += `<rect x="${x(15)}" y="${y(Math.max(oldB,newB))}" width="${x(30)-x(15)}"
+        height="${Math.abs(y(oldB)-y(newB))}" fill="${lifted?'var(--primary)':'#ef4444'}" opacity=".13"/>`;
+
+  // Y 軸
+  [0,50,100].forEach(v=>{
+    g += `<line x1="${L}" y1="${y(v)}" x2="${W-R}" y2="${y(v)}" stroke="#eef0f2"/>`;
+    g += `<text x="${L-7}" y="${y(v)+4}" text-anchor="end" font-size="10">${v}%</text>`;
+  });
+
+  // 事件日
+  g += `<line x1="${x(0)}" y1="${T}" x2="${x(0)}" y2="${H-B}" stroke="var(--event)" stroke-width="1.4" stroke-dasharray="4 3"/>`;
+  g += `<text x="${x(0)}" y="${H-8}" text-anchor="middle" font-size="10" fill="var(--event)" font-weight="700">活動日</text>`;
+  g += `<text x="${x(-14)}" y="${H-8}" text-anchor="start" font-size="10">前 14 天</text>`;
+  g += `<text x="${W-R}" y="${H-8}" text-anchor="end" font-size="10">後 30 天</text>`;
+
+  // 舊基線（虛線）與新基線（實線）
+  g += `<line x1="${x(-14)}" y1="${y(oldB)}" x2="${x(-1)}" y2="${y(oldB)}" stroke="#94a3b8" stroke-width="2" stroke-dasharray="5 3"/>`;
+  g += `<line x1="${x(-1)}"  y1="${y(oldB)}" x2="${W-R}"   y2="${y(oldB)}" stroke="#94a3b8" stroke-width="1" stroke-dasharray="2 4" opacity=".7"/>`;
+  g += `<line x1="${x(15)}" y1="${y(newB)}" x2="${W-R}" y2="${y(newB)}" stroke="var(--primary)" stroke-width="2.5"/>`;
+
+  // 逐日折線
+  let dpath='', pen=false;
+  s.forEach(pt=>{
+    if(pt.rate===null){ pen=false; return; }
+    dpath += (pen?'L':'M') + x(pt.offset).toFixed(1) + ' ' + y(pt.rate).toFixed(1) + ' ';
+    pen=true;
+  });
+  g += `<path d="${dpath.trim()}" fill="none" stroke="#334155" stroke-width="1.3" opacity=".55"/>`;
+  s.forEach(pt=>{ if(pt.rate!==null) g += `<circle cx="${x(pt.offset)}" cy="${y(pt.rate)}" r="1.9" fill="#334155" opacity=".5"/>`; });
+
+  // 右側標註
+  g += `<text x="${W-R+8}" y="${y(oldB)+4}" font-size="11" fill="#64748b">舊基線 ${oldB}%</text>`;
+  g += `<text x="${W-R+8}" y="${y(newB)+4}" font-size="11" font-weight="800" fill="${lifted?'var(--primary-dark)':'#b91c1c'}">新基線 ${newB}%</text>`;
+
+  return `<div class="lift-wrap">
+    <svg viewBox="0 0 ${W} ${H}" class="lift-svg">${g}</svg>
+    <div class="lift-cap">灰虛線＝活動前的水準，綠實線＝活動後 15–30 天穩定下來的水準，
+      中間色帶就是<b>被墊高的幅度</b>。細線為每日實測值。</div>
+  </div>`;
+}
+
 /* ── 績效區塊：發稿前 vs 發稿後 ── */
 function perfHtml(p, no){
   if(!p) return '';
@@ -464,6 +556,7 @@ function perfHtml(p, no){
   };
 
   const d = p.decay;
+  const chart = liftChart(p);
   const decayLine = !d ? '' : `
     <div class="decay">
       <b>聲量會不會被洗掉？會，但沒有掉回原點。</b><br>
@@ -480,6 +573,8 @@ function perfHtml(p, no){
       ${row('被提到時排第一的比例', p.before.firstRate, p.during.firstRate, p.after.firstRate, p.delta.firstRate, '%')}
       ${row('在這個議題的位次', '第 '+p.before.rank, '第 '+p.during.rank, '第 '+p.after.rank, p.delta.rank, ' 名')}
     </tbody></table>
+    ${chart}
+    ${verdictLine(p)}
     ${decayLine}
     <div style="font-size:.76rem;color:var(--muted);margin-top:8px">
       樣本：事前 ${p.before.samples} 次、活動期 ${p.during.samples} 次、沉澱後 ${p.after.samples} 次問答。
