@@ -1126,94 +1126,155 @@ export default async function handler(req, res) {
           const allRuns = (await safeRead('geo_runs!A2:O')).filter((r) => r[0]).map(parseRun)
             .filter((r) => r.score !== null && (!kw || r.keyword === kw));
 
+          /* ── 時間窗 ──
+           * D+15~30 還在搜尋索引新鮮度衰減期內，是「下降中的一點」，不是平台期。
+           * 把它當新基線是方法學錯誤 —— 所以它只叫「餘波期」，
+           * 真正能宣稱基線的窗是 D+31 之後。 */
           const slice = (f, t) => allRuns.filter((r) => r.date >= f && r.date <= t);
-          const before = slice(addDays(ev.date, -14), addDays(ev.date, -1));
-          // 活動期：聲量最高的那兩週。少了這一段就只剩前後兩個點，
-          // 講不出「衝多高、掉多少」，主管問「久了會不會被洗掉」就沒東西回。
-          const during = slice(ev.date, addDays(ev.date, 14));
-          const after = slice(addDays(ev.date, 15), addDays(ev.date, 30));
+          const WINDOWS = {
+            before: [addDays(ev.date, -14), addDays(ev.date, -1)],
+            during: [ev.date, addDays(ev.date, 13)],
+            echo: [addDays(ev.date, 14), addDays(ev.date, 30)],
+            base1: [addDays(ev.date, 31), addDays(ev.date, 60)],
+            base2: [addDays(ev.date, 61), addDays(ev.date, 90)],
+          };
+          const before = slice(...WINDOWS.before);
+          const during = slice(...WINDOWS.during);
+          const after = slice(...WINDOWS.echo);
+          const base1 = slice(...WINDOWS.base1);
+          const base2 = slice(...WINDOWS.base2);
 
-          const profile = (rs) => {
-            if (!rs.length) return null;
-            const h = rs.filter((r) => r.mentioned);
+          /* 只拿「兩個窗都存在」的題目來比。
+           * 題庫隨時可以增刪，如果不做這件事，新增一題就會讓前後不可比，
+           * 而且是靜靜地錯 —— 數字照樣算得出來，只是沒有意義。 */
+          const idsIn = (rs) => new Set(rs.map((r) => r.prompt_id));
+          const comparable = (x, y) => {
+            const ix = idsIn(x), iy = idsIn(y);
+            const both = [...ix].filter((id) => iy.has(id));
+            return { both: new Set(both), changed: both.length !== ix.size || both.length !== iy.size };
+          };
+
+          const profile = (rs, keep) => {
+            const use = keep ? rs.filter((r) => keep.has(r.prompt_id)) : rs;
+            if (!use.length) return null;
+            const h = use.filter((r) => r.mentioned);
             const cc = {};
-            rs.forEach((r) => String(r.competitors || '').split(/[、,，]/)
+            use.forEach((r) => String(r.competitors || '').split(/[、,，]/)
               .map((s) => s.trim()).filter(Boolean)
               .forEach((c) => { cc[c] = (cc[c] || 0) + 1; }));
             const bd = [{ name: '工研院', n: h.length, self: true },
               ...Object.entries(cc).map(([name, n]) => ({ name, n, self: false }))]
               .sort((a, b) => b.n - a.n || (b.self ? 1 : -1));
             return {
-              samples: rs.length,
-              mentionRate: Math.round((h.length / rs.length) * 100),
-              firstRate: h.length ? Math.round((h.filter((r) => r.rank === 1).length / h.length) * 100) : 0,
+              samples: use.length,
+              days: new Set(use.map((r) => r.date)).size,
+              prompts: idsIn(use).size,
+              mentionRate: Math.round((h.length / use.length) * 100),
+              // 分母用「總問答數」而非「被提及數」：後者會隨主指標一起動，
+              // 而且被提及次數少的時候一兩筆就跳很大，站不住。
+              firstRate: Math.round((use.filter((r) => r.rank === 1).length / use.length) * 100),
               rank: bd.findIndex((x) => x.self) + 1,
               topRival: (bd.find((x) => !x.self) || {}).name || null,
             };
           };
 
-          const b = profile(before), a = profile(after), dur = profile(during);
-
-          /* ── 這個差距大到可以宣稱嗎？ ──
-           * 同一天問的是同一批題目，彼此高度相關，把每一次問答都當獨立樣本會高估精確度。
-           * 所以先把每天收斂成「當天提及率」一個觀測，再比較兩段的日均值。
-           * 差距小於兩倍標準誤就不宣稱——寧可說「還看不出來」，也不要讓他被長官問倒。 */
-          const dailyRates = (rs) => {
-            const byDay = {};
-            rs.forEach((r) => { (byDay[r.date] ||= []).push(r); });
-            return Object.values(byDay).map((list) =>
-              (list.filter((r) => r.mentioned).length / list.length) * 100);
+          /* ── 差距大到可以宣稱嗎 ──
+           * 同一天問的是同一批題目，彼此高度相關，每筆當獨立樣本會嚴重高估精確度。
+           * 以「天」為群集做 bootstrap：每次重抽整天，抽 1200 次取 2.5%/97.5% 分位。
+           * 信賴區間跨過 0 就不宣稱。 */
+          const byDayList = (rs, keep) => {
+            const use = keep ? rs.filter((r) => keep.has(r.prompt_id)) : rs;
+            const m = {};
+            use.forEach((r) => { (m[r.date] ||= []).push(r); });
+            return Object.values(m);
           };
-          const meanOf = (xs) => xs.reduce((s, x) => s + x, 0) / xs.length;
-          const varOf = (xs) => {
-            if (xs.length < 2) return null;
-            const m = meanOf(xs);
-            return xs.reduce((s, x) => s + (x - m) ** 2, 0) / (xs.length - 1);
+          const rateOf = (days) => {
+            const flat = days.flat();
+            return flat.length ? (flat.filter((r) => r.mentioned).length / flat.length) * 100 : null;
+          };
+          // 固定種子，同一份資料每次算出同樣的區間 —— 報告不能每次重整就換數字
+          let _seed = 20260803;
+          const rnd = () => (_seed = (_seed * 1103515245 + 12345) % 2147483648) / 2147483648;
+          const resample = (xs) => xs.map(() => xs[Math.floor(rnd() * xs.length)]);
+
+          const bootCI = (dx, dy) => {
+            const out = [];
+            for (let i = 0; i < 1200; i++) {
+              const a1 = rateOf(resample(dx)), b1 = rateOf(resample(dy));
+              if (a1 !== null && b1 !== null) out.push(b1 - a1);
+            }
+            if (!out.length) return null;
+            out.sort((p, q) => p - q);
+            const at = (f) => out[Math.min(out.length - 1, Math.max(0, Math.floor(f * out.length)))];
+            return [Math.round(at(0.025) * 10) / 10, Math.round(at(0.975) * 10) / 10];
           };
 
-          const rb = b ? dailyRates(before) : [], ra = a ? dailyRates(after) : [];
-          let verdict = null;
-          if (rb.length >= 2 && ra.length >= 2) {
-            const vb = varOf(rb), va = varOf(ra);
-            const se = Math.sqrt(vb / rb.length + va / ra.length);
-            const diff = meanOf(ra) - meanOf(rb);
-            // 下限 5 個百分點：資料剛好每天一樣時標準誤會是 0，那會把任何微小差距
-            // 都判成顯著。實務上不到 5 個百分點的變化也不值得拿去跟長官宣稱。
-            const margin = Math.max(2 * se, 5);
-            verdict = {
-              diff: Math.round(diff * 10) / 10,
-              margin: Math.round(margin * 10) / 10,
-              days: [rb.length, ra.length],
-              call: Math.abs(diff) < margin ? 'inconclusive' : diff > 0 ? 'lifted' : 'dropped',
-            };
-          } else {
-            verdict = { call: 'too_few', days: [rb.length, ra.length] };
-          }
+          /**
+           * 判定階梯。順序有意義：先擋不可比，再擋樣本不足，
+           * 再擋差距太小，最後才看「這個窗有沒有資格叫基線」。
+           */
+          const judge2 = (post, label) => {
+            if (!post || !before.length) return { call: 'INSUFFICIENT_N' };
+            const { both, changed } = comparable(before, post);
+            if (changed) return { call: 'NOT_COMPARABLE' };
+
+            const dPre = byDayList(before, both), dPost = byDayList(post, both);
+            if (dPre.length < 7 || dPost.length < 7) {
+              return { call: 'INSUFFICIENT_N', days: [dPre.length, dPost.length] };
+            }
+            const pPre = rateOf(dPre), pPost = rateOf(dPost);
+            const diff = Math.round((pPost - pPre) * 10) / 10;
+            const ci = bootCI(dPre, dPost);
+            const base = { diff, ci, days: [dPre.length, dPost.length], window: label };
+
+            if (Math.abs(diff) < 10) return { ...base, call: 'NO_MATERIAL_DIFF' };
+            if (!ci || (ci[0] <= 0 && ci[1] >= 0)) return { ...base, call: 'NO_DETECTABLE_DIFF' };
+            if (diff < 0) return { ...base, call: 'DROPPED' };
+            return { ...base, call: 'LIFTED' };
+          };
+
+          const b = profile(before), dur = profile(during), a = profile(after);
+          const p1 = profile(base1), p2 = profile(base2);
           const daysSince = dayDiff(ev.date, todayTW());
 
-          // 掉了多少 vs 留下多少 —— 這兩個數字是分開的，別混在一起講
+          const vEcho = judge2(after, 'echo');
+          const vBase1 = base1.length ? judge2(base1, 'base1') : null;
+          const vBase2 = base2.length ? judge2(base2, 'base2') : null;
+
+          /* 「基線墊高」只有 D+31 以後的窗才有資格宣稱。
+           * D+15~30 還在新鮮度衰減期，那裡的高點是餘波，不是新水位。 */
+          let stage;
+          if (vBase1?.call === 'LIFTED' && vBase2?.call === 'LIFTED') stage = 'BASELINE_RAISED';
+          else if (vBase1?.call === 'LIFTED') stage = 'BASELINE_PROVISIONAL';
+          else if (vBase1 && ['NO_MATERIAL_DIFF', 'NO_DETECTABLE_DIFF'].includes(vBase1.call)) stage = 'RETURNED';
+          else if (vBase1?.call === 'DROPPED') stage = 'DROPPED';
+          else if (vEcho.call === 'LIFTED') stage = 'ECHO_HIGH_NOT_BASELINE';
+          else stage = vEcho.call;
+
+          // 掉了多少 vs 留下多少 —— 兩件事，別混成一個數字
           let decay = null;
           if (b && dur && a) {
-            const held = dur.mentionRate - b.mentionRate;          // 活動期比基線高多少
-            const kept = a.mentionRate - b.mentionRate;             // 沉澱後還高多少
+            const held = dur.mentionRate - b.mentionRate;   // 活動期比基準期高幾個百分點
+            const kept = a.mentionRate - b.mentionRate;     // 餘波期還高幾個百分點
             decay = {
               held, kept,
-              lostPct: held > 0 ? Math.round(((held - kept) / held) * 100) : null, // 掉掉了幾成
-              keptPct: held > 0 ? Math.round((kept / held) * 100) : null,          // 留下幾成
+              keptPct: held > 0 ? Math.round((kept / held) * 100) : null,
             };
           }
 
           performance = {
             event: { title: ev.title, date: ev.date, keyword: ev.keywords },
-            before: b, during: dur, after: a, decay, verdict, daysSince,
+            before: b, during: dur, after: a, base1: p1, base2: p2,
+            decay, daysSince,
+            stage, vEcho, vBase1, vBase2,
             // 事件前 14 天到事件後 30 天的逐日提及率，給「墊高」那張圖用。
             // 沒有圖的話，基線墊高只是表格裡的一個數字，看不出來。
             dailySeries: (() => {
               const byDay = {};
-              slice(addDays(ev.date, -14), addDays(ev.date, 30))
+              slice(addDays(ev.date, -14), addDays(ev.date, 90))
                 .forEach((r) => { (byDay[r.date] ||= []).push(r); });
               const out = [];
-              for (let i = -14; i <= 30; i++) {
+              for (let i = -14; i <= 90; i++) {
                 const d = addDays(ev.date, i);
                 if (d > todayTW()) break;
                 const list = byDay[d];
@@ -1226,10 +1287,11 @@ export default async function handler(req, res) {
             })(),
             ready: !!(b && a),
             waitingFor: !b ? '事件前 14 天沒有資料——追蹤是活動之後才開始的，這一場算不出前後對比'
-              : !a ? `還要等 ${Math.max(0, 30 - daysSince)} 天（活動後滿 30 天才結算）` : null,
+              : !a ? `還要等 ${Math.max(0, 30 - daysSince)} 天（活動後滿 30 天才有餘波期資料）` : null,
+            // 淨變化一律用「百分點（pp）」，不是「%」——30%→60% 是 +30pp，不是 +30%
             delta: (b && a) ? {
-              mentionRate: a.mentionRate - b.mentionRate,
-              firstRate: a.firstRate - b.firstRate,
+              mentionRatePP: a.mentionRate - b.mentionRate,
+              firstRatePP: a.firstRate - b.firstRate,
               rank: b.rank - a.rank,
             } : null,
           };
