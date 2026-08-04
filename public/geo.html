@@ -112,6 +112,8 @@
   .rep-stat .v{font-size:1.3rem;font-weight:800;color:var(--text)}
   .rep-stat .p{font-size:.76rem;font-weight:700;margin-top:2px}
   .perf-wait{background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:12px 14px;font-size:.84rem;line-height:1.7}
+  .decay{background:var(--primary-light);border-left:4px solid var(--primary);border-radius:0 10px 10px 0;
+    padding:12px 14px;font-size:.85rem;line-height:1.8}
   .quote{border:1px solid var(--border);border-radius:12px;padding:14px 16px;margin-bottom:10px}
   .quote.miss{background:#fef2f2;border-color:#fecaca}
   .quote .q{font-size:.82rem;font-weight:700;margin-bottom:6px}
@@ -405,10 +407,11 @@ function copySlide(){
   L.push('');
 
   if(p && p.ready){
-    L.push(`【前後對比】（發稿前 14 天 → 發稿後 15–30 天）`);
-    L.push(`・AI 提到工研院的比例：${p.before.mentionRate}% → ${p.after.mentionRate}%（${p.delta.mentionRate>0?'+':''}${p.delta.mentionRate}）`);
-    L.push(`・被提到時排第一的比例：${p.before.firstRate}% → ${p.after.firstRate}%（${p.delta.firstRate>0?'+':''}${p.delta.firstRate}）`);
-    L.push(`・議題位次：第 ${p.before.rank} 名 → 第 ${p.after.rank} 名`);
+    L.push(`【前後對比】發稿前 14 天 → 活動期 → 沉澱後 15–30 天`);
+    L.push(`・AI 提到工研院的比例：${p.before.mentionRate}% → ${p.during.mentionRate}% → ${p.after.mentionRate}%（淨 ${p.delta.mentionRate>0?'+':''}${p.delta.mentionRate}）`);
+    L.push(`・被提到時排第一的比例：${p.before.firstRate}% → ${p.during.firstRate}% → ${p.after.firstRate}%（淨 ${p.delta.firstRate>0?'+':''}${p.delta.firstRate}）`);
+    L.push(`・議題位次：第 ${p.before.rank} → 第 ${p.during.rank} → 第 ${p.after.rank} 名`);
+    if(p.decay) L.push(`・聲量回落：活動期拉高 ${p.decay.held} 個百分點，一個月後留下 ${p.decay.kept} 個百分點（保留 ${p.decay.keptPct}%）`);
     L.push('');
   }
 
@@ -449,29 +452,39 @@ function perfHtml(p, no){
         數字再漂亮也不能說是這場帶來的。</div></div>`;
   }
 
-  const row = (label, b, a, delta, suf, invert) => {
-    const up = invert ? delta < 0 : delta > 0;
-    const flat = delta === 0;
+  const row = (label, b, m, a, delta, suf) => {
+    const up = delta > 0, flat = delta === 0;
     const cls = flat ? 'flat' : up ? 'up' : 'down';
-    const sign = delta > 0 ? '+' : '';
     return `<tr>
       <td>${esc(label)}</td>
       <td class="num-cell" style="color:var(--muted)">${b}${suf}</td>
+      <td class="num-cell" style="color:var(--muted)">${m}${suf}</td>
       <td class="num-cell">${a}${suf}</td>
-      <td class="num-cell ${cls}">${flat ? '持平' : `${up ? '▲' : '▼'} ${sign}${delta}${suf}`}</td></tr>`;
+      <td class="num-cell ${cls}">${flat ? '持平' : `${up ? '▲ +' : '▼ '}${up?delta:Math.abs(delta)}${suf}`}</td></tr>`;
   };
+
+  const d = p.decay;
+  const decayLine = !d ? '' : `
+    <div class="decay">
+      <b>聲量會不會被洗掉？會，但沒有掉回原點。</b><br>
+      活動期把提及率從 ${p.before.mentionRate}% 拉到 ${p.during.mentionRate}%（拉高 ${d.held} 個百分點），
+      一個月後回落到 ${p.after.mentionRate}%——<b>掉掉了 ${d.lostPct}%，留下 ${d.keptPct}%</b>。
+      留下的那 ${d.kept} 個百分點就是這場活動對 AI 長期認知的實際貢獻。
+    </div>`;
 
   return head + `
     <table style="margin-bottom:10px"><thead><tr>
-      <th>指標</th><th>發稿前 14 天</th><th>發稿後 15–30 天</th><th>變化</th>
+      <th>指標</th><th>發稿前<br>14 天</th><th>活動期<br>當天～14 天</th><th>沉澱後<br>15–30 天</th><th>淨變化</th>
     </tr></thead><tbody>
-      ${row('AI 提到工研院的比例', p.before.mentionRate, p.after.mentionRate, p.delta.mentionRate, '%')}
-      ${row('被提到時排第一的比例', p.before.firstRate, p.after.firstRate, p.delta.firstRate, '%')}
-      ${row('在這個議題的位次', '第 '+p.before.rank, '第 '+p.after.rank, p.delta.rank, ' 名', false)}
+      ${row('AI 提到工研院的比例', p.before.mentionRate, p.during.mentionRate, p.after.mentionRate, p.delta.mentionRate, '%')}
+      ${row('被提到時排第一的比例', p.before.firstRate, p.during.firstRate, p.after.firstRate, p.delta.firstRate, '%')}
+      ${row('在這個議題的位次', '第 '+p.before.rank, '第 '+p.during.rank, '第 '+p.after.rank, p.delta.rank, ' 名')}
     </tbody></table>
-    <div style="font-size:.76rem;color:var(--muted)">
-      樣本：事前 ${p.before.samples} 次、事後 ${p.after.samples} 次問答。
-      ${p.before.topRival?`事前最強對手是${esc(p.before.topRival)}。`:''}</div>`;
+    ${decayLine}
+    <div style="font-size:.76rem;color:var(--muted);margin-top:8px">
+      樣本：事前 ${p.before.samples} 次、活動期 ${p.during.samples} 次、沉澱後 ${p.after.samples} 次問答。
+      ${p.before.topRival?`事前最強對手是${esc(p.before.topRival)}。`:''}
+      「淨變化」比較的是<b>事前</b>與<b>沉澱後</b>，刻意不採用活動期的高點。</div>`;
 }
 
 /* ── 一頁報告（給同仁與主管） ── */

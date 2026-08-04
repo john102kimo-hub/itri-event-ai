@@ -1128,6 +1128,9 @@ export default async function handler(req, res) {
 
           const slice = (f, t) => allRuns.filter((r) => r.date >= f && r.date <= t);
           const before = slice(addDays(ev.date, -14), addDays(ev.date, -1));
+          // 活動期：聲量最高的那兩週。少了這一段就只剩前後兩個點，
+          // 講不出「衝多高、掉多少」，主管問「久了會不會被洗掉」就沒東西回。
+          const during = slice(ev.date, addDays(ev.date, 14));
           const after = slice(addDays(ev.date, 15), addDays(ev.date, 30));
 
           const profile = (rs) => {
@@ -1149,11 +1152,24 @@ export default async function handler(req, res) {
             };
           };
 
-          const b = profile(before), a = profile(after);
+          const b = profile(before), a = profile(after), dur = profile(during);
           const daysSince = dayDiff(ev.date, todayTW());
+
+          // 掉了多少 vs 留下多少 —— 這兩個數字是分開的，別混在一起講
+          let decay = null;
+          if (b && dur && a) {
+            const held = dur.mentionRate - b.mentionRate;          // 活動期比基線高多少
+            const kept = a.mentionRate - b.mentionRate;             // 沉澱後還高多少
+            decay = {
+              held, kept,
+              lostPct: held > 0 ? Math.round(((held - kept) / held) * 100) : null, // 掉掉了幾成
+              keptPct: held > 0 ? Math.round((kept / held) * 100) : null,          // 留下幾成
+            };
+          }
+
           performance = {
             event: { title: ev.title, date: ev.date, keyword: ev.keywords },
-            before: b, after: a, daysSince,
+            before: b, during: dur, after: a, decay, daysSince,
             ready: !!(b && a),
             waitingFor: !b ? '事件前 14 天沒有資料——追蹤是活動之後才開始的，這一場算不出前後對比'
               : !a ? `還要等 ${Math.max(0, 30 - daysSince)} 天（活動後滿 30 天才結算）` : null,
