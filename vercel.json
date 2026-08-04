@@ -12,6 +12,8 @@
   },
   "crons": [
     { "path": "/api/geo?action=cron", "schedule": "0 1 * * *" },
-    { "path": "/api/geo?action=cron", "schedule": "30 1 * * *" }
+    { "path": "/api/geo?action=cron", "schedule": "30 1 * * *" },
+    { "path": "/api/geo?action=cron&calibrate=1", "schedule": "0 5 1 * *" },
+    { "path": "/api/geo?action=cron&calibrate=1", "schedule": "0 12 1 * *" }
   ]
 }

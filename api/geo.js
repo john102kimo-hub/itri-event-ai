@@ -514,6 +514,23 @@ const parsePrompt = (r) => ({
 });
 
 /**
+ * 每個 cron 呼叫受 WAVE_CUTOFF_MS 限制，題庫大時一次呼叫掃不完全部組合
+ * （例如只有一個引擎、30 題時，一次呼叫大約只能掃 8 題）。
+ * 若每天都固定從第一題開始掃，後面掃不到的題目會永遠掃不到——
+ * 不是隨機的，是同一批題目每天都輪空。
+ * 這裡把起點依「今年第幾天」輪動，讓每天的起點不同，
+ * 掃不完的缺口會在幾天內轉移、而不是固定卡死在同一批題目上。
+ */
+function rotateForToday(arr) {
+  if (arr.length < 2) return arr;
+  const d = new Date(todayTW() + 'T00:00:00Z');
+  const startOfYear = new Date(d.getUTCFullYear(), 0, 1);
+  const dayOfYear = Math.floor((d - startOfYear) / 86400000);
+  const offset = dayOfYear % arr.length;
+  return [...arr.slice(offset), ...arr.slice(0, offset)];
+}
+
+/**
  * 找出今天還沒跑的 (題目 × 引擎) 組合。
  * 成功過就不再跑；失敗過但未達每日重試上限的會排回去，
  * 這樣暫時性的 API 錯誤有機會補救，壞掉的題目也不會把預算吃光。
@@ -531,7 +548,7 @@ async function pendingPairs(force) {
     if (!r[14]) succeeded.add(key);
   });
 
-  const prompts = promptRows.filter((r) => r[0]).map(parsePrompt).filter((p) => p.active);
+  const prompts = rotateForToday(promptRows.filter((r) => r[0]).map(parsePrompt).filter((p) => p.active));
   const engines = activeEngines();
 
   const pairs = [];
@@ -916,7 +933,11 @@ export default async function handler(req, res) {
       if (!passed) return res.status(401).json({ error: '未授權' });
       const gap = readyCheck();
       if (gap) return res.status(500).json({ error: gap });
-      return ok(res, await runBatch());
+      // calibrate=1：每月固定日子多跑幾輪，force 略過「今天已成功」的略過邏輯，
+      // 跟當天正常那一輪一起被 buildSeries 平均起來，當天的分數等於多次取樣的平均，
+      // 用來對照單次取樣的雜訊有多大（不改變其餘日子的每日一次取樣，成本不變）。
+      const calibrate = req.query.calibrate === '1';
+      return ok(res, await runBatch({ force: calibrate }));
     }
 
     /* ── 身分：管理員（密碼）或同仁（專用連結的 code）──
