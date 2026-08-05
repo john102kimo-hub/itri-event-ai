@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>記者名單健檢 — 工研院活動溝通 AI 平台</title>
+<style>
+  :root{
+    --primary:#0F9E7A; --primary-dark:#0a7a60; --primary-light:rgba(15,158,122,0.08);
+    --text:#1a1a2e; --muted:#6b7280; --bg:#f0f7f5; --card:#fff; --border:#e5e7eb; --radius:14px;
+    --warn:#f59e0b; --danger:#ef4444;
+    --font:'PingFang TC','Noto Sans TC','Microsoft JhengHei',sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:var(--font);background:var(--bg);color:var(--text);line-height:1.6}
+  .wrap{max-width:760px;margin:0 auto;padding:24px 16px 80px}
+
+  #gate{position:fixed;inset:0;background:linear-gradient(135deg,#0b3d30,#0F9E7A);display:flex;align-items:center;justify-content:center;padding:20px;z-index:50}
+  #gate-box{background:#fff;border-radius:20px;padding:36px 28px;width:100%;max-width:380px;text-align:center;box-shadow:0 24px 64px rgba(0,0,0,.25)}
+  #gate-box h1{font-size:1.2rem;margin-bottom:6px}
+  #gate-box p{color:var(--muted);font-size:.86rem;margin-bottom:22px}
+  #gate-box input{width:100%;border:2px solid var(--border);border-radius:12px;padding:13px;font-size:1rem;font-family:var(--font);text-align:center;outline:none;margin-bottom:12px}
+  #gate-box input:focus{border-color:var(--primary)}
+  #gate-box button{width:100%;background:var(--primary);color:#fff;border:none;border-radius:12px;padding:13px;font-size:1rem;font-weight:700;font-family:var(--font);cursor:pointer}
+  #gate-err{color:var(--danger);font-size:.82rem;margin-top:10px;min-height:18px}
+
+  h1.title{font-size:1.4rem;margin-bottom:4px}
+  .sub{color:var(--muted);font-size:.86rem;margin-bottom:20px}
+
+  .kpi-row{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:20px}
+  .kpi{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:14px;text-align:center}
+  .kpi .num{font-size:1.6rem;font-weight:800;color:var(--primary)}
+  .kpi .lab{font-size:.74rem;color:var(--muted);margin-top:2px}
+
+  .search{display:flex;gap:8px;margin-bottom:18px}
+  .search input{flex:1;border:1px solid var(--border);border-radius:10px;padding:10px 12px;font-family:var(--font);font-size:.9rem}
+  .search button{border:1px solid var(--border);background:#fff;border-radius:10px;padding:10px 16px;font-family:var(--font);font-size:.86rem;cursor:pointer}
+
+  .list-head{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px}
+  .list-head h2{font-size:1rem}
+  .list-head .note{font-size:.78rem;color:var(--muted)}
+
+  .rec{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:12px}
+  .rec.done{opacity:.4}
+  .rec-top{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:10px}
+  .rec-name{font-size:1.05rem;font-weight:700}
+  .rec-outlet{color:var(--muted);font-size:.86rem;margin-top:2px}
+  .rec-flag{font-size:.72rem;font-weight:700;padding:3px 9px;border-radius:20px;white-space:nowrap}
+  .flag-stale{background:#fef2f2;color:var(--danger)}
+  .flag-nobeat{background:#fffbeb;color:#92400e}
+  .rec-meta{font-size:.78rem;color:var(--muted);margin-bottom:12px}
+
+  .beat-row{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}
+  .beat-chip{border:1px solid var(--border);background:#fff;border-radius:20px;padding:6px 13px;font-size:.82rem;cursor:pointer;color:var(--text)}
+  .beat-chip.on{background:var(--primary);border-color:var(--primary);color:#fff;font-weight:700}
+
+  .action-row{display:flex;gap:8px}
+  .btn{flex:1;border:none;border-radius:10px;padding:11px;font-family:var(--font);font-size:.86rem;font-weight:700;cursor:pointer}
+  .btn-confirm{background:var(--primary);color:#fff}
+  .btn-left{background:#fff;border:1px solid var(--border);color:var(--muted)}
+  .btn:disabled{opacity:.5;cursor:not-allowed}
+
+  .empty{text-align:center;color:var(--muted);padding:50px 20px;font-size:.9rem}
+  .empty .big{font-size:2.2rem;margin-bottom:10px}
+
+  .admin-panel{margin-top:30px;border-top:2px dashed var(--border);padding-top:20px}
+  .admin-panel h3{font-size:.92rem;margin-bottom:8px}
+  .admin-panel .desc{font-size:.8rem;color:var(--muted);margin-bottom:10px}
+  .admin-panel textarea{width:100%;min-height:100px;border:1px solid var(--border);border-radius:10px;padding:10px;font-family:monospace;font-size:.78rem;margin-bottom:8px}
+  .admin-panel .row{display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;align-items:center}
+  .admin-panel button{border:1px solid var(--border);background:#fff;border-radius:9px;padding:8px 14px;font-family:var(--font);font-size:.82rem;cursor:pointer}
+  .admin-panel button.primary{background:var(--primary);color:#fff;border-color:var(--primary)}
+  .link-box{background:#f9fafb;border:1px solid var(--border);border-radius:8px;padding:8px 10px;font-family:monospace;font-size:.78rem;word-break:break-all;flex:1}
+  .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--text);color:#fff;padding:10px 20px;border-radius:10px;font-size:.85rem;opacity:0;transition:opacity .2s;pointer-events:none;z-index:60}
+  .toast.show{opacity:1}
+</style>
+</head>
+<body>
+
+<div id="gate">
+  <div id="gate-box">
+    <h1>記者名單健檢</h1>
+    <p>輸入承辦人給你的連結代碼，或管理員密碼</p>
+    <input id="gate-input" type="text" placeholder="連結代碼 / 管理員密碼">
+    <button onclick="unlock()">進入</button>
+    <div id="gate-err"></div>
+  </div>
+</div>
+
+<div class="wrap" id="app" style="display:none">
+  <h1 class="title">記者名單健檢</h1>
+  <p class="sub">路線空白、或太久沒受邀的記者會排在前面。花一分鐘確認幾筆，資料就會愈用愈準。</p>
+
+  <div class="kpi-row">
+    <div class="kpi"><div class="num" id="kpi-total">–</div><div class="lab">在職記者</div></div>
+    <div class="kpi"><div class="num" id="kpi-beat">–</div><div class="lab">已有路線</div></div>
+    <div class="kpi"><div class="num" id="kpi-review">–</div><div class="lab">待確認</div></div>
+  </div>
+
+  <div class="search">
+    <input id="search-input" type="text" placeholder="辦活動前先查一下：輸入記者姓名或媒體名稱">
+    <button onclick="doSearch()">查詢</button>
+  </div>
+  <div id="search-results"></div>
+
+  <div class="list-head">
+    <h2>待確認名單</h2>
+    <div class="note" id="showing-note"></div>
+  </div>
+  <div id="list"></div>
+
+  <div class="admin-panel" id="admin-panel" style="display:none">
+    <h3>同仁共用連結</h3>
+    <p class="desc">把這條連結傳給同仁，他們不需要密碼就能確認／更新名單。連結外流就按「換一條」，舊連結立刻失效。</p>
+    <div class="row">
+      <div class="link-box" id="staff-link">尚未產生</div>
+      <button onclick="genLink(false)">產生連結</button>
+      <button onclick="genLink(true)">換一條</button>
+    </div>
+
+    <h3>一次性匯入 / 更新資料</h3>
+    <p class="desc">
+      從 Excel／CSV 貼上，第一列要是標題，至少要有 <code>id,name,outlet</code> 三欄，
+      其餘可選：<code>beat,email,phone,invited_count,confirmed_count,declined_count,last_invited</code>（YYYY-MM-DD）。
+      同一個 id 再貼一次是「更新」不是「重複新增」；已經人工填過的路線不會被覆蓋。
+    </p>
+    <textarea id="csv-input" placeholder="id,name,outlet,beat,email,phone,invited_count,confirmed_count,declined_count,last_invited&#10;R0101,吳雅婷,三立新聞,,a@b.com,0912345678,86,3,4,2025-08-20"></textarea>
+    <div class="row">
+      <button class="primary" onclick="doSeed()">匯入</button>
+      <span id="seed-result" style="font-size:.8rem;color:var(--muted)"></span>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+let S = { pwd:'', code:'', role:'staff' };
+
+function toast(msg){
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('show');
+  setTimeout(()=>t.classList.remove('show'), 2200);
+}
+
+async function call(action, extra, method){
+  method = method || 'GET';
+  if(method === 'GET'){
+    // 管理員密碼走 header，不要出現在網址上；code 是同仁共用連結碼，設計上本來就要能放網址裡
+    const authPart = S.role==='admin' ? {} : {code:S.code};
+    const headers = S.role==='admin' ? {'X-Admin-Password': S.pwd} : {};
+    const qs = new URLSearchParams({action, ...authPart, ...(extra||{})});
+    return fetch('/api/media?'+qs.toString(), {headers}).then(r=>r.json());
+  }
+  const authPart = S.role==='admin' ? {password:S.pwd} : {code:S.code};
+  return fetch('/api/media', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({action, ...authPart, ...(extra||{})})}).then(r=>r.json());
+}
+
+async function unlock(){
+  const v = document.getElementById('gate-input').value.trim();
+  const err = document.getElementById('gate-err');
+  if(!v){ err.textContent = '請輸入代碼或密碼'; return; }
+  err.textContent = '驗證中…';
+
+  // 先當同仁代碼試
+  S.role='staff'; S.code=v;
+  let r = await call('list');
+  if(r.error){
+    // 再當管理員密碼試
+    S.role='admin'; S.pwd=v; S.code='';
+    r = await call('list');
+    if(r.error){ err.textContent = r.error; S.role='staff'; S.pwd=''; return; }
+  }
+  document.getElementById('gate').style.display='none';
+  document.getElementById('app').style.display='block';
+  if(S.role==='admin') document.getElementById('admin-panel').style.display='block';
+  render(r);
+}
+
+function daysLabel(d){
+  if(d===null || d===undefined) return '從沒受邀過';
+  if(d>365*3) return `${Math.floor(d/365)} 年前受邀`;
+  if(d>60) return `${Math.floor(d/30)} 個月前受邀`;
+  return `${d} 天前受邀`;
+}
+
+let recNames = {}; // id → name，供 markLeft 的確認訊息用
+
+function render(data){
+  document.getElementById('kpi-total').textContent = data.totalActive ?? '–';
+  document.getElementById('kpi-beat').textContent = data.totalWithBeat ?? '–';
+  document.getElementById('kpi-review').textContent = data.totalNeedsReview ?? '–';
+  document.getElementById('showing-note').textContent =
+    data.totalNeedsReview > data.showing ? `顯示 ${data.showing} / ${data.totalNeedsReview} 筆（先處理最重要的）` : '';
+
+  const list = document.getElementById('list');
+  if(!data.needsReview || !data.needsReview.length){
+    list.innerHTML = `<div class="empty"><div class="big">✓</div>目前沒有待確認的記者，太好了。</div>`;
+    return;
+  }
+  recNames = {};
+  list.innerHTML = data.needsReview.map(r => {
+    recNames[r.id] = r.name;
+    const flags = [];
+    if(!r.beat) flags.push('<span class="rec-flag flag-nobeat">沒有路線</span>');
+    if(r.daysSince===null || r.daysSince>365) flags.push('<span class="rec-flag flag-stale">太久沒受邀</span>');
+    const beats = (data.beats||[]).map(b =>
+      `<div class="beat-chip ${b===r.beat?'on':''}" onclick="pickBeat('${r.id}',this,'${b}')">${b}</div>`
+    ).join('');
+    return `
+    <div class="rec" id="rec-${r.id}">
+      <div class="rec-top">
+        <div><div class="rec-name">${esc(r.name)}</div><div class="rec-outlet">${esc(r.outlet)}</div></div>
+        <div>${flags.join(' ')}</div>
+      </div>
+      <div class="rec-meta">受邀過 ${r.invited_count} 次・${daysLabel(r.daysSince)}</div>
+      <div class="beat-row" id="beats-${r.id}">${beats}</div>
+      <div class="action-row">
+        <button class="btn btn-confirm" onclick="confirmRec('${r.id}')">✓ 還在跑，資料正確</button>
+        <button class="btn btn-left" onclick="markLeft('${r.id}')">已離職／轉線</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function esc(s){ return String(s||'').replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+let pendingBeat = {};
+function pickBeat(id, el, beat){
+  pendingBeat[id] = beat;
+  document.querySelectorAll(`#beats-${id} .beat-chip`).forEach(c=>c.classList.remove('on'));
+  el.classList.add('on');
+}
+
+async function confirmRec(id){
+  const r = await call('update', {id, beat: pendingBeat[id]}, 'POST');
+  if(r.error){ toast(r.error); return; }
+  document.getElementById(`rec-${id}`).classList.add('done');
+  toast('已確認');
+  setTimeout(()=>document.getElementById(`rec-${id}`)?.remove(), 400);
+}
+
+async function markLeft(id){
+  if(!confirm(`${recNames[id] || '這位記者'} 確定標記為已離職／轉線？`)) return;
+  const r = await call('update', {id, mark:'left'}, 'POST');
+  if(r.error){ toast(r.error); return; }
+  document.getElementById(`rec-${id}`).classList.add('done');
+  toast('已標記離職／轉線');
+  setTimeout(()=>document.getElementById(`rec-${id}`)?.remove(), 400);
+}
+
+// 誤點 markLeft 後唯一的復原管道：重新匯入 CSV 也救不回（seed 會保留既有的 status），
+// 只能靠這顆按鈕手動改回在職。
+async function markActive(id){
+  const r = await call('update', {id, mark:'active'}, 'POST');
+  if(r.error){ toast(r.error); return; }
+  toast('已恢復在職');
+  doSearch();
+}
+
+async function doSearch(){
+  const q = document.getElementById('search-input').value.trim();
+  const box = document.getElementById('search-results');
+  if(!q){ box.innerHTML=''; return; }
+  const r = await call('search', {q});
+  if(r.error || !r.results?.length){ box.innerHTML = `<div class="empty" style="padding:16px">找不到符合的記者</div>`; return; }
+  box.innerHTML = r.results.map(x => `
+    <div class="rec">
+      <div class="rec-top"><div><div class="rec-name">${esc(x.name)}</div><div class="rec-outlet">${esc(x.outlet)}</div></div>
+      ${x.status==='left' ? '<span class="rec-flag flag-stale">已離職／轉線</span>' : ''}</div>
+      <div class="rec-meta">路線：${esc(x.beat)||'（未填）'}・受邀過 ${x.invited_count} 次</div>
+      ${x.status==='left' ? `<div class="action-row"><button class="btn btn-confirm" onclick="markActive('${x.id}')">恢復在職</button></div>` : ''}
+    </div>`).join('');
+}
+document.getElementById('search-input').addEventListener('keydown', e=>{ if(e.key==='Enter') doSearch(); });
+
+async function genLink(regenerate){
+  if(regenerate && !confirm('確定要換新連結？舊連結會立刻失效，已拿到舊連結的同仁都要重發。')) return;
+  const r = await call('settings_save', {regenerate}, 'POST');
+  if(r.error){ toast(r.error); return; }
+  const url = `${location.origin}${location.pathname}?code=${r.code}`;
+  document.getElementById('staff-link').textContent = url;
+}
+
+async function doSeed(){
+  const csv = document.getElementById('csv-input').value;
+  const out = document.getElementById('seed-result');
+  if(!csv.trim()){ out.textContent = '請先貼上內容'; return; }
+  out.textContent = '匯入中…';
+  const r = await call('seed', {csv}, 'POST');
+  if(r.error){ out.textContent = r.error; return; }
+  out.textContent = `完成：新增 ${r.created} 筆、更新 ${r.updated} 筆，目前共 ${r.total} 筆`;
+  const list = await call('list');
+  render(list);
+}
+
+// 網址帶 ?code= 直接進場，不用再輸入一次
+(async function(){
+  const code = new URLSearchParams(location.search).get('code');
+  if(!code) return;
+  S.role='staff'; S.code=code;
+  const r = await call('list');
+  if(r.error){ document.getElementById('gate-err').textContent = r.error; return; }
+  document.getElementById('gate').style.display='none';
+  document.getElementById('app').style.display='block';
+  render(r);
+})();
+document.getElementById('gate-input').addEventListener('keydown', e=>{ if(e.key==='Enter') unlock(); });
+</script>
+</body>
+</html>

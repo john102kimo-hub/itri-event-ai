@@ -328,6 +328,10 @@ textarea.form-control { min-height: 200px; resize: vertical; line-height: 1.6; }
       <div class="topbar">
         <h1><i class="ti ti-calendar-event" style="color:var(--primary)"></i> 活動管理</h1>
         <div class="topbar-actions">
+          <label style="display:inline-flex;align-items:center;gap:6px;font-size:0.85rem;color:var(--muted);cursor:pointer;white-space:nowrap">
+            <input type="checkbox" id="show-archived" onchange="renderEvents()" style="cursor:pointer">
+            顯示封存
+          </label>
           <button class="btn btn-outline" onclick="loadAll()"><i class="ti ti-refresh"></i> 重整</button>
           <button class="btn btn-primary" onclick="showCreateModal()"><i class="ti ti-plus"></i> 新增活動</button>
         </div>
@@ -508,17 +512,17 @@ let state = { password: '', events: [], analytics: null };
 async function login() {
   const pwd = document.getElementById('pwd-input').value.trim();
   if (!pwd) return;
+  const errEl = document.getElementById('login-error');
+  errEl.style.display = 'none';
   // 驗證：嘗試取分析資料（需要密碼）
   try {
-    const res = await fetch(`/api/analytics?password=${encodeURIComponent(pwd)}`);
+    const res = await fetch('/api/analytics', { headers: { 'X-Admin-Password': pwd } });
     if (res.status === 401) {
-      document.getElementById('login-error').style.display = 'block';
+      errEl.textContent = '密碼錯誤，請重試';
+      errEl.style.display = 'block';
       return;
     }
     const data = await res.json();
-    if (data.error && data.error !== '密碼錯誤') {
-      // 密碼正確但可能 Sheets 未設定，仍允許登入
-    }
     state.password = pwd;
     state.analytics = data;
     sessionStorage.setItem('itri_pwd', pwd);
@@ -526,13 +530,23 @@ async function login() {
     document.getElementById('app').style.display = 'block';
     loadAll();
   } catch(e) {
-    // 網路錯誤時也允許繼續（密碼先存著）
-    state.password = pwd;
-    sessionStorage.setItem('itri_pwd', pwd);
-    document.getElementById('login-screen').style.display = 'none';
-    document.getElementById('app').style.display = 'block';
-    loadAll();
+    // 網路錯誤（Vercel 冷啟動、訊號差）不能直接放行——之前這裡會讓任何輸入都當成密碼存進
+    // session，之後每個操作都 401，畫面看起來像整個系統壞掉，其實只是密碼沒被驗證過。
+    errEl.textContent = '連線失敗，請確認網路後再試一次';
+    errEl.style.display = 'block';
   }
+}
+
+// 後台操作收到 401 時自動登出，回到登入畫面重新輸入（而不是讓使用者對著一堆「密碼錯誤」的
+// 操作結果一頭霧水，以為系統壞了）
+async function authedFetch(url, options = {}) {
+  const headers = { ...(options.headers || {}), 'X-Admin-Password': state.password };
+  const res = await fetch(url, { ...options, headers });
+  if (res.status === 401) {
+    logout();
+    throw new Error('登入已失效，請重新輸入密碼');
+  }
+  return res;
 }
 
 function logout() {
@@ -580,7 +594,7 @@ async function loadEvents() {
 
 async function loadStatsQuick() {
   try {
-    const res = await fetch(`/api/analytics?password=${encodeURIComponent(state.password)}`);
+    const res = await authedFetch('/api/analytics');
     const data = await res.json();
     if (!data.error) {
       state.analytics = data;
@@ -597,18 +611,22 @@ function updateStats(data) {
   (data.by_event || []).forEach(e => (e.media_list || []).forEach(m => allMedia.add(m)));
   document.getElementById('stat-media').textContent = allMedia.size;
 
-  const today = new Date().toLocaleDateString('zh-TW');
-  const todayCount = (data.recent || []).filter(r => r.time && r.time.includes(today)).length;
-  document.getElementById('stat-today').textContent = todayCount;
+  // 後端對全量資料算好的今日筆數 —— 之前是在最近 50 筆裡數今天的，記者會當天問答一旦破 50
+  // 就會低估，而那正是最需要盯著這個數字的時候。
+  document.getElementById('stat-today').textContent = data.today_count ?? 0;
 }
 
 function renderEvents() {
   const grid = document.getElementById('events-grid');
-  const events = state.events;
+  // 依建立時間新到舊排序，且預設不顯示已封存的活動——依 Sheet 列序（等於建立順序舊到新）
+  // 平鋪、封存的活動混在裡面，辦到十幾場後最常用的「進行中」活動反而被埋在最下面。
+  const showArchived = document.getElementById('show-archived')?.checked;
+  let events = [...state.events].sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
+  if (!showArchived) events = events.filter(e => e.status !== 'archived');
   if (!events.length) {
     grid.innerHTML = `<div class="empty-state" style="grid-column:1/-1">
       <i class="ti ti-calendar-off"></i>
-      <p>尚無活動，點擊「新增活動」建立第一個</p>
+      <p>${state.events.length ? '沒有進行中的活動（可勾選「顯示封存」查看已封存的活動）' : '尚無活動，點擊「新增活動」建立第一個'}</p>
     </div>`;
     return;
   }
@@ -687,11 +705,17 @@ function showAnalyticsByEvent(eventId) {
 
 async function deleteQA(rowNum) {
   if (!confirm('確定要刪除這筆問答紀錄嗎？')) return;
+  // 帶上這一列目前顯示的時間戳與問題內容，後端會比對是否相符才刪除——避免試算表被手動
+  // 整理過、row_num 早就指向別筆資料時，誤刪到別的記者的問答。
+  const row = (state.recentCache || []).find(r => r.row_num === rowNum);
   try {
-    const res = await fetch('/api/analytics', {
+    const res = await authedFetch('/api/analytics', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'delete', row_num: rowNum, password: state.password })
+      body: JSON.stringify({
+        action: 'delete', row_num: rowNum, password: state.password,
+        timestamp: row?.time, question: row?.question
+      })
     });
     const data = await res.json();
     if (data.error) throw new Error(data.error);
@@ -709,10 +733,13 @@ async function loadAnalytics() {
 
   try {
     const noTest = document.getElementById('analytics-exclude-test')?.checked;
-    const url = `/api/analytics?password=${encodeURIComponent(state.password)}${eid ? '&event_id=' + encodeURIComponent(eid) : ''}${noTest ? '&exclude_test=1' : ''}`;
-    const res = await fetch(url);
+    const params = new URLSearchParams();
+    if (eid) params.set('event_id', eid);
+    if (noTest) params.set('exclude_test', '1');
+    const res = await authedFetch(`/api/analytics?${params.toString()}`);
     const data = await res.json();
     if (data.error) throw new Error(data.error);
+    state.recentCache = data.recent || [];
     renderAnalytics(data, eid);
   } catch(e) {
     view.innerHTML = `<div style="color:#ef4444;padding:20px">載入失敗：${e.message}</div>`;
@@ -780,9 +807,10 @@ async function loadRecent() {
   document.getElementById('recent-tbody').innerHTML =
     '<tr><td colspan="5" style="text-align:center;padding:40px;color:var(--muted)">載入中…</td></tr>';
   try {
-    const res = await fetch(`/api/analytics?password=${encodeURIComponent(state.password)}`);
+    const res = await authedFetch('/api/analytics?limit=200');
     const data = await res.json();
     if (data.error) throw new Error(data.error);
+    state.recentCache = data.recent || [];
     document.getElementById('recent-tbody').innerHTML = (data.recent || []).map(r => `
       <tr>
         <td style="white-space:nowrap;font-size:0.78rem;color:var(--muted)">${escHtml(r.time||'')}</td>
@@ -801,11 +829,15 @@ async function loadRecent() {
 
 async function deleteQARecent(rowNum) {
   if (!confirm('確定要刪除這筆問答紀錄嗎？')) return;
+  const row = (state.recentCache || []).find(r => r.row_num === rowNum);
   try {
-    const res = await fetch('/api/analytics', {
+    const res = await authedFetch('/api/analytics', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'delete', row_num: rowNum, password: state.password })
+      body: JSON.stringify({
+        action: 'delete', row_num: rowNum, password: state.password,
+        timestamp: row?.time, question: row?.question
+      })
     });
     const data = await res.json();
     if (data.error) throw new Error(data.error);
@@ -838,18 +870,19 @@ function showCreateModal() {
   document.getElementById('event-modal').style.display = 'flex';
 }
 
-// 填充「以既有活動為範本」下拉（用已載入的活動清單）
+// 填充「以既有活動為範本」下拉（用已載入的活動清單；新到舊排序，最近一場最常被當範本）
 function populateCopyTemplate() {
   const sel = document.getElementById('copy-template-select');
+  const sorted = [...(state.events || [])].sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
   sel.innerHTML = '<option value="">— 選擇要複製的活動 —</option>' +
-    (state.events || []).map(e => `<option value="${escHtml(e.id)}">${escHtml(e.name)}</option>`).join('');
+    sorted.map(e => `<option value="${escHtml(e.id)}">${escHtml(e.name)}</option>`).join('');
 }
 
 // 選擇舊活動 → 把其知識庫與主辦單位帶進表單
 async function copyFromEvent(eventId) {
   if (!eventId) return;
   try {
-    const res = await fetch(`/api/events?action=get&id=${encodeURIComponent(eventId)}&password=${encodeURIComponent(state.password)}`);
+    const res = await authedFetch(`/api/events?action=get&id=${encodeURIComponent(eventId)}`);
     const ev = await res.json();
     if (ev.error) throw new Error(ev.error);
     document.getElementById('input-kb').value = ev.knowledge_base || KB_TEMPLATE;
@@ -868,7 +901,7 @@ async function showEditModal(eventId) {
   document.getElementById('archive-btn').style.display = 'inline-flex';
 
   try {
-    const res = await fetch(`/api/events?action=get&id=${encodeURIComponent(eventId)}&password=${encodeURIComponent(state.password)}`);
+    const res = await authedFetch(`/api/events?action=get&id=${encodeURIComponent(eventId)}`);
     const ev = await res.json();
     if (ev.error) { toast(ev.error); return; }
 
@@ -923,7 +956,7 @@ async function saveEvent() {
   btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader"></i> 儲存中…';
 
   try {
-    const res = await fetch('/api/events', {
+    const res = await authedFetch('/api/events', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -995,7 +1028,7 @@ async function archiveEvent() {
   if (!confirm('確定要封存這個活動嗎？封存後記者前台將無法使用。')) return;
 
   try {
-    const res = await fetch('/api/events', {
+    const res = await authedFetch('/api/events', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'archive', password: state.password, id })
@@ -1011,10 +1044,30 @@ async function archiveEvent() {
 }
 
 // ── 工具函式 ──────────────────────────────────────────────
-function exportCSV(eventId) {
+async function exportCSV(eventId) {
   const eid = eventId || document.getElementById('analytics-event-filter')?.value || '';
-  const url = `/api/export?password=${encodeURIComponent(state.password)}${eid ? '&event_id=' + encodeURIComponent(eid) : ''}`;
-  window.open(url, '_blank');
+  // 改用 fetch + Blob 下載：window.open 會把密碼直接顯示在網址列上（開會投影、截圖分享
+  // 給主管時等於當場外洩），且密碼會留在 Vercel 的存取紀錄與瀏覽器歷史裡。
+  try {
+    const res = await authedFetch(`/api/export${eid ? '?event_id=' + encodeURIComponent(eid) : ''}`);
+    if (!res.ok) {
+      const d = await res.json().catch(() => ({}));
+      throw new Error(d.error || '匯出失敗');
+    }
+    const blob = await res.blob();
+    const cd = res.headers.get('Content-Disposition') || '';
+    const m = cd.match(/filename\*=UTF-8''([^;]+)/);
+    const filename = m ? decodeURIComponent(m[1]) : `qa-export-${new Date().toISOString().slice(0,10)}.csv`;
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(a.href);
+  } catch (e) {
+    toast('匯出失敗：' + e.message);
+  }
 }
 
 function copyLink(eventId) {
@@ -1028,7 +1081,7 @@ async function copyEditLink(eventId, btn) {
   const original = btn ? btn.innerHTML : '';
   if (btn) { btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader"></i> 產生中…'; }
   try {
-    const res = await fetch('/api/events', {
+    const res = await authedFetch('/api/events', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'ensure_edit_code', password: state.password, id: eventId })

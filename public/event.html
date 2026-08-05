@@ -60,7 +60,7 @@
   #media-banner label { font-size: 0.82rem; color: var(--muted); white-space: nowrap; }
   #media-input {
     flex: 1; border: 1px solid var(--border); border-radius: 8px;
-    padding: 6px 12px; font-family: var(--font); font-size: 0.88rem;
+    padding: 6px 12px; font-family: var(--font); font-size: 16px;
     background: white; outline: none;
     transition: border-color 0.2s;
   }
@@ -204,7 +204,7 @@
     border-radius: 10px;
     padding: 10px 14px;
     font-family: var(--font);
-    font-size: 0.9rem;
+    font-size: 16px;
     resize: none;
     overflow-y: auto;
     max-height: 120px;
@@ -377,6 +377,7 @@ const eventId = params.get('id');
 let hist = [];
 let eventColor = '#0F9E7A';
 let mediaName = '';
+let isWaiting = false;
 
 // 預設快速問題（若活動未自訂則使用）
 const defaultChips = [
@@ -426,8 +427,8 @@ async function init() {
       return;
     }
 
-    // 套用活動設定
-    eventColor = event.color || '#0F9E7A';
+    // 套用活動設定（色碼格式不對就退回預設，避免同仁填錯格式讓整頁 CSS 變數失效）
+    eventColor = /^#[0-9A-Fa-f]{6}$/.test(event.color || '') ? event.color : '#0F9E7A';
     document.documentElement.style.setProperty('--primary', eventColor);
     // 深色版
     document.documentElement.style.setProperty('--primary-dark', shadeColor(eventColor, -15));
@@ -513,7 +514,10 @@ function confirmMediaModal() {
 const _modalInput = document.getElementById('media-modal-input');
 const _modalBtn   = document.getElementById('media-modal-btn');
 _modalInput.addEventListener('input',   () => { _modalBtn.disabled = !_modalInput.value.trim(); });
-_modalInput.addEventListener('keydown', e  => { if (e.key === 'Enter') confirmMediaModal(); });
+_modalInput.addEventListener('keydown', e  => {
+  if (e.isComposing || e.keyCode === 229) return; // 中文輸入法選字時的 Enter，不當作送出
+  if (e.key === 'Enter') confirmMediaModal();
+});
 _modalBtn.addEventListener('click', confirmMediaModal);
 
 // 媒體名稱處理（banner 可修改媒體名稱）
@@ -577,8 +581,10 @@ function showTyping() {
 }
 
 async function sendMessage(text) {
+  if (isWaiting) return; // AI 還在回覆時，Enter 連按或連點 chip 不會平行送出第二個請求
   const q = (text || document.getElementById('user-input').value).trim();
   if (!q) return;
+  isWaiting = true;
 
   // 首次提問後收合歡迎卡，釋放（尤其手機）對話空間
   const welcomeEl = document.getElementById('welcome');
@@ -615,10 +621,12 @@ async function sendMessage(text) {
   }
 
   document.getElementById('send-btn').disabled = false;
+  isWaiting = false;
 }
 
 // Enter 送出
 document.getElementById('user-input').addEventListener('keydown', e => {
+  if (e.isComposing || e.keyCode === 229) return; // 中文輸入法選字時的 Enter，不當作送出
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
 });
 document.getElementById('send-btn').addEventListener('click', () => sendMessage());

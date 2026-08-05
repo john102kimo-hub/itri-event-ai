@@ -140,6 +140,7 @@ async function anthropic(body) {
       'anthropic-version': '2023-06-01',
     },
     body: JSON.stringify(body),
+    signal: AbortSignal.timeout(15_000), // probeClaude 有 pause_turn 續跑迴圈，單次呼叫上限抓緊一點
   });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error?.message || `Anthropic ${res.status}`);
@@ -155,7 +156,8 @@ const webSearchTool = (model) =>
 async function probeClaude(question) {
   const messages = [{ role: 'user', content: question }];
   let answer = '';
-  const citations = [];
+  const citations = [];      // 模型「實際引用」的來源（text block 的 citations 欄位）
+  const searchResults = [];  // 搜尋引擎回傳的候選結果清單，只用來確認接地有沒有生效，不算引用
 
   // 伺服端工具跑滿內部迴圈會回 pause_turn，把 assistant 回合接回去續跑
   for (let i = 0; i < 3; i++) {
@@ -169,10 +171,15 @@ async function probeClaude(question) {
     });
 
     for (const b of data.content || []) {
-      if (b.type === 'text') answer += b.text;
-      else if (b.type === 'web_search_tool_result' && Array.isArray(b.content)) {
+      if (b.type === 'text') {
+        answer += b.text;
+        // text block 的 citations 才是模型「真的引用」的來源；web_search_tool_result
+        // 只是搜尋引擎回傳的候選清單（每次搜尋最多約 10 筆）——把候選清單當成引用，
+        // 會讓自家網域只要出現在搜尋結果裡就白拿分，跟其他引擎的真引用不是同一件事。
+        (b.citations || []).forEach((c) => c?.url && citations.push(cite(c.url, c.title)));
+      } else if (b.type === 'web_search_tool_result' && Array.isArray(b.content)) {
         // 錯誤時 content 是物件（{error_code}），只有成功才是陣列
-        b.content.forEach((r) => r?.url && citations.push(cite(r.url)));
+        b.content.forEach((r) => r?.url && searchResults.push(cite(r.url)));
       }
     }
 
@@ -180,7 +187,7 @@ async function probeClaude(question) {
     messages.push({ role: 'assistant', content: data.content });
   }
 
-  return { answer: answer.trim(), citations };
+  return { answer: answer.trim(), citations, searchResults };
 }
 
 /* ── 其餘引擎（選配，依各家公開回應格式解析，缺欄位就當作沒有引用） ── */
@@ -188,7 +195,10 @@ async function probeClaude(question) {
 async function gemini(body, model = GEMINI_MODEL) {
   const res = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GEMINI_API_KEY}`,
-    { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }
+    {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+      signal: AbortSignal.timeout(20_000),
+    }
   );
   const data = await res.json();
   if (!res.ok) throw new Error(data.error?.message || `Gemini ${res.status}`);
@@ -236,6 +246,7 @@ async function probeOpenAI(question) {
       input: question,
       tools: [{ type: 'web_search' }],
     }),
+    signal: AbortSignal.timeout(20_000),
   });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error?.message || `OpenAI ${res.status}`);
@@ -265,6 +276,7 @@ async function probePerplexity(question) {
         { role: 'user', content: question },
       ],
     }),
+    signal: AbortSignal.timeout(20_000),
   });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error?.message || `Perplexity ${res.status}`);
@@ -568,12 +580,13 @@ async function pendingPairs(force) {
 
 /** 跑一題一引擎，回傳觀察結果（不寫檔）。給 runOne 與 selftest 共用。 */
 async function probeAndScore(p, engine) {
-  const { answer, citations } = await engine.run(p.prompt);
+  const { answer, citations, searchResults = [] } = await engine.run(p.prompt);
   if (!answer) throw new Error('引擎沒有回傳文字');
 
   // 沒有任何來源 = 搜尋沒生效（額度不足、接地未開通、或模型選擇不搜尋）。
   // 這種回答是模型憑記憶講的，不能當成能見度分數記進去，否則整條曲線是假的。
-  if (engine.grounded && !citations.length) {
+  // （searchResults 只有 Claude 會有值：就算這題沒有真引用，只要搜尋確實跑過，接地就算有生效。）
+  if (engine.grounded && !citations.length && !searchResults.length) {
     throw new Error('接地未生效：回應沒有任何搜尋來源，此筆不計分（請確認搜尋額度是否開通）');
   }
 
@@ -913,7 +926,7 @@ const uid = (p) => `${p}_${Date.now().toString(36)}${Math.random().toString(36).
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-Admin-Password');
   if (req.method === 'OPTIONS') return res.status(200).end();
 
   const admin = process.env.ADMIN_PASSWORD;
@@ -931,16 +944,20 @@ export default async function handler(req, res) {
     const cronCall = req.query.action === 'cron' || (!!secret && bearer === secret);
 
     if (cronCall) {
-      const passed = secret
-        ? (bearer === secret || req.query.secret === secret)
-        : (fromVercelCron || req.query.password === admin);
-      if (!passed) return res.status(401).json({ error: '未授權' });
-      const gap = readyCheck();
-      if (gap) return res.status(500).json({ error: gap });
       // calibrate=1：每月固定日子多跑幾輪，force 略過「今天已成功」的略過邏輯，
       // 跟當天正常那一輪一起被 buildSeries 平均起來，當天的分數等於多次取樣的平均，
       // 用來對照單次取樣的雜訊有多大（不改變其餘日子的每日一次取樣，成本不變）。
       const calibrate = req.query.calibrate === '1';
+      const strongAuth = secret
+        ? (bearer === secret || req.query.secret === secret)
+        : (!!admin && req.query.password === admin);
+      // User-Agent 是任何人都能偽造的標頭，只用它放行「一般批次」；
+      // calibrate（force 全量重掃、會跳過當天去重）一律要求 CRON_SECRET 或管理員密碼，
+      // 否則一行偽造 UA 的 curl 就能無限重跑、燒光探測用的 API 額度。
+      const passed = strongAuth || (!calibrate && fromVercelCron);
+      if (!passed) return res.status(401).json({ error: '未授權' });
+      const gap = readyCheck();
+      if (gap) return res.status(500).json({ error: gap });
       return ok(res, await runBatch({ force: calibrate }));
     }
 
@@ -948,7 +965,9 @@ export default async function handler(req, res) {
      * 同仁能開追蹤、能掃、能看結果與建議；不能改設定、不能刪東西、
      * 也拿不到後台密碼。 */
     const q = req.method === 'GET' ? req.query : (req.body || {});
-    const password = q.password;
+    // 管理員密碼優先讀 header（GET 用這個，避免留在網址列／瀏覽器歷史裡）；
+    // code 是同仁的專屬連結碼，設計上本來就要能放在網址裡分享，維持走 query/body。
+    const password = req.method === 'GET' ? (req.headers['x-admin-password'] || q.password) : q.password;
     const code = String(q.code || '').trim();
 
     let role = null;
@@ -1555,10 +1574,15 @@ export default async function handler(req, res) {
     }
 
     /**
-     * 停止追蹤一場活動：把該議題的題目從題庫刪掉，並移除活動標記。
+     * 停止追蹤一場活動：把該議題的題目「停用」（active 設 FALSE），並移除活動標記。
      *
-     * 刻意只刪題庫、不動 geo_runs —— 曲線、事件效應、議題排行全部是從
-     * geo_runs 算出來的，所以歷史資料與圖表都還在。那是花錢換來的，刪掉回不來。
+     * 之前是直接把題目整列刪除，但題目一刪，歷史報告靠 prompt_id 回查問句文字
+     * 就會變空白（只剩答案沒有問題），而且無法重新啟用追蹤、只能重生一批新題
+     * （prompt_id 不同，前後不可比）。改成停用：不掃描、不計費（pendingPairs 只挑
+     * active 的題目），但題目本身與歷史資料都還在，之後可以重新啟用。
+     *
+     * geo_runs 完全不動 —— 曲線、事件效應、議題排行全部是從 geo_runs 算出來的，
+     * 那是花錢換來的歷史資料，不受這個動作影響。
      */
     if (body.action === 'track_stop') {
       const evRows = await safeRead('geo_events!A2:G');
@@ -1566,19 +1590,16 @@ export default async function handler(req, res) {
       if (!target) return res.status(404).json({ error: '找不到這場追蹤' });
       const keyword = target[4] || '';
 
-      // 刪掉同議題的題目
-      let removed = 0;
+      // 停用同議題的題目（逐列更新 G 欄，不影響其他欄位與其他議題的題目）
+      let stopped = 0;
       if (keyword) {
         const pRows = await safeRead('geo_prompts!A2:H');
-        const keptPrompts = pRows.filter((r) => {
-          if (r[0] && r[3] === keyword) { removed++; return false; }
-          return !!r[0];
-        });
-        if (pRows.length) {
-          await updateRange(`geo_prompts!A2:H${pRows.length + 1}`, pRows.map(() => new Array(8).fill('')));
-        }
-        if (keptPrompts.length) {
-          await updateRange(`geo_prompts!A2:H${keptPrompts.length + 1}`, keptPrompts);
+        for (let i = 0; i < pRows.length; i++) {
+          const r = pRows[i];
+          if (r[0] && r[3] === keyword && String(r[6]).toUpperCase() !== 'FALSE') {
+            await updateRange(`geo_prompts!G${i + 2}`, [['FALSE']]);
+            stopped++;
+          }
         }
       }
 
@@ -1588,7 +1609,7 @@ export default async function handler(req, res) {
       }
       if (kept.length) await updateRange(`geo_events!A2:G${kept.length + 1}`, kept);
 
-      return ok(res, { success: true, removed, keyword });
+      return ok(res, { success: true, removed: stopped, keyword });
     }
 
     if (body.action === 'prompt_generate') {

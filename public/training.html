@@ -158,7 +158,7 @@
     border: 1.5px solid var(--border);
     border-radius: 10px;
     padding: 10px 14px;
-    font-family: var(--font); font-size: 0.9rem;
+    font-family: var(--font); font-size: 16px;
     resize: none; overflow-y: auto; max-height: 120px;
     line-height: 1.5; outline: none;
     transition: border-color 0.2s;
@@ -277,6 +277,9 @@
 <script>
 const params = new URLSearchParams(location.search);
 let eventId = params.get('id');
+// 這支功能只給內部人用：帶 ?code=（同仁該場的編輯碼）或已在後台登入過（sessionStorage 有密碼）才能用
+const TRAINING_CODE = params.get('code') || '';
+const TRAINING_PWD = sessionStorage.getItem('itri_pwd') || '';
 let reporterHist = [];  // 記者對話歷程
 let questionCount = 0;
 const MAX_Q = 5;
@@ -287,6 +290,15 @@ let eventName = '工研院活動';
 async function init() {
   // 設定返回連結
   document.getElementById('back-link').href = '/';
+
+  if (!TRAINING_CODE && !TRAINING_PWD) {
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('info-card').innerHTML =
+      '<i class="ti ti-lock"></i><span>這個功能只給內部同仁使用。請先從後台登入，再從活動卡片點「媒體訓練」進入本頁。</span>';
+    document.getElementById('progress-bar').style.display = 'none';
+    document.getElementById('start-area').style.display = 'none';
+    return;
+  }
 
   try {
     const res = await fetch('/api/events');
@@ -412,7 +424,9 @@ async function askNextQuestion() {
       body: JSON.stringify({
         messages: reporterHist,
         event_id: eventId,
-        mode: 'reporter'
+        mode: 'reporter',
+        code: TRAINING_CODE || undefined,
+        password: TRAINING_PWD || undefined
       })
     });
     const data = await res.json();
@@ -463,7 +477,9 @@ async function submitAnswer() {
       body: JSON.stringify({
         messages: reporterHist,
         event_id: eventId,
-        mode: 'evaluate'
+        mode: 'evaluate',
+        code: TRAINING_CODE || undefined,
+        password: TRAINING_PWD || undefined
       })
     });
     const evalData = await evalRes.json();
@@ -577,6 +593,7 @@ function removeTyping() {
 
 // 輸入事件
 document.getElementById('user-input').addEventListener('keydown', e => {
+  if (e.isComposing || e.keyCode === 229) return; // 中文輸入法選字時的 Enter，不當作送出
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submitAnswer(); }
 });
 document.getElementById('send-btn').addEventListener('click', submitAnswer);

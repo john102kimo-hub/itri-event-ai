@@ -9,6 +9,37 @@ function base64url(input) {
     .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
 }
 
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * 統一加上重試的 fetch：遇到 429（配額用完）或 500/503（Google 端暫時性錯誤）
+ * 就重試，最多 3 次、間隔 500ms → 1500ms → 3000ms。
+ *
+ * 為什麼要這層：Sheets API 配額是每個服務帳號每分鐘讀寫各 60 次，全站共用
+ * 同一個帳號。記者會當天幾十位記者在開場後十分鐘內集中發問，很容易瞬間撞到
+ * 配額——沒有這層重試，撞到就直接 throw，記者端會看到「伺服器錯誤」。
+ */
+async function fetchWithRetry(url, options, maxRetries = 3) {
+  const delays = [500, 1500, 3000];
+  let lastErr;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    let res;
+    try {
+      res = await fetch(url, options);
+    } catch (err) {
+      lastErr = err;
+      if (attempt < maxRetries) { await sleep(delays[attempt]); continue; }
+      throw err;
+    }
+    if ((res.status === 429 || res.status === 500 || res.status === 503) && attempt < maxRetries) {
+      await sleep(delays[attempt]);
+      continue;
+    }
+    return res;
+  }
+  throw lastErr || new Error('請求失敗');
+}
+
 // Token 快取（同一個 Function 執行週期內重用）
 let tokenCache = null;
 let tokenExpiry = 0;
@@ -39,7 +70,7 @@ async function getAccessToken() {
 
   const jwt = `${header}.${payload}.${signature}`;
 
-  const res = await fetch('https://oauth2.googleapis.com/token', {
+  const res = await fetchWithRetry('https://oauth2.googleapis.com/token', {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: `grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=${jwt}`
@@ -55,7 +86,7 @@ async function getAccessToken() {
 
 export async function readRange(range) {
   const token = await getAccessToken();
-  const res = await fetch(
+  const res = await fetchWithRetry(
     `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/${encodeURIComponent(range)}`,
     { headers: { Authorization: `Bearer ${token}` } }
   );
@@ -66,7 +97,7 @@ export async function readRange(range) {
 
 export async function appendRows(range, values) {
   const token = await getAccessToken();
-  const res = await fetch(
+  const res = await fetchWithRetry(
     `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/${encodeURIComponent(range)}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`,
     {
       method: 'POST',
@@ -82,7 +113,7 @@ export async function appendRows(range, values) {
 // 結構操作（新增分頁）
 export async function batchUpdate(requests) {
   const token = await getAccessToken();
-  const res = await fetch(
+  const res = await fetchWithRetry(
     `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}:batchUpdate`,
     {
       method: 'POST',
@@ -97,7 +128,7 @@ export async function batchUpdate(requests) {
 
 export async function listSheets() {
   const token = await getAccessToken();
-  const res = await fetch(
+  const res = await fetchWithRetry(
     `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}?fields=sheets.properties(sheetId,title)`,
     { headers: { Authorization: `Bearer ${token}` } }
   );
@@ -120,7 +151,7 @@ export async function ensureSheets(spec) {
 
 export async function updateRange(range, values) {
   const token = await getAccessToken();
-  const res = await fetch(
+  const res = await fetchWithRetry(
     `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/${encodeURIComponent(range)}?valueInputOption=RAW`,
     {
       method: 'PUT',

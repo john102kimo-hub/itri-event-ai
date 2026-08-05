@@ -387,7 +387,7 @@ async function unlock(){
   const pwd = document.getElementById('gate-input').value.trim();
   if(!pwd) return;
   const err = document.getElementById('gate-err'); err.textContent = '驗證中…';
-  const res = await fetch(`/api/geo?action=status&password=${encodeURIComponent(pwd)}`);
+  const res = await fetch('/api/geo?action=status', { headers: { 'X-Admin-Password': pwd } });
   if(!res.ok){ err.textContent = '密碼錯誤'; return; }
   S.pwd = pwd; sessionStorage.setItem('itri_pwd', pwd);
   document.getElementById('gate').style.display='none';
@@ -415,10 +415,12 @@ document.getElementById('gate-input').addEventListener('keydown', e=>{ if(e.key=
   if(p){ document.getElementById('gate-input').value = p; unlock(); }
 })();
 
-const auth = () => S.role==='staff'
-  ? `code=${encodeURIComponent(S.code)}` : `password=${encodeURIComponent(S.pwd)}`;
-const api = (qs) => fetch(`/api/geo?${qs}&${auth()}`).then(r=>r.json());
-const post = (body) => fetch('/api/geo',{method:'POST',headers:{'Content-Type':'application/json'},
+// code（同仁共用連結碼）維持走 query——它設計上本來就要能放進網址分享；
+// 管理員密碼改走 header，不要留在網址列／瀏覽器歷史／伺服器存取紀錄裡。
+const authQS = () => S.role==='staff' ? `&code=${encodeURIComponent(S.code)}` : '';
+const authHeaders = () => S.role==='admin' ? { 'X-Admin-Password': S.pwd } : {};
+const api = (qs) => fetch(`/api/geo?${qs}${authQS()}`, { headers: authHeaders() }).then(r=>r.json());
+const post = (body) => fetch('/api/geo',{method:'POST',headers:{'Content-Type':'application/json', ...authHeaders()},
   body:JSON.stringify(S.role==='staff' ? {...body, code:S.code} : {...body, password:S.pwd})}).then(r=>r.json());
 
 async function loadAll(){
@@ -985,7 +987,10 @@ async function loadStatus(){
     ` ｜ 判官：${s.judge||'—'}` +
     (muted.length?` ｜ 已停掃（省錢）：${muted.join('、')}`:'') +
     (off.length?` ｜ 未設金鑰：${off.join('、')}`:'') +
-    (s.ready?` ｜ <span style="color:#ef4444;font-weight:700">${esc(s.ready)}</span>`:'');
+    (s.ready?` ｜ <span style="color:#ef4444;font-weight:700">${esc(s.ready)}</span>`:'') +
+    (S.role==='admin' && !s.cronSecretSet
+      ? ` ｜ <span style="color:#ef4444;font-weight:700">⚠ 尚未設定 CRON_SECRET，排程端點可被外部觸發，請至 Vercel 環境變數新增</span>`
+      : '');
 }
 
 /* ── 主資料 ── */
@@ -1404,10 +1409,10 @@ async function loadEvents(){
         <i class="ti ti-trash"></i> 停止追蹤</button></td></tr>`).join('') + '</tbody></table>';
 }
 async function stopTracking(id, title){
-  if(!confirm(`停止追蹤「${title}」？\n\n・該議題的題目會從題庫刪除，不再掃描也不再計費\n・已經掃到的歷史資料與曲線保留`)) return;
+  if(!confirm(`停止追蹤「${title}」？\n\n・該議題的題目會停用，不再掃描也不再計費（之後可重新啟用）\n・已經掃到的歷史資料與曲線保留`)) return;
   const r = await post({ action:'track_stop', id });
   if(r.error) return toast(r.error);
-  toast(`已停止追蹤，刪除 ${r.removed} 題`);
+  toast(`已停止追蹤，停用 ${r.removed} 題`);
   loadEvents(); loadPrompts(); loadSeries(); loadSnapshot();
 }
 const delEvent = (id) => stopTracking(id, '這場活動');

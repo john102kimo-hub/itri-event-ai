@@ -58,7 +58,7 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); min-
 .form-group label { display: block; font-size: 0.84rem; font-weight: 600; color: var(--text); margin-bottom: 6px; }
 .form-control {
   width: 100%; border: 1.5px solid var(--border); border-radius: 8px;
-  padding: 10px 12px; font-family: var(--font); font-size: 0.92rem;
+  padding: 10px 12px; font-family: var(--font); font-size: 16px;
   outline: none; transition: border-color 0.2s; background: white;
 }
 .form-control:focus { border-color: var(--primary); }
@@ -190,21 +190,21 @@ textarea.form-control { min-height: 240px; resize: vertical; line-height: 1.65; 
       <label>快速問題按鈕（每行一題）</label>
       <textarea class="form-control" id="input-chips" rows="4"
         placeholder="這次活動的主要發表內容是什麼？&#10;有哪些合作廠商參與？&#10;這項技術的應用場域為何？"
-        style="font-size:0.85rem;min-height:auto"></textarea>
+        style="font-size:16px;min-height:auto"></textarea>
       <div class="form-hint">留空則使用預設通用問題；建議 3–6 題</div>
     </div>
     <div class="form-group">
       <label>AI 開場白</label>
       <textarea class="form-control" id="input-greeting" rows="3"
         placeholder="您好！我是「活動名稱」的 AI 新聞助理…"
-        style="font-size:0.85rem;min-height:auto"></textarea>
+        style="font-size:16px;min-height:auto"></textarea>
       <div class="form-hint">留空則使用預設問候語</div>
     </div>
     <div class="form-group">
       <label>圖片資源 URL（每行一個，供記者下載技術照片）</label>
       <textarea class="form-control" id="input-images" rows="3"
         placeholder="https://example.com/photo1.jpg&#10;https://example.com/photo2.png"
-        style="font-size:0.85rem;min-height:auto"></textarea>
+        style="font-size:16px;min-height:auto"></textarea>
       <div class="form-hint">貼上圖片直連 URL（需可公開存取）</div>
     </div>
     <div class="form-group">
@@ -298,6 +298,13 @@ A：
 - 照片：
 `;
 
+// 沒存就關分頁毫無警告的話，同仁手打的內容會整段蒸發 —— 追蹤是否有未儲存的變更
+let dirty = false;
+document.getElementById('editor').addEventListener('input', () => { dirty = true; });
+window.addEventListener('beforeunload', (e) => {
+  if (dirty) { e.preventDefault(); e.returnValue = ''; }
+});
+
 function showError(title, msg) {
   document.getElementById('loading').style.display = 'none';
   document.getElementById('editor').style.display = 'none';
@@ -361,6 +368,17 @@ async function save() {
   if (!name) { toast('請填寫活動名稱'); return; }
   if (!knowledge_base) { toast('知識庫不可為空'); return; }
 
+  let color = document.getElementById('input-color').value.trim() || '#0F9E7A';
+  if (!/^#[0-9A-Fa-f]{6}$/.test(color)) {
+    toast('色碼格式錯誤，請填 # 加 6 碼，例如 #0F9E7A');
+    return;
+  }
+
+  if (knowledge_base.length > 8000 &&
+      !confirm('知識庫已超過 8000 字（目前 ' + knowledge_base.length + ' 字），超長內容會讓 AI 回答變慢變貴，確定要存？')) {
+    return;
+  }
+
   const btn = document.getElementById('save-btn');
   btn.disabled = true;
   btn.innerHTML = '<i class="ti ti-loader"></i> 儲存中…';
@@ -376,7 +394,7 @@ async function save() {
         name,
         knowledge_base,
         organizer: document.getElementById('input-organizer').value.trim() || '工研院',
-        color: document.getElementById('input-color').value.trim() || '#0F9E7A',
+        color,
         chips: document.getElementById('input-chips').value.trim(),
         greeting: document.getElementById('input-greeting').value.trim(),
         images: document.getElementById('input-images').value.trim(),
@@ -385,7 +403,8 @@ async function save() {
     });
     const data = await res.json();
     if (!res.ok || data.error) throw new Error(data.error || '儲存失敗');
-    toast('✓ 已儲存！記者前台會立即套用');
+    dirty = false;
+    toast('✓ 已儲存！約 1 分鐘後對記者端生效');
     const now = new Date().toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' });
     document.getElementById('saved-hint').textContent = `最後儲存 ${now}`;
   } catch (e) {

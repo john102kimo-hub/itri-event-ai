@@ -101,7 +101,15 @@ let ANALYTICS = null;
 let EXPOSURE = null;
 let PASSWORD = '';
 
-const STOP = new Set(['的','了','是','在','有','和','與','這','那','什麼','請問','可以','嗎','呢','一','會','不','也','都','我','你','他','她','我們','他們','您','這個','那個','如何','為什麼','是否','能否','目前','已經','未來','關於','想','請','一下','今天','沒有','什麼的']);
+// 通用產業詞表，跟 api/analytics.js 的關鍵字統計用同一套邏輯：字典比對，不用貪婪切詞。
+// 貪婪切詞（連續中文 2–8 字）切出的是「這次發表的」這種斷句碎片，兩位記者問同一件事
+// 只要措辭差一個字就會被算成兩個不同關鍵字，熱點永遠浮不出來，印給主管看也不通順。
+const GENERIC_TERMS = [
+  'AI', '人工智慧', '量產', '技轉', '時程', '成本', '合作廠商', '合作對象', '應用場域',
+  '技術突破', '商業化', '專利', '產能', '良率', '補助', '投資', '國際', '出貨', '市場',
+  '規格', '效能', '安全', '法規', '永續', '碳排', '淨零', '智慧製造', '半導體', '晶片',
+  '醫療', '機器人', '能源', '資安', '雲端', '合作備忘錄', 'MOU', '授權', '團隊', '成果'
+];
 
 function unlock(){
   const pwd = document.getElementById('gate-input').value.trim();
@@ -114,14 +122,14 @@ document.getElementById('gate-input').addEventListener('keydown', e=>{ if(e.key=
 
 async function load(){
   try{
-    const res = await fetch(`/api/analytics?password=${encodeURIComponent(PASSWORD)}&exclude_test=1`);
+    const res = await fetch('/api/analytics?exclude_test=1', { headers: { 'X-Admin-Password': PASSWORD } });
     const data = await res.json();
     if(data.error){ document.getElementById('gate-err').textContent = data.error; return; }
     ANALYTICS = data;
 
     // 媒體露出（同仁在編輯頁上傳的資料）；沒有也不影響報告主體
     try{
-      const r2 = await fetch(`/api/exposure?action=analysis_all&password=${encodeURIComponent(PASSWORD)}`);
+      const r2 = await fetch('/api/exposure?action=analysis_all', { headers: { 'X-Admin-Password': PASSWORD } });
       if(r2.ok){ const d2 = await r2.json(); if(!d2.error) EXPOSURE = d2; }
     }catch(_){ }
 
@@ -133,12 +141,12 @@ async function load(){
   }
 }
 
-// 從問題陣列擷取熱門議題
+// 從問題陣列擷取熱門議題（字典比對：統計每個詞出現在幾則問題裡，能跨措辭聚合）
 function topTopics(questions, n){
   const kw = {};
   (questions||[]).forEach(q=>{
-    const matches = (q.question||'').match(/[一-龥]{2,8}|[a-zA-Z]{3,}/g) || [];
-    matches.forEach(w=>{ if(!STOP.has(w)) kw[w]=(kw[w]||0)+1; });
+    const text = q.question || '';
+    GENERIC_TERMS.forEach(word => { if (text.includes(word)) kw[word] = (kw[word] || 0) + 1; });
   });
   return Object.entries(kw).sort((a,b)=>b[1]-a[1]).slice(0,n).map(([w,c])=>({w,c}));
 }

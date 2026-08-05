@@ -11,7 +11,7 @@
 // 設計重點：同仁只有 edit_code，沒有後台密碼。上傳與檢視必須能用 edit_code
 // 通過，否則這個功能對同仁等於不存在。
 
-import { readRange, appendRows, updateRange, ensureSheets } from './lib/sheets.js';
+import { readRange, appendRows, ensureSheets, listSheets, batchUpdate } from './lib/sheets.js';
 import { parseExposureFile, normalizeOutlet } from './lib/exposure-parse.js';
 
 const SHEETS = {
@@ -42,6 +42,35 @@ async function authorize({ id, code, password }) {
 }
 
 const rowsForEvent = (rows, id) => rows.filter((r) => r[0] === id);
+
+/**
+ * 只刪除該場活動在 exposure 分頁的列，不影響其他活動的資料。
+ *
+ * 舊版做法是「讀整表 → 清空全部 A2:I → 再把想保留的列寫回去」：清空成功但回寫失敗時
+ * （Sheets 429、網路瞬斷、function 中止），所有活動的露出資料會一次歸零。
+ * 改用 batchUpdate 的 deleteDimension 直接刪列，是單一原子操作，且全程只碰這一場的列。
+ */
+async function deleteEventRows(id) {
+  const sheets = await listSheets();
+  const sheet = sheets.find((s) => s.title === 'exposure');
+  if (!sheet) return 0; // 分頁還沒建立，沒東西可刪
+
+  const rows = await safeRead('exposure!A2:A'); // 只讀 A 欄（event_id）定位列號，省流量
+  const rowIndexes = []; // 對應 rows 陣列的 0-based index；試算表實際列號 = index + 2（跳過表頭）
+  rows.forEach((r, i) => { if (r[0] === id) rowIndexes.push(i); });
+  if (!rowIndexes.length) return 0;
+
+  // 由大到小排序再刪：先刪後面的列，前面列的索引才不會跟著位移錯位
+  const requests = rowIndexes
+    .sort((a, b) => b - a)
+    .map((i) => ({
+      deleteDimension: {
+        range: { sheetId: sheet.sheetId, dimension: 'ROWS', startIndex: i + 1, endIndex: i + 2 },
+      },
+    }));
+  await batchUpdate(requests);
+  return rowIndexes.length;
+}
 
 function summarize(records) {
   const byOutlet = {}, byType = {}, byDate = {};
@@ -112,13 +141,16 @@ function crossAnalyze(expRows, qaRows) {
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type,X-Admin-Password');
   if (req.method === 'OPTIONS') return res.status(200).end();
 
   try {
     // ─────────────── GET
     if (req.method === 'GET') {
-      const { action, id, code, password } = req.query;
+      const { action, id, code } = req.query;
+      // 管理員密碼優先讀 header，避免留在網址列／瀏覽器歷史／伺服器存取紀錄裡（code 是同仁的
+      // 專屬編輯連結，設計上本來就要能放在網址裡分享，維持走 query）
+      const password = req.headers['x-admin-password'] || req.query.password;
 
       if (action === 'list') {
         const auth = await authorize({ id, code, password });
@@ -136,9 +168,11 @@ export default async function handler(req, res) {
 
       if (action === 'analysis' || action === 'analysis_all') {
         if (password !== process.env.ADMIN_PASSWORD) return res.status(401).json({ error: '密碼錯誤' });
-        const [expRows, qaRows] = await Promise.all([
-          safeRead('exposure!A2:I'), safeRead('qa_log!A2:F'),
+        const [expRows, qaRowsRaw] = await Promise.all([
+          safeRead('exposure!A2:I'), safeRead('qa_log!A2:G'),
         ]);
+        // 已刪除的問答（G 欄標記，或舊資料殘留的 B 欄 [deleted]）不該算進交叉分析
+        const qaRows = qaRowsRaw.filter((r) => r[1] !== '[deleted]' && r[6] !== '1');
 
         if (action === 'analysis') {
           return res.status(200).json({
@@ -174,14 +208,8 @@ export default async function handler(req, res) {
 
       if (action === 'clear') {
         await ensureSheets(SHEETS);
-        const all = await safeRead('exposure!A2:I');
-        const kept = all.filter((r) => r[0] !== id);
-        if (all.length) {
-          const blank = all.map(() => new Array(9).fill(''));
-          await updateRange(`exposure!A2:I${all.length + 1}`, blank);
-        }
-        if (kept.length) await updateRange(`exposure!A2:I${kept.length + 1}`, kept);
-        return res.status(200).json({ success: true, removed: all.length - kept.length });
+        const removed = await deleteEventRows(id);
+        return res.status(200).json({ success: true, removed });
       }
 
       if (action === 'upload') {
@@ -201,14 +229,8 @@ export default async function handler(req, res) {
 
         await ensureSheets(SHEETS);
 
-        // 同一場重複上傳 → 先清掉舊資料，避免累加重複
-        const all = await safeRead('exposure!A2:I');
-        const kept = all.filter((r) => r[0] !== id);
-        const replaced = all.length - kept.length;
-        if (all.length) {
-          await updateRange(`exposure!A2:I${all.length + 1}`, all.map(() => new Array(9).fill('')));
-        }
-        if (kept.length) await updateRange(`exposure!A2:I${kept.length + 1}`, kept);
+        // 同一場重複上傳 → 先刪掉這一場的舊資料（不影響其他活動），避免累加重複
+        const replaced = await deleteEventRows(id);
 
         const stamp = now();
         const rows = records.map((r) => [

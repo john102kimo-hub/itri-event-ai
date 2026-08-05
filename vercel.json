@@ -8,7 +8,9 @@
     { "source": "/geo", "destination": "/geo.html" }
   ],
   "functions": {
-    "api/geo.js": { "maxDuration": 60 }
+    "api/geo.js": { "maxDuration": 60 },
+    "api/chat.js": { "maxDuration": 60 },
+    "api/training.js": { "maxDuration": 60 }
   },
   "crons": [
     { "path": "/api/geo?action=cron", "schedule": "0 1 * * *" },

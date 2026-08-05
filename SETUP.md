@@ -1,6 +1,8 @@
 # 部署說明 — 工研院活動溝通 AI 平台
 
-## 環境變數一覽（共 5 個）
+## 環境變數一覽
+
+### 必填（5 個）
 
 | 變數名 | 說明 |
 |---|---|
@@ -9,6 +11,14 @@
 | `GOOGLE_SERVICE_ACCOUNT_EMAIL` | Google 服務帳號 Email |
 | `GOOGLE_PRIVATE_KEY` | Google 服務帳號私鑰（含換行） |
 | `GOOGLE_SPREADSHEET_ID` | Google 試算表 ID |
+
+### 選填 —— 給「AI 能見度追蹤」（/geo）用，不設定則該功能停用
+
+| 變數名 | 說明 |
+|---|---|
+| `CRON_SECRET` | **強烈建議設定**（隨機長字串即可）。沒設的話排程端點只能靠容易被偽造的 User-Agent 驗證，等於任何人都能觸發全量重掃、燒光 API 額度。詳見 [GEO_SETUP.md](GEO_SETUP.md)。 |
+| `GEMINI_API_KEY` / `OPENAI_API_KEY` / `PERPLEXITY_API_KEY` | 想多掃哪家 AI 引擎就填哪把，缺的引擎會自動跳過，不影響其他功能 |
+| `GEO_MODEL` / `GEMINI_MODEL` / `OPENAI_MODEL` / `PERPLEXITY_MODEL` | 想指定特定模型版本才需要填，留空用系統預設 |
 
 ---
 
@@ -22,6 +32,9 @@
    - 其中 `edit_code`（K 欄）是「同仁編輯連結」用的每場專屬編輯碼，系統會自動產生、不用手動填。若是既有試算表，只要確保 K 欄留著給它用即可。
 5. 點 ＋ 新增分頁，重新命名為 `qa_log`
 6. 在 A1~F1 填入標題：`timestamp` `event_id` `event_name` `media_name` `question` `answer`
+   - G 欄留給系統標記刪除用（後台按「刪除」時會在這欄寫 `1`，不用手動填、也不用管它）
+7. 其餘分頁（`exposure`、`geo_prompts`、`geo_runs`、`geo_events`、`geo_settings`、`media_roster`、`media_settings`）
+   不用手動建立——第一次用到「露出上傳」「AI 能見度」「記者名單健檢」等功能時，系統會自動建好並補上表頭。
 
 ---
 
@@ -83,7 +96,10 @@
 | 後台儀表板 | `https://itri-event-ai.vercel.app/` | **只有你**（需後台密碼） |
 | 記者前台 | `https://itri-event-ai.vercel.app/event?id=活動ID` | 記者（免登入） |
 | 同仁編輯頁 | `https://itri-event-ai.vercel.app/edit?id=活動ID&code=編輯碼` | 負責該場的同仁（免後台密碼） |
-| 媒體訓練 | `https://itri-event-ai.vercel.app/training?id=活動ID` | 主管 |
+| 媒體訓練 | `https://itri-event-ai.vercel.app/training?id=活動ID` | 主管（要先從後台登入過，或用同仁編輯碼；直接開網址無法使用） |
+| 成效報告 | `https://itri-event-ai.vercel.app/report` | **只有你**（需後台密碼，一頁印給主管看） |
+| AI 能見度追蹤 | `https://itri-event-ai.vercel.app/geo` | **只有你**（需後台密碼），選配功能見上方 GEO 環境變數 |
+| 記者名單健檢 | 從後台或同仁共用連結進入 | 你與獲授權同仁 |
 
 ---
 
@@ -91,8 +107,9 @@
 
 1. 登入後台 → **新增活動** → 貼入新聞稿 → 儲存
 2. 複製「記者連結」 → 傳給媒體
-3. 活動結束後 → **分析** 看問題熱點 → **匯出 CSV** 製作結案報告
-4. 下次記者會 → 再新增一個活動，同一個平台管理
+3. 活動結束後 → 同仁在編輯頁上傳監測公司給的「OO露出清單.doc」→ 後台看「提問 × 露出」交叉分析
+4. **分析** 看問題熱點 → **匯出 CSV** 製作結案報告，或直接開「成效報告」頁印給主管
+5. 下次記者會 → 再新增一個活動，同一個平台管理
 
 ---
 

@@ -18,6 +18,9 @@ import { readRange, appendRows, updateRange } from './lib/sheets.js';
 //               F created_at, G chips, H images, I greeting, J organizer, K edit_code
 const RANGE = 'events!A2:K';
 
+// Google Sheets 單一儲存格上限約 5 萬字元；留一點餘裕避免踩線寫入失敗
+const KB_MAX_LEN = 45000;
+
 function generateId(name) {
   const slug = name
     .toLowerCase()
@@ -59,14 +62,16 @@ function buildContentRow(existing, b) {
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type,X-Admin-Password');
   if (req.method === 'OPTIONS') return res.status(200).end();
 
   const adminPassword = process.env.ADMIN_PASSWORD;
 
   // ── GET ──────────────────────────────────────────────────────────────
   if (req.method === 'GET') {
-    const { action, id, password, code } = req.query;
+    const { action, id, code } = req.query;
+    // 管理員密碼優先讀 header，避免留在網址列／瀏覽器歷史／伺服器存取紀錄裡
+    const password = req.headers['x-admin-password'] || req.query.password;
     try {
       const rows = await readRange(RANGE);
 
@@ -147,6 +152,9 @@ export default async function handler(req, res) {
         if (existing[4] === 'archived') {
           return res.status(403).json({ error: '這場活動已封存，無法修改' });
         }
+        if (body.knowledge_base !== undefined && String(body.knowledge_base).length > KB_MAX_LEN) {
+          return res.status(400).json({ error: `內容過長（上限 ${KB_MAX_LEN} 字），請刪減後再存` });
+        }
         const updated = buildContentRow(existing, body);
         await updateRange(`events!A${rowIndex + 2}:K${rowIndex + 2}`, [updated]);
         return res.status(200).json({ success: true });
@@ -155,6 +163,9 @@ export default async function handler(req, res) {
       // ── 以下皆需管理員密碼 ────────────────────────────────────────────
       const { password, id, name, color, knowledge_base, chips, status, images, event_date, greeting, organizer } = body;
       if (password !== adminPassword) return res.status(401).json({ error: '密碼錯誤' });
+      if (knowledge_base !== undefined && String(knowledge_base).length > KB_MAX_LEN) {
+        return res.status(400).json({ error: `內容過長（上限 ${KB_MAX_LEN} 字），請刪減後再存` });
+      }
 
       if (action === 'create') {
         if (!name) return res.status(400).json({ error: '活動名稱必填' });
