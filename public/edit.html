@@ -201,11 +201,18 @@ textarea.form-control { min-height: 240px; resize: vertical; line-height: 1.65; 
       <div class="form-hint">留空則使用預設問候語</div>
     </div>
     <div class="form-group">
-      <label>圖片資源 URL（每行一個，供記者下載技術照片）</label>
+      <label>圖片資源（供記者下載技術照片）</label>
       <textarea class="form-control" id="input-images" rows="3"
         placeholder="https://example.com/photo1.jpg&#10;https://example.com/photo2.png"
         style="font-size:16px;min-height:auto"></textarea>
-      <div class="form-hint">貼上圖片直連 URL（需可公開存取）</div>
+      <div style="margin-top:8px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <input type="file" id="input-image-file" accept="image/*" multiple style="display:none">
+        <button type="button" class="btn btn-outline" onclick="document.getElementById('input-image-file').click()">
+          <i class="ti ti-upload"></i> 上傳照片檔案
+        </button>
+        <span id="upload-status" style="font-size:0.8rem;color:var(--muted)"></span>
+      </div>
+      <div class="form-hint">可直接上傳照片檔案（自動加到上面清單），或手動貼圖片直連 URL；單檔上限 10MB</div>
     </div>
     <div class="form-group">
       <label>品牌主色
@@ -494,6 +501,40 @@ function toast(msg) {
 }
 
 load();
+</script>
+
+<!-- 圖片上傳：直接從瀏覽器把檔案傳到 Vercel Blob，拿回直連網址 -->
+<script type="module">
+  import { upload } from 'https://esm.sh/@vercel/blob@1/client';
+  window.__blobUpload = upload;
+</script>
+<script>
+document.getElementById('input-image-file').addEventListener('change', async (e) => {
+  const files = Array.from(e.target.files);
+  if (!files.length) return;
+  const statusEl = document.getElementById('upload-status');
+  const textarea = document.getElementById('input-images');
+
+  for (const file of files) {
+    if (!file.type.startsWith('image/')) { toast(file.name + ' 不是圖片檔，已略過'); continue; }
+    if (file.size > 10 * 1024 * 1024) { toast(file.name + ' 超過 10MB 上限，已略過'); continue; }
+    statusEl.textContent = `上傳中：${file.name}…`;
+    try {
+      if (!window.__blobUpload) throw new Error('上傳元件尚未載入，請稍候再試');
+      const blob = await window.__blobUpload(file.name, file, {
+        access: 'public',
+        handleUploadUrl: '/api/upload',
+        clientPayload: JSON.stringify({ event_id: EVENT_ID, code: EDIT_CODE })
+      });
+      textarea.value = (textarea.value.trim() ? textarea.value.trim() + '\n' : '') + blob.url;
+      dirty = true;
+    } catch (err) {
+      toast(file.name + ' 上傳失敗：' + err.message);
+    }
+  }
+  statusEl.textContent = '';
+  e.target.value = '';
+});
 </script>
 </body>
 </html>
