@@ -1328,7 +1328,7 @@ export default async function handler(req, res) {
           dateRange: [scored[0].date, scored[scored.length - 1].date],
           engines: [...new Set(scored.map((r) => r.engine))],
           headline,
-          voiceBoard: board.slice(0, 8),
+          voiceBoard: board, // 有出現就都列，不砍——board 本來就只含實際被偵測到的機構
           myRank,
           stats: [
             { label: '問到這個議題時，AI 提到工研院的比例',
