@@ -245,6 +245,11 @@
       </label>
     </div>
 
+    <label style="display:flex;align-items:flex-start;gap:8px;margin-top:10px;font-size:.84rem;cursor:pointer">
+      <input type="checkbox" id="s-standing" style="margin-top:3px" onchange="onStandingToggle()">
+      <span>這是<b>長期關注議題</b>（例如長官在意的無人機、機器人），不是特定發稿活動——不會算半衰期／基線抬升，只單純長期看走勢與議題排行</span>
+    </label>
+
     <div id="gen-out"></div>
   </div>
 
@@ -839,6 +844,22 @@ function onPickEvent(){
   }
 }
 
+/** 勾了「長期關注議題」就不用選活動、不用填活動名稱，只留關鍵字跟開始追蹤日 */
+function onStandingToggle(){
+  const standing = document.getElementById('s-standing').checked;
+  const sel = document.getElementById('s-event');
+  if(standing){
+    sel.value = '__other__';
+    document.getElementById('s-title-fld').style.display = 'none';
+    document.getElementById('s-date-hint').textContent = '（開始追蹤日，不是發稿日）';
+    const d = document.getElementById('s-date');
+    d.value = d.value || new Date().toISOString().slice(0,10);
+  } else {
+    onPickEvent();
+  }
+  sel.disabled = standing;
+}
+
 /* ── 狀態列 ── */
 /* ── 引擎開關（存試算表，不用碰環境變數） ── */
 function renderEngines(s){
@@ -1001,7 +1022,13 @@ async function runAdvise(){
     if(!r.ready){ out.innerHTML = `<div class="empty">${esc(r.msg)}</div>`; return; }
 
     const a = r.advice;
+    const scopeNote = r.basis.scope === 'overall_fallback'
+      ? `<div style="background:#fffbeb;border:1px solid #fde68a;color:#92400e;border-radius:10px;padding:10px 14px;margin-bottom:12px;font-size:.82rem">
+          ⚠️ 「${esc(r.basis.keyword)}」這個主題自己的掃描資料還太少，以下建議借用的是<b>跨議題的一般模式</b>，不是這個主題專屬的實測結果。
+          建議現在就去題庫幫這個主題「產生題目」開始追蹤，之後回來看就會有專屬資料了。
+        </div>` : '';
     out.innerHTML = `
+      ${scopeNote}
       <div style="background:var(--primary-light);border-radius:10px;padding:12px 14px;margin-bottom:12px;font-weight:700;color:var(--primary-dark)">
         ${esc(a.verdict)}
       </div>
@@ -1012,7 +1039,7 @@ async function runAdvise(){
           <div style="font-size:.86rem">怎麼改：${esc(s.fix)}</div>
         </div>`).join('')}
       <div style="font-size:.74rem;color:var(--muted);margin-top:6px">
-        依據：近 90 天${r.basis.keyword?`「${esc(r.basis.keyword)}」`:'整體'} ${r.basis.samples} 次掃描結果
+        依據：近 90 天${r.basis.keyword?`「${esc(r.basis.keyword)}」`:'整體'} ${r.basis.samples} 次掃描結果${r.basis.scope==='overall_fallback'?'（跨議題）':''}
       </div>`;
   } catch(err){
     toast('分析失敗，請稍後再試');
@@ -1311,6 +1338,7 @@ async function startTracking(){
   const sel = document.getElementById('s-event');
   const opt = sel.selectedOptions[0];
   const bound = sel.value && sel.value !== '__other__';
+  const standing = document.getElementById('s-standing').checked;
   const body = {
     action:'track_start',
     keyword: document.getElementById('s-kw').value.trim(),
@@ -1318,6 +1346,7 @@ async function startTracking(){
     itri_event_id: bound ? sel.value : '',
     title: bound ? (opt?.dataset.name||'') : document.getElementById('s-title').value.trim(),
     date:  document.getElementById('s-date').value,   // 一律以畫面上那格為準
+    type: standing ? '持續關注' : undefined,
     competitors: (document.getElementById('gen-comp')?.value||'')
       .split(/[、,，]/).map(s=>s.trim()).filter(Boolean),
   };

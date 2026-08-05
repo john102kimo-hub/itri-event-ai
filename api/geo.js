@@ -1381,8 +1381,12 @@ export default async function handler(req, res) {
           safeRead('geo_runs!A2:O'), safeRead('geo_events!A2:G'),
         ]);
         const runs = runRows.filter((r) => r[0]).map(parseRun);
+        // 「持續關注」是長官在意的議題但沒有特定發稿日，不是一次性活動——
+        // 半衰期／基線抬升這兩個數字算的是「衝上去又掉下來」，continuous 監測
+        // 從第一天就沒有基線可比，硬算只會產生看起來像結論的雜訊，所以排除在事件效應之外。
+        // 議題排行不受影響，持續關注的議題一樣會出現在那張表。
         const events = evRows.filter((r) => r[0]).map(parseEvent)
-          .filter((e) => e.date >= addDays(todayTW(), -n + 1))
+          .filter((e) => e.date >= addDays(todayTW(), -n + 1) && e.type !== '持續關注')
           .sort((a, b) => a.date.localeCompare(b.date));
 
         const since14 = addDays(todayTW(), -13);
@@ -1669,16 +1673,27 @@ export default async function handler(req, res) {
       const kw = String(body.keyword || '').trim();
       const days = 90;
       const from = addDays(todayTW(), -days + 1);
+      const MIN_SAMPLES = 5;
 
-      const rs = (await safeRead('geo_runs!A2:O')).filter((r) => r[0]).map(parseRun)
-        .filter((r) => r.date >= from && (!kw || r.keyword === kw) && r.score !== null);
+      const allInWindow = (await safeRead('geo_runs!A2:O')).filter((r) => r[0]).map(parseRun)
+        .filter((r) => r.date >= from && r.score !== null);
+      const kwRs = kw ? allInWindow.filter((r) => r.keyword === kw) : allInWindow;
 
-      if (rs.length < 5) {
+      // 新議題常常是活動前一個月才知道，90 天內這個關鍵字本來就不可能累積很多筆。
+      // 資料不夠時不要整個擋掉——退而求其次用「全部主題」的既有模式當證據基礎，
+      // 只是要老實標明這不是這個議題專屬的資料，是跨議題的一般模式。
+      let rs = kwRs, scope = 'keyword';
+      if (kw && kwRs.length < MIN_SAMPLES) {
+        if (allInWindow.length >= MIN_SAMPLES) { rs = allInWindow; scope = 'overall_fallback'; }
+        else { rs = []; scope = 'insufficient'; }
+      }
+
+      if (rs.length < MIN_SAMPLES) {
         return ok(res, {
           ready: false,
           msg: kw
-            ? `「${kw}」這個主題近 90 天只有 ${rs.length} 次掃描，資料還太少，建議先讓它跑 2-3 週再回來看建議。`
-            : `近 90 天累積的掃描只有 ${rs.length} 次，資料還太少，建議先讓它跑 2-3 週再回來看建議。`,
+            ? `「${kw}」這個主題近 90 天只有 ${kwRs.length} 次掃描，整體資料也只有 ${allInWindow.length} 次，還太少。建議：現在就去題庫幫這個議題「產生題目」開始追蹤——就算新聞稿還沒寫，先掃著，等你回來看建議時就有基礎了。`
+            : `近 90 天累積的掃描只有 ${allInWindow.length} 次，資料還太少，建議先讓它跑 2-3 週再回來看建議。`,
         });
       }
 
@@ -1695,8 +1710,12 @@ export default async function handler(req, res) {
       const missedQuote = [...rs].reverse().find((r) => !r.mentioned && r.excerpt)?.excerpt || '';
       const findings = diagnose(rs);
 
+      const scopeLabel = scope === 'keyword' ? `「${kw}」這個主題`
+        : scope === 'overall_fallback' ? `全部議題（「${kw}」這個主題目前只有 ${kwRs.length} 筆，還不夠單獨看，先借用其他議題累積出來的一般模式）`
+        : '整體';
+
       const evidence = `
-近 90 天${kw ? `「${kw}」這個主題` : '整體'}的 GEO 掃描結果（${rs.length} 次觀察）：
+近 90 天${scopeLabel}的 GEO 掃描結果（${rs.length} 次觀察）：
 - 提及率 ${Math.round(mentionedRuns.length / rs.length * 100)}%，其中講到具體內容（不是只有名字）的佔 ${mentionedRuns.length ? Math.round(mentionedRuns.filter(r=>r.specifics).length / mentionedRuns.length * 100) : 0}%
 - AI 引用來源時，引到工研院自己網域的次數分布：${topOwned.join('、') || '（幾乎沒有）'}
 - AI 引用來源時，引到別人網域的次數分布：${topOthers.join('、') || '（無資料）'}
@@ -1706,7 +1725,7 @@ ${missedQuote ? `- AI 沒提到工研院時，答案實際引用/描述的是：
 `.trim();
 
       const prompt = `你是工研院的 GEO（生成式引擎優化）內容顧問。你的建議必須每一條都能指回下面這份實測證據，不可以講泛用的 SEO 建議。
-
+${scope === 'overall_fallback' ? '\n重要：下面這份證據是跨議題的一般模式，不是這個主題專屬的實測結果——這個主題本身資料還太少。你的建議可以引用這些一般模式，但不要講得好像這是這個主題已經被實測驗證過的結論，要誠實反映「這是通用模式，這個主題還沒有自己的實測數據」。\n' : ''}
 【實測證據】
 ${evidence}
 
@@ -1739,7 +1758,11 @@ ${draft.slice(0, 6000)}
       };
 
       const advice = await askJSON(prompt, schema, 2000);
-      return ok(res, { ready: true, basis: { samples: rs.length, keyword: kw || null, topOwned, topOthers }, advice });
+      return ok(res, {
+        ready: true,
+        basis: { samples: rs.length, keyword: kw || null, scope, topOwned, topOthers },
+        advice,
+      });
     }
 
     return res.status(400).json({ error: `不支援的操作: ${body.action}` });
