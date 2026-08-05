@@ -1026,18 +1026,27 @@ async function runAdvise(){
     if(r.error){ toast(r.error); return; }
     if(!r.ready){ out.innerHTML = `<div class="empty">${esc(r.msg)}</div>`; return; }
 
-    const a = r.advice;
-    const scopeNote = r.basis.scope === 'overall_fallback'
+    const a = r.advice || {};
+    const suggestions = Array.isArray(a.suggestions) ? a.suggestions : [];
+    const basis = r.basis || {};
+    if(!a.verdict && !suggestions.length){
+      // 結構跟預期對不上（例如模型沒照 schema 回），與其讓後面整段渲染爆掉，
+      // 不如老實講清楚，讓人能重試，而不是丟出一句籠統的「分析失敗」。
+      out.innerHTML = `<div class="empty">這次分析回傳的內容格式不完整，不是資料不足。請重新分析一次；如果一直發生，把這個訊息回報給維護者：advice 缺少 verdict/suggestions。
+        <button onclick="runAdvise()" style="margin-left:8px;font-size:.78rem;border:1px solid var(--border);background:none;border-radius:6px;padding:2px 8px;cursor:pointer;color:var(--primary-dark)">重新分析</button></div>`;
+      return;
+    }
+    const scopeNote = basis.scope === 'overall_fallback'
       ? `<div style="background:#fffbeb;border:1px solid #fde68a;color:#92400e;border-radius:10px;padding:10px 14px;margin-bottom:12px;font-size:.82rem">
-          ⚠️ 「${esc(r.basis.keyword)}」這個主題自己的掃描資料還太少，以下建議借用的是<b>跨議題的一般模式</b>，不是這個主題專屬的實測結果。
+          ⚠️ 「${esc(basis.keyword)}」這個主題自己的掃描資料還太少，以下建議借用的是<b>跨議題的一般模式</b>，不是這個主題專屬的實測結果。
           建議現在就去題庫幫這個主題「產生題目」開始追蹤，之後回來看就會有專屬資料了。
         </div>` : '';
     out.innerHTML = `
       ${scopeNote}
       <div style="background:var(--primary-light);border-radius:10px;padding:12px 14px;margin-bottom:12px;font-weight:700;color:var(--primary-dark)">
-        ${esc(a.verdict)}
+        ${esc(a.verdict || '（本次沒有總評文字）')}
       </div>
-      ${a.suggestions.map((s,i)=>{
+      ${suggestions.map((s,i)=>{
         const hasContent = (s.issue||'').trim() && (s.why||'').trim() && (s.fix||'').trim();
         if(!hasContent){
           return `<div style="border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:10px;color:var(--muted)">
@@ -1052,10 +1061,12 @@ async function runAdvise(){
         </div>`;
       }).join('')}
       <div style="font-size:.74rem;color:var(--muted);margin-top:6px">
-        依據：近 90 天${r.basis.keyword?`「${esc(r.basis.keyword)}」`:'整體'} ${r.basis.samples} 次掃描結果${r.basis.scope==='overall_fallback'?'（跨議題）':''}
+        依據：近 90 天${basis.keyword?`「${esc(basis.keyword)}」`:'整體'} ${basis.samples} 次掃描結果${basis.scope==='overall_fallback'?'（跨議題）':''}
       </div>`;
   } catch(err){
-    toast('分析失敗，請稍後再試');
+    // 把實際錯誤帶出來，而不是統一講「分析失敗」——不然下次又壞了還是不知道壞在哪。
+    console.error('[runAdvise]', err);
+    toast('分析失敗：' + (err?.message || '未知錯誤'));
   } finally {
     btn.disabled = false; btn.innerHTML = '<i class="ti ti-sparkles"></i> 分析這份初稿';
   }
