@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>AI 能見度追蹤 — 工研院活動溝通 AI 平台</title>
+<title>GEO｜AI 能見度追蹤 — 工研院活動溝通 AI 平台</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.3.0/tabler-icons.min.css">
 <style>
   :root{
@@ -253,6 +253,14 @@
     它是<b>代理指標</b>——趨勢可用，但不等同 ChatGPT 或 Google AI Overviews 消費端畫面，對外引用務必註明。看趨勢請以<b>七日均線</b>為準。
   </div>
 
+  <div class="caveat" style="background:#eef2ff;border-color:#c7d2fe;color:#3730a3">
+    <b>方法論依據：</b>AMEC（國際傳播評測學會，公關成效評測的國際權威組織，Barcelona Principles 的發布者）於 2026-05-20 在都柏林 Global Summit 發布《AMEC GEO Principles》，訂出七大原則與三個證據領域——
+    <b>上游聲譽訊號</b>（露出報告涵蓋）、<b>搜尋與內容可讀性</b>（發稿檢查清單涵蓋）、<b>下游 AI 輸出追蹤</b>（本頁涵蓋）。
+    官方原文明講：「AI outputs should be treated as directional evidence rather than absolute truth, and caution against relying on any single score, platform or tool.」——本頁用<b>七日均線</b>而非單次分數、明白標註<b>代理指標</b>、每月做多輪取樣校準誤差，做的正是這件事。
+    三層合起來看，才是完整的 GEO 量測；目前市面上多數 GEO 工具只做第三層，且未公開取樣方法。
+    <span style="font-size:.72rem;opacity:.75">原文：amecorg.com/2026/05/amec-launches-geo-principles-to-bring-rigour-to-ai-led-communications-measurement</span>
+  </div>
+
   <div class="card" id="test-card" style="display:none">
     <h2><i class="ti ti-stethoscope" style="color:var(--primary)"></i> 自我測試（不入庫）</h2>
     <div class="desc">拿一題實跑到底，確認引擎跟判官真的通了、判分合理。上線後先按這個再開始掃。</div>
@@ -304,6 +312,22 @@
     <h2><i class="ti ti-list-numbers" style="color:var(--primary)"></i> 議題排行</h2>
     <div class="desc">變化＝所選期間後半段均分減前半段。提及率與引用率取近半段樣本。<b>點任一列看這個議題的診斷與下一步。</b></div>
     <div id="board" class="tbl"></div>
+  </div>
+
+  <div class="card">
+    <h2><i class="ti ti-compass" style="color:var(--primary)"></i> 發稿建議（GEO 內容顧問）</h2>
+    <div class="desc">貼上新聞稿初稿或影片文案，AI 會對照這個議題近 90 天的實測結果，給出可直接照做的修改建議——不是泛用 SEO 建議，每一條都指回實際掃描到的證據。<b>只吃文字</b>：影片請貼文案／腳本／字幕，畫面本身不會被 AI 引擎讀進去。</div>
+    <div class="row" style="margin-bottom:10px">
+      <select id="adv-keyword" style="min-width:160px">
+        <option value="">整體（不限議題）</option>
+      </select>
+      <span style="font-size:.76rem;color:var(--muted)">選這篇稿子屬於哪個議題，建議會更精準；沒有對應議題就選「整體」</span>
+    </div>
+    <textarea id="adv-draft" rows="8" style="width:100%" placeholder="貼上新聞稿全文或影片文案初稿…"></textarea>
+    <div class="row" style="margin-top:10px">
+      <button class="btn btn-primary" id="adv-btn" onclick="runAdvise()"><i class="ti ti-sparkles"></i> 分析這份初稿</button>
+    </div>
+    <div id="adv-out" style="margin-top:14px"></div>
   </div>
 
   <div class="card admin-only">
@@ -950,6 +974,51 @@ async function loadSeries(){
   if(d.error) return toast(d.error);
   S.data = d;
   renderKpis(d.summary); renderChips(d.series); renderChart(); renderEvents(d.events); renderBoard(d.board);
+  renderAdviseKeywords(d.series?.keywords || []);
+}
+
+/* ── 發稿建議：把累積的掃描資料變成能直接用的修改建議 ── */
+function renderAdviseKeywords(keywords){
+  const sel = document.getElementById('adv-keyword');
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">整體（不限議題）</option>' +
+    keywords.map(k=>`<option value="${esc(k.keyword)}">${esc(k.keyword)}</option>`).join('');
+  if([...sel.options].some(o=>o.value===cur)) sel.value = cur;
+}
+
+async function runAdvise(){
+  const draft = document.getElementById('adv-draft').value.trim();
+  const keyword = document.getElementById('adv-keyword').value;
+  const out = document.getElementById('adv-out');
+  const btn = document.getElementById('adv-btn');
+  if(draft.length < 30){ toast('請貼上完整的初稿內容'); return; }
+
+  btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader-2"></i> 分析中…（含搜尋比對，約需 10-20 秒）';
+  out.innerHTML = '';
+  try{
+    const r = await post({action:'advise', draft, keyword});
+    if(r.error){ toast(r.error); return; }
+    if(!r.ready){ out.innerHTML = `<div class="empty">${esc(r.msg)}</div>`; return; }
+
+    const a = r.advice;
+    out.innerHTML = `
+      <div style="background:var(--primary-light);border-radius:10px;padding:12px 14px;margin-bottom:12px;font-weight:700;color:var(--primary-dark)">
+        ${esc(a.verdict)}
+      </div>
+      ${a.suggestions.map((s,i)=>`
+        <div style="border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:10px">
+          <div style="font-weight:700;margin-bottom:4px">${i+1}. ${esc(s.issue)}</div>
+          <div style="font-size:.82rem;color:var(--muted);margin-bottom:6px">為什麼：${esc(s.why)}</div>
+          <div style="font-size:.86rem">怎麼改：${esc(s.fix)}</div>
+        </div>`).join('')}
+      <div style="font-size:.74rem;color:var(--muted);margin-top:6px">
+        依據：近 90 天${r.basis.keyword?`「${esc(r.basis.keyword)}」`:'整體'} ${r.basis.samples} 次掃描結果
+      </div>`;
+  } catch(err){
+    toast('分析失敗，請稍後再試');
+  } finally {
+    btn.disabled = false; btn.innerHTML = '<i class="ti ti-sparkles"></i> 分析這份初稿';
+  }
 }
 
 function renderKpis(s){

@@ -1656,6 +1656,92 @@ export default async function handler(req, res) {
       return ok(res, { success: true });
     }
 
+    /**
+     * 發稿建議：把累積的 GEO 掃描資料變成能直接用的東西，不然只是量測、沒有用在下一次發稿上。
+     *
+     * 只吃文字（新聞稿全文、影片腳本或文案）——影片本身的畫面不會被 LLM 讀進去，
+     * 真正決定會不會被引用的是文字，所以刻意不做檔案上傳。
+     * 資料不夠就老實說資料不夠，不硬生出建議；證據都附著出處，不是泛用 SEO 建議。
+     */
+    if (body.action === 'advise') {
+      const draft = String(body.draft || '').trim();
+      if (draft.length < 30) return res.status(400).json({ error: '請貼上完整的新聞稿或文案內容（至少 30 字）' });
+      const kw = String(body.keyword || '').trim();
+      const days = 90;
+      const from = addDays(todayTW(), -days + 1);
+
+      const rs = (await safeRead('geo_runs!A2:O')).filter((r) => r[0]).map(parseRun)
+        .filter((r) => r.date >= from && (!kw || r.keyword === kw) && r.score !== null);
+
+      if (rs.length < 5) {
+        return ok(res, {
+          ready: false,
+          msg: kw
+            ? `「${kw}」這個主題近 90 天只有 ${rs.length} 次掃描，資料還太少，建議先讓它跑 2-3 週再回來看建議。`
+            : `近 90 天累積的掃描只有 ${rs.length} 次，資料還太少，建議先讓它跑 2-3 週再回來看建議。`,
+        });
+      }
+
+      const mentionedRuns = rs.filter((r) => r.mentioned);
+      const owned = {}, others = {};
+      rs.forEach((r) => String(r.citations || '').split('|').map((s) => s.trim()).filter(Boolean)
+        .forEach((c) => {
+          const host = c.includes('://') ? hostOf(c) : c.toLowerCase();
+          (matchesOwned(host) ? owned : others)[host] = ((matchesOwned(host) ? owned : others)[host] || 0) + 1;
+        }));
+      const topOwned = Object.entries(owned).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([d]) => d);
+      const topOthers = Object.entries(others).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([d]) => d);
+      const goodQuote = [...rs].reverse().find((r) => r.mentioned && r.specifics && r.excerpt)?.excerpt || '';
+      const missedQuote = [...rs].reverse().find((r) => !r.mentioned && r.excerpt)?.excerpt || '';
+      const findings = diagnose(rs);
+
+      const evidence = `
+近 90 天${kw ? `「${kw}」這個主題` : '整體'}的 GEO 掃描結果（${rs.length} 次觀察）：
+- 提及率 ${Math.round(mentionedRuns.length / rs.length * 100)}%，其中講到具體內容（不是只有名字）的佔 ${mentionedRuns.length ? Math.round(mentionedRuns.filter(r=>r.specifics).length / mentionedRuns.length * 100) : 0}%
+- AI 引用來源時，引到工研院自己網域的次數分布：${topOwned.join('、') || '（幾乎沒有）'}
+- AI 引用來源時，引到別人網域的次數分布：${topOthers.join('、') || '（無資料）'}
+- 系統既有診斷：${findings.map((f) => `${f.title}——${f.todo}`).join('；') || '（尚無明顯模式）'}
+${goodQuote ? `- AI 曾經講對、講具體的一段話（值得延續這種寫法）：「${goodQuote}」` : ''}
+${missedQuote ? `- AI 沒提到工研院時，答案實際引用/描述的是：「${missedQuote}」` : ''}
+`.trim();
+
+      const prompt = `你是工研院的 GEO（生成式引擎優化）內容顧問。你的建議必須每一條都能指回下面這份實測證據，不可以講泛用的 SEO 建議。
+
+【實測證據】
+${evidence}
+
+【要檢查的新聞稿／文案初稿】
+${draft.slice(0, 6000)}
+
+請針對這份初稿，給出具體、可直接照做的修改建議，每一條都要講清楚「改哪一句、怎麼改、為什麼」（為什麼要對應到上面的實測證據，不要空講「增加曝光度」這種話）。最多 6 條，依重要性排序。同時給一句話總評（這份初稿現在的 AI 能見度體質如何）。`;
+
+      const schema = {
+        type: 'object',
+        properties: {
+          verdict: { type: 'string', description: '一句話總評' },
+          suggestions: {
+            type: 'array',
+            maxItems: 6,
+            items: {
+              type: 'object',
+              properties: {
+                issue: { type: 'string', description: '初稿裡的哪個地方有問題，引用原句' },
+                why: { type: 'string', description: '為什麼是問題，要對應到實測證據' },
+                fix: { type: 'string', description: '具體怎麼改，可直接照做' },
+              },
+              required: ['issue', 'why', 'fix'],
+              additionalProperties: false,
+            },
+          },
+        },
+        required: ['verdict', 'suggestions'],
+        additionalProperties: false,
+      };
+
+      const advice = await askJSON(prompt, schema, 2000);
+      return ok(res, { ready: true, basis: { samples: rs.length, keyword: kw || null, topOwned, topOthers }, advice });
+    }
+
     return res.status(400).json({ error: `不支援的操作: ${body.action}` });
   } catch (err) {
     return res.status(500).json({ error: err.message });
