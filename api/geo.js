@@ -356,6 +356,12 @@ async function askAnthropic(prompt, schema, maxTokens, model = judgeModel()) {
       messages: [{ role: 'user', content: prompt + '\n\n只輸出 JSON 物件本身，不要加說明或程式碼框。' }],
     });
   }
+  // 跟 askGemini 同一個坑：max_tokens 中途截斷時 API 仍回 200，
+  // 內容看似有結構、實際欄位是空的或直接不是合法 JSON。明確擋下來讓上層重試，
+  // 不要讓半殘的結果流到前端變成「有標籤沒內容」的空白卡片。
+  if (data.stop_reason === 'max_tokens') {
+    throw new Error('回應被 token 上限截斷，請再試一次');
+  }
   return parseJudge((data.content || []).filter((b) => b.type === 'text').map((b) => b.text).join(''));
 }
 
@@ -1782,7 +1788,7 @@ ${draft.slice(0, 6000)}
         additionalProperties: false,
       };
 
-      const advice = await askJSON(prompt, schema, 2000);
+      const advice = await askJSON(prompt, schema, 3000);
       return ok(res, {
         ready: true,
         basis: { samples: rs.length, keyword: kw || null, scope, topOwned, topOthers },

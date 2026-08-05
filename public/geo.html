@@ -1037,12 +1037,20 @@ async function runAdvise(){
       <div style="background:var(--primary-light);border-radius:10px;padding:12px 14px;margin-bottom:12px;font-weight:700;color:var(--primary-dark)">
         ${esc(a.verdict)}
       </div>
-      ${a.suggestions.map((s,i)=>`
-        <div style="border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:10px">
+      ${a.suggestions.map((s,i)=>{
+        const hasContent = (s.issue||'').trim() && (s.why||'').trim() && (s.fix||'').trim();
+        if(!hasContent){
+          return `<div style="border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:10px;color:var(--muted)">
+            ${i+1}. 數據不夠，無法提供實際數據建議
+            <button onclick="runAdvise()" style="margin-left:8px;font-size:.78rem;border:1px solid var(--border);background:none;border-radius:6px;padding:2px 8px;cursor:pointer;color:var(--primary-dark)">重新分析</button>
+          </div>`;
+        }
+        return `<div style="border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:10px">
           <div style="font-weight:700;margin-bottom:4px">${i+1}. ${esc(s.issue)}</div>
           <div style="font-size:.82rem;color:var(--muted);margin-bottom:6px">為什麼：${esc(s.why)}</div>
           <div style="font-size:.86rem">怎麼改：${esc(s.fix)}</div>
-        </div>`).join('')}
+        </div>`;
+      }).join('')}
       <div style="font-size:.74rem;color:var(--muted);margin-top:6px">
         依據：近 90 天${r.basis.keyword?`「${esc(r.basis.keyword)}」`:'整體'} ${r.basis.samples} 次掃描結果${r.basis.scope==='overall_fallback'?'（跨議題）':''}
       </div>`;
