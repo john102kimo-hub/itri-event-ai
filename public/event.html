@@ -464,16 +464,20 @@ async function init() {
     });
 
     // 圖片資源（若活動有設定）；每行格式為「網址」或「網址|圖說」
+    // 分隔符半形｜全形都收：同仁在中文輸入法下打出來的多半是全形「｜」，
+    // 只認半形的話整串圖說會被當成網址的一部分，圖就永遠載不出來。
     if (event.images) {
       const lines = event.images.split('\n').map(s => s.trim()).filter(Boolean);
       const items = lines.map(line => {
-        const i = line.indexOf('|');
+        const i = line.search(/[|｜]/);
         return i === -1 ? { url: line, caption: '' } : { url: line.slice(0, i).trim(), caption: line.slice(i + 1).trim() };
       });
       if (items.length) {
         const gallery = document.getElementById('image-gallery');
         const grid = document.getElementById('image-gallery-grid');
         gallery.style.display = 'block';
+        // 每張都載不出來時整區收掉，免得記者只看到一個空的「活動圖片資料」標題
+        let alive = items.length;
         items.forEach(({ url, caption }) => {
           const item = document.createElement('div');
           item.className = 'gallery-item';
@@ -481,7 +485,10 @@ async function init() {
           img.src = url;
           img.className = 'gallery-img';
           img.alt = caption || '活動圖片';
-          img.onerror = () => item.style.display = 'none';
+          img.onerror = () => {
+            item.style.display = 'none';
+            if (--alive === 0) gallery.style.display = 'none';
+          };
           img.onclick = () => openLightbox(url, caption);
           item.appendChild(img);
           if (caption) {

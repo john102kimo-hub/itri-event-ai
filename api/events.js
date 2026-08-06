@@ -214,7 +214,7 @@ export default async function handler(req, res) {
         // 手動貼的外部連結（example.com 之類）留著不動，del() 對它們也不會有作用。
         const imageLines = (e[7] || '').split('\n').map(s => s.trim()).filter(Boolean);
         const blobUrls = imageLines
-          .map(line => (line.includes('|') ? line.slice(0, line.indexOf('|')).trim() : line))
+          .map(line => { const i = line.search(/[|｜]/); return i === -1 ? line : line.slice(0, i).trim(); })
           .filter(url => url.includes('.public.blob.vercel-storage.com'));
         if (blobUrls.length) {
           try { await del(blobUrls); } catch (err) { console.error('封存時刪除 Blob 圖片失敗:', err.message); }
