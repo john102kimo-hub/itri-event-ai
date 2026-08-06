@@ -203,7 +203,7 @@ textarea.form-control { min-height: 240px; resize: vertical; line-height: 1.65; 
     <div class="form-group">
       <label>圖片資源（供記者下載技術照片）</label>
       <textarea class="form-control" id="input-images" rows="3"
-        placeholder="https://example.com/photo1.jpg&#10;https://example.com/photo2.png"
+        placeholder="https://example.com/photo1.jpg&#10;https://example.com/photo2.png|何次長致詞"
         style="font-size:16px;min-height:auto"></textarea>
       <div style="margin-top:8px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
         <input type="file" id="input-image-file" accept="image/*" multiple style="display:none">
@@ -212,7 +212,7 @@ textarea.form-control { min-height: 240px; resize: vertical; line-height: 1.65; 
         </button>
         <span id="upload-status" style="font-size:0.8rem;color:var(--muted)"></span>
       </div>
-      <div class="form-hint">可直接上傳照片檔案（自動加到上面清單），或手動貼圖片直連 URL；單檔上限 10MB</div>
+      <div class="form-hint">可直接上傳照片檔案（自動加到上面清單），或手動貼圖片直連 URL；單檔上限 10MB。想加圖說的話，在網址後面加「｜圖說文字」，例如：https://.../a.jpg|何次長致詞</div>
     </div>
     <div class="form-group">
       <label>品牌主色
