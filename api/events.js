@@ -12,7 +12,8 @@
 // POST {action:'archive',...}          → 封存活動
 // POST {action:'ensure_edit_code',id}  → 確保該活動有 edit_code（沒有就補上），回傳
 
-import { readRange, appendRows, updateRange } from './lib/sheets.js'; import { del } from '@vercel/blob';
+import { readRange, appendRows, updateRange } from './lib/sheets.js';
+import { del } from '@vercel/blob';
 
 // events 表欄位：A id, B name, C color, D knowledge_base, E status,
 //               F created_at, G chips, H images, I greeting, J organizer, K edit_code
@@ -207,8 +208,18 @@ export default async function handler(req, res) {
         const rows = await readRange(RANGE);
         const rowIndex = rows.findIndex(r => r[0] === id);
         if (rowIndex === -1) return res.status(404).json({ error: '活動不存在' });
-        const e = rows[rowIndex]; const imageLines = (e[7] || '').split('
-').map(s => s.trim()).filter(Boolean); const blobUrls = imageLines.map(line => (line.includes('|') ? line.slice(0, line.indexOf('|')).trim() : line)).filter(url => url.includes('.public.blob.vercel-storage.com')); if (blobUrls.length) { try { await del(blobUrls); } catch (err) { console.error('封存時刪除 Blob 圖片失敗:', err.message); } }
+        const e = rows[rowIndex];
+
+        // 封存時順便刪掉存在 Vercel Blob 的圖片，釋放空間；只刪自己 store 上傳的檔案，
+        // 手動貼的外部連結（example.com 之類）留著不動，del() 對它們也不會有作用。
+        const imageLines = (e[7] || '').split('\n').map(s => s.trim()).filter(Boolean);
+        const blobUrls = imageLines
+          .map(line => (line.includes('|') ? line.slice(0, line.indexOf('|')).trim() : line))
+          .filter(url => url.includes('.public.blob.vercel-storage.com'));
+        if (blobUrls.length) {
+          try { await del(blobUrls); } catch (err) { console.error('封存時刪除 Blob 圖片失敗:', err.message); }
+        }
+
         const updated = [e[0], e[1], e[2], e[3], 'archived', e[5], e[6] || '', '', e[8] || '', e[9] || '工研院', e[10] || ''];
         await updateRange(`events!A${rowIndex + 2}:K${rowIndex + 2}`, [updated]);
         return res.status(200).json({ success: true });
