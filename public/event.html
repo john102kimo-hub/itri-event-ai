@@ -111,13 +111,19 @@
     flex-shrink: 0;
   }
   #image-gallery-title { font-size: 0.82rem; color: var(--muted); margin-bottom: 8px; display: flex; align-items: center; gap: 6px; }
-  #image-gallery-grid { display: flex; gap: 8px; flex-wrap: wrap; }
+  #image-gallery-grid { display: flex; gap: 10px; flex-wrap: wrap; }
+  .gallery-item { display: flex; flex-direction: column; align-items: center; width: 80px; }
   .gallery-img {
     width: 80px; height: 80px; object-fit: cover;
     border-radius: 8px; border: 1px solid var(--border);
     cursor: pointer; transition: transform 0.15s, box-shadow 0.15s;
   }
   .gallery-img:hover { transform: scale(1.05); box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
+  .gallery-caption {
+    font-size: 0.68rem; color: var(--muted); text-align: center; margin-top: 4px;
+    max-width: 80px; overflow: hidden; text-overflow: ellipsis;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 1.3;
+  }
   /* Lightbox */
   #lightbox {
     display: none; position: fixed; inset: 0;
@@ -130,6 +136,11 @@
     position: absolute; top: 16px; right: 20px;
     color: white; font-size: 28px; cursor: pointer;
     background: none; border: none; line-height: 1;
+  }
+  #lightbox-caption {
+    position: absolute; bottom: 72px; left: 50%; transform: translateX(-50%);
+    max-width: 90vw; color: white; font-size: 0.85rem; text-align: center;
+    text-shadow: 0 1px 3px rgba(0,0,0,0.6);
   }
   #lightbox-dl {
     position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
@@ -341,8 +352,7 @@
 </div>
 
 <div id="welcome">
-  歡迎使用 <strong id="welcome-name">AI 新聞助理</strong>！您可以詢問本次活動的新聞稿內容、技術說明、合作廠商資訊等。
-  無需登入，直接提問即可。
+  歡迎使用 <strong id="welcome-name">AI 新聞助理</strong>，直接提問即可，無需登入。
 </div>
 
 <div id="chips"></div>
@@ -350,7 +360,7 @@
 <!-- 圖片資源（若活動有設定）-->
 <div id="image-gallery" style="display:none">
   <div id="image-gallery-title">
-    <i class="ti ti-photo"></i> 圖片資源（點擊放大／下載）
+    <i class="ti ti-photo"></i> 活動圖片資料(新聞照、技術照等)
   </div>
   <div id="image-gallery-grid"></div>
 </div>
@@ -359,6 +369,7 @@
 <div id="lightbox" onclick="closeLightbox(event)">
   <button id="lightbox-close" onclick="closeLightbox()">✕</button>
   <img id="lightbox-img" src="" alt="">
+  <div id="lightbox-caption"></div>
   <a id="lightbox-dl" href="" download target="_blank">
     <i class="ti ti-download"></i> 下載圖片
   </a>
@@ -452,21 +463,34 @@ async function init() {
       chipsEl.appendChild(btn);
     });
 
-    // 圖片資源（若活動有設定）
+    // 圖片資源（若活動有設定）；每行格式為「網址」或「網址|圖說」
     if (event.images) {
-      const urls = event.images.split('\n').map(s => s.trim()).filter(Boolean);
-      if (urls.length) {
+      const lines = event.images.split('\n').map(s => s.trim()).filter(Boolean);
+      const items = lines.map(line => {
+        const i = line.indexOf('|');
+        return i === -1 ? { url: line, caption: '' } : { url: line.slice(0, i).trim(), caption: line.slice(i + 1).trim() };
+      });
+      if (items.length) {
         const gallery = document.getElementById('image-gallery');
         const grid = document.getElementById('image-gallery-grid');
         gallery.style.display = 'block';
-        urls.forEach(url => {
+        items.forEach(({ url, caption }) => {
+          const item = document.createElement('div');
+          item.className = 'gallery-item';
           const img = document.createElement('img');
           img.src = url;
           img.className = 'gallery-img';
-          img.alt = '活動圖片';
-          img.onerror = () => img.style.display = 'none';
-          img.onclick = () => openLightbox(url);
-          grid.appendChild(img);
+          img.alt = caption || '活動圖片';
+          img.onerror = () => item.style.display = 'none';
+          img.onclick = () => openLightbox(url, caption);
+          item.appendChild(img);
+          if (caption) {
+            const cap = document.createElement('div');
+            cap.className = 'gallery-caption';
+            cap.textContent = caption;
+            item.appendChild(cap);
+          }
+          grid.appendChild(item);
         });
       }
     }
@@ -661,9 +685,10 @@ function renderMarkdown(text) {
 }
 
 // 圖片燈筱
-function openLightbox(url) {
+function openLightbox(url, caption) {
   document.getElementById('lightbox-img').src = url;
   document.getElementById('lightbox-dl').href = url;
+  document.getElementById('lightbox-caption').textContent = caption || '';
   document.getElementById('lightbox').classList.add('open');
 }
 function closeLightbox(e) {
