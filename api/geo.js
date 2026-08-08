@@ -327,6 +327,8 @@ ${answer}
 - competitors_found：回答正文裡，除了${brand}之外，被明確點名的機構／單位／公司有哪些——
   政府法人／學研機構（如工研院、資策會、大學）與**民間企業**（不論台灣本地或跨國、不論大廠或新創）都算，
   不限於上面那份參考名單，名單外的一樣要列出來；只列被明確點名的，不要列「業界」「相關單位」這種泛稱（回傳名稱陣列，沒有就空陣列）。
+  **同一家只列一次，而且要寫成母機構最常見的正式簡稱**：不要寫它底下的所／中心，也不要用英文縮寫
+  （例：「資策會產業情報研究所」「資策會 MIC」「MIC」一律寫「資策會」；「工研院材化所」寫「工研院」）。
 - evidence：40 字以內的一句話說明你的判斷依據。`;
 }
 
@@ -506,10 +508,11 @@ async function generatePrompts(keyword) {
     throw new Error('生出來的題目不合格（可能都提到了工研院），請再按一次或換個關鍵字');
   }
 
-  // 對照單位若沒生出來就退回通用名單，總比空的好
-  const competitors = (out.competitors || [])
+  // 對照單位若沒生出來就退回通用名單，總比空的好。
+  // 先過一次正規化：這份名單會原封不動送進判官當範例，寫法歪了它就跟著歪。
+  const competitors = canonList((out.competitors || [])
     .map((s) => String(s || '').trim())
-    .filter((s) => s && s.length <= 20 && !BRAND_RE.test(s));
+    .filter((s) => s && s.length <= 20 && !BRAND_RE.test(s)));
 
   return { prompts: clean, competitors: competitors.length ? competitors : COMPETITORS.split('、') };
 }
@@ -526,6 +529,132 @@ const matchesOwned = (host) =>
 
 /** 引用來源是不是自家網域。domain 優先（Gemini 的真實網域只在這裡），再退回 url 的 host。 */
 const isOwned = (c) => matchesOwned(c.domain) || matchesOwned(hostOf(c.url));
+
+/* ────────────────────────────── 單位名稱正規化 ──────────────────────────────
+ * 同一家機構在 AI 回答裡會有一堆寫法：「資策會 MIC」「資策會產業情報研究所」
+ * 「資策會產業情報研究所（MIC）」講的是同一家。不合併的話，話語權排行會把一家拆成三列，
+ * 每一列都被低估、名次整個失真——這是這張表最容易被當場問倒的地方。
+ *
+ * 只在「讀出來算」的時候合併，geo_runs 一律照 AI 原話存。舊資料不必搬、規則改了重算就對，
+ * 也還原得回 AI 究竟是怎麼寫的。
+ *
+ * 兩層，順序不能顛倒：
+ *  1) normOrgKey()：全形轉半形、拿掉括號註記與「財團法人／股份有限公司」這類修飾詞、去空白標點。
+ *     沒登記在表裡的單位也吃得到——寫法差異只要落在這一層就會自己併起來。
+ *  2) ORG_MAP：把清洗後的字串收斂成對外要顯示的正式簡稱。中文用「包含核心詞」比對，
+ *     所以底下的所／中心（資策會產業情報研究所、工研院產科國際所）會自動歸到母體；
+ *     英文縮寫要求整串相等，免得 III、MIC 這種短字串誤傷別人。
+ * 表裡沒有、清洗後也不同的，一律各自保留——寧可多一列，不要亂併。
+ */
+
+// [對外顯示的正式簡稱, 中文核心詞（包含即算）, 英文縮寫（整串相等才算）]
+// 要加新單位就往這裡加一列，不必動任何邏輯。
+const ORG_MAP = [
+  ['工研院', ['工研院', '工業技術研究院'], ['itri']],
+  ['資策會', ['資策會', '資訊工業策進會'], ['iii', 'mic']],
+  ['國研院', ['國研院', '國家實驗研究院'], ['narlabs']],
+  ['中科院', ['中科院', '中山科學研究院'], ['ncsist']],
+  ['中研院', ['中研院', '中央研究院'], ['sinica', 'academiasinica']],
+  ['金屬中心', ['金屬中心', '金屬工業研究發展中心'], ['mirdc']],
+  ['紡織所', ['紡織所', '紡織產業綜合研究所'], ['ttri']],
+  ['生技中心', ['生技中心', '生物技術開發中心'], ['dcb']],
+  ['食品所', ['食品所', '食品工業發展研究所'], ['firdi']],
+  ['精密機械中心', ['精密機械中心', '精密機械研究發展中心'], ['pmc']],
+  ['塑膠中心', ['塑膠中心', '塑膠工業技術發展中心'], ['pidc']],
+  ['車輛中心', ['車輛中心', '車輛研究測試中心'], ['artc']],
+  ['台經院', ['台經院', '台灣經濟研究院'], ['tier']],
+  ['中經院', ['中經院', '中華經濟研究院'], ['cier']],
+  ['台大', ['台灣大學', '台大'], ['ntu']],
+  ['清大', ['清華大學', '清大'], ['nthu']],
+  ['陽明交大', ['陽明交通大學', '陽明交大', '交通大學'], ['nycu', 'nctu']],
+  ['成大', ['成功大學', '成大'], ['ncku']],
+  ['台科大', ['台灣科技大學', '台科大'], ['ntust']],
+  ['中央大學', ['中央大學'], ['ncu']],
+  ['中興大學', ['中興大學'], ['nchu']],
+  ['中山大學', ['中山大學'], ['nsysu']],
+  ['台積電', ['台積電', '台灣積體電路'], ['tsmc']],
+  ['聯電', ['聯電', '聯華電子'], ['umc']],
+  ['聯發科', ['聯發科'], ['mediatek']],
+  ['鴻海', ['鴻海', '富士康'], ['foxconn']],
+  ['日月光', ['日月光'], ['ase']],
+  ['台達電', ['台達電'], ['delta', 'deltaelectronics']],
+  ['廣達', ['廣達'], ['quanta']],
+  ['緯創', ['緯創'], ['wistron']],
+];
+
+// 判官被交代過不要回泛稱，但偶爾還是會漏一兩個。這種東西進了排行榜就是雜訊。
+const NOT_ORG = new Set(['業界', '產業界', '學界', '相關單位', '政府', '廠商', '企業', '法人',
+  '研究單位', '學研機構', '產學研', '國內廠商', '國外廠商', '多家業者', '台灣', '其他']);
+
+function normOrgKey(s) {
+  let t = String(s || '').trim();
+  if (!t) return '';
+  // 全形英數與標點 → 半形（（MIC）會在這一步變成 (mic)，下一步才吃得到）
+  t = t.replace(/[！-～]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xFEE0))
+    .replace(/　/g, ' ')
+    .toLowerCase();
+  t = t.replace(/[(【[][^)】\]]*[)】\]]/g, '');       // 括號註記整段拿掉
+  t = t.replace(/財團法人|社團法人|股份有限公司|有限公司|國立|私立/g, '');
+  t = t.replace(/臺/g, '台');
+  return t.replace(/[\s·・．.,，、。;；:：\-–—_/／\\|｜'"「」『』]/g, '');
+}
+
+// 展平成「核心詞 → 正式簡稱」，長的先比：短詞先命中會把「台灣科技大學」搶去對「台大」
+const ORG_TOKENS = ORG_MAP
+  .flatMap(([canon, cores]) => cores.map((t) => ({ canon, t: normOrgKey(t) })))
+  .filter((x) => x.t).sort((a, b) => b.t.length - a.t.length);
+const ORG_ABBR = new Map(ORG_MAP
+  .flatMap(([canon, , abbrs = []]) => abbrs.map((a) => [a.toLowerCase(), canon])));
+
+const _orgCache = new Map();
+/** 一個單位名稱 →｛用來歸戶的 key、要顯示的名稱、有沒有登記在表裡｝ */
+function resolveOrg(raw) {
+  const s = String(raw || '').replace(/\s+/g, ' ').trim();
+  if (_orgCache.has(s)) return _orgCache.get(s);
+  const k = normOrgKey(s);
+  let out;
+  if (!k || NOT_ORG.has(k)) out = { key: '', name: '', known: false };
+  else {
+    const canon = ORG_ABBR.get(k) || (ORG_TOKENS.find((x) => k.includes(x.t)) || {}).canon;
+    out = canon ? { key: canon, name: canon, known: true } : { key: k, name: s, known: false };
+  }
+  _orgCache.set(s, out);
+  return out;
+}
+
+const BRAND_KEY = resolveOrg(BRAND_DEFAULT).key;
+
+/** 一串名稱 → 收斂過、去重過的正式名稱陣列。給題目的對照名單與自我測試用。 */
+const canonList = (arr) => [...new Set((arr || [])
+  .map((s) => resolveOrg(s).name).filter(Boolean))];
+
+/**
+ * 把一批 run 的 competitors 欄位收斂成 Map(key → { name, n, variants })。
+ * 同一列裡多種寫法指到同一家只算一次——不先去重的話，合併反而會把那家灌水。
+ */
+function tallyOrgs(rows) {
+  const acc = new Map();
+  rows.forEach((r) => {
+    const seen = new Set();
+    String(r.competitors || '').split(/[、,，;；|｜/／]/)
+      .map((s) => s.trim()).filter(Boolean)
+      .forEach((raw) => {
+        const o = resolveOrg(raw);
+        // 品牌自己不能出現在對手列（「工研院材化所」也算工研院），
+        // 否則同一家會被拆成「工研院」和它底下的所，兩列各自被低估。
+        if (!o.key || o.key === BRAND_KEY) return;
+        const e = acc.get(o.key) || { name: o.name, known: o.known, n: 0, variants: new Set() };
+        // 出現過的寫法全部留著（合併說明要列給主管看），但同一列同一家只計 1 次——
+        // 一列裡同時寫了「資策會 MIC」和「資策會產業情報研究所」還算兩次的話，合併反而變灌水。
+        e.variants.add(raw.replace(/\s+/g, ''));
+        if (!seen.has(o.key)) { seen.add(o.key); e.n += 1; }
+        // 沒登記的單位就用最短的寫法當代表，通常那個最乾淨
+        if (!e.known && o.name.length < e.name.length) e.name = o.name;
+        acc.set(o.key, e);
+      });
+  });
+  return acc;
+}
 
 /* ────────────────────────────── 掃描 ────────────────────────────── */
 
@@ -1111,11 +1240,8 @@ export default async function handler(req, res) {
         const ranks = hit.map((r) => r.rank).filter((x) => x > 0);
         const avgRank = ranks.length ? Math.round(avg(ranks) * 10) / 10 : null;
 
-        // 同框單位出現次數
-        const compCount = {};
-        scored.forEach((r) => String(r.competitors || '').split(/[、,，]/)
-          .map((s) => s.trim()).filter(Boolean)
-          .forEach((c) => { compCount[c] = (compCount[c] || 0) + 1; }));
+        // 同框單位出現次數（同一家的不同寫法先併起來，見「單位名稱正規化」）
+        const compCount = tallyOrgs(scored);
 
         // 被引用的網域，分成自家與別人
         const owned = {}, others = {};
@@ -1137,8 +1263,12 @@ export default async function handler(req, res) {
          * 主管真正要看的是「這個議題被問到時，AI 認為誰是答案」，
          * 不是我們的技術衛生指標。工研院和對手放同一張表比次數，位次自然浮出來。 */
         const board = [
-          { name: '工研院', n: hit.length, self: true },
-          ...Object.entries(compCount).map(([name, n]) => ({ name, n, self: false })),
+          { name: BRAND_DEFAULT, n: hit.length, self: true, variants: [] },
+          ...[...compCount.values()].map((e) => ({
+            name: e.name, n: e.n, self: false,
+            // 合併了哪些寫法要攤在報告上。不寫出來的話，「資策會 12 次」會被當成算錯。
+            variants: e.variants.size > 1 ? [...e.variants] : [],
+          })),
         ].sort((a, b) => b.n - a.n || (b.self ? 1 : -1));
 
         const myRank = board.findIndex((x) => x.self) + 1;
@@ -1208,12 +1338,9 @@ export default async function handler(req, res) {
             const use = keep ? rs.filter((r) => keep.has(r.prompt_id)) : rs;
             if (!use.length) return null;
             const h = use.filter((r) => r.mentioned);
-            const cc = {};
-            use.forEach((r) => String(r.competitors || '').split(/[、,，]/)
-              .map((s) => s.trim()).filter(Boolean)
-              .forEach((c) => { cc[c] = (cc[c] || 0) + 1; }));
-            const bd = [{ name: '工研院', n: h.length, self: true },
-              ...Object.entries(cc).map(([name, n]) => ({ name, n, self: false }))]
+            // 前後期的名次要可比，兩邊就得用同一套合併規則
+            const bd = [{ name: BRAND_DEFAULT, n: h.length, self: true },
+              ...[...tallyOrgs(use).values()].map((e) => ({ name: e.name, n: e.n, self: false }))]
               .sort((a, b) => b.n - a.n || (b.self ? 1 : -1));
             return {
               samples: use.length,
@@ -1457,7 +1584,7 @@ export default async function handler(req, res) {
             return {
               engine: e.id, ok: true, ms: Date.now() - t0, score: r.score,
               mentioned: r.mentioned, rank: r.rank, cited: r.cited, specifics: r.specifics,
-              evidence: r.obs.evidence || '', competitors: r.obs.competitors_found || [],
+              evidence: r.obs.evidence || '', competitors: canonList(r.obs.competitors_found),
               citations: r.citations.slice(0, 10).map((c) => ({ domain: c.domain, url: c.url })),
               answer: r.answer.slice(0, 1200),
             };
@@ -1535,8 +1662,9 @@ export default async function handler(req, res) {
       if (!title) title = keyword;
       if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) date = todayTW();
 
-      // 對照單位隨題目一起存：通用名單對不上題目領域的話，那一欄永遠是空的
-      const comps = (body.competitors || []).map((s) => String(s || '').trim()).filter(Boolean);
+      // 對照單位隨題目一起存：通用名單對不上題目領域的話，那一欄永遠是空的。
+      // 同樣先收斂寫法——這是新開追蹤的入口，歪在這裡之後每天都跟著歪。
+      const comps = canonList((body.competitors || []).map((s) => String(s || '').trim()));
       const compStr = comps.length ? comps.join('、') : COMPETITORS;
 
       const stamp = nowTW();
