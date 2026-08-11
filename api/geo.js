@@ -66,7 +66,7 @@ async function saveSetting(key, value) {
 const judgeEngine = () =>
   CFG.judge || (process.env.GEMINI_API_KEY ? 'gemini' : process.env.ANTHROPIC_API_KEY ? 'anthropic' : null);
 const judgeModel = () => (judgeEngine() === 'gemini' ? GEMINI_MODEL : PROBE_MODEL);
-const OWNED_DOMAINS = ['itri.org.tw', 'itritech.itri.org.tw'];
+const OWNED_DOMAINS = ['itri.org.tw', 'itritech.itri.org.tw', 'iek.org.tw'];
 
 // Vercel function maxDuration 60s。一波（4 題）含搜尋約 15–20s，
 // 所以超過 35s 就不再開新的一波，避免整批被砍掉。
@@ -550,7 +550,7 @@ const isOwned = (c) => matchesOwned(c.domain) || matchesOwned(hostOf(c.url));
 // [對外顯示的正式簡稱, 中文核心詞（包含即算）, 英文縮寫（整串相等才算）]
 // 要加新單位就往這裡加一列，不必動任何邏輯。
 const ORG_MAP = [
-  ['工研院', ['工研院', '工業技術研究院', '產業科技國際策略發展所', '產業經濟與趨勢研究中心'], ['itri', 'iek', 'isti']],
+  ['工研院', ['工研院', '工業技術研究院', '產業科技國際策略發展所', '產科國際所', '產業經濟與趨勢研究中心'], ['itri', 'iek', 'isti']],
   ['資策會', ['資策會', '資訊工業策進會'], ['iii', 'mic']],
   ['國研院', ['國研院', '國家實驗研究院'], ['narlabs']],
   ['中科院', ['中科院', '中山科學研究院'], ['ncsist']],
