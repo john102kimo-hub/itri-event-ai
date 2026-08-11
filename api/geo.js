@@ -465,7 +465,7 @@ const GEN_SCHEMA = {
   additionalProperties: false,
 };
 
-const BRAND_RE = /工研院|工業技術研究院|ITRI/i;
+const BRAND_RE = /工研院|工業技術研究院|ITRI|IEK|ISTI/i;
 
 function genPrompt(keyword) {
   return `你要為「AI 搜尋能見度追蹤」設計探測問句。
@@ -550,7 +550,7 @@ const isOwned = (c) => matchesOwned(c.domain) || matchesOwned(hostOf(c.url));
 // [對外顯示的正式簡稱, 中文核心詞（包含即算）, 英文縮寫（整串相等才算）]
 // 要加新單位就往這裡加一列，不必動任何邏輯。
 const ORG_MAP = [
-  ['工研院', ['工研院', '工業技術研究院'], ['itri']],
+  ['工研院', ['工研院', '工業技術研究院', '產業科技國際策略發展所', '產業經濟與趨勢研究中心'], ['itri', 'iek', 'isti']],
   ['資策會', ['資策會', '資訊工業策進會'], ['iii', 'mic']],
   ['國研院', ['國研院', '國家實驗研究院'], ['narlabs']],
   ['中科院', ['中科院', '中山科學研究院'], ['ncsist']],
