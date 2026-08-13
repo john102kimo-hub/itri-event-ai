@@ -595,6 +595,7 @@ async function loadEvents() {
     state.events = data.events || [];
     renderEvents();
     updateEventFilter();
+    updateEventCount();
   } catch(e) {
     document.getElementById('events-grid').innerHTML =
       '<div style="color:#ef4444;padding:20px">載入失敗：' + e.message + '</div>';
@@ -608,12 +609,23 @@ async function loadStatsQuick() {
     if (!data.error) {
       state.analytics = data;
       updateStats(data);
+      // events 和 analytics 是平行抓的，誰先回來不一定。analytics 先到的話，
+      // 卡片已經在沒有問答數的情況下渲染過了，這裡補畫一次，否則每張卡會停在 0 則問答。
+      if (state.events.length) renderEvents();
     }
   } catch(e) {}
 }
 
+// 「進行中活動」算的是 state.events，而 state.events 是另一支 API 填的。
+// 這個數字必須在 events 到齊之後才算得準，所以獨立成一個函式，
+// loadEvents() 和 updateStats() 兩邊都呼叫 —— 不管誰先回來都不會顯示 0。
+function updateEventCount() {
+  const el = document.getElementById('stat-events');
+  if (el) el.textContent = state.events.filter(e => e.status === 'active').length;
+}
+
 function updateStats(data) {
-  document.getElementById('stat-events').textContent = state.events.filter(e => e.status === 'active').length;
+  updateEventCount();
   document.getElementById('stat-total-qa').textContent = data.total || 0;
 
   const allMedia = new Set();
