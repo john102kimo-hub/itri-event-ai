@@ -305,7 +305,9 @@ textarea.form-control { min-height: 200px; resize: vertical; line-height: 1.6; }
     <button class="nav-item" onclick="showView('recent')">
       <i class="ti ti-message-circle"></i> 最新問答
     </button>
-    <a class="nav-item" href="/training" target="_blank" style="text-decoration:none;color:rgba(255,255,255,0.7)">
+    <!-- 這條不能開新分頁。彙整訓練（event_id=all）後端只認管理員密碼，密碼放在 sessionStorage，
+         新分頁不保證帶得過去，帶不過去就會被擋在「這個功能只給內部同仁使用」。同分頁開才穩。 -->
+    <a class="nav-item" href="/training" style="text-decoration:none;color:rgba(255,255,255,0.7)">
       <i class="ti ti-microphone"></i> 彙整媒體訓練
     </a>
     <a class="nav-item" href="/report" style="text-decoration:none;color:rgba(255,255,255,0.7)">
@@ -667,9 +669,9 @@ function renderEvents() {
           <a class="action-btn primary" href="/event?id=${encodeURIComponent(ev.id)}" target="_blank">
             <i class="ti ti-external-link"></i> 記者前台
           </a>
-          <a class="action-btn orange" href="/training?id=${encodeURIComponent(ev.id)}" target="_blank">
+          <button class="action-btn orange" onclick="openTraining('${escHtml(ev.id)}', this)">
             <i class="ti ti-microphone"></i> 媒體訓練
-          </a>
+          </button>
           <button class="action-btn" onclick="showAnalyticsByEvent('${escHtml(ev.id)}')">
             <i class="ti ti-chart-bar"></i> 分析
           </button>
@@ -1100,6 +1102,32 @@ async function copyEditLink(eventId, btn) {
     toast('同仁編輯連結已複製！貼給負責同仁即可（對方只能改這一場）');
   } catch (e) {
     toast('產生失敗：' + e.message);
+  }
+  if (btn) { btn.disabled = false; btn.innerHTML = original; }
+}
+
+// 單場媒體訓練：先取該場的 edit_code，開成 /training?id=&code= 的連結。
+// 訓練頁的授權來自網址上的 code 或 sessionStorage 的管理員密碼，新分頁不保證帶得到
+// sessionStorage，所以一律把 code 帶在網址上；這條連結也能直接轉給受訪主管、換一台電腦照樣能用。
+async function openTraining(eventId, btn) {
+  const original = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader"></i> 準備中…'; }
+  // 分頁要先開。等 await 回來再 window.open 會被瀏覽器當成快顯擋掉。
+  const win = window.open('about:blank', '_blank');
+  try {
+    const res = await authedFetch('/api/events', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'ensure_edit_code', password: state.password, id: eventId })
+    });
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    const url = `${location.origin}/training?id=${encodeURIComponent(eventId)}&code=${encodeURIComponent(data.edit_code)}`;
+    if (win) win.location = url;
+    else location.href = url;  // 快顯被擋就改同分頁開
+  } catch (e) {
+    if (win) win.close();
+    toast('開啟媒體訓練失敗：' + e.message);
   }
   if (btn) { btn.disabled = false; btn.innerHTML = original; }
 }
