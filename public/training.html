@@ -488,20 +488,27 @@ async function submitAnswer() {
     const evalText = evalData.reply || evalData.error || '（無法取得評分）';
     reporterHist.push({ role: 'assistant', content: evalText });
 
-    // 解析評分中的下一題（分隔線後的內容）
-    const parts = evalText.split(/---下一題---|---下一個問題---/);
+    // 解析評分中的下一題（分隔線後的內容）。
+    // 模型偶爾會把分隔線寫成簡體「---下一题---」或改成全形破折號，寬鬆一點比較保險：
+    // 同一行、前後至少兩個破折號、中間含「下一」就算數。
+    const parts = evalText.split(/[-—–─]{2,}[^\n]*下一[^\n]*[-—–─]{2,}/);
     const evalPart = parts[0].trim();
     const nextQ = parts[1]?.trim();
 
     addEvalMsg(evalPart);
 
-    if (questionCount >= MAX_Q || !nextQ) {
+    if (questionCount >= MAX_Q) {
       // 訓練結束
       setTimeout(() => {
         document.getElementById('input-area').style.display = 'none';
         document.getElementById('end-screen').style.display = 'block';
         updateProgress();
       }, 800);
+    } else if (!nextQ) {
+      // 評分沒照格式附上下一題。以前這裡會直接判定訓練結束，五題變兩題就沒了；
+      // 改成回頭用記者模式補問一題，格式漂移不該讓整場訓練提早收掉。
+      reporterHist.push({ role: 'user', content: '（訓練系統）請直接提出下一個問題，只要問題本身，不要任何前綴或說明。' });
+      await askNextQuestion();
     } else {
       // 繼續下一題（把下一題加入對話）
       reporterHist.push({ role: 'assistant', content: nextQ });
