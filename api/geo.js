@@ -371,8 +371,15 @@ async function askAnthropic(prompt, schema, maxTokens, model = judgeModel()) {
  * Gemini 3.x 的思考 token 是算在 maxOutputTokens 裡的。實測一題 1,500 的預算，
  * 思考就吃掉 1,436，JSON 只寫到一半就 MAX_TOKENS 截斷 —— 表面症狀是「回傳不是 JSON」，
  * 而且會隨機發生。所以要壓低思考層級，同時把上限開大。
+ *
+ * 2026-08-13 補充：官方文件證實 Gemini 3 Flash 系列沒有「關閉思考」這個選項，
+ * thinkingLevel 最低只到 minimal，就算 minimal 一樣會生思考 token、一樣計費
+ * （來源：ai.google.dev/gemini-api/docs/thinking）。所以這裡做不到「不用思考」，
+ * 只能盡量壓低——判官那種單純打分、量又大的呼叫走 minimal；發稿建議、產生題目
+ * 這種量很小、要綜合判斷給具體內容的呼叫調到 medium，思考品質比省那幾毛錢重要。
+ * 由呼叫端決定要哪個層級，見 askJSON 的 thinkingLevel 參數。
  */
-async function askGemini(prompt, maxTokens, model = judgeModel()) {
+async function askGemini(prompt, maxTokens, model = judgeModel(), thinkingLevel = 'low') {
   const budget = Math.max(maxTokens * 3, 6000);
   const base = {
     contents: [{ role: 'user', parts: [{ text: prompt }] }],
@@ -383,7 +390,7 @@ async function askGemini(prompt, maxTokens, model = judgeModel()) {
   try {
     data = await gemini({
       ...base,
-      generationConfig: { ...base.generationConfig, thinkingConfig: { thinkingLevel: 'low' } },
+      generationConfig: { ...base.generationConfig, thinkingConfig: { thinkingLevel } },
     }, model);
   } catch (err) {
     // 舊機型不吃 thinkingLevel，就純靠放大上限
@@ -410,12 +417,12 @@ const isSwitchable = (m) =>
  * 實際踩過 —— Gemini 預付額度用完，連純文字都 429，如果不退回 Anthropic，
  * 那天的資料就整天都是空的。
  */
-async function askJSON(prompt, schema, maxTokens = 1000) {
+async function askJSON(prompt, schema, maxTokens = 1000, thinkingLevel = 'low') {
   const primary = judgeEngine();
   if (!primary) throw new Error('沒有可用的模型：請先在 Vercel 填一把 API 金鑰');
 
   const run = (eng) => (eng === 'gemini'
-    ? askGemini(prompt, maxTokens, GEMINI_MODEL)
+    ? askGemini(prompt, maxTokens, GEMINI_MODEL, thinkingLevel)
     : askAnthropic(prompt, schema, maxTokens, PROBE_MODEL));
 
   try {
@@ -434,7 +441,8 @@ async function askJSON(prompt, schema, maxTokens = 1000) {
   }
 }
 
-const judge = (args) => askJSON(judgePrompt(args), JUDGE_SCHEMA);
+// 判官單純打分、一天要跑十幾到幾十次，思考壓到 minimal（Gemini 3 Flash 能給的最低值，關不掉）
+const judge = (args) => askJSON(judgePrompt(args), JUDGE_SCHEMA, 1000, 'minimal');
 
 /* ── 由關鍵字生題 ── */
 // 四種問法直接來自 2026-08-02 那次 30 題實測：指名問幾乎滿分，
@@ -493,7 +501,8 @@ ${ANGLES.map((a) => `- ${a.id}（${a.label}）：${a.hint}`).join('\n')}
 }
 
 async function generatePrompts(keyword) {
-  const out = await askJSON(genPrompt(keyword), GEN_SCHEMA, 1500);
+  // 設定新關鍵字才會呼叫一次，量很小，思考層級調到 medium 換題目品質
+  const out = await askJSON(genPrompt(keyword), GEN_SCHEMA, 1500, 'medium');
   const seen = new Set();
   const clean = (out.prompts || [])
     .map((p) => ({
@@ -1917,7 +1926,8 @@ ${draft.slice(0, 6000)}
         additionalProperties: false,
       };
 
-      const advice = await askJSON(prompt, schema, 3000);
+      // 這支一週頂多跑幾次、要綜合證據給具體修改建議，調到 medium 換思考品質
+      const advice = await askJSON(prompt, schema, 3000, 'medium');
       return ok(res, {
         ready: true,
         basis: { samples: rs.length, keyword: kw || null, scope, topOwned, topOthers },
