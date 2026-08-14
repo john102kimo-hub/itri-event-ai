@@ -428,6 +428,15 @@ async function init() {
 
     // 已結束活動：鎖定前台，禁止提問
     if (event.status === 'ended') {
+      document.getElementById('loading').style.display = 'none';
+      // 伺服器端已把新聞資料存檔渲染進來時，改顯示存檔文章，不要蓋鎖定畫面
+      if (document.getElementById('geo-article')) {
+        document.body.classList.add('archive-mode');
+        document.getElementById('event-title').textContent = event.name;
+        document.getElementById('event-subtitle').textContent = '記者會已結束 · 新聞資料存檔';
+        document.title = event.name + ' — 新聞資料存檔';
+        return;
+      }
       document.getElementById('error-screen').style.background = '#fffbeb';
       document.querySelector('#error-screen i').style.color = '#d97706';
       document.querySelector('#error-screen i').className = 'ti ti-lock';
