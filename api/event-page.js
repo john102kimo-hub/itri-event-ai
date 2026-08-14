@@ -115,7 +115,17 @@ function extractPressBody(kb) {
   let body = s.slice(start.index + start[0].length);
   const cut = body.match(/【[^】]*(聯絡窗口|聯絡人|窗口)[^】]*】/);
   if (cut) body = body.slice(0, cut.index);
-  return body.trim();
+
+  // 標記後面通常還黏著幾行給模型的操作指示（「-「當記者打字出現…請分兩段輸出」）。
+  // 新聞稿不會用項目符號開頭，也不會提到「記者打字」，用這兩點把前導指示丟掉。
+  const isDirective = l =>
+    !l ||
+    /^[-–—・•*]/.test(l) ||
+    /記者打字|主動提示|分兩段輸出|請回覆|以取得後半段|回答要|你是|你的任務/.test(l);
+  const lines = body.split('\n');
+  let i = 0;
+  while (i < lines.length && isDirective(lines[i].trim())) i++;
+  return lines.slice(i).join('\n').trim();
 }
 
 // 摘要：給 meta description / og:description 用，控制在 155 字內
