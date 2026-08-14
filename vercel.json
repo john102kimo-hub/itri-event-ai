@@ -2,7 +2,7 @@
   "rewrites": [
     {
       "source": "/event",
-      "destination": "/api/event-page"
+      "destination": "/api/event-page?_r=event"
     },
     {
       "source": "/edit",
@@ -26,11 +26,11 @@
     },
     {
       "source": "/robots.txt",
-      "destination": "/api/robots"
+      "destination": "/api/event-page?_r=robots"
     },
     {
       "source": "/sitemap.xml",
-      "destination": "/api/sitemap"
+      "destination": "/api/event-page?_r=sitemap"
     }
   ],
   "functions": {
