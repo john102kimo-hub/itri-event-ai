@@ -1,16 +1,22 @@
-// 記者問答頁的伺服器端渲染（SSR）版本
+// GEO（生成式引擎優化）三合一 handler：記者問答頁 SSR + robots.txt + sitemap.xml
 // ──────────────────────────────────────────────────────────────────────
-// 為什麼需要這支：public/event.html 是純前端渲染，活動名稱與新聞稿都是頁面
+// 為什麼三個功能擠在同一支：Vercel Hobby 方案每次部署上限 12 個 Serverless
+// Function，這個專案已經貼著上限了。拆成三支會直接部署失敗
+// （errorCode: exceeded_serverless_functions_per_deployment），所以用
+// vercel.json 的 rewrite 帶一個 _r 參數進來分流。
+//
+// 為什麼需要 SSR：public/event.html 是純前端渲染，活動名稱與新聞稿都是頁面
 // 載入後才用 fetch 抓回來的。ChatGPT、Perplexity、Claude 這類 AI 爬蟲多數不執行
 // JS，抓到的只有一個空殼，等於這個頁面對生成式引擎完全不存在。
-// 這支 function 先把資料抓好、直接寫進 HTML，爬蟲才讀得到。
 //
 // 內容開放政策（依主辦方要求）：
 //   記者會「已結束」或活動日期已過 → 渲染完整新聞稿，開放索引
 //   還沒結束                      → 只出通用敘述 + noindex，避免新聞稿提前外洩
 //
 // vercel.json 需搭配：
-//   rewrites:  /event → /api/event-page
+//   rewrites:  /event       → /api/event-page?_r=event   （原本的 ?id= 會自動合併）
+//              /robots.txt  → /api/event-page?_r=robots
+//              /sitemap.xml → /api/event-page?_r=sitemap
 //   functions: api/event-page.js 的 includeFiles 要含 public/event.html
 
 import fs from 'fs';
@@ -19,6 +25,23 @@ import { readRange } from './lib/sheets.js';
 
 const RANGE = 'events!A2:K';
 const SITE = 'https://itri-event-ai.vercel.app';
+
+// 生成式引擎的爬蟲。分開列出來，之後要單獨停掉哪一家比較好改。
+const AI_BOTS = [
+  'GPTBot',            // OpenAI 訓練用
+  'OAI-SearchBot',     // ChatGPT 搜尋
+  'ChatGPT-User',      // ChatGPT 使用者即時瀏覽
+  'ClaudeBot',         // Anthropic 訓練用
+  'Claude-User',       // Claude 使用者即時瀏覽
+  'Claude-SearchBot',  // Claude 搜尋
+  'anthropic-ai',
+  'PerplexityBot',
+  'Perplexity-User',
+  'Google-Extended',   // Google AI 摘要／Gemini
+  'Applebot-Extended',
+  'Bingbot',
+  'CCBot'              // Common Crawl，多數模型的資料來源
+];
 
 // 冷啟動讀一次就好，同一個 instance 的後續請求直接用快取
 let cachedTemplate = null;
@@ -35,14 +58,18 @@ function esc(s) {
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
+function escXml(s) {
+  return String(s ?? '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&apos;');
+}
+
 // created_at 欄位有兩種格式：手動填的 "2026-07-08"，跟系統寫入的 "2026/6/18 下午11:06:04"
 function parseEventDate(raw) {
   if (!raw) return null;
-  const s = String(raw).trim();
-  let m = s.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+  const m = String(raw).trim().match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
   if (!m) return null;
-  const [, y, mo, d] = m;
-  const dt = new Date(Date.UTC(+y, +mo - 1, +d));
+  const dt = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
   return isNaN(dt.getTime()) ? null : dt;
 }
 
@@ -56,7 +83,7 @@ function isConcluded(status, rawDate) {
   if (status === 'ended') return true;
   const dt = parseEventDate(rawDate);
   if (!dt) return false;
-  // 給一天緩衝，避免當天早上就被當成已結束
+  // 給一天多的緩衝，避免當天早上就被當成已結束
   return Date.now() > dt.getTime() + 36 * 60 * 60 * 1000;
 }
 
@@ -79,19 +106,78 @@ function makeSummary(name, organizer, kb, concluded) {
       return plain.length > 150 ? plain.slice(0, 150) + '…' : plain;
     }
   }
-  return `${name}＜${organizer} 記者會 AI 新聞助理。記者可直接提問新聞稿內容、技術規格、合作廠商等資訊，無需登入即時取得回覆。`;
+  return `${name}｜${organizer} 記者會 AI 新聞助理。記者可直接提問新聞稿內容、技術規格、合作廠商等資訊，無需登入即時取得回覆。`;
 }
 
-export default async function handler(req, res) {
+// ── robots.txt ────────────────────────────────────────────────────────
+// 這裡「允許」只是解除封鎖，還沒結束的記者會頁面另外掛 noindex，
+// 所以新聞稿不會在記者會前被索引。
+function serveRobots(res) {
+  const lines = [
+    '# 記者會 AI 新聞助理',
+    '# 後台與訓練頁不開放；記者問答頁開放，但未結束的場次會另掛 noindex',
+    ''
+  ];
+  const rules = ['Allow: /event', 'Disallow: /admin', 'Disallow: /training', 'Disallow: /api/', ''];
+  for (const bot of AI_BOTS) lines.push(`User-agent: ${bot}`, ...rules);
+  lines.push('User-agent: *', ...rules);
+  lines.push(`Sitemap: ${SITE}/sitemap.xml`, '');
+
+  res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+  res.setHeader('Cache-Control', 'public, max-age=0, s-maxage=3600, stale-while-revalidate=86400');
+  return res.status(200).send(lines.join('\n'));
+}
+
+// ── sitemap.xml ───────────────────────────────────────────────────────
+// 只列出已結束的記者會。還沒辦的場次掛 noindex，列進 sitemap 只會讓爬蟲
+// 白跑一趟，也可能提前洩漏場次名稱。
+async function serveSitemap(res) {
+  let rows = [];
+  try {
+    rows = await readRange(RANGE);
+  } catch (err) {
+    console.error('sitemap 讀取活動失敗:', err.message);
+  }
+
+  const items = rows
+    .filter(r => r[0] && r[4] !== 'archived' && isConcluded(r[4], r[5]))
+    .map(r => ({
+      loc: `${SITE}/event?id=${encodeURIComponent(r[0])}`,
+      lastmod: toISODate(parseEventDate(r[5]))
+    }));
+
+  const xml = [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">',
+    ...items.map(u => [
+      '  <url>',
+      `    <loc>${escXml(u.loc)}</loc>`,
+      u.lastmod ? `    <lastmod>${u.lastmod}</lastmod>` : '',
+      '    <changefreq>monthly</changefreq>',
+      '  </url>'
+    ].filter(Boolean).join('\n')),
+    '</urlset>',
+    ''
+  ].join('\n');
+
+  res.setHeader('Content-Type', 'application/xml; charset=utf-8');
+  res.setHeader('Cache-Control', 'public, max-age=0, s-maxage=3600, stale-while-revalidate=86400');
+  return res.status(200).send(xml);
+}
+
+// ── 記者問答頁 SSR ────────────────────────────────────────────────────
+async function serveEventPage(req, res) {
   const id = req.query?.id;
   const template = loadTemplate();
 
-  // 沒帶 id 就原樣吐出靜態頁，讓前端自己顯示「請在網址加上 ?id=」的錯誤
-  if (!id) {
+  const plain = (status, code = 200) => {
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.setHeader('X-Robots-Tag', 'noindex');
-    return res.status(200).send(template);
-  }
+    return res.status(code).send(status);
+  };
+
+  // 沒帶 id 就原樣吐出靜態頁，讓前端自己顯示「請在網址加上 ?id=」的錯誤
+  if (!id) return plain(template);
 
   let row = null;
   try {
@@ -100,24 +186,20 @@ export default async function handler(req, res) {
   } catch (err) {
     // 試算表讀取失敗時不要讓整頁掛掉，退回靜態頁由前端重試
     console.error('SSR 讀取活動失敗:', err.message);
-    res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.setHeader('X-Robots-Tag', 'noindex');
-    return res.status(200).send(template);
+    return plain(template);
   }
 
   if (!row || row[4] === 'archived') {
-    res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.setHeader('X-Robots-Tag', 'noindex');
-    return res.status(404).send(
+    return plain(
       template.replace('<title>AI 新聞助理</title>',
-        '<title>找不到活動 — AI 新聞助理</title>\n<meta name="robots" content="noindex">')
+        '<title>找不到活動 — AI 新聞助理</title>\n<meta name="robots" content="noindex">'),
+      404
     );
   }
 
   const ev = {
     id: row[0],
     name: row[1] || 'AI 新聞助理',
-    color: /^#[0-9A-Fa-f]{6}$/.test(row[2] || '') ? row[2] : '#0F9E7A',
     knowledge_base: row[3] || '',
     status: row[4] || 'active',
     date: row[5] || '',
@@ -126,13 +208,12 @@ export default async function handler(req, res) {
   };
 
   const concluded = isConcluded(ev.status, ev.date);
-  const dt = parseEventDate(ev.date);
-  const isoDate = toISODate(dt);
+  const isoDate = toISODate(parseEventDate(ev.date));
   const pageUrl = `${SITE}/event?id=${encodeURIComponent(ev.id)}`;
   const summary = makeSummary(ev.name, ev.organizer, ev.knowledge_base, concluded);
   const chipList = ev.chips.split('\n').map(s => s.trim()).filter(Boolean);
 
-  // ── head 注入：title / meta / Open Graph / JSON-LD ──────────────────
+  // ── head 注入：title / meta / Open Graph / JSON-LD ────────────────
   const jsonLd = {
     '@context': 'https://schema.org',
     '@graph': [
@@ -145,9 +226,7 @@ export default async function handler(req, res) {
       {
         '@type': 'Event',
         name: ev.name,
-        eventStatus: concluded
-          ? 'https://schema.org/EventScheduled'
-          : 'https://schema.org/EventScheduled',
+        eventStatus: 'https://schema.org/EventScheduled',
         eventAttendanceMode: 'https://schema.org/OfflineEventAttendanceMode',
         ...(isoDate ? { startDate: isoDate } : {}),
         organizer: { '@id': `${SITE}/#organization` },
@@ -188,7 +267,7 @@ export default async function handler(req, res) {
 
   let html = template.replace('<title>AI 新聞助理</title>', headBlock);
 
-  // ── body 注入：記者會結束後才把新聞稿寫進 HTML ──────────────────────
+  // ── body 注入：記者會結束後才把新聞稿寫進 HTML ────────────────────
   // 還沒結束的活動只在 head 出通用敘述並掛 noindex，body 不放任何實質內容。
   if (concluded) {
     const article = `
@@ -235,6 +314,7 @@ export default async function handler(req, res) {
   body.archive-mode #chips,
   body.archive-mode #messages,
   body.archive-mode #input-area,
+  body.archive-mode #status-dot,
   body.archive-mode #image-gallery { display: none !important; }
 </style>`;
 
@@ -248,4 +328,13 @@ export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'public, max-age=0, s-maxage=300, stale-while-revalidate=600');
   if (!concluded) res.setHeader('X-Robots-Tag', 'noindex, nofollow');
   return res.status(200).send(html);
+}
+
+export default async function handler(req, res) {
+  // _r 由 vercel.json 的 rewrite 帶進來；直接打 /api/event-page 時預設當成頁面請求
+  switch (req.query?._r) {
+    case 'robots':  return serveRobots(res);
+    case 'sitemap': return serveSitemap(res);
+    default:        return serveEventPage(req, res);
+  }
 }
