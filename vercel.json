@@ -1,21 +1,68 @@
 {
   "rewrites": [
-    { "source": "/event", "destination": "/event.html" },
-    { "source": "/edit", "destination": "/edit.html" },
-    { "source": "/training", "destination": "/training.html" },
-    { "source": "/admin", "destination": "/index.html" },
-    { "source": "/report", "destination": "/report.html" },
-    { "source": "/geo", "destination": "/geo.html" }
+    {
+      "source": "/event",
+      "destination": "/api/event-page"
+    },
+    {
+      "source": "/edit",
+      "destination": "/edit.html"
+    },
+    {
+      "source": "/training",
+      "destination": "/training.html"
+    },
+    {
+      "source": "/admin",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/report",
+      "destination": "/report.html"
+    },
+    {
+      "source": "/geo",
+      "destination": "/geo.html"
+    },
+    {
+      "source": "/robots.txt",
+      "destination": "/api/robots"
+    },
+    {
+      "source": "/sitemap.xml",
+      "destination": "/api/sitemap"
+    }
   ],
   "functions": {
-    "api/geo.js": { "maxDuration": 60 },
-    "api/chat.js": { "maxDuration": 60 },
-    "api/training.js": { "maxDuration": 60 }
+    "api/geo.js": {
+      "maxDuration": 60
+    },
+    "api/chat.js": {
+      "maxDuration": 60
+    },
+    "api/training.js": {
+      "maxDuration": 60
+    },
+    "api/event-page.js": {
+      "includeFiles": "public/event.html"
+    }
   },
   "crons": [
-    { "path": "/api/geo?action=cron", "schedule": "0 1 * * *" },
-    { "path": "/api/geo?action=cron", "schedule": "30 1 * * *" },
-    { "path": "/api/geo?action=cron&calibrate=1", "schedule": "0 5 1 * *" },
-    { "path": "/api/geo?action=cron&calibrate=1", "schedule": "0 12 1 * *" }
+    {
+      "path": "/api/geo?action=cron",
+      "schedule": "0 1 * * *"
+    },
+    {
+      "path": "/api/geo?action=cron",
+      "schedule": "30 1 * * *"
+    },
+    {
+      "path": "/api/geo?action=cron&calibrate=1",
+      "schedule": "0 5 1 * *"
+    },
+    {
+      "path": "/api/geo?action=cron&calibrate=1",
+      "schedule": "0 12 1 * *"
+    }
   ]
 }
