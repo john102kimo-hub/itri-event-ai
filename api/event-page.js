@@ -77,14 +77,16 @@ function toISODate(dt) {
   return dt ? dt.toISOString().slice(0, 10) : '';
 }
 
-// 記者會辦完了沒？狀態標記為 ended，或活動日期已經過去，都算結束。
-// 日期那條是保險：同仁常忘了回頭把狀態改成「已結束」。
-function isConcluded(status, rawDate) {
-  if (status === 'ended') return true;
-  const dt = parseEventDate(rawDate);
-  if (!dt) return false;
-  // 給一天多的緩衝，避免當天早上就被當成已結束
-  return Date.now() > dt.getTime() + 36 * 60 * 60 * 1000;
+// 記者會辦完了沒？只認後台按下的「已結束」，不用日期推算。
+//
+// 原本想加「日期過了就自動當作結束」當保險，但那樣會出兩個問題：
+//   1. 新聞稿是靠這個判斷才公開的。日期欄位填錯、活動延期、或只是先開好場次
+//      佔位，都會讓還沒發布的新聞稿自己跑出去——這種錯誤收不回來。
+//   2. 前台鎖定看的是 status === 'ended'。日期到了但狀態還是 active 時，
+//      存檔文章會跟聊天介面疊在一起。
+// 寧可漏掉 GEO（之後補按「已結束」就會生效），也不要提前外洩。
+function isConcluded(status) {
+  return status === 'ended';
 }
 
 // 新聞稿純文字 → 段落 HTML。知識庫上限 45000 字，這裡不截斷，
@@ -140,7 +142,7 @@ async function serveSitemap(res) {
   }
 
   const items = rows
-    .filter(r => r[0] && r[4] !== 'archived' && isConcluded(r[4], r[5]))
+    .filter(r => r[0] && r[4] !== 'archived' && isConcluded(r[4]))
     .map(r => ({
       loc: `${SITE}/event?id=${encodeURIComponent(r[0])}`,
       lastmod: toISODate(parseEventDate(r[5]))
@@ -207,7 +209,7 @@ async function serveEventPage(req, res) {
     organizer: row[9] || '工研院'
   };
 
-  const concluded = isConcluded(ev.status, ev.date);
+  const concluded = isConcluded(ev.status);
   const isoDate = toISODate(parseEventDate(ev.date));
   const pageUrl = `${SITE}/event?id=${encodeURIComponent(ev.id)}`;
   const summary = makeSummary(ev.name, ev.organizer, ev.knowledge_base, concluded);
