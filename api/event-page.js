@@ -100,10 +100,28 @@ function renderBody(text) {
     .join('\n      ');
 }
 
+// 知識庫欄位是「AI 系統提示 + 參考資料」的混合體：開頭那段是寫給模型看的角色
+// 設定（「你是…」「你的任務：」「回答要簡潔有力…」），從來不是寫給讀者看的。
+// 整包直接發布，內部提示詞就會變成搜尋結果上的頁面摘要。
+//
+// 規則：只發布【…新聞稿…】標記之後的內容，並在【聯絡窗口】處截斷（承辦人電話
+// 不該被索引）。找不到標記就回傳空字串——內文不發布，只留活動基本資料。
+// 寧可少發，也不要把不該公開的東西送出去。
+function extractPressBody(kb) {
+  if (!kb) return '';
+  const s = String(kb);
+  const start = s.match(/【[^】]*新聞稿[^】]*】/);
+  if (!start) return '';
+  let body = s.slice(start.index + start[0].length);
+  const cut = body.match(/【[^】]*(聯絡窗口|聯絡人|窗口)[^】]*】/);
+  if (cut) body = body.slice(0, cut.index);
+  return body.trim();
+}
+
 // 摘要：給 meta description / og:description 用，控制在 155 字內
-function makeSummary(name, organizer, kb, concluded) {
-  if (concluded && kb) {
-    const plain = String(kb).replace(/\s+/g, ' ').trim();
+function makeSummary(name, organizer, pressBody, concluded) {
+  if (concluded && pressBody) {
+    const plain = String(pressBody).replace(/\s+/g, ' ').trim();
     if (plain.length > 20) {
       return plain.length > 150 ? plain.slice(0, 150) + '…' : plain;
     }
@@ -212,7 +230,8 @@ async function serveEventPage(req, res) {
   const concluded = isConcluded(ev.status);
   const isoDate = toISODate(parseEventDate(ev.date));
   const pageUrl = `${SITE}/event?id=${encodeURIComponent(ev.id)}`;
-  const summary = makeSummary(ev.name, ev.organizer, ev.knowledge_base, concluded);
+  const pressBody = concluded ? extractPressBody(ev.knowledge_base) : '';
+  const summary = makeSummary(ev.name, ev.organizer, pressBody, concluded);
   const chipList = ev.chips.split('\n').map(s => s.trim()).filter(Boolean);
 
   // ── head 注入：title / meta / Open Graph / JSON-LD ────────────────
@@ -239,14 +258,14 @@ async function serveEventPage(req, res) {
   };
 
   // 新聞稿只在記者會結束後才進結構化資料，避免提前外洩
-  if (concluded && ev.knowledge_base) {
+  if (concluded && pressBody) {
     jsonLd['@graph'].push({
       '@type': 'NewsArticle',
       headline: ev.name.slice(0, 110),
       ...(isoDate ? { datePublished: isoDate } : {}),
       publisher: { '@id': `${SITE}/#organization` },
       mainEntityOfPage: pageUrl,
-      articleBody: ev.knowledge_base
+      articleBody: pressBody
     });
   }
 
@@ -278,8 +297,8 @@ async function serveEventPage(req, res) {
   <h1>${esc(ev.name)}</h1>
   <div class="geo-meta">${esc(ev.organizer)}${isoDate ? ` · ${esc(isoDate)}` : ''}</div>
   ${chipList.length ? `<div class="geo-topics"><h2>本場次提供資料</h2><ul>${chipList.map(c => `<li>${esc(c)}</li>`).join('')}</ul></div>` : ''}
-  ${ev.knowledge_base ? `<div class="geo-body"><h2>新聞資料全文</h2>
-      ${renderBody(ev.knowledge_base)}
+  ${pressBody ? `<div class="geo-body"><h2>新聞資料全文</h2>
+      ${renderBody(pressBody)}
   </div>` : ''}
   <div class="geo-foot">本頁由 ${esc(ev.organizer)} 記者會 AI 新聞助理提供。</div>
 </article>`;
