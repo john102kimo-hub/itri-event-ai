@@ -287,9 +287,11 @@ async function serveEventPage(req, res) {
     const articleStyle = `
 <style>
   #geo-article {
-    max-width: 760px; margin: 0 auto; padding: 32px 20px 64px;
+    width: 100%; max-width: 760px; margin: 0 auto; padding: 32px 20px 64px;
     line-height: 1.9; font-size: 0.95rem; color: #1a1a2e;
-    overflow-y: auto; flex: 1;
+    overflow-y: auto; overflow-x: hidden; flex: 1;
+    /* 新聞稿裡常有長網址，不斷字的話整頁會被撐出橫向捲軸 */
+    overflow-wrap: anywhere; word-break: break-word;
   }
   #geo-article .geo-tag {
     display: inline-block; background: #fef3c7; color: #92400e;
