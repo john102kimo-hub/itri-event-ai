@@ -5,7 +5,7 @@
 // 授權方式跟本平台其他同仁功能一致：同仁用該場的 edit_code，管理員用 ADMIN_PASSWORD。
 
 import { handleUpload } from '@vercel/blob/client';
-import { readRange } from './lib/sheets.js';
+import { readRange } from '../lib/sheets.js';
 
 const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
 const MAX_SIZE = 10 * 1024 * 1024; // 10MB

@@ -6,7 +6,7 @@
 // 管理員密碼也可用 X-Admin-Password header 傳（GET 用這個，不要放在網址上——
 // 網址會留在瀏覽器歷史與伺服器存取紀錄裡）。
 
-import { readRange, updateRange } from './lib/sheets.js';
+import { readRange, updateRange } from '../lib/sheets.js';
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');

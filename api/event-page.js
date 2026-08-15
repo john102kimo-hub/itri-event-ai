@@ -1,9 +1,12 @@
 // GEO（生成式引擎優化）三合一 handler：記者問答頁 SSR + robots.txt + sitemap.xml
 // ──────────────────────────────────────────────────────────────────────
 // 為什麼三個功能擠在同一支：Vercel Hobby 方案每次部署上限 12 個 Serverless
-// Function，這個專案已經貼著上限了。拆成三支會直接部署失敗
+// Function。這支剛加進來時專案正好卡在 12，拆成三支會直接部署失敗
 // （errorCode: exceeded_serverless_functions_per_deployment），所以用
 // vercel.json 的 rewrite 帶一個 _r 參數進來分流。
+//
+// 註：共用模組已從 api/lib/ 搬到根目錄 lib/（見下方 import），api/ 底下
+// 目前是 10 支、還有 2 格空間，但這支維持三合一——沒有理由為了拆而拆。
 //
 // 為什麼需要 SSR：public/event.html 是純前端渲染，活動名稱與新聞稿都是頁面
 // 載入後才用 fetch 抓回來的。ChatGPT、Perplexity、Claude 這類 AI 爬蟲多數不執行
@@ -21,7 +24,7 @@
 
 import fs from 'fs';
 import path from 'path';
-import { readRange } from './lib/sheets.js';
+import { readRange } from '../lib/sheets.js';
 
 const RANGE = 'events!A2:K';
 const SITE = 'https://itri-event-ai.vercel.app';

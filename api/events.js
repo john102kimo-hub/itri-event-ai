@@ -12,7 +12,7 @@
 // POST {action:'archive',...}          → 封存活動
 // POST {action:'ensure_edit_code',id}  → 確保該活動有 edit_code（沒有就補上），回傳
 
-import { readRange, appendRows, updateRange } from './lib/sheets.js';
+import { readRange, appendRows, updateRange } from '../lib/sheets.js';
 import { del } from '@vercel/blob';
 
 // events 表欄位：A id, B name, C color, D knowledge_base, E status,

@@ -6,7 +6,7 @@
 // （同仁本來就有 /edit 連結的那組碼）或 ADMIN_PASSWORD；「彙整所有活動」模式
 // 因為沒有單一場次的 edit_code 可比對，只接受 ADMIN_PASSWORD。
 
-import { readRange } from './lib/sheets.js';
+import { readRange } from '../lib/sheets.js';
 
 const CACHE_TTL_MS = 60 * 1000; // 60 秒；同仁改完知識庫應該很快能在訓練模式看到新版
 
