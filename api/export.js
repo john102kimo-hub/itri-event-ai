@@ -2,7 +2,7 @@
 // GET ?event_id=xxx
 // 管理員密碼走 X-Admin-Password header（也相容舊的 ?password= query，供直接貼網址測試用）
 
-import { readRange } from './lib/sheets.js';
+import { readRange } from '../lib/sheets.js';
 
 // CSV 公式注入防護：記者輸入以 =／+／-／@ 開頭的內容，管理員用 Excel 開啟時
 // 會被當公式執行；在前面補一個單引號讓 Excel 只當純文字顯示。

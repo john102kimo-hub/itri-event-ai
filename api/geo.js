@@ -15,7 +15,7 @@
 // 誠實邊界：這裡量到的是「可用 API 的 AI 答案引擎」，不是 ChatGPT／AI Overviews 的
 // 消費端畫面。它是代理指標，趨勢有效、絕對值不可對外宣稱等同某產品。
 
-import { readRange, appendRows, updateRange, ensureSheets } from './lib/sheets.js';
+import { readRange, appendRows, updateRange, ensureSheets } from '../lib/sheets.js';
 
 const SHEETS = {
   geo_prompts: ['id', 'topic', 'prompt', 'keyword', 'brand', 'competitors', 'active', 'created_at'],

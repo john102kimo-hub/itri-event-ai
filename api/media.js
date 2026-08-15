@@ -16,7 +16,7 @@
 // 誠實邊界：這裡不猜記者現在跑什麼路線，只把「太久沒受邀」「從沒填過路線」的人
 // 排到前面讓人判斷，是否還在職、路線是什麼，一律由人工按一下確認。
 
-import { readRange, appendRows, updateRange, ensureSheets } from './lib/sheets.js';
+import { readRange, appendRows, updateRange, ensureSheets } from '../lib/sheets.js';
 
 const SHEETS = {
   media_roster: [

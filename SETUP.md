@@ -103,6 +103,36 @@
 
 ---
 
+## ⚠️ 要加新功能前，先看這段（Vercel 免費方案的 12 支上限）
+
+Vercel Hobby（免費）方案規定：**一次部署最多 12 個 Serverless Function**，超過就整包部署失敗，
+畫面會出現這行紅字：
+
+> No more than 12 Serverless Functions can be added to a Deployment on the Hobby plan.
+
+判斷方式很簡單——**`api/` 資料夾底下每一個 `.js` 檔就是一支 Function，包含子資料夾裡的檔案**。
+不是只算「看得出來是 API 的那幾支」。
+
+以前 `api/lib/sheets.js`、`api/lib/exposure-parse.js` 這兩個「共用工具檔」放在 `api/` 底下，
+它們根本不是 API、沒有人會去呼叫，卻照樣各佔一格，等於白白吃掉 2 格額度。
+現在已經搬到根目錄的 `lib/`，額度回來了：
+
+| | 位置 | 佔用格數 |
+|---|---|---|
+| 10 支真正的 API | `api/*.js` | 10 |
+| 2 個共用工具檔 | `lib/*.js`（根目錄，**不佔額度**） | 0 |
+| **合計** | | **10 / 12（剩 2 格）** |
+
+**所以之後：**
+
+- 要加新的 API → 直接在 `api/` 新增 `.js`，還有 2 格可以用。
+- 要加「共用工具檔」（不是 API、只是給別的檔 import 的） → **一定要放根目錄 `lib/`，不要放 `api/`**。
+- 又滿了怎麼辦 → 不必升級付費方案。把功能相近的幾支合併成一支，
+  再用 `vercel.json` 的 `rewrites` 帶一個參數進去分流即可。
+  現成範例：`api/event-page.js` 一支同時供應 `/event`、`/robots.txt`、`/sitemap.xml` 三個網址。
+
+---
+
 ## 日常使用流程（你自己辦一場）
 
 1. 登入後台 → **新增活動** → 貼入新聞稿 → 儲存

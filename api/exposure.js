@@ -11,8 +11,8 @@
 // 設計重點：同仁只有 edit_code，沒有後台密碼。上傳與檢視必須能用 edit_code
 // 通過，否則這個功能對同仁等於不存在。
 
-import { readRange, appendRows, ensureSheets, listSheets, batchUpdate } from './lib/sheets.js';
-import { parseExposureFile, normalizeOutlet } from './lib/exposure-parse.js';
+import { readRange, appendRows, ensureSheets, listSheets, batchUpdate } from '../lib/sheets.js';
+import { parseExposureFile, normalizeOutlet } from '../lib/exposure-parse.js';
 
 const SHEETS = {
   exposure: ['event_id', '則數', '日期', '類型', '媒體名稱', '版位', '標題', '上傳時間', '來源檔'],

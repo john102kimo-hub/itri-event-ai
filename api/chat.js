@@ -1,6 +1,6 @@
 // 記者問答 API — 動態讀取活動知識庫，並將問答寫入 Google Sheets
 
-import { readRange, appendRows } from './lib/sheets.js';
+import { readRange, appendRows } from '../lib/sheets.js';
 
 // 活動設定快取（60 秒；記者會現場臨時改稿也能很快生效）
 const eventCache = new Map();
