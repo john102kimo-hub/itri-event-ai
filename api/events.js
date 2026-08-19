@@ -22,6 +22,11 @@ const RANGE = 'events!A2:K';
 // Google Sheets 單一儲存格上限約 5 萬字元；留一點餘裕避免踩線寫入失敗
 const KB_MAX_LEN = 45000;
 
+// 活動狀態合法值：active 進行中／ended 已結束（會觸發新聞稿全文開放搜尋引擎與 AI 收錄，
+// 見 event-page.js 的 isConcluded）／archived 已封存（記者前台下架）。
+// 同仁自助編輯與管理員共用同一份檢查，避免寫入允許值以外的字串。
+const EVENT_STATUSES = ['active', 'ended', 'archived'];
+
 function generateId(name) {
   const slug = name
     .toLowerCase()
@@ -42,7 +47,9 @@ function generateEditCode() {
   return s;
 }
 
-// 同仁可編輯的內容欄位 → 組出完整 11 欄，狀態(E)與編輯碼(K)一律沿用既有值
+// 同仁可編輯的內容欄位 → 組出完整 11 欄，編輯碼(K)一律沿用既有值。
+// 狀態(E) 開放同仁自行切換（進行中/已結束/已封存）；呼叫端須先用 EVENT_STATUSES
+// 驗證過 b.status 是合法值（見 update_edit），這裡才會直接信任並寫入。
 function buildContentRow(existing, b) {
   const pick = (v, i, def) => (v !== undefined ? v : (existing[i] !== undefined ? existing[i] : def));
   return [
@@ -50,7 +57,7 @@ function buildContentRow(existing, b) {
     pick(b.name, 1, ''),                            // B name
     pick(b.color, 2, '#0F9E7A'),                    // C color
     pick(b.knowledge_base, 3, ''),                  // D knowledge_base
-    existing[4] || 'active',                        // E status（同仁不可改）
+    pick(b.status, 4, 'active'),                    // E status（同仁可改）
     pick(b.event_date, 5, ''),                      // F created_at / 活動日期
     pick(b.chips, 6, ''),                           // G chips
     pick(b.images, 7, ''),                          // H images
@@ -155,6 +162,9 @@ export default async function handler(req, res) {
         }
         if (body.knowledge_base !== undefined && String(body.knowledge_base).length > KB_MAX_LEN) {
           return res.status(400).json({ error: `內容過長（上限 ${KB_MAX_LEN} 字），請刪減後再存` });
+        }
+        if (body.status !== undefined && !EVENT_STATUSES.includes(body.status)) {
+          return res.status(400).json({ error: '狀態值不正確' });
         }
         const updated = buildContentRow(existing, body);
         await updateRange(`events!A${rowIndex + 2}:K${rowIndex + 2}`, [updated]);
