@@ -28,8 +28,11 @@
 2. 將試算表網址中的 ID 記下：
    `https://docs.google.com/spreadsheets/d/【這段就是ID】/edit`
 3. 點右鍵 Sheet1 標籤 → **重新命名**為 `events`
-4. 在 A1~K1 填入標題：`id` `name` `color` `knowledge_base` `status` `created_at` `chips` `images` `greeting` `organizer` `edit_code`
+4. 在 A1~O1 填入標題：`id` `name` `color` `knowledge_base` `status` `created_at` `chips` `images` `greeting` `organizer` `edit_code` `event_time` `venue` `event_type` `press_contact`
    - 其中 `edit_code`（K 欄）是「同仁編輯連結」用的每場專屬編輯碼，系統會自動產生、不用手動填。若是既有試算表，只要確保 K 欄留著給它用即可。
+   - `created_at`（F 欄）欄名是舊的，實際存的是**活動日期**（後台的「活動行事曆」就是靠這欄畫的）——新增／編輯活動時填的「活動日期」寫的就是這一欄，欄名沒有跟著改是為了不動既有資料。
+   - `status`（E 欄）合法值有四種：`draft` 未發布（僅後台看得到，新活動預設值）／`active` 進行中／`ended` 已結束／`archived` 已封存。
+   - L～O 欄（`event_time` `venue` `event_type` `press_contact`）是活動時間、地點、類型、新聞聯絡人，全部選填，後台「活動行事曆」與卡片會顯示。若是既有試算表沒有這幾欄，不影響現有功能運作——程式是照欄位位置讀寫，不是照標題文字比對；只是你自己打開試算表看的時候，補上標題會比較好懂。
 5. 點 ＋ 新增分頁，重新命名為 `qa_log`
 6. 在 A1~F1 填入標題：`timestamp` `event_id` `event_name` `media_name` `question` `answer`
    - G 欄留給系統標記刪除用（後台按「刪除」時會在這欄寫 `1`，不用手動填、也不用管它）

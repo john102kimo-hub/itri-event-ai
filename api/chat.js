@@ -10,7 +10,7 @@ async function getEventConfig(eventId) {
   const cached = eventCache.get(eventId);
   if (cached && Date.now() < cached.expiry) return cached.data;
 
-  const rows = await readRange('events!A2:J');
+  const rows = await readRange('events!A2:J'); // O 欄的新增欄位（時間/地點/類型/聯絡人）這裡用不到，讀到 J 就夠
   const row = rows.find(r => r[0] === eventId);
   if (!row) return null;
 
@@ -96,7 +96,9 @@ export default async function handler(req, res) {
 
   try {
     const event = await getEventConfig(event_id);
-    if (!event || event.status === 'archived') {
+    // draft 是「後台先開好框架、內容還在填」的未發布狀態，跟 archived 一樣不讓記者問到——
+    // 差別只在 archived 是「問過了、現在下架」，draft 是「根本還沒對外」。
+    if (!event || event.status === 'archived' || event.status === 'draft') {
       return res.status(404).json({ error: '活動不存在或已結束' });
     }
 

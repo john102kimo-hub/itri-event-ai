@@ -154,6 +154,30 @@ textarea.form-control { min-height: 240px; resize: vertical; line-height: 1.65; 
     <div class="form-group">
       <label><i class="ti ti-calendar-event"></i> 活動日期</label>
       <input class="form-control" id="input-date" type="date">
+      <div class="form-hint">這個日期會顯示在後台的活動行事曆上</div>
+    </div>
+    <div class="form-group">
+      <label><i class="ti ti-clock"></i> 活動時間（選填）</label>
+      <input class="form-control" id="input-time" placeholder="例：10:00">
+    </div>
+    <div class="form-group">
+      <label><i class="ti ti-map-pin"></i> 活動地點（選填）</label>
+      <input class="form-control" id="input-venue" placeholder="例：工研院中興院區 中興文薈廳">
+    </div>
+    <div class="form-group">
+      <label><i class="ti ti-category"></i> 活動類型（選填）</label>
+      <input class="form-control" id="input-type" list="type-list" placeholder="例：記者會">
+      <datalist id="type-list">
+        <option value="記者會"></option>
+        <option value="發表會"></option>
+        <option value="論壇"></option>
+        <option value="參訪"></option>
+      </datalist>
+    </div>
+    <div class="form-group">
+      <label><i class="ti ti-headset"></i> 新聞聯絡人（選填）</label>
+      <input class="form-control" id="input-contact" placeholder="例：王小明 03-1234567 分機 8888">
+      <div class="form-hint">AI 答不出來時，會請記者洽詢這裡填的人；也是未來 LINE 查詢「這場還沒有內容」時唯一能給的線索，建議填。</div>
     </div>
     <div class="form-group">
       <label><i class="ti ti-building"></i> 主辦單位</label>
@@ -167,6 +191,7 @@ textarea.form-control { min-height: 240px; resize: vertical; line-height: 1.65; 
     <div class="form-group">
       <label><i class="ti ti-flag"></i> 活動狀態</label>
       <select class="form-control" id="input-status" onchange="updateStatusHint()">
+        <option value="draft">未發布（僅後台看得到）</option>
         <option value="active">進行中</option>
         <option value="ended">已結束</option>
         <option value="archived">已封存</option>
@@ -317,6 +342,7 @@ A：
 // 狀態下拉的說明文字。「已結束」不是裝飾用——選了以後 event-page.js 的 SSR 會把完整新聞稿
 // 開放給搜尋引擎與 AI 爬蟲收錄（見該檔 isConcluded 的註解），等於正式對外公開，要提醒清楚。
 const STATUS_HINTS = {
+  draft:    '尚未對外發布：記者前台的連結會顯示「找不到活動」，可以放心慢慢把內容填好。填好後改選「進行中」即可對外開放，不用等承辦人。',
   active:   '記者前台正常提供問答；新聞稿全文尚不會被搜尋引擎／AI（如 ChatGPT、Perplexity）收錄完整內容。',
   ended:    '活動確定結束、新聞稿已正式對外發布後再選這個。選了以後，完整新聞稿會開放讓搜尋引擎與 AI 收錄索引，且無法完全收回，請確認真的可以公開了再選。',
   archived: '封存後記者前台將立即無法使用，且你之後將無法再自行修改這場活動，如需取消請聯絡活動承辦人／後台管理員。'
@@ -325,6 +351,9 @@ function updateStatusHint() {
   const v = document.getElementById('input-status').value;
   document.getElementById('status-hint').textContent = STATUS_HINTS[v] || '';
 }
+
+// 記錄頁面載入當下的狀態，存檔時用來判斷「這次是不是第一次從未發布切成進行中」（= 發布）
+let loadedStatus = 'active';
 
 // 沒存就關分頁毫無警告的話，同仁手打的內容會整段蒸發 —— 追蹤是否有未儲存的變更
 let dirty = false;
@@ -361,11 +390,16 @@ async function load() {
     document.getElementById('input-chips').value = ev.chips || '';
     document.getElementById('input-greeting').value = ev.greeting || '';
     document.getElementById('input-images').value = ev.images || '';
-    document.getElementById('input-status').value = ev.status || 'active';
+    document.getElementById('input-time').value = ev.event_time || '';
+    document.getElementById('input-venue').value = ev.venue || '';
+    document.getElementById('input-type').value = ev.event_type || '';
+    document.getElementById('input-contact').value = ev.press_contact || '';
+    loadedStatus = ev.status || 'active';
+    document.getElementById('input-status').value = loadedStatus;
     updateStatusHint();
 
     // 活動日期解析
-    const dateStr = ev.created_at || '';
+    const dateStr = ev.event_date || ev.created_at || '';
     let isoDate = '';
     if (dateStr.match(/^\d{4}-\d{2}-\d{2}/)) {
       isoDate = dateStr.slice(0, 10);
@@ -414,6 +448,10 @@ async function save() {
       !confirm('確定要封存這場活動嗎？封存後記者前台將立即無法使用，且你之後將無法自行修改，如需取消要聯絡後台管理員。')) {
     return;
   }
+  if (status === 'active' && loadedStatus === 'draft' &&
+      !confirm('確定要發布這場活動嗎？發布後記者就能透過連結問到這裡的內容，請確認內容已經準備好。')) {
+    return;
+  }
 
   const btn = document.getElementById('save-btn');
   btn.disabled = true;
@@ -435,12 +473,17 @@ async function save() {
         chips: document.getElementById('input-chips').value.trim(),
         greeting: document.getElementById('input-greeting').value.trim(),
         images: document.getElementById('input-images').value.trim(),
-        event_date: document.getElementById('input-date').value || undefined
+        event_date: document.getElementById('input-date').value || undefined,
+        event_time: document.getElementById('input-time').value.trim(),
+        venue: document.getElementById('input-venue').value.trim(),
+        event_type: document.getElementById('input-type').value.trim(),
+        press_contact: document.getElementById('input-contact').value.trim()
       })
     });
     const data = await res.json();
     if (!res.ok || data.error) throw new Error(data.error || '儲存失敗');
     dirty = false;
+    loadedStatus = status;
     toast('✓ 已儲存！約 1 分鐘後對記者端生效');
     const now = new Date().toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' });
     document.getElementById('saved-hint').textContent = `最後儲存 ${now}`;

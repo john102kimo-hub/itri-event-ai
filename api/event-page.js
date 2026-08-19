@@ -222,7 +222,8 @@ async function serveEventPage(req, res) {
     return plain(template);
   }
 
-  if (!row || row[4] === 'archived') {
+  // draft 是「後台先開好框架、內容還在填」的未發布狀態，跟 archived 一樣不讓記者開得到這頁。
+  if (!row || row[4] === 'archived' || row[4] === 'draft') {
     return plain(
       template.replace('<title>AI 新聞助理</title>',
         '<title>找不到活動 — AI 新聞助理</title>\n<meta name="robots" content="noindex">'),

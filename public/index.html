@@ -157,8 +157,43 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); min-
   margin-left: 8px; flex-shrink: 0;
 }
 .status-active { background: #d1fae5; color: #065f46; }
+.status-active-nokb { background: #f1f5f9; color: #475569; }
 .status-archived { background: #f3f4f6; color: #9ca3af; }
 .status-ended { background: #fef3c7; color: #92400e; }
+.status-draft { background: #e0e7ff; color: #3730a3; }
+
+/* ── 行事曆 ────────────────────────────────────────────── */
+.cal-nav { display: flex; align-items: center; gap: 10px; }
+.cal-month-label { font-size: 0.95rem; font-weight: 700; min-width: 100px; text-align: center; }
+.cal-legend { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 16px; font-size: 0.78rem; color: var(--muted); }
+.cal-legend span { display: inline-flex; align-items: center; gap: 5px; }
+.cal-legend i { font-size: 10px; }
+.cal-grid {
+  display: grid; grid-template-columns: repeat(7,1fr); gap: 1px;
+  background: var(--border); border: 1px solid var(--border);
+  border-radius: var(--radius); overflow: hidden;
+}
+.cal-dow { background: #f9fafb; padding: 8px; text-align: center; font-size: 0.75rem; font-weight: 700; color: var(--muted); }
+.cal-cell { background: white; min-height: 104px; padding: 6px; cursor: pointer; transition: background 0.15s; }
+.cal-cell:hover { background: #f9fafb; }
+.cal-cell.other-month { background: #fafafa; cursor: default; }
+.cal-cell.other-month .cal-date { color: #d1d5db; }
+.cal-cell.today { background: var(--primary-light); }
+.cal-date { font-size: 0.78rem; font-weight: 700; margin-bottom: 4px; }
+.cal-cell.today .cal-date { color: var(--primary); }
+.cal-pill {
+  display: block; font-size: 0.7rem; font-weight: 600; line-height: 1.6;
+  padding: 1px 6px; border-radius: 5px; margin-bottom: 2px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  color: white; cursor: pointer;
+}
+.cal-pill:hover { opacity: 0.85; }
+.cal-pill.is-draft { opacity: 0.6; border: 1px dashed rgba(255,255,255,0.8); }
+.cal-more { font-size: 0.68rem; color: var(--muted); padding-left: 2px; }
+@media (max-width: 768px) {
+  .cal-cell { min-height: 64px; }
+  .cal-legend { display: none; }
+}
 .event-meta { font-size: 0.78rem; color: var(--muted); margin-bottom: 14px; display: flex; gap: 12px; flex-wrap: wrap; }
 .event-meta span { display: flex; align-items: center; gap: 4px; }
 .event-actions { display: flex; gap: 8px; flex-wrap: wrap; }
@@ -296,13 +331,16 @@ textarea.form-control { min-height: 200px; resize: vertical; line-height: 1.6; }
       <h2>工研院活動<br>AI 溝通平台</h2>
       <span>ITRI Event AI</span>
     </div>
-    <button class="nav-item active" onclick="showView('events')">
+    <button class="nav-item active" data-view="events" onclick="showView('events')">
       <i class="ti ti-calendar-event"></i> 活動管理
     </button>
-    <button class="nav-item" onclick="showView('analytics')">
+    <button class="nav-item" data-view="calendar" onclick="showView('calendar')">
+      <i class="ti ti-calendar-month"></i> 活動行事曆
+    </button>
+    <button class="nav-item" data-view="analytics" onclick="showView('analytics')">
       <i class="ti ti-chart-bar"></i> 問答分析
     </button>
-    <button class="nav-item" onclick="showView('recent')">
+    <button class="nav-item" data-view="recent" onclick="showView('recent')">
       <i class="ti ti-message-circle"></i> 最新問答
     </button>
     <!-- 這條不能開新分頁。彙整訓練（event_id=all）後端只認管理員密碼，密碼放在 sessionStorage，
@@ -365,6 +403,31 @@ textarea.form-control { min-height: 200px; resize: vertical; line-height: 1.6; }
           <div class="skeleton"></div>
           <div class="skeleton"></div>
         </div>
+      </div>
+    </div>
+
+    <!-- 活動行事曆 -->
+    <div id="view-calendar" style="display:none">
+      <div class="topbar">
+        <h1><i class="ti ti-calendar-month" style="color:var(--primary)"></i> 活動行事曆</h1>
+        <div class="topbar-actions cal-nav">
+          <button class="btn btn-outline" onclick="calShiftMonth(-1)"><i class="ti ti-chevron-left"></i></button>
+          <span class="cal-month-label" id="cal-month-label">—</span>
+          <button class="btn btn-outline" onclick="calShiftMonth(1)"><i class="ti ti-chevron-right"></i></button>
+          <button class="btn btn-outline" onclick="calGoToday()">今天</button>
+          <button class="btn btn-primary" onclick="showCreateModal()"><i class="ti ti-plus"></i> 新增活動</button>
+        </div>
+      </div>
+      <div class="content">
+        <div class="cal-legend">
+          <span><i class="ti ti-circle-filled" style="color:#065f46"></i> 進行中·可問答</span>
+          <span><i class="ti ti-circle-filled" style="color:#475569"></i> 進行中·僅基本資料</span>
+          <span><i class="ti ti-circle-filled" style="color:#92400e"></i> 已結束</span>
+          <span><i class="ti ti-circle-filled" style="color:#3730a3"></i> 未發布（虛線框＝僅後台看得到）</span>
+          <span><i class="ti ti-circle-filled" style="color:#9ca3af"></i> 已封存</span>
+        </div>
+        <div class="cal-grid" id="calendar-grid"></div>
+        <div class="form-hint" style="margin-top:10px">點空白日期可直接新增當天的活動；點色塊可開啟該場編輯；沒有日期或日期解析不出來的活動不會出現在這裡。</div>
       </div>
     </div>
 
@@ -439,7 +502,30 @@ textarea.form-control { min-height: 200px; resize: vertical; line-height: 1.6; }
     <div class="form-group">
       <label><i class="ti ti-calendar-event"></i> 活動日期</label>
       <input class="form-control" id="input-date" type="date">
-      <div class="form-hint">設定記者會/活動的實際舉辦日期</div>
+      <div class="form-hint">設定記者會/活動的實際舉辦日期，會顯示在「活動行事曆」上</div>
+    </div>
+    <div class="form-group">
+      <label><i class="ti ti-clock"></i> 活動時間（選填）</label>
+      <input class="form-control" id="input-time" placeholder="例：10:00">
+    </div>
+    <div class="form-group">
+      <label><i class="ti ti-map-pin"></i> 活動地點（選填）</label>
+      <input class="form-control" id="input-venue" placeholder="例：工研院中興院區 中興文薈廳">
+    </div>
+    <div class="form-group">
+      <label><i class="ti ti-tag"></i> 活動類型（選填）</label>
+      <input class="form-control" id="input-type" list="type-list" placeholder="例：記者會">
+      <datalist id="type-list">
+        <option value="記者會"></option>
+        <option value="發表會"></option>
+        <option value="論壇"></option>
+        <option value="參訪"></option>
+      </datalist>
+    </div>
+    <div class="form-group">
+      <label><i class="ti ti-headset"></i> 新聞聯絡人（選填）</label>
+      <input class="form-control" id="input-contact" placeholder="例：王小明 03-1234567 分機 8888">
+      <div class="form-hint">AI 答不出來時會請記者洽詢這裡填的人，建議每場都填</div>
     </div>
     <div class="form-group">
       <label><i class="ti ti-building"></i> 主辦單位</label>
@@ -498,6 +584,7 @@ textarea.form-control { min-height: 200px; resize: vertical; line-height: 1.6; }
     <div class="form-group" id="status-group" style="display:none">
       <label>狀態</label>
       <select class="form-control" id="input-status">
+        <option value="draft">未發布（僅後台看得到）</option>
         <option value="active">進行中</option>
         <option value="ended">已結束</option>
         <option value="archived">封存</option>
@@ -573,14 +660,18 @@ if (savedPwd) {
 }
 
 // ── 視圖切換 ─────────────────────────────────────────────
+// 用 data-view 屬性比對，不用陣列位置——之前用「第 N 個 .nav-item」對應「第 N 個視圖名稱」，
+// 側邊欄一旦插入新項目（例如行事曆）順序就會全部錯位，改成屬性比對就不怕再加項目。
 function showView(name) {
-  ['events','analytics','recent'].forEach(v => {
+  ['events','calendar','analytics','recent'].forEach(v => {
     document.getElementById(`view-${v}`).style.display = v === name ? 'block' : 'none';
   });
-  document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
-  document.querySelectorAll('.nav-item')[['events','analytics','recent'].indexOf(name)].classList.add('active');
+  document.querySelectorAll('.nav-item[data-view]').forEach(el => {
+    el.classList.toggle('active', el.dataset.view === name);
+  });
   if (name === 'analytics') loadAnalytics();
   if (name === 'recent') loadRecent();
+  if (name === 'calendar') renderCalendar();
 }
 
 // ── 載入所有資料 ──────────────────────────────────────────
@@ -590,12 +681,16 @@ async function loadAll() {
 
 async function loadEvents() {
   try {
-    const res = await fetch('/api/events');
+    // list_admin：後台專用列表，含未發布(draft)與已封存活動，並附 has_kb——
+    // 卡片檢視、行事曆、範本下拉都共用同一份 state.events。
+    const res = await authedFetch('/api/events?action=list_admin');
     const data = await res.json();
+    if (data.error) throw new Error(data.error);
     state.events = data.events || [];
     renderEvents();
     updateEventFilter();
     updateEventCount();
+    renderCalendar();
   } catch(e) {
     document.getElementById('events-grid').innerHTML =
       '<div style="color:#ef4444;padding:20px">載入失敗：' + e.message + '</div>';
@@ -660,27 +755,38 @@ function renderEvents() {
 
   grid.innerHTML = events.map(ev => {
     const count = qCount[ev.id] || 0;
-    const badgeClass = ev.status === 'active' ? 'status-active' : ev.status === 'ended' ? 'status-ended' : 'status-archived';
-    const badgeText = ev.status === 'active' ? '進行中' : ev.status === 'ended' ? '已結束' : '已封存';
+    const meta = eventStatusMeta(ev);
     const color = ev.color || '#0F9E7A';
+    const metaBits = [
+      `<span><i class="ti ti-message-dots"></i> ${count} 則問答</span>`,
+      `<span><i class="ti ti-calendar"></i> ${(ev.event_date || ev.created_at || '').slice(0,10) || '—'}</span>`
+    ];
+    if (ev.venue) metaBits.push(`<span><i class="ti ti-map-pin"></i> ${escHtml(ev.venue)}</span>`);
     return `
     <div class="event-card">
       <div class="event-card-color" style="background:${escHtml(color)}"></div>
       <div class="event-card-body">
         <div class="event-card-header">
           <div class="event-name">${escHtml(ev.name)}</div>
-          <span class="status-badge ${badgeClass}">
-            ${badgeText}
+          <span class="status-badge ${meta.badgeClass}">
+            ${meta.badgeText}
           </span>
         </div>
         <div class="event-meta">
-          <span><i class="ti ti-message-dots"></i> ${count} 則問答</span>
-          <span><i class="ti ti-calendar"></i> ${ev.created_at?.slice(0,10) || '—'}</span>
+          ${metaBits.join('')}
         </div>
         <div class="event-actions">
+          ${ev.status === 'draft' ? `
+          <button class="action-btn primary" onclick="publishEvent('${escHtml(ev.id)}')" title="發布後記者前台與公開列表才看得到這場">
+            <i class="ti ti-send"></i> 發布
+          </button>` : `
           <a class="action-btn primary" href="/event?id=${encodeURIComponent(ev.id)}" target="_blank">
             <i class="ti ti-external-link"></i> 記者前台
-          </a>
+          </a>`}
+          ${ev.status === 'active' ? `
+          <button class="action-btn" onclick="unpublishEvent('${escHtml(ev.id)}')" title="收回為未發布，記者前台會立即顯示找不到活動">
+            <i class="ti ti-eye-off"></i> 收回草稿
+          </button>` : ''}
           <button class="action-btn orange" onclick="openTraining('${escHtml(ev.id)}', this)">
             <i class="ti ti-microphone"></i> 媒體訓練
           </button>
@@ -870,19 +976,28 @@ async function deleteQARecent(rowNum) {
 }
 
 // ── Modal ─────────────────────────────────────────────────
-function showCreateModal() {
+// prefillDate：從行事曆點空白日期新增活動時，把那天帶進來（YYYY-MM-DD）
+function showCreateModal(prefillDate) {
   document.getElementById('modal-title').textContent = '新增活動';
   document.getElementById('edit-event-id').value = '';
   document.getElementById('input-name').value = '';
   document.getElementById('input-organizer').value = '工研院';
   document.getElementById('input-color').value = '#0F9E7A';
   document.getElementById('color-preview').style.background = '#0F9E7A';
-  document.getElementById('input-date').value = new Date().toISOString().slice(0,10);
+  document.getElementById('input-date').value = prefillDate || new Date().toISOString().slice(0,10);
+  document.getElementById('input-time').value = '';
+  document.getElementById('input-venue').value = '';
+  document.getElementById('input-type').value = '';
+  document.getElementById('input-contact').value = '';
   document.getElementById('input-kb').value = KB_TEMPLATE;
   document.getElementById('kb-count').textContent = KB_TEMPLATE.length + ' / 8000 字';
   document.getElementById('input-chips').value = '';
   document.getElementById('input-greeting').value = '';
   document.getElementById('input-images').value = '';
+  // 新活動一律從「未發布」開始：狀態欄位仍隱藏（新增流程不想一次塞太多欄位），
+  // 但送出值要明確是 draft，不能讓下拉殘留上一次編輯活動時選過的狀態。
+  // 填好內容、確認沒問題後，回卡片按「發布」即可對外開放。
+  document.getElementById('input-status').value = 'draft';
   document.getElementById('status-group').style.display = 'none';
   document.getElementById('archive-btn').style.display = 'none';
   // 顯示並填充「以既有活動為範本」下拉
@@ -937,9 +1052,13 @@ async function showEditModal(eventId) {
     document.getElementById('input-chips').value = ev.chips || '';
     document.getElementById('input-greeting').value = ev.greeting || '';
     document.getElementById('input-images').value = ev.images || '';
+    document.getElementById('input-time').value = ev.event_time || '';
+    document.getElementById('input-venue').value = ev.venue || '';
+    document.getElementById('input-type').value = ev.event_type || '';
+    document.getElementById('input-contact').value = ev.press_contact || '';
     document.getElementById('input-status').value = ev.status || 'active';
-    // 解析 created_at 為 date input 格式（YYYY-MM-DD）
-    const dateStr = ev.created_at || '';
+    // 解析活動日期為 date input 格式（YYYY-MM-DD）；event_date 是新別名，created_at 是舊欄名相容
+    const dateStr = ev.event_date || ev.created_at || '';
     let isoDate = '';
     if (dateStr.match(/^\d{4}-\d{2}-\d{2}/)) {
       isoDate = dateStr.slice(0, 10);
@@ -969,6 +1088,10 @@ async function saveEvent() {
   const images = document.getElementById('input-images').value.trim();
   const status = document.getElementById('input-status').value;
   const event_date = document.getElementById('input-date').value || undefined;
+  const event_time = document.getElementById('input-time').value.trim();
+  const venue = document.getElementById('input-venue').value.trim();
+  const event_type = document.getElementById('input-type').value.trim();
+  const press_contact = document.getElementById('input-contact').value.trim();
 
   if (!name) { toast('活動名稱必填'); return; }
   if (!knowledge_base) { toast('知識庫不可為空'); return; }
@@ -984,7 +1107,8 @@ async function saveEvent() {
         action: id ? 'update' : 'create',
         password: state.password,
         id: id || undefined,
-        name, organizer, color, knowledge_base, chips, images, greeting, status, event_date
+        name, organizer, color, knowledge_base, chips, images, greeting, status, event_date,
+        event_time, venue, event_type, press_contact
       })
     });
     const data = await res.json();
@@ -1062,6 +1186,144 @@ async function archiveEvent() {
   } catch(e) {
     toast('封存失敗：' + e.message);
   }
+}
+
+// 發布：draft → active。卡片與行事曆共用。
+async function publishEvent(id) {
+  try {
+    const res = await authedFetch('/api/events', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'update', password: state.password, id, status: 'active' })
+    });
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    toast('已發布，記者前台現在看得到這場了');
+    await loadEvents();
+  } catch(e) {
+    toast('發布失敗：' + e.message);
+  }
+}
+
+// 收回為未發布：active → draft。跟封存不一樣——封存不能自己復原，這個可以隨時再發布回來。
+async function unpublishEvent(id) {
+  if (!confirm('確定要收回為未發布嗎？記者前台會立即顯示「找不到活動」，直到你重新按發布。')) return;
+  try {
+    const res = await authedFetch('/api/events', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'update', password: state.password, id, status: 'draft' })
+    });
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    toast('已收回為未發布');
+    await loadEvents();
+  } catch(e) {
+    toast('操作失敗：' + e.message);
+  }
+}
+
+// ── 行事曆 ────────────────────────────────────────────────
+let calState = (() => { const d = new Date(); return { year: d.getFullYear(), month: d.getMonth() }; })();
+
+function calShiftMonth(delta) {
+  calState.month += delta;
+  if (calState.month < 0) { calState.month = 11; calState.year--; }
+  if (calState.month > 11) { calState.month = 0; calState.year++; }
+  renderCalendar();
+}
+function calGoToday() {
+  const d = new Date();
+  calState.year = d.getFullYear(); calState.month = d.getMonth();
+  renderCalendar();
+}
+
+// events 表的活動日期有兩種既有格式：手動填的 "2026-07-08"，跟沒填日期時系統寫入的
+// "2026/6/18 下午11:06:04"（建立時間戳記）。跟後端 event-page.js 的 parseEventDate
+// 用同一套規則，兩邊對日期的認定才會一致。
+function calParseDate(raw) {
+  if (!raw) return null;
+  const m = String(raw).trim().match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+  if (!m) return null;
+  const d = new Date(+m[1], +m[2] - 1, +m[3]);
+  return isNaN(d.getTime()) ? null : d;
+}
+function calDateKey(d) {
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+
+// 卡片徽章與行事曆色塊共用同一套「狀態 → 顯示樣式」判斷，兩處視覺才不會兜不起來。
+// has_kb 只在 active 時才細分「可問答／僅基本資料」——其他狀態下有沒有知識庫不影響記者能不能問到。
+function eventStatusMeta(ev) {
+  if (ev.status === 'draft')    return { badgeClass: 'status-draft',     badgeText: '未發布',           dotColor: '#3730a3', dashed: true };
+  if (ev.status === 'archived') return { badgeClass: 'status-archived',  badgeText: '已封存',           dotColor: '#9ca3af', dashed: false };
+  if (ev.status === 'ended')    return { badgeClass: 'status-ended',     badgeText: '已結束',           dotColor: '#92400e', dashed: false };
+  return ev.has_kb
+    ? { badgeClass: 'status-active',       badgeText: '進行中',            dotColor: '#065f46', dashed: false }
+    : { badgeClass: 'status-active-nokb',  badgeText: '進行中·僅基本資料', dotColor: '#475569', dashed: false };
+}
+
+function renderCalendar() {
+  const labelEl = document.getElementById('cal-month-label');
+  const gridEl = document.getElementById('calendar-grid');
+  if (!labelEl || !gridEl) return; // 視圖還沒渲染進 DOM 時（理論上不會，防呆用）
+  labelEl.textContent = `${calState.year} 年 ${calState.month + 1} 月`;
+
+  // 依日期分桶。日期是空的或解析不出來的活動不猜、直接跳過——猜錯比不顯示更誤導人，
+  // 這些活動仍在「活動管理」卡片檢視看得到，只是不會出現在月曆格子裡。
+  const byDay = new Map();
+  (state.events || []).forEach(ev => {
+    const d = calParseDate(ev.event_date || ev.created_at);
+    if (!d) return;
+    const key = calDateKey(d);
+    if (!byDay.has(key)) byDay.set(key, []);
+    byDay.get(key).push(ev);
+  });
+
+  const first = new Date(calState.year, calState.month, 1);
+  const startOffset = first.getDay(); // 0=日
+  const daysInMonth = new Date(calState.year, calState.month + 1, 0).getDate();
+  const daysInPrevMonth = new Date(calState.year, calState.month, 0).getDate();
+  const todayKey = calDateKey(new Date());
+  const totalCells = Math.ceil((startOffset + daysInMonth) / 7) * 7;
+  const MAX_SHOW = 3;
+
+  const cells = [];
+  for (let i = 0; i < totalCells; i++) {
+    const dayNum = i - startOffset + 1;
+    let cellDate, otherMonth = false;
+    if (dayNum < 1) { cellDate = new Date(calState.year, calState.month - 1, daysInPrevMonth + dayNum); otherMonth = true; }
+    else if (dayNum > daysInMonth) { cellDate = new Date(calState.year, calState.month + 1, dayNum - daysInMonth); otherMonth = true; }
+    else { cellDate = new Date(calState.year, calState.month, dayNum); }
+
+    const key = calDateKey(cellDate);
+    const dayEvents = (byDay.get(key) || []).sort((a,b) => (a.name||'').localeCompare(b.name||''));
+    const isToday = key === todayKey;
+    const shown = dayEvents.slice(0, MAX_SHOW);
+    const extra = dayEvents.length - shown.length;
+
+    cells.push(`
+      <div class="cal-cell${otherMonth ? ' other-month' : ''}${isToday ? ' today' : ''}"
+           ${otherMonth ? '' : `onclick="calCellClick('${key}')"`}>
+        <div class="cal-date">${cellDate.getDate()}</div>
+        ${shown.map(ev => {
+          const meta = eventStatusMeta(ev);
+          return `<span class="cal-pill${meta.dashed ? ' is-draft' : ''}" style="background:${meta.dotColor}"
+            title="${escHtml(ev.name)}（${meta.badgeText}）"
+            onclick="event.stopPropagation(); showEditModal('${escHtml(ev.id)}')">${escHtml(ev.name)}</span>`;
+        }).join('')}
+        ${extra > 0 ? `<div class="cal-more">還有 ${extra} 場…</div>` : ''}
+      </div>`);
+  }
+
+  gridEl.innerHTML =
+    ['日','一','二','三','四','五','六'].map(d => `<div class="cal-dow">${d}</div>`).join('') +
+    cells.join('');
+}
+
+// 點空白格子＝在那天快速新增活動；點到色塊時色塊自己的 onclick 已經 stopPropagation，不會走到這裡
+function calCellClick(dateKey) {
+  showCreateModal(dateKey);
 }
 
 // ── 工具函式 ──────────────────────────────────────────────
