@@ -131,7 +131,8 @@ function mergeContentRow(existing, b, baseHashes, { backfillEditCode = false } =
 
   CONTENT_FIELDS.forEach((f, i) => {
     const current = cellOf(existing, f);
-    if (b[f.key] === undefined) { row[f.col] = current; return; }   // 這次沒送這欄 → 保持現值
+    // 這次沒送這欄（含 null）→ 保持現值。寧可少改一欄，也不要把 "null" 這種字串寫進去。
+    if (b[f.key] === undefined || b[f.key] === null) { row[f.col] = current; return; }
     const incoming = String(b[f.key]);
     if (!baseHashes) { row[f.col] = incoming; return; }             // 沒帶版本 → 舊行為
 
