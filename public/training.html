@@ -280,6 +280,10 @@ let eventId = params.get('id');
 // 這支功能只給內部人用：帶 ?code=（同仁該場的編輯碼）或已在後台登入過（sessionStorage 有密碼）才能用
 const TRAINING_CODE = params.get('code') || '';
 const TRAINING_PWD = sessionStorage.getItem('itri_pwd') || '';
+// 編輯碼只授權「那一場」：後端對其他場次、對彙整訓練都會回 401。所以拿編輯碼進來的同仁
+// 不能看到活動選單——之前就是選了別場（或彙整）才會卡在「請由後台或同仁編輯連結進入媒體
+// 訓練」，畫面上看起來像整個功能壞掉。這個模式一律鎖在網址帶進來的那一場。
+const STAFF_ONLY = !!TRAINING_CODE && !TRAINING_PWD;
 let reporterHist = [];  // 記者對話歷程
 let questionCount = 0;
 const MAX_Q = 5;
@@ -287,23 +291,94 @@ let isWaiting = false;
 let awaitingAnswer = false; // 等待使用者回答
 let eventName = '工研院活動';
 
-async function init() {
-  // 設定返回連結
-  document.getElementById('back-link').href = '/';
+// 擋下來的畫面：說清楚原因，並收掉進度條與開始按鈕（免得按了才吐錯誤）
+function lockScreen(msg) {
+  document.getElementById('loading').style.display = 'none';
+  const card = document.getElementById('info-card');
+  card.innerHTML = '<i class="ti ti-lock"></i>';
+  const span = document.createElement('span');
+  span.textContent = msg;        // 錯誤訊息一律當純文字，不進 innerHTML
+  card.appendChild(span);
+  document.getElementById('progress-bar').style.display = 'none';
+  document.getElementById('start-area').style.display = 'none';
+  document.getElementById('input-area').style.display = 'none';
+}
 
-  if (!TRAINING_CODE && !TRAINING_PWD) {
-    document.getElementById('loading').style.display = 'none';
-    document.getElementById('info-card').innerHTML =
-      '<i class="ti ti-lock"></i><span>這個功能只給內部同仁使用。請先從後台登入，再從活動卡片點「媒體訓練」進入本頁。</span>';
-    document.getElementById('progress-bar').style.display = 'none';
-    document.getElementById('start-area').style.display = 'none';
-    return;
-  }
+function setTitles(title, subtitle) {
+  document.getElementById('event-title').textContent = title;
+  document.getElementById('event-subtitle').textContent = subtitle;
+  document.title = title;
+}
 
+// 後台管理員的活動清單：改讀 list_admin，未發布(draft)的場次才會出現在選單裡——
+// 需要先練一輪的，通常正是還沒發布的那幾場。已封存的濾掉（後端本來就會擋）。
+async function loadAdminEvents() {
+  try {
+    const res = await fetch('/api/events?action=list_admin', { headers: { 'X-Admin-Password': TRAINING_PWD } });
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data.events)) return data.events.filter(e => e.status !== 'archived');
+    }
+  } catch (e) { /* 換公開清單再試一次 */ }
   try {
     const res = await fetch('/api/events');
     const data = await res.json();
-    const events = data.events || [];
+    return data.events || [];
+  } catch (e) { return []; }
+}
+
+async function init() {
+  const backLink = document.getElementById('back-link');
+  // 同仁是從自己那場的編輯頁點進來的，回去也該回那一頁（後台他也進不去）
+  backLink.href = STAFF_ONLY && eventId
+    ? `/edit?id=${encodeURIComponent(eventId)}&code=${encodeURIComponent(TRAINING_CODE)}`
+    : '/';
+  if (STAFF_ONLY && eventId) backLink.innerHTML = '<i class="ti ti-arrow-left"></i> 回編輯頁';
+
+  if (!TRAINING_CODE && !TRAINING_PWD) {
+    return lockScreen('這個功能只給內部同仁使用。請先從後台登入，再從活動卡片點「媒體訓練」進入本頁；'
+                    + '或從活動承辦人給你的專屬編輯連結，點「開始這場的媒體訓練」。');
+  }
+
+  // ── 同仁（只有編輯碼）：固定鎖在網址帶進來的那一場 ──────────────
+  if (STAFF_ONLY) {
+    if (!eventId) {
+      return lockScreen('這個連結少了活動編號，無法判斷要練哪一場。請回到你那場活動的編輯頁，'
+                      + '點「開始這場的媒體訓練」重新進入。');
+    }
+    if (eventId === 'all') {
+      return lockScreen('彙整訓練（全部活動）僅限後台管理員使用。你的編輯碼只授權自己那一場，'
+                      + '請回編輯頁點「開始這場的媒體訓練」。');
+    }
+    try {
+      // 用編輯碼把這場讀出來：一來拿得到名稱（未發布的場次不會出現在公開清單裡），
+      // 二來當場驗證 id + code 對不對，錯了立刻說清楚，不會等到按「開始訓練」才吐 401。
+      const res = await fetch(`/api/events?action=get_edit&id=${encodeURIComponent(eventId)}`
+                            + `&code=${encodeURIComponent(TRAINING_CODE)}`);
+      const ev = await res.json();
+      if (!res.ok || ev.error) {
+        return lockScreen(ev.error || '無法讀取這場活動，請向活動承辦人索取新的編輯連結。');
+      }
+      eventName = ev.name || '工研院活動';
+      setTitles(eventName + ' — 媒體訓練', 'AI 記者實戰演練');
+      if (!String(ev.knowledge_base || '').trim()) {
+        const card = document.getElementById('info-card');
+        card.innerHTML = '<i class="ti ti-alert-triangle"></i>';
+        const span = document.createElement('span');
+        span.textContent = '這場活動的知識庫還是空的，AI 記者只能問通用問題。'
+                         + '建議先回編輯頁把新聞稿貼上並儲存，再回來練習。';
+        card.appendChild(span);
+      }
+      document.getElementById('loading').style.display = 'none';
+    } catch (e) {
+      return lockScreen('連線失敗，請檢查網路後重新整理。');
+    }
+    return;
+  }
+
+  // ── 後台管理員：可以選任一場，也可以練彙整 ──────────────────────
+  try {
+    const events = await loadAdminEvents();
 
     if (!eventId) {
       // 沒有指定活動 → 顯示選擇器
@@ -315,16 +390,12 @@ async function init() {
 
     if (eventId === 'all') {
       eventName = '工研院彙整媒體訓練';
-      document.getElementById('event-title').textContent = '彙整媒體訓練 — 全部活動';
-      document.getElementById('event-subtitle').textContent = 'AI 記者實戰演練（綜合所有活動）';
-      document.title = '彙整媒體訓練';
+      setTitles('彙整媒體訓練 — 全部活動', 'AI 記者實戰演練（綜合所有活動）');
     } else {
       const event = events.find(e => e.id === eventId);
       if (event) {
         eventName = event.name;
-        document.getElementById('event-title').textContent = event.name + ' — 媒體訓練';
-        document.getElementById('event-subtitle').textContent = 'AI 記者實戰演練';
-        document.title = event.name + ' — 媒體訓練';
+        setTitles(event.name + ' — 媒體訓練', 'AI 記者實戰演練');
       }
     }
   } catch(e) {}
@@ -349,9 +420,10 @@ function showEventSelector(events) {
   const allBtn = createSelectorBtn('🗂 彙整訓練（全部活動）', 'all', '涵蓋所有進行中活動的知識庫');
   container.appendChild(allBtn);
 
-  // 各活動選項
+  // 各活動選項（未發布的也列出來——要先練一輪的通常就是還沒發布的那幾場）
+  const STATUS_DESC = { draft: '未發布（僅後台看得到）', ended: '已結束' };
   events.forEach(ev => {
-    const btn = createSelectorBtn('📋 ' + ev.name, ev.id, '');
+    const btn = createSelectorBtn('📋 ' + ev.name, ev.id, STATUS_DESC[ev.status] || '');
     container.appendChild(btn);
   });
 
@@ -400,6 +472,8 @@ document.getElementById('restart-btn').addEventListener('click', () => {
   document.getElementById('end-screen').style.display = 'none';
   document.getElementById('input-area').style.display = 'none';
   document.getElementById('start-area').style.display = 'flex';
+  // 上一輪若是出題失敗，按鈕會停在「再試一次」，重練時要換回來
+  document.getElementById('start-btn').innerHTML = '<i class="ti ti-player-play"></i> 開始媒體訓練';
   updateProgress();
 });
 
@@ -432,7 +506,18 @@ async function askNextQuestion() {
     const data = await res.json();
     removeTyping();
 
-    const reply = data.reply || data.error || '（無法取得問題）';
+    // 失敗訊息不能當成「AI 記者的問題」貼上去——之前授權沒帶到時就是這樣，畫面上變成
+    // 記者開口說「請由後台或同仁編輯連結進入媒體訓練」，還被算成一題，看起來像壞掉。
+    if (!res.ok || data.error) {
+      addSystemMsg(data.error || '無法取得問題，請稍後再試。');
+      document.getElementById('start-btn').innerHTML = '<i class="ti ti-refresh"></i> 再試一次';
+      document.getElementById('start-area').style.display = 'flex';
+      document.getElementById('input-area').style.display = 'none';
+      isWaiting = false;
+      return;
+    }
+
+    const reply = data.reply || '（無法取得問題）';
     reporterHist.push({ role: 'assistant', content: reply });
     addReporterMsg(reply);
 
@@ -485,7 +570,21 @@ async function submitAnswer() {
     const evalData = await evalRes.json();
     removeTyping();
 
-    const evalText = evalData.reply || evalData.error || '（無法取得評分）';
+    // 評分失敗就把這一輪整個退回去：對話歷程裡剛推進去的回答要拿掉（否則歷程會連續兩則
+    // user，下一次送出可能整串被拒），畫面上的泡泡也移掉，內容還給輸入框讓他直接再送一次。
+    if (!evalRes.ok || evalData.error) {
+      reporterHist.pop();
+      document.getElementById('messages').lastElementChild?.remove();
+      document.getElementById('user-input').value = ans;
+      addSystemMsg((evalData.error || '評分失敗') + '，你的回答已經還原到輸入框，請再按一次送出。');
+      document.getElementById('user-input').disabled = false;
+      document.getElementById('send-btn').disabled = false;
+      awaitingAnswer = true;
+      isWaiting = false;
+      return;
+    }
+
+    const evalText = evalData.reply || '（無法取得評分）';
     reporterHist.push({ role: 'assistant', content: evalText });
 
     // 解析評分中的下一題（分隔線後的內容）。

@@ -602,7 +602,7 @@ textarea.form-control { min-height: 200px; resize: vertical; line-height: 1.6; }
 <div id="toast"></div>
 
 <script>
-let state = { password: '', events: [], analytics: null };
+let state = { password: '', events: [], analytics: null, editingRev: '' };
 
 // ── 登入 ─────────────────────────────────────────────────
 async function login() {
@@ -980,6 +980,7 @@ async function deleteQARecent(rowNum) {
 function showCreateModal(prefillDate) {
   document.getElementById('modal-title').textContent = '新增活動';
   document.getElementById('edit-event-id').value = '';
+  state.editingRev = '';   // 新活動沒有「載入當下的版本」可比對
   document.getElementById('input-name').value = '';
   document.getElementById('input-organizer').value = '工研院';
   document.getElementById('input-color').value = '#0F9E7A';
@@ -1043,6 +1044,10 @@ async function showEditModal(eventId) {
 
     document.getElementById('copy-template-group').style.display = 'none';
     document.getElementById('edit-event-id').value = ev.id;
+    // 這場活動「打開視窗當下」的版本。儲存時一起送回去，伺服器才分得出哪些欄位是
+    // 同仁在這段時間從編輯連結改的——活動前一週兩邊常常同時開著，沒有這個東西，
+    // 後台按下儲存就會把同仁剛更新的新聞稿整段蓋回舊版，而且雙方都不會發現。
+    state.editingRev = ev.rev || '';
     document.getElementById('input-name').value = ev.name || '';
     document.getElementById('input-organizer').value = ev.organizer || '工研院';
     document.getElementById('input-color').value = ev.color || '#0F9E7A';
@@ -1077,7 +1082,8 @@ function closeModal() {
   document.getElementById('event-modal').style.display = 'none';
 }
 
-async function saveEvent() {
+// opts.force = true：使用者在衝突提示按了「確定」，明確要覆蓋掉同仁改過的那幾欄
+async function saveEvent(opts = {}) {
   const id = document.getElementById('edit-event-id').value;
   const name = document.getElementById('input-name').value.trim();
   const organizer = document.getElementById('input-organizer').value.trim() || '工研院';
@@ -1099,6 +1105,7 @@ async function saveEvent() {
   const btn = document.getElementById('save-btn');
   btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader"></i> 儲存中…';
 
+  let forceRetry = false;
   try {
     const res = await authedFetch('/api/events', {
       method: 'POST',
@@ -1108,20 +1115,37 @@ async function saveEvent() {
         password: state.password,
         id: id || undefined,
         name, organizer, color, knowledge_base, chips, images, greeting, status, event_date,
-        event_time, venue, event_type, press_contact
+        event_time, venue, event_type, press_contact,
+        rev: state.editingRev || undefined,
+        force: opts.force || undefined
       })
     });
     const data = await res.json();
-    if (data.error) throw new Error(data.error);
 
-    closeModal();
-    toast(id ? '活動已更新！' : '活動已建立！');
-    await loadEvents();
+    // 409＝這段時間同仁從編輯連結改了同一個欄位。伺服器什麼都沒寫，由你決定。
+    if (res.status === 409 && data.conflict) {
+      state.editingRev = data.rev || state.editingRev;   // 換成最新版本，按「覆蓋」時才比對得對
+      const fields = (data.fields || []).join('、') || '部分欄位';
+      forceRetry = confirm(
+        `這場活動的「${fields}」，在你打開這個編輯視窗之後已經被同仁從編輯連結改過了。\n\n`
+        + `按「確定」＝用你視窗裡的版本覆蓋掉同仁剛存的${fields}（其他欄位仍保留他的更新）。\n`
+        + '按「取消」＝這次不儲存；建議關掉視窗重新打開，在最新版本上再改一次。'
+      );
+      if (!forceRetry) toast('已取消儲存，沒有覆蓋同仁的更新');
+    } else if (data.error) {
+      throw new Error(data.error);
+    } else {
+      state.editingRev = data.rev || '';
+      closeModal();
+      toast(id ? '活動已更新！' : '活動已建立！');
+      await loadEvents();
+    }
   } catch(e) {
     toast('儲存失敗：' + e.message);
   }
 
   btn.disabled = false; btn.innerHTML = '<i class="ti ti-check"></i> 儲存';
+  if (forceRetry) return saveEvent({ force: true });
 }
 
 // ── 知識庫固定範本（新增活動時自動帶入，照格式填空即可）──────────
