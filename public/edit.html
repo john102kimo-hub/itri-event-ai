@@ -89,6 +89,12 @@ textarea.form-control { min-height: 240px; resize: vertical; line-height: 1.65; 
 }
 .action-bar .saved-hint { margin-right: auto; font-size: 0.8rem; color: var(--muted); }
 
+/* 儲存衝突（有人同時在改同一場） */
+.card.conflict { border-color: #f0b429; background: #fffbf0; }
+.card.conflict h2 { color: #b45309; }
+.card.conflict .btn-warn { background: #b45309; color: white; }
+.card.conflict .btn-warn:hover { background: #92400e; }
+
 /* 狀態畫面（載入 / 錯誤） */
 .state-screen {
   min-height: 70vh; display: flex; flex-direction: column;
@@ -258,6 +264,24 @@ textarea.form-control { min-height: 240px; resize: vertical; line-height: 1.65; 
     </div>
   </div>
 
+  <!-- 媒體訓練入口（本場專用）。授權完全靠網址上的 id+code，跟這頁同一組，
+       不依賴 sessionStorage，所以換一台電腦、把連結轉給受訪主管都能用。
+       若日後決定不開放給同仁，把下面整張 card 刪掉即可，其餘功能不受影響。 -->
+  <div class="card">
+    <h2><i class="ti ti-microphone" style="color:var(--primary)"></i> 媒體訓練（本場）</h2>
+    <div class="sub">上台前先練一輪：AI 扮演犀利記者，就這場的內容連問 5 題並即時評分</div>
+
+    <a class="btn btn-outline" id="training-link" href="#" target="_blank" rel="noopener"
+       onclick="return openTraining()">
+      <i class="ti ti-player-play"></i> 開始這場的媒體訓練
+    </a>
+
+    <div class="form-hint" style="margin-top:10px">
+      只會用<b>這一場、已儲存</b>的內容出題，不會動到你正在編輯的資料；另開分頁，這頁打到一半的內容也不會不見。
+      <br>這條連結可以直接轉給受訪主管或發言人，他不需要密碼；但它同時等於這場的編輯權限，<b>請勿轉給記者</b>。
+    </div>
+  </div>
+
   <div class="card">
     <h2><i class="ti ti-chart-bar" style="color:var(--primary)"></i> 媒體露出（活動結束後上傳）</h2>
     <div class="sub">上傳這場活動的露出清單，系統會自動統計並和記者的 AI 提問交叉分析</div>
@@ -277,6 +301,24 @@ textarea.form-control { min-height: 240px; resize: vertical; line-height: 1.65; 
     </button>
 
     <div id="exp-result" style="display:none;margin-top:16px"></div>
+  </div>
+
+  <!-- 儲存衝突：同一場活動被兩個人同時打開時才會出現 -->
+  <div class="card conflict" id="conflict-box" style="display:none">
+    <h2><i class="ti ti-alert-triangle"></i> 有人同時在改這場活動</h2>
+    <div class="sub" id="conflict-msg"></div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:14px">
+      <button class="btn btn-outline" onclick="reloadLatest()">
+        <i class="ti ti-refresh"></i> 放棄我的修改，載入最新內容
+      </button>
+      <button class="btn btn-warn" onclick="save({ force: true })">
+        <i class="ti ti-device-floppy"></i> 以我的版本覆蓋
+      </button>
+    </div>
+    <div class="form-hint" style="margin-top:10px">
+      建議先把自己剛打的內容複製一份再決定。「以我的版本覆蓋」<b>只會覆蓋上面列出的欄位</b>，
+      其他欄位仍然保留對方剛存的更新。
+    </div>
   </div>
 
   <div class="action-bar">
@@ -355,6 +397,11 @@ function updateStatusHint() {
 // 記錄頁面載入當下的狀態，存檔時用來判斷「這次是不是第一次從未發布切成進行中」（= 發布）
 let loadedStatus = 'active';
 
+// 這一場活動「我載入當下」的版本指紋。儲存時一起送回去，伺服器就能分辨
+// 哪些欄位是別人在這段時間改的——同一場活動常常後台跟同仁兩邊同時開著，
+// 沒有這個東西，誰後按儲存誰就會把對方剛存的內容整段蓋掉，而且雙方都不會發現。
+let loadedRev = '';
+
 // 沒存就關分頁毫無警告的話，同仁手打的內容會整段蒸發 —— 追蹤是否有未儲存的變更
 let dirty = false;
 document.getElementById('editor').addEventListener('input', () => { dirty = true; });
@@ -395,6 +442,7 @@ async function load() {
     document.getElementById('input-type').value = ev.event_type || '';
     document.getElementById('input-contact').value = ev.press_contact || '';
     loadedStatus = ev.status || 'active';
+    loadedRev = ev.rev || '';
     document.getElementById('input-status').value = loadedStatus;
     updateStatusHint();
 
@@ -410,6 +458,10 @@ async function load() {
     document.getElementById('input-date').value = isoDate;
 
     document.getElementById('preview-link').href = `/event?id=${encodeURIComponent(EVENT_ID)}`;
+    // 媒體訓練固定鎖在「這一場」：id 與 code 都帶上，訓練頁不會再問要練哪一場，
+    // 也不會讓人選到自己編輯碼沒有授權的場次（選了只會被擋，看起來像功能壞掉）。
+    document.getElementById('training-link').href =
+      `/training?id=${encodeURIComponent(EVENT_ID)}&code=${encodeURIComponent(EDIT_CODE)}`;
 
     document.getElementById('loading').style.display = 'none';
     document.getElementById('editor').style.display = 'block';
@@ -426,7 +478,8 @@ function fillTemplate() {
   document.getElementById('kb-count').textContent = KB_TEMPLATE.length + ' / 8000 字';
 }
 
-async function save() {
+// opts.force = true：使用者在衝突提示裡按了「以我的版本覆蓋」
+async function save(opts = {}) {
   const name = document.getElementById('input-name').value.trim();
   const knowledge_base = document.getElementById('input-kb').value.trim();
   if (!name) { toast('請填寫活動名稱'); return; }
@@ -477,14 +530,30 @@ async function save() {
         event_time: document.getElementById('input-time').value.trim(),
         venue: document.getElementById('input-venue').value.trim(),
         event_type: document.getElementById('input-type').value.trim(),
-        press_contact: document.getElementById('input-contact').value.trim()
+        press_contact: document.getElementById('input-contact').value.trim(),
+        // 我載入這頁當下的版本。伺服器會拿它逐欄比對，只把我真的改過的欄位寫進去，
+        // 不會用我畫面上的舊值蓋掉別人這段時間存的內容。
+        rev: loadedRev || undefined,
+        force: opts.force || undefined
       })
     });
     const data = await res.json();
+
+    // 409＝這段時間有人改了同一個欄位。伺服器什麼都沒寫，由使用者決定怎麼辦。
+    if (res.status === 409 && data.conflict) {
+      loadedRev = data.rev || loadedRev;   // 換成最新版本，按「覆蓋」時才比對得對
+      showConflict(data);
+      btn.disabled = false;
+      btn.innerHTML = '<i class="ti ti-device-floppy"></i> 儲存內容';
+      return;
+    }
     if (!res.ok || data.error) throw new Error(data.error || '儲存失敗');
+
+    hideConflict();
     dirty = false;
     loadedStatus = status;
-    toast('✓ 已儲存！約 1 分鐘後對記者端生效');
+    loadedRev = data.rev || '';
+    toast(opts.force ? '✓ 已用你的版本覆蓋並儲存' : '✓ 已儲存！約 1 分鐘後對記者端生效');
     const now = new Date().toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' });
     document.getElementById('saved-hint').textContent = `最後儲存 ${now}`;
   } catch (e) {
@@ -493,6 +562,45 @@ async function save() {
 
   btn.disabled = false;
   btn.innerHTML = '<i class="ti ti-device-floppy"></i> 儲存內容';
+}
+
+// ───────────────────────── 儲存衝突（兩個人同時改同一場）
+
+function showConflict(data) {
+  const fields = (data.fields || []).join('、') || '部分欄位';
+  document.getElementById('conflict-msg').textContent =
+    `你開啟這頁之後，這場活動的「${fields}」已經被其他人（後台承辦人或另一位拿到同一條編輯連結的同仁）改過。`
+    + '為了不蓋掉對方的內容，剛才那次儲存沒有寫進去——你打的字都還在這頁上。';
+  const box = document.getElementById('conflict-box');
+  box.style.display = 'block';
+  box.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+function hideConflict() {
+  document.getElementById('conflict-box').style.display = 'none';
+}
+
+function reloadLatest() {
+  if (!confirm('確定要放棄這頁上尚未儲存的修改，重新載入最新內容嗎？')) return;
+  dirty = false;      // 讓 beforeunload 不要再問一次
+  location.reload();
+}
+
+// ───────────────────────── 媒體訓練（本場）
+
+// 訓練題目來自「已儲存」的知識庫，所以有沒存的修改要先講清楚。一律另開分頁，
+// 這頁打到一半的內容不會消失；授權靠網址上的 id+code，不需要後台密碼。
+function openTraining() {
+  if (!document.getElementById('input-kb').value.trim()) {
+    toast('請先填好活動知識庫並儲存，AI 記者才有題目可以問');
+    return false;
+  }
+  if (dirty && !confirm(
+        '你有尚未儲存的修改。\n\n媒體訓練只會依照「已儲存」的內容出題，剛改的部分不會被問到。\n\n'
+        + '要現在就開始嗎？（按「取消」＝先回去儲存，這頁的內容不會消失）')) {
+    return false;
+  }
+  return true;
 }
 
 // ───────────────────────── 媒體露出上傳（同仁用 edit_code，不需後台密碼）

@@ -12,8 +12,12 @@
 // POST {action:'update',...}           → 更新活動（後台的「發布／收回」按鈕也是打這個，帶 status）
 // POST {action:'archive',...}          → 封存活動
 // POST {action:'ensure_edit_code',id}  → 確保該活動有 edit_code（沒有就補上），回傳
+// ── 併發保護 ──────────────────────────────────────────────────────────
+// get_edit / get 會多回一個 rev（這一列的版本指紋）；update_edit / update 把它原封不動
+// 帶回來，就能擋掉「用載入當下的舊快照蓋掉別人剛存的內容」，見下方 mergeContentRow。
 
 import { readRange, appendRows, updateRange } from '../lib/sheets.js';
+import { createHash } from 'crypto';
 import { del } from '@vercel/blob';
 
 // events 表欄位：A id, B name, C color, D knowledge_base, E status,
@@ -54,28 +58,101 @@ function generateEditCode() {
   return s;
 }
 
-// 同仁可編輯的內容欄位 → 組出完整 15 欄，編輯碼(K)一律沿用既有值。
+// 可編輯的內容欄位對照表：body 參數名 ↔ events 表欄位 ↔ 沒值時的預設 ↔ 衝突訊息用的中文名。
+// 同仁自助編輯（update_edit）與後台（update）改的是同一組欄位，共用這張表，之後加欄位只要動這裡。
+// A id 與 K edit_code 不在表內——兩邊都不可改，一律沿用既有值。
 // 狀態(E) 開放同仁自行切換（未發布/進行中/已結束/已封存）；呼叫端須先用 EVENT_STATUSES
-// 驗證過 b.status 是合法值（見 update_edit），這裡才會直接信任並寫入。
-function buildContentRow(existing, b) {
-  const pick = (v, i, def) => (v !== undefined ? v : (existing[i] !== undefined ? existing[i] : def));
-  return [
-    existing[0],                                   // A id（不可改）
-    pick(b.name, 1, ''),                            // B name
-    pick(b.color, 2, '#0F9E7A'),                    // C color
-    pick(b.knowledge_base, 3, ''),                  // D knowledge_base
-    pick(b.status, 4, 'active'),                    // E status（同仁可改）
-    pick(b.event_date, 5, ''),                      // F created_at / 活動日期
-    pick(b.chips, 6, ''),                           // G chips
-    pick(b.images, 7, ''),                          // H images
-    pick(b.greeting, 8, ''),                        // I greeting
-    pick(b.organizer, 9, '工研院'),                 // J organizer
-    existing[10] || '',                             // K edit_code（不可改）
-    pick(b.event_time, 11, ''),                     // L event_time
-    pick(b.venue, 12, ''),                          // M venue
-    pick(b.event_type, 13, ''),                     // N event_type
-    pick(b.press_contact, 14, '')                   // O press_contact
-  ];
+// 驗證過 status 是合法值（見 update_edit / update），這裡才會直接信任並寫入。
+const CONTENT_FIELDS = [
+  { key: 'name',           col: 1,  def: '',        label: '活動名稱' },
+  { key: 'color',          col: 2,  def: '#0F9E7A', label: '品牌主色' },
+  { key: 'knowledge_base', col: 3,  def: '',        label: '活動知識庫' },
+  { key: 'status',         col: 4,  def: 'active',  label: '活動狀態' },
+  { key: 'event_date',     col: 5,  def: '',        label: '活動日期' },
+  { key: 'chips',          col: 6,  def: '',        label: '快速問題按鈕' },
+  { key: 'images',         col: 7,  def: '',        label: '圖片資源' },
+  { key: 'greeting',       col: 8,  def: '',        label: 'AI 開場白' },
+  { key: 'organizer',      col: 9,  def: '工研院',   label: '主辦單位' },
+  { key: 'event_time',     col: 11, def: '',        label: '活動時間' },
+  { key: 'venue',          col: 12, def: '',        label: '活動地點' },
+  { key: 'event_type',     col: 13, def: '',        label: '活動類型' },
+  { key: 'press_contact',  col: 14, def: '',        label: '新聞聯絡人' }
+];
+
+// ── 併發保護（同一場活動被兩個人同時編輯）──────────────────────────────
+// 一場活動可能同時開在「後台管理員的編輯視窗」和「同仁的專屬編輯連結」裡。活動前一週
+// 資料還在改，兩邊都是載入當下抓一份快照、按儲存時整列寫回去——誰後按誰就會用自己的
+// 舊快照把對方剛存的內容蓋掉，而且畫面上兩邊都顯示「已儲存」，完全看不出來。
+//
+// 作法（不動試算表結構，也不需要新欄位）：
+//   讀取時回傳 rev＝把每個內容欄位各壓成一段短雜湊串起來，前端原封不動帶回；
+//   儲存時重讀該列再算一次，逐欄三方比對：
+//     · 別人沒動過這欄           → 寫入我送來的新值
+//     · 別人動過、但我沒動       → 保留別人的值（「不要覆蓋別人」的關鍵）
+//     · 別人動過、我也動同一欄   → 真衝突，整列都不寫，回 409 並列出是哪幾欄
+//   沒帶 rev 的請求（舊分頁、只切狀態的發布／收回）維持原本「有送就覆蓋」的行為。
+const REV_PREFIX = 'v1';
+
+// 讀某一欄的現值。Sheets 會省略尾端空欄，所以 undefined 要補預設值——跟寫入時同一套規則，
+// 兩邊才算得出一樣的指紋。
+const cellOf = (row, f) => (row[f.col] !== undefined && row[f.col] !== null ? String(row[f.col]) : f.def);
+
+// 比對用的指紋。先 trim 再算：前端送出前普遍會 .trim()，若連頭尾空白都算「改過」，
+// 沒動過的欄位會被誤判成有修改，白白撞出假衝突。
+const fieldHash = (v) => createHash('sha1').update(String(v ?? '').trim(), 'utf8').digest('hex').slice(0, 8);
+
+function buildRev(row) {
+  return [REV_PREFIX, ...CONTENT_FIELDS.map((f) => fieldHash(cellOf(row, f)))].join('.');
+}
+
+// 解析前端帶回的 rev。格式不符（舊版前端、被改壞）一律當成沒帶，退回原本行為，
+// 寧可少擋一次，也不要因為版本字串對不上就讓同仁存不了東西。
+function parseRev(rev) {
+  if (!rev) return null;
+  const parts = String(rev).split('.');
+  if (parts[0] !== REV_PREFIX || parts.length !== CONTENT_FIELDS.length + 1) return null;
+  return parts.slice(1);
+}
+
+/**
+ * 把這次送進來的欄位併回試算表上的那一列，組出完整 15 欄。
+ *
+ * @param existing    重讀出來的現況列
+ * @param b           request body
+ * @param baseHashes  parseRev(b.rev)；null＝沒帶版本，走舊行為
+ * @param backfillEditCode  舊活動沒有編輯碼時是否順手補一組（後台 update 用）
+ * @returns {{ row: string[], conflicts: string[] }} conflicts 非空代表兩邊改到同一欄
+ */
+function mergeContentRow(existing, b, baseHashes, { backfillEditCode = false } = {}) {
+  const row = new Array(15).fill('');
+  row[0] = String(existing[0] || '');                                             // A id（不可改）
+  row[10] = String(existing[10] || (backfillEditCode ? generateEditCode() : '')); // K edit_code（不可改）
+  const conflicts = [];
+
+  CONTENT_FIELDS.forEach((f, i) => {
+    const current = cellOf(existing, f);
+    if (b[f.key] === undefined) { row[f.col] = current; return; }   // 這次沒送這欄 → 保持現值
+    const incoming = String(b[f.key]);
+    if (!baseHashes) { row[f.col] = incoming; return; }             // 沒帶版本 → 舊行為
+
+    if (fieldHash(current) === baseHashes[i]) { row[f.col] = incoming; return; }  // 別人沒動 → 用我的
+    if (fieldHash(incoming) === baseHashes[i]) { row[f.col] = current; return; }  // 我沒動 → 留別人的
+    row[f.col] = incoming;      // 兩邊都動了；有衝突的話整列都不會寫進去
+    conflicts.push(f.label);
+  });
+
+  return { row, conflicts };
+}
+
+// 衝突時回給前端的內容：列出撞到的欄位，並附上最新版本讓「確定要覆蓋」能接著比對。
+function conflictResponse(res, existing, conflicts, who) {
+  return res.status(409).json({
+    conflict: true,
+    fields: conflicts,
+    rev: buildRev(existing),
+    error: `這場活動在你開啟編輯畫面之後，已經被${who}改過（${conflicts.join('、')}）。`
+         + '為了不蓋掉對方的內容，這次沒有儲存。'
+  });
 }
 
 export default async function handler(req, res) {
@@ -121,7 +198,8 @@ export default async function handler(req, res) {
           id: row[0], name: row[1], color: row[2] || '#0F9E7A',
           knowledge_base: row[3] || '', status: row[4] || 'active', created_at: row[5] || '', event_date: row[5] || '',
           chips: row[6] || '', images: row[7] || '', greeting: row[8] || '', organizer: row[9] || '工研院',
-          event_time: row[11] || '', venue: row[12] || '', event_type: row[13] || '', press_contact: row[14] || ''
+          event_time: row[11] || '', venue: row[12] || '', event_type: row[13] || '', press_contact: row[14] || '',
+          rev: buildRev(row)   // 儲存時原封不動帶回來，用來擋掉互相覆蓋
         });
       }
 
@@ -135,7 +213,8 @@ export default async function handler(req, res) {
           knowledge_base: row[3] || '', status: row[4] || 'active', created_at: row[5], event_date: row[5] || '',
           chips: row[6] || '', images: row[7] || '', greeting: row[8] || '', organizer: row[9] || '工研院',
           edit_code: row[10] || '',
-          event_time: row[11] || '', venue: row[12] || '', event_type: row[13] || '', press_contact: row[14] || ''
+          event_time: row[11] || '', venue: row[12] || '', event_type: row[13] || '', press_contact: row[14] || '',
+          rev: buildRev(row)   // 儲存時原封不動帶回來，用來擋掉互相覆蓋
         });
       }
 
@@ -201,9 +280,11 @@ export default async function handler(req, res) {
         if (body.status !== undefined && !EVENT_STATUSES.includes(body.status)) {
           return res.status(400).json({ error: '狀態值不正確' });
         }
-        const updated = buildContentRow(existing, body);
+        // 併發保護：帶了 rev 就逐欄比對，只有「兩邊都改到同一欄」才擋下來（force 可強制覆蓋）
+        const { row: updated, conflicts } = mergeContentRow(existing, body, parseRev(body.rev));
+        if (conflicts.length && !body.force) return conflictResponse(res, existing, conflicts, '其他人');
         await updateRange(`events!A${rowIndex + 2}:O${rowIndex + 2}`, [updated]);
-        return res.status(200).json({ success: true });
+        return res.status(200).json({ success: true, rev: buildRev(updated) });
       }
 
       // ── 以下皆需管理員密碼 ────────────────────────────────────────────
@@ -227,12 +308,15 @@ export default async function handler(req, res) {
         // 預設 draft（未發布）：新活動先只在後台看得到，記者前台、公開列表都查不到，
         // 按活動卡片上的「發布」（其實是 action=update 帶 status=active）之後才對外開放。
         const initialStatus = status || 'draft';
-        await appendRows('events!A:O', [[
+        const newRow = [
           newId, name, color || '#0F9E7A', knowledge_base || '', initialStatus, created_at,
           chips || '', images || '', greeting || '', organizer || '工研院', editCode,
           event_time || '', venue || '', event_type || '', press_contact || ''
-        ]]);
-        return res.status(200).json({ success: true, id: newId, edit_code: editCode, status: initialStatus });
+        ];
+        await appendRows('events!A:O', [newRow]);
+        return res.status(200).json({
+          success: true, id: newId, edit_code: editCode, status: initialStatus, rev: buildRev(newRow)
+        });
       }
 
       if (action === 'update') {
@@ -241,25 +325,14 @@ export default async function handler(req, res) {
         const rowIndex = rows.findIndex(r => r[0] === id);
         if (rowIndex === -1) return res.status(404).json({ error: '活動不存在' });
         const existing = rows[rowIndex];
-        const updated = [
-          id,
-          name !== undefined ? name : (existing[1] || ''),
-          color !== undefined ? color : (existing[2] || '#0F9E7A'),
-          knowledge_base !== undefined ? knowledge_base : (existing[3] || ''),
-          status !== undefined ? status : (existing[4] || 'active'),
-          event_date !== undefined ? event_date : (existing[5] || ''),
-          chips !== undefined ? chips : (existing[6] || ''),
-          images !== undefined ? images : (existing[7] || ''),
-          greeting !== undefined ? greeting : (existing[8] || ''),
-          organizer !== undefined ? organizer : (existing[9] || '工研院'),
-          existing[10] || generateEditCode(),   // 舊活動若無編輯碼，順手補上
-          event_time !== undefined ? event_time : (existing[11] || ''),
-          venue !== undefined ? venue : (existing[12] || ''),
-          event_type !== undefined ? event_type : (existing[13] || ''),
-          press_contact !== undefined ? press_contact : (existing[14] || '')
-        ];
+        // 跟同仁編輯共用同一套併發保護：後台編輯視窗開著沒關、同仁這段時間從編輯連結
+        // 存了新的知識庫，按下儲存時不會再把對方的內容整段蓋掉。
+        // 卡片上的「發布／收回」只送 status，沒帶 rev 也不受影響（其他欄位本來就沿用現值）。
+        const { row: updated, conflicts } =
+          mergeContentRow(existing, body, parseRev(body.rev), { backfillEditCode: true });
+        if (conflicts.length && !body.force) return conflictResponse(res, existing, conflicts, '同仁（從編輯連結）');
         await updateRange(`events!A${rowIndex + 2}:O${rowIndex + 2}`, [updated]);
-        return res.status(200).json({ success: true, edit_code: updated[10] });
+        return res.status(200).json({ success: true, edit_code: updated[10], rev: buildRev(updated) });
       }
 
       if (action === 'archive') {
