@@ -117,12 +117,25 @@ export default async function handler(req, res) {
           return res.status(401).json({ error: '編輯碼錯誤，請向承辦人索取正確的編輯連結' });
         }
         if (row[4] === 'archived') return res.status(403).json({ error: '這場活動已封存，如需修改請聯絡承辦人' });
-        return res.status(200).json({
+        const payload = {
           id: row[0], name: row[1], color: row[2] || '#0F9E7A',
           knowledge_base: row[3] || '', status: row[4] || 'active', created_at: row[5] || '', event_date: row[5] || '',
           chips: row[6] || '', images: row[7] || '', greeting: row[8] || '', organizer: row[9] || '工研院',
           event_time: row[11] || '', venue: row[12] || '', event_type: row[13] || '', press_contact: row[14] || ''
-        });
+        };
+        // 「以既有活動為範本」：同仁已用自己這一場的 edit_code 通過驗證，即視為可信的內部同仁，
+        // 可再指定 copy_from 帶出另一場活動的知識庫供複製參考——跟後台管理員版的複製範本邏輯一致，
+        // 只是驗證身分用的是這一場的 code，而不是管理員密碼。
+        if (req.query.copy_from) {
+          const srcRow = rows.find(r => r[0] === req.query.copy_from);
+          if (srcRow) {
+            payload.copy_source = {
+              id: srcRow[0], name: srcRow[1] || '',
+              knowledge_base: srcRow[3] || '', chips: srcRow[6] || '', organizer: srcRow[9] || '工研院'
+            };
+          }
+        }
+        return res.status(200).json(payload);
       }
 
       // 管理員：單一活動含知識庫與編輯碼

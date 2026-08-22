@@ -131,6 +131,12 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); min-
 .btn-danger { background: #fef2f2; color: #ef4444; border: 1.5px solid #fecaca; }
 .btn-danger:hover { background: #ef4444; color: white; }
 
+/* 活動管理內的區塊（行事曆／活動列表堆疊呈現） */
+.section-block { margin-bottom: 8px; }
+.section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; flex-wrap: wrap; gap: 10px; }
+.section-header h2 { font-size: 1rem; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+.section-header h2 i { color: var(--primary); font-size: 20px; }
+
 .content { padding: 24px 28px; flex: 1; }
 
 /* ── 活動卡片 ──────────────────────────────────────────── */
@@ -334,14 +340,8 @@ textarea.form-control { min-height: 200px; resize: vertical; line-height: 1.6; }
     <button class="nav-item active" data-view="events" onclick="showView('events')">
       <i class="ti ti-calendar-event"></i> 活動管理
     </button>
-    <button class="nav-item" data-view="calendar" onclick="showView('calendar')">
-      <i class="ti ti-calendar-month"></i> 活動行事曆
-    </button>
     <button class="nav-item" data-view="analytics" onclick="showView('analytics')">
       <i class="ti ti-chart-bar"></i> 問答分析
-    </button>
-    <button class="nav-item" data-view="recent" onclick="showView('recent')">
-      <i class="ti ti-message-circle"></i> 最新問答
     </button>
     <!-- 這條不能開新分頁。彙整訓練（event_id=all）後端只認管理員密碼，密碼放在 sessionStorage，
          新分頁不保證帶得過去，帶不過去就會被擋在「這個功能只給內部同仁使用」。同分頁開才穩。 -->
@@ -377,61 +377,64 @@ textarea.form-control { min-height: 200px; resize: vertical; line-height: 1.6; }
         </div>
       </div>
       <div class="content">
-        <div class="stats-grid" id="stats-grid">
-          <div class="stat-card">
-            <div class="stat-icon"><i class="ti ti-calendar-event"></i></div>
-            <div class="stat-label">進行中活動</div>
-            <div class="stat-value" id="stat-events">—</div>
+        <!-- 行事曆（上） -->
+        <div class="section-block">
+          <div class="section-header">
+            <h2><i class="ti ti-calendar-month"></i> 活動行事曆</h2>
+            <div class="cal-nav">
+              <button class="btn btn-outline" onclick="calShiftMonth(-1)"><i class="ti ti-chevron-left"></i></button>
+              <span class="cal-month-label" id="cal-month-label">—</span>
+              <button class="btn btn-outline" onclick="calShiftMonth(1)"><i class="ti ti-chevron-right"></i></button>
+              <button class="btn btn-outline" onclick="calGoToday()">今天</button>
+            </div>
           </div>
-          <div class="stat-card">
-            <div class="stat-icon"><i class="ti ti-message-dots"></i></div>
-            <div class="stat-label">總問答次數</div>
-            <div class="stat-value" id="stat-total-qa">—</div>
+          <div class="cal-legend">
+            <span><i class="ti ti-circle-filled" style="color:#065f46"></i> 進行中·可問答</span>
+            <span><i class="ti ti-circle-filled" style="color:#475569"></i> 進行中·僅基本資料</span>
+            <span><i class="ti ti-circle-filled" style="color:#92400e"></i> 已結束</span>
+            <span><i class="ti ti-circle-filled" style="color:#3730a3"></i> 未發布（虛線框＝僅後台看得到）</span>
+            <span><i class="ti ti-circle-filled" style="color:#9ca3af"></i> 已封存</span>
           </div>
-          <div class="stat-card">
-            <div class="stat-icon"><i class="ti ti-building-newspaper"></i></div>
-            <div class="stat-label">媒體數（填寫）</div>
-            <div class="stat-value" id="stat-media">—</div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-icon"><i class="ti ti-trending-up"></i></div>
-            <div class="stat-label">今日問答</div>
-            <div class="stat-value" id="stat-today">—</div>
-          </div>
+          <div class="cal-grid" id="calendar-grid"></div>
+          <div class="form-hint" style="margin-top:10px">點空白日期可直接新增當天的活動；點色塊可開啟該場編輯；沒有日期或日期解析不出來的活動不會出現在這裡。</div>
         </div>
-        <div class="events-grid" id="events-grid">
-          <div class="skeleton"></div>
-          <div class="skeleton"></div>
+
+        <!-- 活動列表（下） -->
+        <div class="section-block" style="margin-top:32px">
+          <div class="section-header">
+            <h2><i class="ti ti-layout-grid"></i> 活動列表</h2>
+          </div>
+          <div class="stats-grid" id="stats-grid">
+            <div class="stat-card">
+              <div class="stat-icon"><i class="ti ti-calendar-event"></i></div>
+              <div class="stat-label">進行中活動</div>
+              <div class="stat-value" id="stat-events">—</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-icon"><i class="ti ti-message-dots"></i></div>
+              <div class="stat-label">總問答次數</div>
+              <div class="stat-value" id="stat-total-qa">—</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-icon"><i class="ti ti-building-newspaper"></i></div>
+              <div class="stat-label">媒體數（填寫）</div>
+              <div class="stat-value" id="stat-media">—</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-icon"><i class="ti ti-trending-up"></i></div>
+              <div class="stat-label">今日問答</div>
+              <div class="stat-value" id="stat-today">—</div>
+            </div>
+          </div>
+          <div class="events-grid" id="events-grid">
+            <div class="skeleton"></div>
+            <div class="skeleton"></div>
+          </div>
         </div>
       </div>
     </div>
 
-    <!-- 活動行事曆 -->
-    <div id="view-calendar" style="display:none">
-      <div class="topbar">
-        <h1><i class="ti ti-calendar-month" style="color:var(--primary)"></i> 活動行事曆</h1>
-        <div class="topbar-actions cal-nav">
-          <button class="btn btn-outline" onclick="calShiftMonth(-1)"><i class="ti ti-chevron-left"></i></button>
-          <span class="cal-month-label" id="cal-month-label">—</span>
-          <button class="btn btn-outline" onclick="calShiftMonth(1)"><i class="ti ti-chevron-right"></i></button>
-          <button class="btn btn-outline" onclick="calGoToday()">今天</button>
-          <button class="btn btn-primary" onclick="showCreateModal()"><i class="ti ti-plus"></i> 新增活動</button>
-        </div>
-      </div>
-      <div class="content">
-        <div class="cal-legend">
-          <span><i class="ti ti-circle-filled" style="color:#065f46"></i> 進行中·可問答</span>
-          <span><i class="ti ti-circle-filled" style="color:#475569"></i> 進行中·僅基本資料</span>
-          <span><i class="ti ti-circle-filled" style="color:#92400e"></i> 已結束</span>
-          <span><i class="ti ti-circle-filled" style="color:#3730a3"></i> 未發布（虛線框＝僅後台看得到）</span>
-          <span><i class="ti ti-circle-filled" style="color:#9ca3af"></i> 已封存</span>
-        </div>
-        <div class="cal-grid" id="calendar-grid"></div>
-        <div class="form-hint" style="margin-top:10px">點空白日期可直接新增當天的活動；點色塊可開啟該場編輯；沒有日期或日期解析不出來的活動不會出現在這裡。</div>
-      </div>
-    </div>
-
-    <!-- 問答分析 -->
+    <!-- 問答分析（含最新問答紀錄） -->
     <div id="view-analytics" style="display:none">
       <div class="topbar">
         <h1><i class="ti ti-chart-bar" style="color:var(--primary)"></i> 問答分析</h1>
@@ -451,29 +454,6 @@ textarea.form-control { min-height: 200px; resize: vertical; line-height: 1.6; }
         <div style="text-align:center;padding:60px;color:var(--muted)">
           <i class="ti ti-loader" style="font-size:32px;display:block;margin-bottom:12px"></i>
           載入中…
-        </div>
-      </div>
-    </div>
-
-    <!-- 最新問答 -->
-    <div id="view-recent" style="display:none">
-      <div class="topbar">
-        <h1><i class="ti ti-message-circle" style="color:var(--primary)"></i> 最新問答</h1>
-        <div class="topbar-actions">
-          <button class="btn btn-outline" onclick="loadRecent()"><i class="ti ti-refresh"></i> 更新</button>
-          <button class="btn btn-primary" onclick="exportCSV()"><i class="ti ti-download"></i> 匯出 CSV</button>
-        </div>
-      </div>
-      <div class="content">
-        <div style="overflow-x:auto">
-          <table class="qa-table">
-            <thead><tr>
-              <th>時間</th><th>活動</th><th>媒體</th><th>問題</th><th style="width:60px">操作</th>
-            </tr></thead>
-            <tbody id="recent-tbody">
-              <tr><td colspan="5" style="text-align:center;padding:40px;color:var(--muted)">載入中…</td></tr>
-            </tbody>
-          </table>
         </div>
       </div>
     </div>
@@ -663,15 +643,13 @@ if (savedPwd) {
 // 用 data-view 屬性比對，不用陣列位置——之前用「第 N 個 .nav-item」對應「第 N 個視圖名稱」，
 // 側邊欄一旦插入新項目（例如行事曆）順序就會全部錯位，改成屬性比對就不怕再加項目。
 function showView(name) {
-  ['events','calendar','analytics','recent'].forEach(v => {
+  ['events','analytics'].forEach(v => {
     document.getElementById(`view-${v}`).style.display = v === name ? 'block' : 'none';
   });
   document.querySelectorAll('.nav-item[data-view]').forEach(el => {
     el.classList.toggle('active', el.dataset.view === name);
   });
   if (name === 'analytics') loadAnalytics();
-  if (name === 'recent') loadRecent();
-  if (name === 'calendar') renderCalendar();
 }
 
 // ── 載入所有資料 ──────────────────────────────────────────
@@ -863,6 +841,8 @@ async function loadAnalytics() {
     const params = new URLSearchParams();
     if (eid) params.set('event_id', eid);
     if (noTest) params.set('exclude_test', '1');
+    // 問答分析併入了原本「最新問答」的功能，limit 拉高到 200 筆，涵蓋範圍不縮水。
+    params.set('limit', '200');
     const res = await authedFetch(`/api/analytics?${params.toString()}`);
     const data = await res.json();
     if (data.error) throw new Error(data.error);
@@ -930,50 +910,8 @@ function renderAnalytics(data, eid) {
   </div>`;
 }
 
-async function loadRecent() {
-  document.getElementById('recent-tbody').innerHTML =
-    '<tr><td colspan="5" style="text-align:center;padding:40px;color:var(--muted)">載入中…</td></tr>';
-  try {
-    const res = await authedFetch('/api/analytics?limit=200');
-    const data = await res.json();
-    if (data.error) throw new Error(data.error);
-    state.recentCache = data.recent || [];
-    document.getElementById('recent-tbody').innerHTML = (data.recent || []).map(r => `
-      <tr>
-        <td style="white-space:nowrap;font-size:0.78rem;color:var(--muted)">${escHtml(r.time||'')}</td>
-        <td style="font-size:0.82rem;white-space:nowrap">${escHtml(r.event||'')}</td>
-        <td style="font-size:0.82rem">${escHtml(r.media||'—')}</td>
-        <td>${escHtml(r.question||'')}</td>
-        <td><button onclick="deleteQARecent(${r.row_num})" title="刪除此筆"
-          style="background:#fef2f2;border:1px solid #fecaca;border-radius:6px;cursor:pointer;color:#ef4444;font-size:0.78rem;font-weight:600;padding:4px 10px;white-space:nowrap;font-family:var(--font)">
-          🗑 刪除</button></td>
-      </tr>`).join('') || '<tr><td colspan="5" style="text-align:center;padding:40px;color:var(--muted)">尚無資料</td></tr>';
-  } catch(e) {
-    document.getElementById('recent-tbody').innerHTML =
-      `<tr><td colspan="5" style="color:#ef4444;padding:20px">載入失敗：${e.message}</td></tr>`;
-  }
-}
-
-async function deleteQARecent(rowNum) {
-  if (!confirm('確定要刪除這筆問答紀錄嗎？')) return;
-  const row = (state.recentCache || []).find(r => r.row_num === rowNum);
-  try {
-    const res = await authedFetch('/api/analytics', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        action: 'delete', row_num: rowNum, password: state.password,
-        timestamp: row?.time, question: row?.question
-      })
-    });
-    const data = await res.json();
-    if (data.error) throw new Error(data.error);
-    toast('已刪除');
-    loadRecent();
-  } catch(e) {
-    toast('刪除失敗：' + e.message);
-  }
-}
+// 「最新問答」併入問答分析後移除——功能重複（同一張表、同一個刪除鈕），
+// 問答分析的「全部活動」篩選 + 上面拉高的 limit 已經涵蓋原本這個視圖的用途。
 
 // ── Modal ─────────────────────────────────────────────────
 // prefillDate：從行事曆點空白日期新增活動時，把那天帶進來（YYYY-MM-DD）

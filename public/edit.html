@@ -204,6 +204,14 @@ textarea.form-control { min-height: 240px; resize: vertical; line-height: 1.65; 
     <h2><i class="ti ti-database" style="color:var(--primary)"></i> 活動知識庫（最重要）</h2>
     <div class="sub">貼上本場新聞稿與重要資訊，AI 只會根據這裡的內容回答記者</div>
 
+    <div class="form-group" id="copy-template-group" style="display:none;background:var(--primary-light);border:1px solid var(--border);border-radius:10px;padding:14px">
+      <label style="display:flex;align-items:center;gap:6px"><i class="ti ti-copy" style="color:var(--primary)"></i> 以既有活動為範本（複製其知識庫來改）</label>
+      <select class="form-control" id="copy-template-select" onchange="copyFromEvent(this.value)" style="cursor:pointer">
+        <option value="">— 選擇要複製的活動 —</option>
+      </select>
+      <div class="form-hint">選一場舊活動，會把它的知識庫帶進下方欄位，你再修改成本場內容即可。</div>
+    </div>
+
     <div class="form-group">
       <textarea class="form-control" id="input-kb"
         placeholder="貼入本次活動的新聞稿或重要資訊…"
@@ -281,6 +289,9 @@ textarea.form-control { min-height: 240px; resize: vertical; line-height: 1.65; 
 
   <div class="action-bar">
     <span class="saved-hint" id="saved-hint"></span>
+    <a class="btn btn-outline" id="training-link" target="_blank" title="AI 扮演犀利記者做問答演練，幫發言人先練習">
+      <i class="ti ti-microphone"></i> 媒體訓練
+    </a>
     <a class="btn btn-outline" id="preview-link" target="_blank">
       <i class="ti ti-eye"></i> 預覽記者前台
     </a>
@@ -410,10 +421,13 @@ async function load() {
     document.getElementById('input-date').value = isoDate;
 
     document.getElementById('preview-link').href = `/event?id=${encodeURIComponent(EVENT_ID)}`;
+    // 訓練頁的授權吃網址上的 code，跟這個編輯頁用同一支，同仁不用另外要密碼就能直接點開。
+    document.getElementById('training-link').href = `/training?id=${encodeURIComponent(EVENT_ID)}&code=${encodeURIComponent(EDIT_CODE)}`;
 
     document.getElementById('loading').style.display = 'none';
     document.getElementById('editor').style.display = 'block';
     loadExposure();
+    populateCopyTemplate();
   } catch (e) {
     showError('連線失敗', e.message + '，請檢查網路後重新整理。');
   }
@@ -424,6 +438,46 @@ function fillTemplate() {
   if (kb.value.trim() && !confirm('目前欄位已有內容，帶入範本會覆蓋掉，確定嗎？')) return;
   kb.value = KB_TEMPLATE;
   document.getElementById('kb-count').textContent = KB_TEMPLATE.length + ' / 8000 字';
+}
+
+// 「以既有活動為範本」：用公開活動列表（不含知識庫）填下拉選單，排除自己這一場。
+async function populateCopyTemplate() {
+  const group = document.getElementById('copy-template-group');
+  const sel = document.getElementById('copy-template-select');
+  try {
+    const res = await fetch('/api/events');
+    const data = await res.json();
+    const events = (data.events || []).filter(e => e.id !== EVENT_ID);
+    if (!events.length) return; // 沒有其他活動可複製，不顯示這個區塊
+    sel.innerHTML = '<option value="">— 選擇要複製的活動 —</option>' +
+      events.map(e => `<option value="${esc(e.id)}">${esc(e.name)}</option>`).join('');
+    group.style.display = 'block';
+  } catch { /* 列表拿不到就不顯示，不擋主流程 */ }
+}
+
+// 選擇舊活動 → 用自己這一場的 edit_code 換取對方的知識庫，帶進表單
+async function copyFromEvent(sourceId) {
+  if (!sourceId) return;
+  if (document.getElementById('input-kb').value.trim() &&
+      !confirm('目前知識庫欄位已有內容，複製會覆蓋掉，確定嗎？')) {
+    document.getElementById('copy-template-select').value = '';
+    return;
+  }
+  try {
+    const res = await fetch(`/api/events?action=get_edit&id=${encodeURIComponent(EVENT_ID)}&code=${encodeURIComponent(EDIT_CODE)}&copy_from=${encodeURIComponent(sourceId)}`);
+    const data = await res.json();
+    if (!res.ok || data.error) throw new Error(data.error || '複製失敗');
+    const src = data.copy_source;
+    if (!src) throw new Error('找不到該場活動的內容');
+    document.getElementById('input-kb').value = src.knowledge_base || KB_TEMPLATE;
+    document.getElementById('kb-count').textContent = document.getElementById('input-kb').value.length + ' / 8000 字';
+    if (src.organizer) document.getElementById('input-organizer').value = src.organizer;
+    if (src.chips) document.getElementById('input-chips').value = src.chips;
+    dirty = true;
+    toast('已帶入「' + (src.name || '') + '」的知識庫，請修改成本場內容');
+  } catch (e) {
+    toast('複製失敗：' + e.message);
+  }
 }
 
 async function save() {
