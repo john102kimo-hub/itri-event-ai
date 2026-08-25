@@ -131,7 +131,7 @@ const PROBE_SYSTEM =
 
 /* ── Anthropic ── */
 
-async function anthropic(body) {
+async function anthropic(body, timeoutMs = 15_000) {
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
@@ -140,7 +140,9 @@ async function anthropic(body) {
       'anthropic-version': '2023-06-01',
     },
     body: JSON.stringify(body),
-    signal: AbortSignal.timeout(15_000), // probeClaude 有 pause_turn 續跑迴圈，單次呼叫上限抓緊一點
+    // 預設 15s 是為 probeClaude 的 pause_turn 續跑迴圈抓緊的單次上限；
+    // 判官類重呼叫（見 askJSON 的 timeoutMs）會傳更長的值進來覆蓋。
+    signal: AbortSignal.timeout(timeoutMs),
   });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error?.message || `Anthropic ${res.status}`);
@@ -192,12 +194,12 @@ async function probeClaude(question) {
 
 /* ── 其餘引擎（選配，依各家公開回應格式解析，缺欄位就當作沒有引用） ── */
 
-async function gemini(body, model = GEMINI_MODEL) {
+async function gemini(body, model = GEMINI_MODEL, timeoutMs = 20_000) {
   const res = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GEMINI_API_KEY}`,
     {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
-      signal: AbortSignal.timeout(20_000),
+      signal: AbortSignal.timeout(timeoutMs),
     }
   );
   const data = await res.json();
@@ -342,21 +344,21 @@ function parseJudge(text) {
   }
 }
 
-async function askAnthropic(prompt, schema, maxTokens, model = judgeModel()) {
+async function askAnthropic(prompt, schema, maxTokens, model = judgeModel(), timeoutMs = 15_000) {
   const base = { model, max_tokens: maxTokens, messages: [{ role: 'user', content: prompt }] };
   let data;
   try {
     data = await anthropic({
       ...base,
       output_config: { effort: 'low', format: { type: 'json_schema', schema } },
-    });
+    }, timeoutMs);
   } catch (err) {
     // 這個模型不吃結構化輸出就退回純文字，靠 parseJudge 救回來
     if (!/output_config|json_schema|format/i.test(err.message)) throw err;
     data = await anthropic({
       ...base,
       messages: [{ role: 'user', content: prompt + '\n\n只輸出 JSON 物件本身，不要加說明或程式碼框。' }],
-    });
+    }, timeoutMs);
   }
   // 跟 askGemini 同一個坑：max_tokens 中途截斷時 API 仍回 200，
   // 內容看似有結構、實際欄位是空的或直接不是合法 JSON。明確擋下來讓上層重試，
@@ -379,7 +381,7 @@ async function askAnthropic(prompt, schema, maxTokens, model = judgeModel()) {
  * 這種量很小、要綜合判斷給具體內容的呼叫調到 medium，思考品質比省那幾毛錢重要。
  * 由呼叫端決定要哪個層級，見 askJSON 的 thinkingLevel 參數。
  */
-async function askGemini(prompt, maxTokens, model = judgeModel(), thinkingLevel = 'low') {
+async function askGemini(prompt, maxTokens, model = judgeModel(), thinkingLevel = 'low', timeoutMs = 20_000) {
   const budget = Math.max(maxTokens * 3, 6000);
   const base = {
     contents: [{ role: 'user', parts: [{ text: prompt }] }],
@@ -391,11 +393,11 @@ async function askGemini(prompt, maxTokens, model = judgeModel(), thinkingLevel 
     data = await gemini({
       ...base,
       generationConfig: { ...base.generationConfig, thinkingConfig: { thinkingLevel } },
-    }, model);
+    }, model, timeoutMs);
   } catch (err) {
     // 舊機型不吃 thinkingLevel，就純靠放大上限
     if (!/thinking|invalid argument/i.test(err.message)) throw err;
-    data = await gemini(base, model);
+    data = await gemini(base, model, timeoutMs);
   }
 
   const c = data.candidates?.[0] || {};
@@ -421,9 +423,15 @@ async function askJSON(prompt, schema, maxTokens = 1000, thinkingLevel = 'low') 
   const primary = judgeEngine();
   if (!primary) throw new Error('沒有可用的模型：請先在 Vercel 填一把 API 金鑰');
 
+  // judge()（minimal，一天跑十幾到幾十次）沿用短 timeout，跟 WAVE_CUTOFF_MS 的節奏綁在一起；
+  // advise／generatePrompts 這種 thinkingLevel:medium 的量小、重呼叫，
+  // 原本共用 15–20s 會在 60s 平台上限前就自己 abort（症狀：前端跳出英文
+  // 「The operation was aborted due to timeout」），所以拉長到 45s，
+  // 換一家失敗仍在 60s maxDuration 內留有緩衝。
+  const timeoutMs = thinkingLevel === 'medium' ? 45_000 : undefined;
   const run = (eng) => (eng === 'gemini'
-    ? askGemini(prompt, maxTokens, GEMINI_MODEL, thinkingLevel)
-    : askAnthropic(prompt, schema, maxTokens, PROBE_MODEL));
+    ? askGemini(prompt, maxTokens, GEMINI_MODEL, thinkingLevel, timeoutMs ?? 20_000)
+    : askAnthropic(prompt, schema, maxTokens, PROBE_MODEL, timeoutMs ?? 15_000));
 
   try {
     return await run(primary);
