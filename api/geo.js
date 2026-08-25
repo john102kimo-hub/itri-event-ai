@@ -344,19 +344,25 @@ function parseJudge(text) {
   }
 }
 
-async function askAnthropic(prompt, schema, maxTokens, model = judgeModel(), timeoutMs = 15_000) {
+// Gemini 的 thinkingLevel 到 Anthropic 沒有 minimal，一律當 low；medium 原樣對應
+// （Anthropic output_config.effort 合法值：low/medium/high/xhigh/max）。
+const toAnthropicEffort = (thinkingLevel) => (thinkingLevel === 'medium' ? 'medium' : 'low');
+
+async function askAnthropic(prompt, schema, maxTokens, model = judgeModel(), timeoutMs = 15_000, thinkingLevel = 'low') {
   const base = { model, max_tokens: maxTokens, messages: [{ role: 'user', content: prompt }] };
+  const effort = toAnthropicEffort(thinkingLevel);
   let data;
   try {
     data = await anthropic({
       ...base,
-      output_config: { effort: 'low', format: { type: 'json_schema', schema } },
+      output_config: { effort, format: { type: 'json_schema', schema } },
     }, timeoutMs);
   } catch (err) {
     // 這個模型不吃結構化輸出就退回純文字，靠 parseJudge 救回來
     if (!/output_config|json_schema|format/i.test(err.message)) throw err;
     data = await anthropic({
       ...base,
+      output_config: { effort },
       messages: [{ role: 'user', content: prompt + '\n\n只輸出 JSON 物件本身，不要加說明或程式碼框。' }],
     }, timeoutMs);
   }
@@ -431,7 +437,7 @@ async function askJSON(prompt, schema, maxTokens = 1000, thinkingLevel = 'low') 
   const timeoutMs = thinkingLevel === 'medium' ? 45_000 : undefined;
   const run = (eng) => (eng === 'gemini'
     ? askGemini(prompt, maxTokens, GEMINI_MODEL, thinkingLevel, timeoutMs ?? 20_000)
-    : askAnthropic(prompt, schema, maxTokens, PROBE_MODEL, timeoutMs ?? 15_000));
+    : askAnthropic(prompt, schema, maxTokens, PROBE_MODEL, timeoutMs ?? 15_000, thinkingLevel));
 
   try {
     return await run(primary);
@@ -1909,7 +1915,9 @@ ${evidence}
 【要檢查的新聞稿／文案初稿】
 ${draft.slice(0, 6000)}
 
-請針對這份初稿，給出具體、可直接照做的修改建議，每一條都要講清楚「改哪一句、怎麼改、為什麼」（為什麼要對應到上面的實測證據，不要空講「增加曝光度」這種話）。最多 6 條，依重要性排序。同時給一句話總評（這份初稿現在的 AI 能見度體質如何）。`;
+請針對這份初稿，給出具體、可直接照做的修改建議，每一條都要講清楚「改哪一句、怎麼改、為什麼」（為什麼要對應到上面的實測證據，不要空講「增加曝光度」這種話）。最多 6 條，依重要性排序。同時給一句話總評（這份初稿現在的 AI 能見度體質如何）。
+
+輸出 JSON：{"verdict":"一句話總評，不可留空","suggestions":[{"issue":"引用初稿原句","why":"對應哪項實測證據","fix":"具體怎麼改"}, …]}（suggestions 至少 1 條、最多 6 條，不可為空陣列）`;
 
       const schema = {
         type: 'object',
