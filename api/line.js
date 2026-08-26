@@ -1,15 +1,22 @@
-// LINE 官方帳號 webhook — 記者問答（批次 2 單場綁定 + 批次 3 自然語言意圖路由，
-// LINE-PLAN.md 有完整規格）
+// LINE 官方帳號 webhook — 記者問答（批次 2 單場綁定 + 批次 3 自然語言意圖路由）
+// + 內部職員模式（批次 4）。LINE-PLAN.md 有完整規格。
 //
-// 兩種問法都支援：
+// 記者端，兩種問法都支援：
 //   1. 掃該場 QR（連結已預帶 #活動代碼，見 LINE-PLAN.md 第 7 節）→ 綁定 line_users →
 //      之後直接發問。#代碼對不上時，當成一般文字重新路由一次，不會只回「找不到」。
 //   2. 沒綁定、直接打活動名稱或問「最近有哪些活動」→ 過 lib/router.js 的意圖路由，
 //      判斷是查活動列表、問特定一場（順手軟綁定，下一題不用再打名稱）、還是無關問題。
 // 兩條路徑最後都走同一份「跟網頁版同一份」knowledge_base 回答，寫回 qa_log（source=line）。
 //
-// 批次 2/3 刻意不做的事（batch 4 才做，見 LINE-PLAN.md）：
-//   - 群組模式、真人接手轉接標記、邀訪收單
+// 職員端（同一個 LINE 帳號、同一支 webhook）：講對 LINE_STAFF_PASSCODE 這組密語，
+// 該 userId 永久記為職員（存 line_staff 表，要收回權限就去 Sheet 刪那一列）。之後
+// 用自然語言下指令，過 lib/staff.js 的 routeStaffIntent()：查活動列表／問特定活動內容
+// （含 draft／archived，reporter 那套 isUsable() 限制不套用）／查某場後台數據／查 GEO
+// 狀態／新增活動並直接拿到同仁編輯連結／要某場的媒體訓練連結。安全模型見 lib/staff.js
+// 開頭註解。
+//
+// 批次 2/3/4 刻意不做的事（batch 5 才做，見 LINE-PLAN.md）：
+//   - 群組模式、真人接手轉接標記、邀訪收單（記者端的 media_requests）
 //
 // 安全與坑，詳見 LINE-PLAN.md 第 3 節：
 //   - 簽章驗證必須用原始 bytes，不能碰 req.body（見 lib/line.js 開頭註解）
@@ -22,7 +29,12 @@
 import { readRange, appendRows, updateRange, ensureSheets } from '../lib/sheets.js';
 import { buildSystemPrompt } from '../lib/prompt.js';
 import { readRawBody, verifySignature, replyOrPush, startLoading } from '../lib/line.js';
-import { buildCalendarCards, routeIntent, formatCalendarReply } from '../lib/router.js';
+import { buildCalendarCards, buildAllCalendarCards, routeIntent, formatCalendarReply } from '../lib/router.js';
+import {
+  isPasscodeMatch, isStaffAuthenticated, authenticateStaff, routeStaffIntent,
+  createDraftEvent, editLink, trainingLink, getEventEditCode, getEventRawById,
+  getEventAnalyticsSummary, formatEventAnalyticsReply, getGeoStatusSummary, formatGeoStatusReply
+} from '../lib/staff.js';
 
 const EVENTS_RANGE = 'events!A2:O';
 const LINE_USERS_RANGE = 'line_users!A2:F';
@@ -205,8 +217,92 @@ async function answerQuestion(replyToken, userId, event, mediaName, text) {
   await startLoading(userId, 55);
   const systemPrompt = buildSystemPrompt(event, lineExtraRules(event));
   const reply = await askAnthropic(systemPrompt, text);
+  // 診斷用途，不是必要邏輯：路由判斷得準不準、AI 答得順不順，靠這行在 Vercel Logs
+  // 裡直接看得到，不用另外接工具。刻意截斷長度，避免整份新聞稿灌爆單行 log。
+  console.log(`[line] answer event=${event.id} status=${event.status} q="${text.slice(0, 60)}" reply="${reply.slice(0, 200)}"`);
   await replyOrPush(replyToken, userId, reply);
   await logQa(event, mediaName, text, reply);
+}
+
+// 職員模式指令分派（批次 4）。跟 handleUnbound 的差異：
+//   - qa 意圖不套用 isUsable()——同仁本來就該問得到 draft／archived 場次的內容
+//   - 不做軟綁定：職員一次對話常常在不同活動之間跳來跳去（查完 A 場數據又問 B 場
+//     內容），鎖定單一活動反而綁手綁腳
+//   - 多了 geo_status／event_analytics／create_event／training_link 四種指令
+async function handleStaffMessage(replyToken, userId, text) {
+  const rows = await getAllEventRows();
+  // 職員要用「全部場次」的候選清單，不能用記者版的 buildCalendarCards()——
+  // 那支會濾掉 draft／archived，職員問得到的場次卻不在候選清單裡，路由回傳的
+  // event_id 會被 routeStaffIntent() 自己的白名單過濾掉，變成「查得到內容、卻永遠
+  // 比對不到活動」。見 lib/router.js 的註解。
+  const cards = buildAllCalendarCards(rows);
+  const routed = await routeStaffIntent(text, cards);
+  console.log(`[line] staff route user=${userId} q="${text.slice(0, 60)}" → ${JSON.stringify(routed)}`);
+  const cardName = id => cards.find(c => c.id === id)?.name || id;
+
+  if (routed.intent === 'calendar') {
+    await replyOrPush(replyToken, userId, formatCalendarReply(cards));
+    return;
+  }
+
+  if (routed.intent === 'geo_status') {
+    await replyOrPush(replyToken, userId, formatGeoStatusReply(await getGeoStatusSummary()));
+    return;
+  }
+
+  if (routed.intent === 'create_event') {
+    if (!routed.new_event_name) {
+      await replyOrPush(replyToken, userId, '請告訴我新活動的名稱，例如：「新增活動 半導體技術發表會」。');
+      return;
+    }
+    const created = await createDraftEvent(routed.new_event_name, routed.new_event_date);
+    console.log(`[line] 職員新增活動 id=${created.id} name="${created.name}"`);
+    await replyOrPush(replyToken, userId,
+      `已建立《${created.name}》（狀態：未發布，僅後台看得到）\n\n同仁編輯連結（給負責的同仁，他不需要後台密碼）：\n${editLink(created.id, created.editCode)}\n\n內容填好、確認沒問題後，要到後台按「發布」才會對記者公開。`);
+    return;
+  }
+
+  if (routed.intent === 'event_analytics' || routed.intent === 'training_link') {
+    if (routed.event_ids.length === 0) {
+      await replyOrPush(replyToken, userId, '請問是想查哪一場活動？直接打活動名稱即可。');
+      return;
+    }
+    if (routed.event_ids.length > 1) {
+      await replyOrPush(replyToken, userId,
+        `是想查這幾場的哪一場？\n${routed.event_ids.map(id => '・' + cardName(id)).join('\n')}`);
+      return;
+    }
+    const eventId = routed.event_ids[0];
+    if (routed.intent === 'event_analytics') {
+      const summary = await getEventAnalyticsSummary(eventId, cardName(eventId));
+      await replyOrPush(replyToken, userId, formatEventAnalyticsReply(summary));
+    } else {
+      const editCode = await getEventEditCode(eventId);
+      if (!editCode) {
+        await replyOrPush(replyToken, userId, '這場活動還沒有編輯碼，請先到後台開啟一次該活動的編輯連結。');
+        return;
+      }
+      await replyOrPush(replyToken, userId, `《${cardName(eventId)}》媒體訓練連結：\n${trainingLink(eventId, editCode)}`);
+    }
+    return;
+  }
+
+  if (routed.intent === 'qa' && routed.event_ids.length === 1 && routed.confidence === 'high') {
+    const event = await getEventRawById(routed.event_ids[0]);
+    if (event) {
+      // 職員模式刻意不呼叫 isUsable()：draft／archived 場次的內容同仁都問得到
+      await answerQuestion(replyToken, userId, event, '（內部職員）', text);
+      return;
+    }
+  }
+  if (routed.intent === 'qa' && routed.event_ids.length > 1) {
+    await replyOrPush(replyToken, userId,
+      `是想問這幾場的哪一場？\n${routed.event_ids.map(id => '・' + cardName(id)).join('\n')}`);
+    return;
+  }
+
+  await replyOrPush(replyToken, userId,
+    '職員模式可以問：活動列表／某場活動內容／某場後台數據／GEO 狀態／新增活動（會給編輯連結）／某場媒體訓練連結。直接打活動名稱或說明需求即可。');
 }
 
 // 沒有有效綁定時的自然語言處理（批次 3）：讓路由判斷這是查活動列表、問特定一場、
@@ -216,6 +312,7 @@ async function handleUnbound(replyToken, userId, text) {
   const rows = await getAllEventRows();
   const cards = buildCalendarCards(rows);
   const { intent, event_ids, confidence } = await routeIntent(text, cards);
+  console.log(`[line] reporter route q="${text.slice(0, 60)}" → intent=${intent} event_ids=${JSON.stringify(event_ids)} confidence=${confidence}`);
 
   if (intent === 'calendar') {
     await replyOrPush(replyToken, userId, formatCalendarReply(cards));
@@ -258,6 +355,7 @@ async function logQa(event, mediaName, question, reply) {
       timestamp, event.id, event.name, mediaName || '（未填寫）',
       sanitize(question, 2000), reply, '', 'line'
     ]]);
+    console.log(`[line] qa_log 寫入成功 event=${event.id}`);
   } catch (e) {
     console.error('LINE qa_log 寫入失敗:', e.message);
   }
@@ -265,6 +363,7 @@ async function logQa(event, mediaName, question, reply) {
 
 // ── 逐一事件處理 ─────────────────────────────────────────────────────
 async function handleEvent(ev) {
+  console.log(`[line] 收到事件 type=${ev.type} msgType=${ev.message?.type || '-'} user=${ev.source?.userId || '-'}`);
   if (ev.type === 'follow') {
     const userId = ev.source?.userId;
     if (!userId || !ev.replyToken) return;
@@ -294,6 +393,24 @@ async function handleEvent(ev) {
 
   if (rateLimited(userId)) {
     await replyOrPush(replyToken, userId, '提問太頻繁，請稍候片刻再試。');
+    return;
+  }
+
+  // 職員模式（批次 4）：密語比對與已登入狀態一律最優先判斷，整段接管、不再往下走
+  // #代碼／reporter 流程——職員用自然語言下所有指令，不用記兩套語法。
+  if (isPasscodeMatch(text)) {
+    if (await isStaffAuthenticated(userId)) {
+      await replyOrPush(replyToken, userId, '您已經是職員模式了，直接問我就可以，不用再輸入一次密語。');
+      return;
+    }
+    const { displayName } = await authenticateStaff(userId);
+    console.log(`[line] 新職員登入 user=${userId} name=${displayName || '(無)'}`);
+    await replyOrPush(replyToken, userId,
+      `職員模式已啟用${displayName ? `，${displayName} 您好` : ''}！\n\n可以問我：活動列表／某場活動內容／某場後台數據／GEO 狀態／新增活動（直接給您同仁編輯連結）／某場媒體訓練連結。\n\n您的 LINE ID：${userId}\n（想在「有新的人用密語登入」時收到通知，把這組 ID 設成 LINE_ADMIN_USER_ID 環境變數即可）`);
+    return;
+  }
+  if (await isStaffAuthenticated(userId)) {
+    await handleStaffMessage(replyToken, userId, text);
     return;
   }
 

@@ -14,6 +14,7 @@
 // POST {action:'ensure_edit_code',id}  → 確保該活動有 edit_code（沒有就補上），回傳
 
 import { readRange, appendRows, updateRange } from '../lib/sheets.js';
+import { generateId, generateEditCode } from '../lib/ids.js';
 import { del } from '@vercel/blob';
 
 // events 表欄位：A id, B name, C color, D knowledge_base, E status,
@@ -33,26 +34,6 @@ const KB_MAX_LEN = 45000;
 //   archived 已封存（記者前台下架）。
 // 同仁自助編輯與管理員共用同一份檢查，避免寫入允許值以外的字串。
 const EVENT_STATUSES = ['draft', 'active', 'ended', 'archived'];
-
-function generateId(name) {
-  const slug = name
-    .toLowerCase()
-    .replace(/[一-龥]/g, '')   // 移除中文
-    .replace(/[^\w\s-]/g, '')
-    .replace(/\s+/g, '-')
-    .replace(/-+/g, '-')
-    .trim()
-    .substring(0, 20) || 'event';
-  return `${slug}-${Date.now().toString(36)}`;
-}
-
-// 產生同仁編輯碼：16 碼英數，做為那一場的「編輯權杖」
-function generateEditCode() {
-  const chars = 'abcdefghijkmnpqrstuvwxyz23456789'; // 去除易混淆字元
-  let s = '';
-  for (let i = 0; i < 16; i++) s += chars[Math.floor(Math.random() * chars.length)];
-  return s;
-}
 
 // 同仁可編輯的內容欄位 → 組出完整 15 欄，編輯碼(K)一律沿用既有值。
 // 狀態(E) 開放同仁自行切換（未發布/進行中/已結束/已封存）；呼叫端須先用 EVENT_STATUSES
