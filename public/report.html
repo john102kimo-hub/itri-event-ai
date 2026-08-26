@@ -192,6 +192,7 @@ function render(){
         <div class="ev-stat"><div class="n">${e.media_count}</div><div class="l">服務媒體家數</div></div>
         <div class="ev-stat"><div class="n">${fillRate}%</div><div class="l">媒體填寫率</div></div>
         <div class="ev-stat"><div class="n">${(e.count*minPerQ/60).toFixed(1)}</div><div class="l">估算節省工時</div></div>
+        ${e.line_count ? `<div class="ev-stat"><div class="n">${e.line_count}</div><div class="l">來自 LINE</div></div>` : ''}
       </div>
       <div class="topic-title"><i class="ti ti-flame"></i> 記者最關心的議題</div>
       <div class="topic-tags">

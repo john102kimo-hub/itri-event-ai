@@ -40,6 +40,9 @@
     "api/chat.js": {
       "maxDuration": 60
     },
+    "api/line.js": {
+      "maxDuration": 60
+    },
     "api/training.js": {
       "maxDuration": 60
     },

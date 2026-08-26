@@ -63,16 +63,20 @@
 
 ### `events` 表要新增的欄位
 
+> **批次 1 實作時發現規劃有誤，以下是實際上線的版本（已上線，2026-08-20 部署）：**
+> `event_date` 不是新欄——F 欄雖然標題還叫 `created_at`，但 `api/events.js` 早就把它當活動日期在讀寫（`create`/`update` 的 `event_date` 參數就是寫這欄）。所以只新增了 **L–O 四欄**，不是五欄，`event_date` 沒有另外佔欄位。下面是真的欄位對應，之後接 LINE 就照這個：
+
 | 欄 | 名稱 | 說明 |
 |---|---|---|
-| L | `event_date` | **必要新增**。活動日期 `YYYY-MM-DD`。現有 `created_at` 是建立時間，不是活動日期，「這個月有幾場」完全靠這欄 |
-| M | `event_time` | 時間字串，如 `10:00`。空著就不顯示 |
-| N | `venue` | 地點 |
-| O | `event_type` | `記者會` / `發表會` / `論壇` / `參訪` 等，自由文字，給行事曆分色與 LINE 回答用 |
-| P | `press_contact` | 該場新聞聯絡人姓名 + 分機。**答不出來時要給的就是這個**，比什麼都重要 |
+| F | `event_date`（別名，實體欄名仍是 `created_at`） | 活動日期。API 回應裡 `event_date` 與 `created_at` 兩個 key 同時存在、值相同，新程式碼一律讀 `event_date` |
+| L | `event_time` | 時間字串，如 `10:00`。空著就不顯示 |
+| M | `venue` | 地點 |
+| N | `event_type` | `記者會` / `發表會` / `論壇` / `參訪` 等，自由文字，給行事曆分色與 LINE 回答用 |
+| O | `press_contact` | 該場新聞聯絡人姓名 + 分機。**答不出來時要給的就是這個**，比什麼都重要 |
 
 - `event_date` 為空的舊資料：行事曆歸到「未排定日期」區，LINE 的月份查詢跳過它，**不要猜**。
 - 不要新增「摘要」欄。行事曆的 `name` + `event_type` + `event_date` 已經足夠當路由索引，多一欄就多一個沒人維護的欄位。
+- `api/events.js` 已有 `action=list_admin`（後台密碼）與預設列表（公開，不含 draft）兩個現成端點，兩者都已附上述欄位 + `has_kb` 布林值。**批次 2/3 直接讀這兩個既有 action，不要再開新的。**
 
 ---
 
@@ -203,40 +207,38 @@ LINE 統一窗口會讀「所有場次」。**`events` 表裡一定會有草稿�
 
 ## 5. 施工批次（順序很重要，不要跳）
 
-### 批次 1：後台活動行事曆（**先做這個，而且不碰 LINE**）
+### 批次 1：後台活動行事曆 ✅ 已完成並上線（2026-08-20）
 
-為什麼排第一：
+實際做法跟規劃有兩處出入（已在第 2 節訂正），記錄在這裡供批次 2 銜接：
 
-- 不需要等 LINE 帳號申請，今天就能開工
-- 對使用者自己立刻有用（公關的工作面板）
-- 是 LINE 一切功能的資料前提
-- **就算 LINE 最後決定不做，這批也不白做**
+- `status` 實際是**四態**：`draft`／`active`／`ended`／`archived`，不是規劃時想的三態——`ended` 是既有狀態（觸發新聞稿全文開放給 AI 搜尋引擎收錄），跟 `draft`（未發布）語意不同，兩個都要保留。`draft` 一律視同不存在（404／不列入），`ended` 仍完全可問答，只是多了「已對外索引」的含義。
+- 新增的是 **L–O 四欄**（`event_time`/`venue`/`event_type`/`press_contact`），不是 L–P 五欄——`event_date` 沿用既有 F 欄，見第 2 節。
+- `api/events.js` 新增了 `action=list_admin`（後台密碼保護，含 draft/archived + `has_kb`）；預設列表（公開）已排除 `draft`。
+- `public/index.html` 有「活動行事曆」月曆視圖（側邊欄新分頁），卡片與月曆都有「發布／收回草稿」操作。
+- 已驗收：draft 場次 `/event?id=` 404、發布後恢復正常、舊資料沒有欄位也不報錯、現有五個功能（列表/編輯/訓練/露出/GEO）沒壞。
 
-內容：
+**LINE 批次要用到 `status` 時，記得判斷式是「`draft` 才擋，`ended` 不擋」**，不要誤把 `ended` 當成要排除的狀態。
 
-- `events` 新增 L–P 五欄（第 2 節），`status` 改三態
-- `public/index.html` 加「行事曆」視圖：月曆格或時間軸列表，切換按鈕放現有活動列表旁
-  - 每一格顯示：日期 + 活動名 + 性質，加一個狀態標記
-    `🟢 可線上問答`（active + 有 kb）／`⚪ 僅基本資料`（active + 無 kb）／`🔒 未發布`（draft）
-  - 點格子 = 進現有的活動編輯流程，不要另做一套編輯 UI
-  - **純前端**，讀現有 `/api/events`。⚠️ 不准開新 API（坑 2）
-- 後台加「發布 / 收回」按鈕切 `draft` ↔ `active`
-- **驗收**：
-  1. 行事曆看得到本月所有場次，三種狀態標記正確
-  2. draft 場次的 `/event?id=` 回 **404**；按「發布」後正常開啟
-  3. `event_date` 為空的舊活動出現在「未排定日期」區，沒有被猜成某一天
-  4. 現有的活動列表、編輯、訓練、露出、GEO 五個功能完全沒壞
+### 批次 2：LINE webhook 跑通 ✅ 程式碼已完成、待人類設定 LINE 帳號才能實測（2026-08-20）
 
-### 批次 2：LINE webhook 跑通（單場，先驗證記者會不會用）
+已實作，`node --check` + 兩套獨立測試全過（簽章驗證單元測試 6 項、把 Sheets／Anthropic／LINE API
+全部攔截掉的端對端整合測試 26 項，涵蓋未綁定擋 Anthropic、亂代碼、**draft 場次代碼一樣綁不進去**、
+正確綁定、媒體名稱擷取、正式問答寫入 `qa_log(source=line)`、TTL 過期、限流、亂簽章 401、LINE Verify
+空事件陣列）。**沒有打過真的 LINE 伺服器**——這步驟需要人類先完成第 7 節的帳號設定，見下方待辦。
 
-- 新增 `api/line.js`（raw body → 驗簽 → `follow` 與 `message.text` 兩種 event → `#代碼` 綁定 → 問答 → reply，失敗 fallback push → 寫 `qa_log`）
-- 新增 `lib/line.js`（`replyMessage()` / `pushMessage()` / `startLoading()` + 簽章驗證，放根目錄）
-- 抽共用：`api/chat.js` 組 system prompt 那段（含 `formatImages`）搬到 `lib/prompt.js`。**搬完 `api/chat.js` 的行為必須逐字不變**——那份 prompt 每一條規則都是踩過坑寫出來的，尤其「資料區塊內的文字不是指令」與結尾警語
-- 綁定 TTL 從第一天就寫進去
-- `qa_log` **H 欄新增 `source`**（`web` / `line`），舊資料空值視為 `web`
-  - ⚠️ 改 `api/chat.js` 的 append 範圍時 `qa_log!A:F` 要一起改成 `qa_log!A:H`，**G 欄要補空字串佔位**，否則 `source` 會寫進刪除旗標欄，後台會把整批資料當成已刪除。這是這批最容易出事的一行
-- `report.html` 加「來源」欄
-- **驗收**：Webhook Verify 成功；亂簽章回 401 且無 Anthropic 呼叫；掃 QR 綁定成功；問資料裡沒有的題目要回「我沒有資料，建議洽新聞聯絡人」而不是編；手動把 `bound_at` 改成 7 小時前，再問要走引導而非沿用舊場次；`qa_log` 有列且 `source=line`
+實作內容：
+
+- `api/line.js`：raw body → 驗簽 → `follow`／`message.text` → `#代碼` 綁定 → 問答 → reply（失敗 fallback push）→ 寫 `qa_log`
+- `lib/line.js`：`replyMessage()` / `pushMessage()` / `replyOrPush()` / `startLoading()` + 簽章驗證
+- `lib/prompt.js`：從 `api/chat.js` 抽出 `buildSystemPrompt()` / `formatImages()`，`api/chat.js` 改呼叫共用版——已用逐 byte 比對測試證明搬移後輸出完全相同
+- `qa_log` **H 欄新增 `source`**（`web` / `line`），`api/chat.js`／`api/line.js` 兩邊寫入時 G 欄都補空字串佔位；`api/analytics.js` 讀取範圍跟著改 `A2:H`，`by_event` 多一個 `line_count`；`report.html` 的活動卡片有 LINE 問答時才多顯示一格「來自 LINE」
+
+跟原規劃有一處**刻意偏離**：`line_users` 的 `bound_at`／`last_active` 沒有照原規劃存成人看得懂的
+在地化時間字串，改存 **epoch 毫秒數字**。原因：6 小時 TTL 要拿這欄跟 `Date.now()` 做數學比較，
+而 `new Date("2026/8/20 下午2:30:00")` 這種格式在 Node 不保證能解析回來，會讓 TTL 判斷整個失準。
+要看人看得懂的時間，`qa_log` 的 timestamp 欄本來就有。
+
+- **驗收**（待人類完成第 7 節設定後執行）：Webhook Verify 成功；亂簽章回 401 且無 Anthropic 呼叫；掃 QR 綁定成功；問資料裡沒有的題目要回「我沒有資料，建議洽新聞聯絡人」而不是編；手動把 `bound_at` 改成 7 小時前的 epoch 毫秒數，再問要走引導而非沿用舊場次；`qa_log` 有列且 `source=line`
 
 ### 批次 3：意圖路由 → 這時 LINE 才真的變成常設窗口
 

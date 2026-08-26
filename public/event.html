@@ -620,6 +620,68 @@ function showTyping() {
   msgEl.scrollIntoView({ behavior: 'smooth', block: 'end' });
 }
 
+// 逐字接收 SSE 並即時上畫面。關鍵在「第一個字一到就把三個等待點換成真正的內容」——
+// 記者感受到的等待因此從整段生成時間（實測 3～10 秒，要全文新聞稿更久）縮到第一個字抵達為止。
+async function streamReply(res) {
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  const box = document.getElementById('messages');
+  let buf = '', acc = '', errMsg = '';
+  let msgEl = null, bubble = null, pending = false;
+
+  // 每收到一個 token 就重繪 Markdown，長回答會明顯卡頓；合併成每 50ms 最多一次。
+  // 這裡刻意不用 requestAnimationFrame——記者把分頁切到背景時 rAF 會整個停住，
+  // 回來才一次補上，看起來就像又卡住了。
+  const flush = () => {
+    pending = false;
+    if (!bubble) return;
+    bubble.innerHTML = renderMarkdown(acc);
+    // 只有使用者本來就貼著底部時才自動捲，免得他往上翻閱時一直被硬拉回來
+    if (box.scrollHeight - box.scrollTop - box.clientHeight < 120) box.scrollTop = box.scrollHeight;
+  };
+  const schedule = () => { if (!pending) { pending = true; setTimeout(flush, 50); } };
+
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    const lines = buf.split('\n');
+    buf = lines.pop() || ''; // 最後一段可能被切在半途，留到下一輪再拼
+    for (const line of lines) {
+      if (!line.startsWith('data:')) continue;
+      const payload = line.slice(5).trim();
+      if (!payload) continue;
+      let evt;
+      try { evt = JSON.parse(payload); } catch (e) { continue; }
+      if (evt.error) { errMsg = evt.error; continue; }
+      if (typeof evt.t !== 'string') continue;
+      if (!msgEl) {
+        document.getElementById('typing')?.remove();
+        msgEl = addMessage('ai', '');
+        bubble = msgEl.querySelector('.bubble');
+      }
+      acc += evt.t;
+      schedule();
+    }
+  }
+
+  document.getElementById('typing')?.remove();
+  const reply = acc || errMsg || '抱歉，發生錯誤。';
+  if (!msgEl) {
+    addMessage('ai', reply);
+  } else {
+    flush();
+    // addMessage 當初綁的複製按鈕抓的是那個空字串，串流結束要重綁成完整內容
+    const oldBtn = msgEl.querySelector('.copy-btn');
+    if (oldBtn) {
+      const btn = oldBtn.cloneNode(true);
+      oldBtn.replaceWith(btn);
+      btn.addEventListener('click', () => copyText(reply, btn));
+    }
+  }
+  hist.push({ role: 'assistant', content: reply });
+}
+
 async function sendMessage(text) {
   if (isWaiting) return; // AI 還在回覆時，Enter 連按或連點 chip 不會平行送出第二個請求
   const q = (text || document.getElementById('user-input').value).trim();
@@ -646,15 +708,23 @@ async function sendMessage(text) {
       body: JSON.stringify({
         messages: hist,
         event_id: eventId,
-        media_name: mediaName || document.getElementById('media-input').value.trim()
+        media_name: mediaName || document.getElementById('media-input').value.trim(),
+        stream: true
       })
     });
-    const data = await res.json();
-    document.getElementById('typing')?.remove();
 
-    const reply = data.reply || data.error || '抱歉，發生錯誤。';
-    hist.push({ role: 'assistant', content: reply });
-    addMessage('ai', reply);
+    // 後端只有在「模型真的開始回答」時才切成 SSE；錯誤（活動不存在、限流、金鑰沒設…）
+    // 仍然是原本那種一次回傳的 JSON，所以這裡要兩條路都留著。
+    const isStream = res.ok && (res.headers.get('content-type') || '').includes('text/event-stream');
+    if (isStream) {
+      await streamReply(res);
+    } else {
+      const data = await res.json().catch(() => ({}));
+      document.getElementById('typing')?.remove();
+      const reply = data.reply || data.error || '抱歉，發生錯誤。';
+      hist.push({ role: 'assistant', content: reply });
+      addMessage('ai', reply);
+    }
   } catch (err) {
     document.getElementById('typing')?.remove();
     addMessage('ai', '連線錯誤，請稍後再試。');

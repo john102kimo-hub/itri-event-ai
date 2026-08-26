@@ -20,6 +20,18 @@
 | `GEMINI_API_KEY` / `OPENAI_API_KEY` / `PERPLEXITY_API_KEY` | 想多掃哪家 AI 引擎就填哪把，缺的引擎會自動跳過，不影響其他功能 |
 | `GEO_MODEL` / `GEMINI_MODEL` / `OPENAI_MODEL` / `PERPLEXITY_MODEL` | 想指定特定模型版本才需要填，留空用系統預設 |
 
+### 選填 —— 給「LINE 官方帳號問答」（/api/line）用，不設定則該功能停用
+
+完整申請步驟見 [LINE-PLAN.md](LINE-PLAN.md) 第 3 節。三個都要設定，缺一個 webhook 就無法運作（會回 500 或簽章一律驗證失敗）：
+
+| 變數名 | 說明 |
+|---|---|
+| `LINE_CHANNEL_SECRET` | LINE Developers Console → Messaging API channel 的 Channel secret。用來驗證每個 webhook 請求真的來自 LINE，**這把沒設對，任何人都能偽造 LINE 的名義打你的 webhook**。 |
+| `LINE_CHANNEL_ACCESS_TOKEN` | 同頁的 Channel access token（要選「長期」，不是那種會過期的短期權杖）。用來呼叫 LINE 的回覆／推播 API。 |
+| `LINE_BASIC_ID` | 官方帳號的 LINE ID（`@` 開頭），用來組記者掃碼用的 QR 連結；`api/line.js` 本身不需要這個值，是給後台產生 QR 用（批次 3 才會用到）。 |
+
+設完到 LINE Developers Console → Messaging API → Webhook URL 填 `https://itri-event-ai.vercel.app/api/line`，按 **Verify** 應顯示 Success。
+
 ---
 
 ## STEP 1：建立 Google 試算表

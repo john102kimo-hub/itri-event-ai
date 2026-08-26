@@ -61,7 +61,7 @@ export default async function handler(req, res) {
   const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 500);
 
   try {
-    const rawRows = await readRange('qa_log!A2:G');
+    const rawRows = await readRange('qa_log!A2:H');
     // 保留原始 row_num（sheet 第幾列，row 2 = index 0）
     const rowsWithNum = rawRows.map((r, i) => ({ r, rowNum: i + 2 }));
 
@@ -72,16 +72,17 @@ export default async function handler(req, res) {
       ? valid.filter(({ r }) => r[1] === event_id)
       : valid;
 
-    // 按活動分組
+    // 按活動分組（H 欄 source 是批次 2 才有的欄位，舊資料一律當 web）
     const byEvent = {};
     filtered.forEach(({ r }) => {
       const eid = r[1] || 'unknown';
       if (!byEvent[eid]) {
-        byEvent[eid] = { event_id: eid, event_name: r[2] || eid, count: 0, media_list: new Set(), questions: [] };
+        byEvent[eid] = { event_id: eid, event_name: r[2] || eid, count: 0, media_list: new Set(), questions: [], line_count: 0 };
       }
       byEvent[eid].count++;
+      if ((r[7] || 'web') === 'line') byEvent[eid].line_count++;
       if (r[3] && r[3] !== '（未填寫）') byEvent[eid].media_list.add(r[3]);
-      byEvent[eid].questions.push({ time: r[0], media: r[3], question: r[4], answer: r[5] });
+      byEvent[eid].questions.push({ time: r[0], media: r[3], question: r[4], answer: r[5], source: r[7] || 'web' });
     });
 
     const byEventArr = Object.values(byEvent).map(e => ({
@@ -141,7 +142,7 @@ export default async function handler(req, res) {
       top_media: topMedia,
       hourly_distribution: hourly,
       recent: filtered.slice(-limit).reverse().map(({ r, rowNum }) => ({
-        time: r[0], event_id: r[1], event: r[2], media: r[3], question: r[4], row_num: rowNum
+        time: r[0], event_id: r[1], event: r[2], media: r[3], question: r[4], row_num: rowNum, source: r[7] || 'web'
       }))
     });
   } catch (err) {
