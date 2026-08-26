@@ -1,23 +1,28 @@
-// LINE 官方帳號 webhook — 單場記者會問答（批次 2，LINE-PLAN.md 有完整規格）
+// LINE 官方帳號 webhook — 記者問答（批次 2 單場綁定 + 批次 3 自然語言意圖路由，
+// LINE-PLAN.md 有完整規格）
 //
-// 記者掃該場 QR（連結已預帶 #活動代碼，見 LINE-PLAN.md 第 7 節）→ 這裡收到文字訊息開頭是
-// #／＃ → 綁定 line_users → 之後直接發問，AI 依「跟網頁版同一份」knowledge_base 回答，
-// 寫回 qa_log（source=line）。
+// 兩種問法都支援：
+//   1. 掃該場 QR（連結已預帶 #活動代碼，見 LINE-PLAN.md 第 7 節）→ 綁定 line_users →
+//      之後直接發問。#代碼對不上時，當成一般文字重新路由一次，不會只回「找不到」。
+//   2. 沒綁定、直接打活動名稱或問「最近有哪些活動」→ 過 lib/router.js 的意圖路由，
+//      判斷是查活動列表、問特定一場（順手軟綁定，下一題不用再打名稱）、還是無關問題。
+// 兩條路徑最後都走同一份「跟網頁版同一份」knowledge_base 回答，寫回 qa_log（source=line）。
 //
-// 批次 2 刻意不做的事（batch 3/4 才做，見 LINE-PLAN.md）：
-//   - 沒有綁定就用自然語言問「這個月有哪些活動」之類的跨場次意圖路由
-//   - 群組模式、真人接手轉接標記
+// 批次 2/3 刻意不做的事（batch 4 才做，見 LINE-PLAN.md）：
+//   - 群組模式、真人接手轉接標記、邀訪收單
 //
 // 安全與坑，詳見 LINE-PLAN.md 第 3 節：
 //   - 簽章驗證必須用原始 bytes，不能碰 req.body（見 lib/line.js 開頭註解）
 //   - reply token 60 秒只能用一次，reply 失敗一律 fallback push（見 lib/line.js）
 //   - 限流用 line_user_id 當 key，不能用 IP——webhook 全部來自 LINE 自己的伺服器，
 //     用 IP 當 key 等於全部記者共用同一個額度，會互相誤殺
-//   - 沒有有效綁定就不能呼叫 Anthropic，跟 api/chat.js「無 event_id 不碰 Anthropic」同一條原則
+//   - 沒有有效綁定／路由結果就不能呼叫 Anthropic，跟 api/chat.js「無 event_id 不碰
+//     Anthropic」同一條原則；draft／archived 場次一律不進行事曆清單、不會被路由到
 
 import { readRange, appendRows, updateRange, ensureSheets } from '../lib/sheets.js';
 import { buildSystemPrompt } from '../lib/prompt.js';
 import { readRawBody, verifySignature, replyOrPush, startLoading } from '../lib/line.js';
+import { buildCalendarCards, routeIntent, formatCalendarReply } from '../lib/router.js';
 
 const EVENTS_RANGE = 'events!A2:O';
 const LINE_USERS_RANGE = 'line_users!A2:F';
@@ -193,6 +198,56 @@ async function askAnthropic(systemPrompt, userText) {
   }
 }
 
+// 正式問答：開輸入中動畫 → 呼叫 Anthropic → reply（失敗 fallback push）→ 寫 qa_log。
+// 綁定路徑（#代碼）跟路由命中路徑（自然語言直接命中某一場）最後都走這支，避免兩邊各自
+// 維護一份幾乎一樣的邏輯、之後改一邊忘了改另一邊。
+async function answerQuestion(replyToken, userId, event, mediaName, text) {
+  await startLoading(userId, 55);
+  const systemPrompt = buildSystemPrompt(event, lineExtraRules(event));
+  const reply = await askAnthropic(systemPrompt, text);
+  await replyOrPush(replyToken, userId, reply);
+  await logQa(event, mediaName, text, reply);
+}
+
+// 沒有有效綁定時的自然語言處理（批次 3）：讓路由判斷這是查活動列表、問特定一場、
+// 還是無關問題。路由失敗或判不出來，一律退回批次 2 原本的引導文案，不會卡住、
+// 也不會誤觸問答。
+async function handleUnbound(replyToken, userId, text) {
+  const rows = await getAllEventRows();
+  const cards = buildCalendarCards(rows);
+  const { intent, event_ids, confidence } = await routeIntent(text, cards);
+
+  if (intent === 'calendar') {
+    await replyOrPush(replyToken, userId, formatCalendarReply(cards));
+    return;
+  }
+
+  if (intent === 'qa' && event_ids.length === 1 && confidence === 'high') {
+    const event = await getEventById(event_ids[0]);
+    if (isUsable(event)) {
+      // 路由命中就順手軟綁定——下一題不用再重打一次活動名稱，也能重複利用
+      // 6 小時 TTL 那套過期機制，不用另外維護一套「路由記憶」。
+      await upsertBinding(userId, event.id);
+      await answerQuestion(replyToken, userId, event, '', text);
+      return;
+    }
+  }
+
+  if (intent === 'qa' && event_ids.length > 0) {
+    const names = event_ids.map(id => cards.find(c => c.id === id)?.name).filter(Boolean).slice(0, 3);
+    if (names.length) {
+      await replyOrPush(replyToken, userId,
+        `您是想問這幾場的哪一場呢？\n${names.map(n => '・' + n).join('\n')}\n\n請直接打完整或部分活動名稱。`);
+      return;
+    }
+  }
+
+  // intent === 'other'，或 qa 但完全比對不到、或路由本身失敗 → 統一導引，
+  // 跟批次 2 原本沒綁定時的文案一致，只是多給「或直接打活動名稱」這條路。
+  await replyOrPush(replyToken, userId,
+    '不確定您想問哪一場活動——可以直接輸入活動名稱、或問「最近有哪些活動」查看清單，也可以掃描現場 QR code 綁定。');
+}
+
 async function logQa(event, mediaName, question, reply) {
   if (!process.env.GOOGLE_SPREADSHEET_ID) return;
   try {
@@ -246,19 +301,21 @@ async function handleEvent(ev) {
   if (text.startsWith('#') || text.startsWith('＃')) {
     const code = text.slice(1).trim();
     const event = await findEventByCode(code);
-    if (!isUsable(event)) {
-      await replyOrPush(replyToken, userId, '找不到這個活動代碼，請確認代碼是否正確，或洽現場工作人員。');
+    if (isUsable(event)) {
+      await upsertBinding(userId, event.id);
+      await replyOrPush(replyToken, userId,
+        `已為您接上《${event.name}》✅\n\n請問您是哪家媒體？（方便新聞聯絡人後續服務，打媒體名稱即可，或回「略過」）\n\n之後就可以直接問問題了。`);
       return;
     }
-    await upsertBinding(userId, event.id);
-    await replyOrPush(replyToken, userId,
-      `已為您接上《${event.name}》✅\n\n請問您是哪家媒體？（方便新聞聯絡人後續服務，打媒體名稱即可，或回「略過」）\n\n之後就可以直接問問題了。`);
+    // 代碼對不上——很可能是把活動「代碼」跟活動「名稱」搞混了，把 # 拿掉當一般
+    // 文字重新路由一次，不要只回「找不到」就結束，記者不會知道代碼跟名稱是兩回事。
+    await handleUnbound(replyToken, userId, code || text);
     return;
   }
 
   const binding = await getBinding(userId);
   if (!binding) {
-    await replyOrPush(replyToken, userId, '請先掃描活動現場的 QR code，或輸入「#活動代碼」綁定場次後再提問。');
+    await handleUnbound(replyToken, userId, text);
     return;
   }
 
@@ -277,12 +334,7 @@ async function handleEvent(ev) {
     return;
   }
 
-  // 正式問答：先開輸入中動畫，再呼叫 Anthropic
-  await startLoading(userId, 55);
-  const systemPrompt = buildSystemPrompt(event, lineExtraRules(event));
-  const reply = await askAnthropic(systemPrompt, text);
-  await replyOrPush(replyToken, userId, reply);
-  await logQa(event, binding.media_name, text, reply);
+  await answerQuestion(replyToken, userId, event, binding.media_name, text);
 }
 
 export default async function handler(req, res) {
