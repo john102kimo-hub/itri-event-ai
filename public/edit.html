@@ -194,6 +194,13 @@ textarea.form-control { min-height: 240px; resize: vertical; line-height: 1.65; 
       <div class="form-hint">活動日期還沒到、又有填這裡的話，記者問答只會用這份內容回答，不會提前給正式新聞稿全文或活動照片。活動當天起自動改回正常回答，不用手動切換。留空則沒有這層限制。</div>
     </div>
     <div class="form-group">
+      <label><i class="ti ti-list-details"></i> 活動前快速提問（選填，每行一題）</label>
+      <textarea class="form-control" id="input-invite-letter-chips" rows="4"
+        placeholder="邀請函內容是什麼？&#10;採訪申請方式？&#10;活動時間地點？"
+        style="font-size:16px;min-height:auto"></textarea>
+      <div class="form-hint">活動前優先顯示這裡的快速提問按鈕，取代下面「快速問題按鈕」那組——留空則活動前也繼續用下面那組。</div>
+    </div>
+    <div class="form-group">
       <label><i class="ti ti-building"></i> 主辦單位</label>
       <input class="form-control" id="input-organizer" list="organizer-list" placeholder="工研院">
       <datalist id="organizer-list">
@@ -421,6 +428,7 @@ async function load() {
     document.getElementById('input-contact').value = ev.press_contact || '';
     document.getElementById('input-contacts').value = ev.contacts || '';
     document.getElementById('input-invite-letter').value = ev.invite_letter || '';
+    document.getElementById('input-invite-letter-chips').value = ev.invite_letter_chips || '';
     loadedStatus = ev.status || 'active';
     document.getElementById('input-status').value = loadedStatus;
     updateStatusHint();
@@ -549,7 +557,8 @@ async function save() {
         event_type: document.getElementById('input-type').value.trim(),
         press_contact: document.getElementById('input-contact').value.trim(),
         contacts: document.getElementById('input-contacts').value.trim(),
-        invite_letter: document.getElementById('input-invite-letter').value.trim()
+        invite_letter: document.getElementById('input-invite-letter').value.trim(),
+        invite_letter_chips: document.getElementById('input-invite-letter-chips').value.trim()
       })
     });
     const data = await res.json();

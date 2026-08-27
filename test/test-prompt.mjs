@@ -26,7 +26,9 @@ const base = {
   id: 'evt', name: '測試記者會', organizer: '工研院', status: 'active',
   knowledge_base: '【正式新聞稿】完整技術規格與時程…',
   images: 'https://example.com/photo.jpg',
-  invite_letter: '【邀請函】誠摯邀請貴媒體蒞臨採訪本次記者會…'
+  invite_letter: '【邀請函】誠摯邀請貴媒體蒞臨採訪本次記者會…',
+  chips: '這場的技術突破是什麼？',
+  invite_letter_chips: '邀請函內容是什麼？\n採訪申請方式？'
 };
 
 console.log('── resolveEventContent／isPreEventMode ──');
@@ -38,7 +40,14 @@ console.log('── resolveEventContent／isPreEventMode ──');
   const resolved = resolveEventContent(ev);
   eq(resolved.knowledge_base, base.invite_letter, '活動前：knowledge_base 換成邀請函內容');
   eq(resolved.images, '', '活動前：images 清空，不提前給正式照片');
+  eq(resolved.chips, base.invite_letter_chips, '活動前：chips 換成活動前快速提問（回報的意見）');
   eq(resolved.name, ev.name, '其他欄位（name）原樣保留');
+}
+
+// 活動前但沒填「活動前快速提問」→ chips 退回原本那組，不會讓按鈕整排消失
+{
+  const ev = { ...base, event_date: TOMORROW, invite_letter_chips: '' };
+  eq(resolveEventContent(ev).chips, base.chips, '活動前沒填 invite_letter_chips → chips 退回原本那組');
 }
 
 // 活動當天 → 不算活動前（嚴格晚於今天才算）

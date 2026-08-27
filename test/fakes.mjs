@@ -1,19 +1,23 @@
 // 假的 Sheets／LINE／Anthropic，給 test-flow.mjs 用。
-// events 欄位順序照 events!A2:Q：A id, B name, C color, D kb, E status, F date,
+// events 欄位順序照 events!A2:R：A id, B name, C color, D kb, E status, F date,
 // G chips, H images, I greeting, J organizer, K edit_code, L time, M venue, N type,
-// O press_contact, P contacts（邀訪窗口分工）, Q invite_letter（媒體邀請函）
+// O press_contact, P contacts（邀訪窗口分工）, Q invite_letter（媒體邀請函）,
+// R invite_letter_chips（活動前快速提問）
 export const state = {
   events: [
     ['quad', '經濟部四足機器人國產研發平台發表記者會', '#0F9E7A', '【新聞稿】四足機器人…', 'ended', '2026-08-08', '重點\n應用', '', '', '工研院', 'code1', '', '', '', '王小明 03-1111111',
-      '技術規格｜陳美玲｜03-1111111 分機9999｜lineid_amy\n新聞稿｜王小明｜03-1111111 分機1234', ''],
-    ['semi', '半導體先進封裝技術發表會', '#0F9E7A', '【新聞稿】先進封裝…', 'active', '2026-09-20', '', '', '', '工研院', 'code2', '', '', '', '陳大文 03-2222222 分機5678', '', ''],
-    ['med', '智慧醫療解決方案記者會', '#0F9E7A', '【新聞稿】智慧醫療…', 'active', '2026-10-01', '', '', '', '工研院', 'code3', '', '', '', '', '', ''],
+      '技術規格｜陳美玲｜03-1111111 分機9999｜lineid_amy\n新聞稿｜王小明｜03-1111111 分機1234', '', ''],
+    ['semi', '半導體先進封裝技術發表會', '#0F9E7A', '【新聞稿】先進封裝…', 'active', '2026-09-20', '', '', '', '工研院', 'code2', '', '', '', '陳大文 03-2222222 分機5678', '', '', ''],
+    ['med', '智慧醫療解決方案記者會', '#0F9E7A', '【新聞稿】智慧醫療…', 'active', '2026-10-01', '', '', '', '工研院', 'code3', '', '', '', '', '', '', ''],
     // 活動日期動態算「明天」，配合媒體邀請函測試（見 test-flow.mjs 情境 14）——不能寫死
     // 日期字串，不然這個 fixture 過幾個月就會變成「已過期」，測試會跟著失效。
+    // chips（G 欄）刻意填一題「活動內容」問句，invite_letter_chips（R 欄）刻意填一題
+    // 完全不同的「邀請函」問句——這樣才測得出來活動前記者看到的按鈕真的換了一組，
+    // 不是剛好兩組長一樣。
     ['soon', '奈米材料前瞻應用發表會', '#0F9E7A', '【正式新聞稿】完整技術規格與時程…', 'active',
       (() => { const d = new Date(); d.setDate(d.getDate() + 1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; })(),
-      '', 'https://example.com/photo.jpg', '', '工研院', 'code4', '', '', '', '',
-      '', '【邀請函】誠摯邀請貴媒體蒞臨採訪本次記者會…']
+      '這場的技術突破是什麼？', 'https://example.com/photo.jpg', '', '工研院', 'code4', '', '', '', '',
+      '', '【邀請函】誠摯邀請貴媒體蒞臨採訪本次記者會…', '邀請函內容是什麼？\n採訪申請方式？']
   ],
   bindings: new Map(),
   staff: [],                 // line_staff!A2:D 的列：userId | name | authorized_at | note
@@ -68,7 +72,7 @@ export const sheets = {
   async updateRange(range, values) {
     if (range === 'contacts_directory!A2') { state.contactsDirectory = values[0][0]; return; }
     // events!K12 這種單欄寫入（補編輯碼）。A=0 起算，K 是索引 10。
-    const evM = range.match(/^events!([A-Q])(\d+)(?::([A-Q])(\d+))?$/);
+    const evM = range.match(/^events!([A-R])(\d+)(?::([A-R])(\d+))?$/);
     if (evM) {
       const row = state.events[Number(evM[2]) - 2];
       if (row) values[0].forEach((v, i) => { row[evM[1].charCodeAt(0) - 65 + i] = v; });

@@ -19,6 +19,7 @@ import { readRange, appendRows, updateRange, ensureSheets } from '../lib/sheets.
 import { generateId, generateEditCode } from '../lib/ids.js';
 import { del } from '@vercel/blob';
 import { CONTACTS_DIR_RANGE, ensureContactsDirectorySheet } from '../lib/contacts-directory.js';
+import { resolveEventContent } from '../lib/prompt.js';
 
 // 跟 events 的 knowledge_base 同一個上限理由：Google Sheets 單一儲存格上限約 5 萬字元，
 // 這份清單目前十幾行遠遠用不到，留餘裕只是避免同仁哪天貼了整份含備註的原始文件進來。
@@ -32,7 +33,8 @@ const CONTACTS_DIR_MAX_LEN = 20000;
 //                 這支只負責存取原始字串，解析邏輯在 api/line.js 的 parseEventContacts()）
 //               Q invite_letter（媒體邀請函；活動日期還沒到時，問答只用這份內容回答，
 //                 不給正式新聞稿與照片——解析邏輯在 lib/prompt.js 的 resolveEventContent()）
-const RANGE = 'events!A2:Q';
+//               R invite_letter_chips（活動前快速提問；沒填就退回 G 欄原本的 chips）
+const RANGE = 'events!A2:R';
 
 // Google Sheets 單一儲存格上限約 5 萬字元；留一點餘裕避免踩線寫入失敗
 const KB_MAX_LEN = 45000;
@@ -68,7 +70,8 @@ function buildContentRow(existing, b) {
     pick(b.event_type, 13, ''),                     // N event_type
     pick(b.press_contact, 14, ''),                  // O press_contact
     pick(b.contacts, 15, ''),                       // P contacts（邀訪窗口分工）
-    pick(b.invite_letter, 16, '')                   // Q invite_letter（媒體邀請函）
+    pick(b.invite_letter, 16, ''),                  // Q invite_letter（媒體邀請函）
+    pick(b.invite_letter_chips, 17, '')             // R invite_letter_chips（活動前快速提問）
   ];
 }
 
@@ -106,11 +109,21 @@ export default async function handler(req, res) {
         const row = rows.find(r => r[0] === id);
         // draft 尚未對外公開，跟 archived 一樣視為不存在——不能讓記者用網址直接看到還沒發布的場次
         if (!row || row[4] === 'archived' || row[4] === 'draft') return res.status(404).json({ error: '活動不存在' });
+        // 活動前只給邀請函對應的 chips／images（見 lib/prompt.js resolveEventContent()
+        // 的說明）——public/event.html 直接顯示 event.chips／event.images，AI 問答那邊
+        // 擋了但這個公開頁面沒擋的話，官方照片一樣會在活動前被看到，等於防了一半。
+        // invite_letter／invite_letter_chips 原始文字不外送：這個端點只需要「已經算好」
+        // 的 chips／images，公開頁面不會直接顯示邀請函全文本身。
+        const { invite_letter, invite_letter_chips, ...publicFields } = resolveEventContent({
+          status: row[4] || 'active', event_date: row[5] || '',
+          chips: row[6] || '', images: row[7] || '',
+          invite_letter: row[16] || '', invite_letter_chips: row[17] || ''
+        });
         return res.status(200).json({
           event: {
             id: row[0], name: row[1], color: row[2] || '#0F9E7A',
-            status: row[4] || 'active', created_at: row[5] || '', event_date: row[5] || '',
-            chips: row[6] || '', images: row[7] || '', greeting: row[8] || '',
+            status: publicFields.status, created_at: row[5] || '', event_date: publicFields.event_date,
+            chips: publicFields.chips, images: publicFields.images, greeting: row[8] || '',
             event_time: row[11] || '', venue: row[12] || '', event_type: row[13] || '', press_contact: row[14] || '',
             contacts: row[15] || ''
           }
@@ -130,7 +143,7 @@ export default async function handler(req, res) {
           knowledge_base: row[3] || '', status: row[4] || 'active', created_at: row[5] || '', event_date: row[5] || '',
           chips: row[6] || '', images: row[7] || '', greeting: row[8] || '', organizer: row[9] || '工研院',
           event_time: row[11] || '', venue: row[12] || '', event_type: row[13] || '', press_contact: row[14] || '',
-          contacts: row[15] || '', invite_letter: row[16] || ''
+          contacts: row[15] || '', invite_letter: row[16] || '', invite_letter_chips: row[17] || ''
         };
         // 「以既有活動為範本」：同仁已用自己這一場的 edit_code 通過驗證，即視為可信的內部同仁，
         // 可再指定 copy_from 帶出另一場活動的知識庫供複製參考——跟後台管理員版的複製範本邏輯一致，
@@ -158,7 +171,7 @@ export default async function handler(req, res) {
           chips: row[6] || '', images: row[7] || '', greeting: row[8] || '', organizer: row[9] || '工研院',
           edit_code: row[10] || '',
           event_time: row[11] || '', venue: row[12] || '', event_type: row[13] || '', press_contact: row[14] || '',
-          contacts: row[15] || '', invite_letter: row[16] || ''
+          contacts: row[15] || '', invite_letter: row[16] || '', invite_letter_chips: row[17] || ''
         });
       }
 
@@ -241,14 +254,14 @@ export default async function handler(req, res) {
           return res.status(400).json({ error: '狀態值不正確' });
         }
         const updated = buildContentRow(existing, body);
-        await updateRange(`events!A${rowIndex + 2}:Q${rowIndex + 2}`, [updated]);
+        await updateRange(`events!A${rowIndex + 2}:R${rowIndex + 2}`, [updated]);
         return res.status(200).json({ success: true });
       }
 
       // ── 以下皆需管理員密碼 ────────────────────────────────────────────
       const {
         password, id, name, color, knowledge_base, chips, status, images, event_date, greeting, organizer,
-        event_time, venue, event_type, press_contact, contacts, invite_letter
+        event_time, venue, event_type, press_contact, contacts, invite_letter, invite_letter_chips
       } = body;
       if (password !== adminPassword) return res.status(401).json({ error: '密碼錯誤' });
       if (knowledge_base !== undefined && String(knowledge_base).length > KB_MAX_LEN) {
@@ -266,10 +279,11 @@ export default async function handler(req, res) {
         // 預設 draft（未發布）：新活動先只在後台看得到，記者前台、公開列表都查不到，
         // 按活動卡片上的「發布」（其實是 action=update 帶 status=active）之後才對外開放。
         const initialStatus = status || 'draft';
-        await appendRows('events!A:Q', [[
+        await appendRows('events!A:R', [[
           newId, name, color || '#0F9E7A', knowledge_base || '', initialStatus, created_at,
           chips || '', images || '', greeting || '', organizer || '工研院', editCode,
-          event_time || '', venue || '', event_type || '', press_contact || '', contacts || '', invite_letter || ''
+          event_time || '', venue || '', event_type || '', press_contact || '', contacts || '',
+          invite_letter || '', invite_letter_chips || ''
         ]]);
         return res.status(200).json({ success: true, id: newId, edit_code: editCode, status: initialStatus });
       }
@@ -297,9 +311,10 @@ export default async function handler(req, res) {
           event_type !== undefined ? event_type : (existing[13] || ''),
           press_contact !== undefined ? press_contact : (existing[14] || ''),
           contacts !== undefined ? contacts : (existing[15] || ''),
-          invite_letter !== undefined ? invite_letter : (existing[16] || '')
+          invite_letter !== undefined ? invite_letter : (existing[16] || ''),
+          invite_letter_chips !== undefined ? invite_letter_chips : (existing[17] || '')
         ];
-        await updateRange(`events!A${rowIndex + 2}:Q${rowIndex + 2}`, [updated]);
+        await updateRange(`events!A${rowIndex + 2}:R${rowIndex + 2}`, [updated]);
         return res.status(200).json({ success: true, edit_code: updated[10] });
       }
 
@@ -322,9 +337,9 @@ export default async function handler(req, res) {
 
         const updated = [
           e[0], e[1], e[2], e[3], 'archived', e[5], e[6] || '', '', e[8] || '', e[9] || '工研院', e[10] || '',
-          e[11] || '', e[12] || '', e[13] || '', e[14] || '', e[15] || '', e[16] || ''
+          e[11] || '', e[12] || '', e[13] || '', e[14] || '', e[15] || '', e[16] || '', e[17] || ''
         ];
-        await updateRange(`events!A${rowIndex + 2}:Q${rowIndex + 2}`, [updated]);
+        await updateRange(`events!A${rowIndex + 2}:R${rowIndex + 2}`, [updated]);
         return res.status(200).json({ success: true });
       }
 
