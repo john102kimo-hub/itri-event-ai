@@ -7,7 +7,10 @@ export const state = {
     ['semi', '半導體先進封裝技術發表會', '#0F9E7A', '【新聞稿】先進封裝…', 'active', '2026-09-20', '', '', '', '工研院', 'code2', '', '', '', ''],
     ['med', '智慧醫療解決方案記者會', '#0F9E7A', '【新聞稿】智慧醫療…', 'active', '2026-10-01', '', '', '', '工研院', 'code3', '', '', '', '']
   ],
-  bindings: new Map()
+  bindings: new Map(),
+  staff: [],                 // line_staff!A2:D 的列：userId | name | authorized_at | note
+  richMenus: [],             // listRichMenus() 回傳的 [{richMenuId, name}]
+  linkedMenus: new Map()     // userId → richMenuId（per-user 連結）
 };
 export const sent = [];
 
@@ -15,6 +18,9 @@ export const sent = [];
 // 碰不到，由 test-flow.mjs 的 freshModule() 重新 import 整支模組來清。
 export function reset() {
   state.bindings.clear();
+  state.staff.length = 0;
+  state.richMenus.length = 0;
+  state.linkedMenus.clear();
   sent.length = 0;
 }
 
@@ -29,14 +35,22 @@ export const sheets = {
   async readRange(range) {
     if (range.startsWith('events!')) return state.events.map(r => [...r]);
     if (range.startsWith('line_users!')) return bindingRows();
+    if (range.startsWith('line_staff!')) return state.staff.map(r => [...r]);
     return [];
   },
   async appendRows(range, rows) {
     if (range.startsWith('line_users!')) {
       for (const r of rows) state.bindings.set(r[0], { event_id: r[1], media_name: r[2], bound_at: Number(r[3]), note: r[5] });
     }
+    if (range.startsWith('line_staff!')) state.staff.push(...rows.map(r => [...r]));
   },
   async updateRange(range, values) {
+    const staffM = range.match(/^line_staff!([A-D])(\d+)(?::([A-D])(\d+))?$/);
+    if (staffM) {
+      const row = state.staff[Number(staffM[2]) - 2];
+      if (row) values[0].forEach((v, i) => { row[staffM[1].charCodeAt(0) - 65 + i] = v; });
+      return;
+    }
     const m = range.match(/^line_users!([A-F])(\d+)(?::([A-F])(\d+))?$/);
     if (!m) return;
     const rowNum = Number(m[2]);
@@ -60,15 +74,20 @@ export const sheets = {
 
 // ── lib/line.js（只換掉會對外送東西的那幾支）─────────────────────────
 export const line = {
-  async replyOrPush(replyToken, userId, text) { sent.push({ kind: 'text', text }); return true; },
+  async replyOrPush(replyToken, userId, text, quickReplyItems) {
+    sent.push({ kind: 'text', text, quickReply: quickReplyItems || [] });
+    return true;
+  },
   async replyOrPushMessages(replyToken, userId, messages) { sent.push({ kind: 'flex', messages }); return true; },
   async startLoading() {},
   async pushImages() { return { ok: true, skipped: true }; },
   async createRichMenu() { return 'rm_fake'; },
   async uploadRichMenuImage() { return true; },
   async setDefaultRichMenu() { return true; },
-  async listRichMenus() { return []; },
+  async listRichMenus() { return state.richMenus; },
   async deleteRichMenu() { return true; },
+  async linkRichMenuToUser(userId, id) { state.linkedMenus.set(userId, id); return true; },
+  async unlinkRichMenuFromUser(userId) { state.linkedMenus.delete(userId); return true; },
   async getProfile() { return null; }
 };
 

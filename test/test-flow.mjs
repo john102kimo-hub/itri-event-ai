@@ -125,5 +125,56 @@ sent.length = 0;
 check('加好友 → 送 Flex 歡迎圖卡', sent[0]?.kind === 'flex', JSON.stringify(sent));
 check('圖卡有 altText', typeof sent[0]?.messages?.[0]?.altText === 'string' && sent[0].messages[0].altText.length > 0);
 
+// ── 情境 6：職員模式登入／退出 ──────────────────────────────────────
+// 「退出職員模式」原本會被 AI 路由判成 other、只回一份能力清單，永遠退不出去。
+process.env.LINE_STAFF_PASSCODE = 'openseasame';
+const { STAFF_MENU, REPORTER_MENU } = await import('../lib/menu.js');
+
+reset(); await freshModule();
+state.richMenus.push(
+  { richMenuId: 'rm_reporter', name: REPORTER_MENU.name },
+  { richMenuId: 'rm_staff', name: STAFF_MENU.name }
+);
+
+out = await send('openseasame', 'U_staff');
+check('講對密語 → 進入職員模式', /職員模式已啟用/.test(out[0]?.text || ''), JSON.stringify(out));
+check('登入時把下方選單換成職員版', state.linkedMenus.get('U_staff') === 'rm_staff',
+  String(state.linkedMenus.get('U_staff')));
+check('職員快速回覆按鈕涵蓋全部功能（不再只有兩顆）',
+  (sent[0]?.quickReply || []).length >= 6, JSON.stringify(sent[0]?.quickReply));
+
+out = await send('退出職員模式', 'U_staff');
+check('「退出職員模式」真的退出，不是回一份能力清單',
+  /已退出職員模式/.test(out[0]?.text || ''), JSON.stringify(out));
+check('line_staff 標記 revoked（保留稽核軌跡，不刪列）',
+  state.staff.length === 1 && state.staff[0][3] === 'revoked', JSON.stringify(state.staff));
+check('解除個人選單連結 → 落回記者選單', !state.linkedMenus.has('U_staff'));
+
+// 退出後就是一般記者
+out = await send('最近活動', 'U_staff');
+check('退出後「最近活動」走記者路徑', /近期活動|近期已結束/.test(out[0]?.text || ''), JSON.stringify(out));
+
+// 其他講法也要能退出
+for (const phrase of ['離開職員模式', '登出', '退出職員身分']) {
+  reset(); await freshModule();
+  state.staff.push(['U_s2', '', '2026-08-27', '']);
+  out = await send(phrase, 'U_s2');
+  check(`「${phrase}」也要能退出`, /已退出職員模式/.test(out[0]?.text || ''), JSON.stringify(out));
+}
+
+// 退出後重新輸入密語要能復權，而且不能長出第二列
+reset(); await freshModule();
+state.staff.push(['U_s3', '小明', '2026-08-27', 'revoked']);
+out = await send('openseasame', 'U_s3');
+check('退出後重新輸入密語 → 復權', /職員模式已啟用/.test(out[0]?.text || ''), JSON.stringify(out));
+check('復權是改原本那列，不是再 append 一列',
+  state.staff.length === 1 && state.staff[0][3] === '', JSON.stringify(state.staff));
+
+// 一般記者打「退出」不能誤觸任何東西
+reset(); await freshModule();
+state.bindings.set('U_reporter', { event_id: 'quad', media_name: '', note: '', bound_at: Date.now() });
+out = await send('退出');
+check('記者打「退出」不會被當成職員指令', out[0]?.kind === 'answer', JSON.stringify(out));
+
 console.log(`\n${fail === 0 ? '✅' : '❌'} 流程測試通過 ${pass}／失敗 ${fail}`);
 process.exit(fail === 0 ? 0 : 1);

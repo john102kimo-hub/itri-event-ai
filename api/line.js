@@ -30,17 +30,19 @@ import { readRange, appendRows, updateRange, ensureSheets } from '../lib/sheets.
 import { buildSystemPrompt } from '../lib/prompt.js';
 import {
   readRawBody, verifySignature, replyOrPush, replyOrPushMessages, startLoading, pushImages,
-  createRichMenu, uploadRichMenuImage, setDefaultRichMenu, listRichMenus, deleteRichMenu
+  createRichMenu, uploadRichMenuImage, setDefaultRichMenu, listRichMenus, deleteRichMenu,
+  linkRichMenuToUser, unlinkRichMenuFromUser
 } from '../lib/line.js';
 import { buildCalendarCards, buildAllCalendarCards, routeIntent, formatCalendarReply, calendarQuickReplyItems } from '../lib/router.js';
 import {
   detectMetaIntent, matchEventByName, HELP_TEXT, buildWelcomeFlex,
-  buildRichMenuDefinition, RICH_MENU_BUTTONS
+  buildRichMenuDefinition, ALL_MENUS, REPORTER_MENU, STAFF_MENU
 } from '../lib/menu.js';
 import {
   isPasscodeMatch, isStaffAuthenticated, authenticateStaff, routeStaffIntent,
   createDraftEvent, editLink, trainingLink, getEventEditCode, getEventRawById,
-  getEventAnalyticsSummary, formatEventAnalyticsReply, getGeoStatusSummary, formatGeoStatusReply
+  getEventAnalyticsSummary, formatEventAnalyticsReply, getGeoStatusSummary, formatGeoStatusReply,
+  isExitStaffCommand, revokeStaff, listActiveStaffIds
 } from '../lib/staff.js';
 
 const EVENTS_RANGE = 'events!A2:O';
@@ -296,33 +298,75 @@ async function answerQuestion(replyToken, userId, event, mediaName, text) {
 // 也不會讓每次 webhook 的冷啟動多背一個 73KB 的檔案。
 const SITE = 'https://itri-event-ai.vercel.app';
 
+// 職員的快速回覆按鈕。LINE 上限 13 顆，這裡用 7 顆——圖文選單那六格全部列出來
+// （選單被收起來時仍然點得到），再加「設定圖文選單」這顆選單本身放不進去的。
+// 原本只給兩顆（活動列表／GEO 狀態），其餘功能同仁得自己知道要打什麼才用得到，
+// 等於功能做了卻沒人找得到。
+const STAFF_QUICK_REPLIES = [...STAFF_MENU.buttons.map(b => b.text), '設定圖文選單'];
+
+// 職員登入／設定選單時要拿到職員選單的 id。不另外存一份到試算表——選單本來就有
+// name 欄位，用它反查即可，少一個會跟 LINE 那邊不同步的狀態。
+async function findRichMenuIdByName(name) {
+  const menus = await listRichMenus();
+  return menus.find(m => m.name === name)?.richMenuId || null;
+}
+
+// 把某個 userId 換成職員選單。整段包在 try 裡：選單是體驗加分，綁失敗不能讓
+// 「密語登入」這件事本身失敗——他仍然是職員，只是先看到記者選單而已。
+async function applyStaffMenu(userId) {
+  try {
+    const id = await findRichMenuIdByName(STAFF_MENU.name);
+    if (!id) return; // 還沒跑過「設定圖文選單」，正常情況，不用吵
+    await linkRichMenuToUser(userId, id);
+  } catch (e) {
+    console.error('綁定職員選單失敗（不影響職員身分）:', e.message);
+  }
+}
+
 async function handleSetupRichMenu(replyToken, userId) {
   if (!process.env.LINE_CHANNEL_ACCESS_TOKEN) {
     await replyOrPush(replyToken, userId, '尚未設定 LINE_CHANNEL_ACCESS_TOKEN，無法建立圖文選單。');
     return;
   }
-  await startLoading(userId, 30);
+  await startLoading(userId, 45);
 
   try {
-    const imgRes = await fetch(`${SITE}/richmenu.png`);
-    if (!imgRes.ok) throw new Error(`抓取底圖失敗 ${imgRes.status}`);
-    const image = Buffer.from(await imgRes.arrayBuffer());
-
-    // 先記下現有的，等新選單確定上線後才刪——順序反過來的話，中間只要有一步失敗，
-    // 記者就會看到一個完全沒有選單的帳號。
+    // 先記下現有的，等新選單全部確定上線後才刪——順序反過來的話，中間只要有一步
+    // 失敗，記者就會看到一個完全沒有選單的帳號。
     const before = await listRichMenus();
 
-    const richMenuId = await createRichMenu(buildRichMenuDefinition());
-    await uploadRichMenuImage(richMenuId, image, 'image/png');
-    await setDefaultRichMenu(richMenuId);
-
-    for (const old of before) {
-      if (old.richMenuId && old.richMenuId !== richMenuId) await deleteRichMenu(old.richMenuId);
+    const created = {};
+    for (const menu of ALL_MENUS) {
+      const imgRes = await fetch(`${SITE}/richmenu-${menu.key}.png`);
+      if (!imgRes.ok) throw new Error(`抓取 ${menu.name} 底圖失敗 ${imgRes.status}`);
+      const id = await createRichMenu(buildRichMenuDefinition(menu));
+      await uploadRichMenuImage(id, Buffer.from(await imgRes.arrayBuffer()), 'image/png');
+      created[menu.key] = id;
     }
 
-    console.log(`[line] 圖文選單已設定 id=${richMenuId} 清掉舊的 ${before.length} 個`);
+    // 記者選單設為預設（所有人），職員再逐一覆蓋成職員選單。
+    // per-user 連結的優先度高於預設，所以記者永遠看不到「新增活動」「後台數據」
+    // 這些內部功能的入口。
+    await setDefaultRichMenu(created[REPORTER_MENU.key]);
+
+    const staffIds = await listActiveStaffIds();
+    let linked = 0;
+    for (const sid of staffIds) {
+      try { await linkRichMenuToUser(sid, created[STAFF_MENU.key]); linked++; }
+      catch (e) { console.error(`綁定職員選單失敗 user=${sid}:`, e.message); }
+    }
+
+    const keep = new Set(Object.values(created));
+    for (const old of before) {
+      if (old.richMenuId && !keep.has(old.richMenuId)) await deleteRichMenu(old.richMenuId);
+    }
+
+    console.log(`[line] 圖文選單已設定 ${JSON.stringify(created)} 職員綁定 ${linked}/${staffIds.length} 清掉舊的 ${before.length} 個`);
     await replyOrPush(replyToken, userId,
-      `圖文選單已設定完成 ✅\n\n記者的聊天室下方現在會出現三顆按鈕：\n${RICH_MENU_BUTTONS.map(b => `・${b.label}（${b.sub}）`).join('\n')}\n\n已經加過好友的人可能要把對話關掉重開才會看到。`);
+      '圖文選單已設定完成 ✅\n\n' +
+      `【記者看到的】\n${REPORTER_MENU.buttons.map(b => `・${b.label}`).join('\n')}\n\n` +
+      `【職員看到的】（已套用到 ${linked} 位職員）\n${STAFF_MENU.buttons.map(b => `・${b.label}`).join('\n')}\n\n` +
+      '記者不會看到職員那一套。已經加過好友的人可能要把對話關掉重開才會看到。');
   } catch (e) {
     console.error('設定圖文選單失敗:', e.message);
     await replyOrPush(replyToken, userId, `設定圖文選單失敗：${e.message}\n\n請確認 LINE_CHANNEL_ACCESS_TOKEN 有效，且網站已部署最新版本。`);
@@ -335,6 +379,19 @@ async function handleSetupRichMenu(replyToken, userId) {
 //     內容），鎖定單一活動反而綁手綁腳
 //   - 多了 geo_status／event_analytics／create_event／training_link 四種指令
 async function handleStaffMessage(replyToken, userId, text) {
+  // ⚠️ 退出一定要在 routeStaffIntent() 之前用字面比對攔下來。交給 AI 判意圖會被歸到
+  // 'other'，使用者只會拿到一份能力清單、永遠退不出去（實際回報過的狀況）。
+  // 權限的關閉不該取決於模型當下判得準不準。
+  if (isExitStaffCommand(text)) {
+    await revokeStaff(userId);
+    await unlinkRichMenuFromUser(userId); // 解除個人連結 → 自動落回記者選單
+    console.log(`[line] 職員退出 user=${userId}`);
+    await replyOrPush(replyToken, userId,
+      '已退出職員模式 ✅\n\n您現在跟一般記者看到的一樣，下方選單也換回記者版。\n要再進來，重新輸入一次密語即可。',
+      ['最近有哪些活動', '使用說明']);
+    return;
+  }
+
   const rows = await getAllEventRows();
   // 職員要用「全部場次」的候選清單，不能用記者版的 buildCalendarCards()——
   // 那支會濾掉 draft／archived，職員問得到的場次卻不在候選清單裡，路由回傳的
@@ -414,8 +471,10 @@ async function handleStaffMessage(replyToken, userId, text) {
   }
 
   await replyOrPush(replyToken, userId,
-    '職員模式可以問：活動列表／某場活動內容／某場後台數據／GEO 狀態／新增活動（會給編輯連結）／某場媒體訓練連結／設定圖文選單。直接打活動名稱或說明需求即可。',
-    ['最近有哪些活動', 'GEO現在狀況', '設定圖文選單']);
+    '職員模式可以做這些事（下面按鈕直接點，或用講的也可以）：\n' +
+    STAFF_MENU.buttons.map(b => `・${b.label}——${b.sub}`).join('\n') +
+    '\n・某場活動內容——直接打活動名稱\n・設定圖文選單——重設下方選單',
+    STAFF_QUICK_REPLIES);
 }
 
 // ── 「跳出本場」意圖（活動列表／換一場／使用說明）─────────────────────
@@ -573,10 +632,11 @@ async function handleEvent(ev) {
       return;
     }
     const { displayName } = await authenticateStaff(userId);
+    await applyStaffMenu(userId); // 下方選單換成職員版
     console.log(`[line] 新職員登入 user=${userId} name=${displayName || '(無)'}`);
     await replyOrPush(replyToken, userId,
-      `職員模式已啟用${displayName ? `，${displayName} 您好` : ''}！\n\n可以問我：活動列表／某場活動內容／某場後台數據／GEO 狀態／新增活動（直接給您同仁編輯連結）／某場媒體訓練連結／設定圖文選單。\n\n您的 LINE ID：${userId}\n（想在「有新的人用密語登入」時收到通知，把這組 ID 設成 LINE_ADMIN_USER_ID 環境變數即可）`,
-      ['最近有哪些活動', 'GEO現在狀況', '設定圖文選單']);
+      `職員模式已啟用${displayName ? `，${displayName} 您好` : ''}！\n\n下方選單已換成職員版，也可以直接用講的。\n\n您的 LINE ID：${userId}\n（想在「有新的人用密語登入」時收到通知，把這組 ID 設成 LINE_ADMIN_USER_ID 環境變數即可）`,
+      STAFF_QUICK_REPLIES);
     return;
   }
   if (await isStaffAuthenticated(userId)) {

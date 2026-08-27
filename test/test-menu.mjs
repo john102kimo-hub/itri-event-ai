@@ -1,4 +1,8 @@
-import { detectMetaIntent, matchEventByName, buildWelcomeFlex, buildRichMenuDefinition, RICH_MENU_BUTTONS } from '../lib/menu.js';
+import {
+  detectMetaIntent, matchEventByName, buildWelcomeFlex, buildRichMenuDefinition,
+  ALL_MENUS, REPORTER_MENU, STAFF_MENU
+} from '../lib/menu.js';
+import { isExitStaffCommand } from '../lib/staff.js';
 
 let pass = 0, fail = 0;
 function eq(actual, expected, label) {
@@ -91,15 +95,45 @@ eq(btnTexts, ['最近有哪些活動', '使用說明'], '按鈕送出的文字')
 for (const t of btnTexts) eq(detectMetaIntent(t) !== null, true, `歡迎卡按鈕「${t}」要能被 detectMetaIntent 認出`);
 
 console.log('── 圖文選單定義 ──');
-const menu = buildRichMenuDefinition();
-eq(menu.size, { width: 2500, height: 843 }, '尺寸符合 LINE 精簡版規格');
-eq(menu.areas.length, 3, '三個可點區域');
-eq(menu.areas[0].bounds, { x: 0, y: 0, width: 833, height: 843 }, '第一格');
-eq(menu.areas[2].bounds.x + menu.areas[2].bounds.width, 2500, '最後一格補滿餘數、沒有點不到的空白');
-eq(menu.chatBarText.length <= 14, true, 'chatBarText 在 14 字上限內');
-for (const b of RICH_MENU_BUTTONS) {
-  eq(detectMetaIntent(b.text) !== null, true, `選單按鈕「${b.text}」要能被 detectMetaIntent 認出`);
-  eq(b.label.length <= 20, true, `選單 label「${b.label}」在 20 字上限內`);
+for (const m of ALL_MENUS) {
+  const menu = buildRichMenuDefinition(m);
+  eq(menu.size, { width: 2500, height: 1686 }, `${m.name}：尺寸符合 LINE 大版規格`);
+  eq(menu.areas.length, 6, `${m.name}：六個可點區域`);
+  eq(menu.chatBarText.length <= 14, true, `${m.name}：chatBarText 在 14 字上限內`);
+  eq(menu.areas[0].bounds, { x: 0, y: 0, width: 833, height: 843 }, `${m.name}：左上格`);
+
+  // 六格必須無縫鋪滿整張圖：有縫隙就是點了沒反應，有重疊就是按到隔壁那格
+  const covered = menu.areas.reduce((sum, a) => sum + a.bounds.width * a.bounds.height, 0);
+  eq(covered, 2500 * 1686, `${m.name}：六格剛好鋪滿 2500x1686，沒有縫隙也沒有重疊`);
+  eq(Math.max(...menu.areas.map(a => a.bounds.x + a.bounds.width)), 2500, `${m.name}：右緣補滿`);
+  eq(Math.max(...menu.areas.map(a => a.bounds.y + a.bounds.height)), 1686, `${m.name}：下緣補滿`);
+
+  for (const b of m.buttons) {
+    eq(b.label.length <= 20, true, `${m.name}：label「${b.label}」在 20 字上限內`);
+    eq(!!b.icon && !!b.sub && !!b.text, true, `${m.name}：「${b.label}」四個欄位都有值`);
+  }
+}
+
+// 按鈕送出的文字必須被對應的路由認得，否則就是「按了沒反應」
+console.log('── 選單按鈕送出的字要被路由認得 ──');
+for (const b of REPORTER_MENU.buttons) {
+  // 前三顆走 detectMetaIntent；後三顆是問該場內容的常見問題，交給既有問答路徑，
+  // 這裡只要確認它們「不會」被 meta 意圖誤攔走（誤攔的話記者永遠問不到內容）
+  const meta = detectMetaIntent(b.text);
+  const isMetaButton = ['最近有哪些活動', '換一場活動', '使用說明'].includes(b.text);
+  eq(meta !== null, isMetaButton, `記者選單「${b.label}」→ meta=${meta}（預期 ${isMetaButton ? '被攔' : '放行給問答'}）`);
+}
+eq(detectMetaIntent('退出職員模式'), null, '「退出職員模式」不能被記者的 meta 意圖攔走（那是職員指令）');
+for (const b of STAFF_MENU.buttons) {
+  eq(typeof b.text === 'string' && b.text.length > 0, true, `職員選單「${b.label}」有送出文字`);
+}
+
+console.log('── 退出職員模式的指令比對 ──');
+for (const t of ['退出職員模式', '離開職員模式', '結束職員模式', '退出職員身分', '登出', 'logout', 'exit', '關閉職員模式']) {
+  eq(isExitStaffCommand(t), true, `「${t}」應可退出`);
+}
+for (const t of ['退出', '離開', '結束', '取消', '退出這場活動', '登出後還能再登入嗎', '這個展場的出口在哪']) {
+  eq(isExitStaffCommand(t), false, `「${t}」不應被當成退出指令`);
 }
 
 console.log(`\n${fail === 0 ? '✅' : '❌'} 通過 ${pass}／失敗 ${fail}`);
