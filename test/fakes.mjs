@@ -1,13 +1,19 @@
 // 假的 Sheets／LINE／Anthropic，給 test-flow.mjs 用。
-// events 欄位順序照 events!A2:P：A id, B name, C color, D kb, E status, F date,
+// events 欄位順序照 events!A2:Q：A id, B name, C color, D kb, E status, F date,
 // G chips, H images, I greeting, J organizer, K edit_code, L time, M venue, N type,
-// O press_contact, P contacts（邀訪窗口分工）
+// O press_contact, P contacts（邀訪窗口分工）, Q invite_letter（媒體邀請函）
 export const state = {
   events: [
     ['quad', '經濟部四足機器人國產研發平台發表記者會', '#0F9E7A', '【新聞稿】四足機器人…', 'ended', '2026-08-08', '重點\n應用', '', '', '工研院', 'code1', '', '', '', '王小明 03-1111111',
-      '技術規格｜陳美玲｜03-1111111 分機9999｜lineid_amy\n新聞稿｜王小明｜03-1111111 分機1234'],
-    ['semi', '半導體先進封裝技術發表會', '#0F9E7A', '【新聞稿】先進封裝…', 'active', '2026-09-20', '', '', '', '工研院', 'code2', '', '', '', '陳大文 03-2222222 分機5678', ''],
-    ['med', '智慧醫療解決方案記者會', '#0F9E7A', '【新聞稿】智慧醫療…', 'active', '2026-10-01', '', '', '', '工研院', 'code3', '', '', '', '', '']
+      '技術規格｜陳美玲｜03-1111111 分機9999｜lineid_amy\n新聞稿｜王小明｜03-1111111 分機1234', ''],
+    ['semi', '半導體先進封裝技術發表會', '#0F9E7A', '【新聞稿】先進封裝…', 'active', '2026-09-20', '', '', '', '工研院', 'code2', '', '', '', '陳大文 03-2222222 分機5678', '', ''],
+    ['med', '智慧醫療解決方案記者會', '#0F9E7A', '【新聞稿】智慧醫療…', 'active', '2026-10-01', '', '', '', '工研院', 'code3', '', '', '', '', '', ''],
+    // 活動日期動態算「明天」，配合媒體邀請函測試（見 test-flow.mjs 情境 14）——不能寫死
+    // 日期字串，不然這個 fixture 過幾個月就會變成「已過期」，測試會跟著失效。
+    ['soon', '奈米材料前瞻應用發表會', '#0F9E7A', '【正式新聞稿】完整技術規格與時程…', 'active',
+      (() => { const d = new Date(); d.setDate(d.getDate() + 1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; })(),
+      '', 'https://example.com/photo.jpg', '', '工研院', 'code4', '', '', '', '',
+      '', '【邀請函】誠摯邀請貴媒體蒞臨採訪本次記者會…']
   ],
   bindings: new Map(),
   staff: [],                 // line_staff!A2:D 的列：userId | name | authorized_at | note
@@ -62,7 +68,7 @@ export const sheets = {
   async updateRange(range, values) {
     if (range === 'contacts_directory!A2') { state.contactsDirectory = values[0][0]; return; }
     // events!K12 這種單欄寫入（補編輯碼）。A=0 起算，K 是索引 10。
-    const evM = range.match(/^events!([A-P])(\d+)(?::([A-P])(\d+))?$/);
+    const evM = range.match(/^events!([A-Q])(\d+)(?::([A-Q])(\d+))?$/);
     if (evM) {
       const row = state.events[Number(evM[2]) - 2];
       if (row) values[0].forEach((v, i) => { row[evM[1].charCodeAt(0) - 65 + i] = v; });
@@ -133,7 +139,8 @@ export const line = {
 const EVENT_KEYWORDS = {
   quad: ['四足', '機器人', '經濟部'],
   semi: ['半導體', '封裝'],
-  med: ['醫療']
+  med: ['醫療'],
+  soon: ['奈米材料', '前瞻應用']
 };
 
 function matchEventIds(text) {
@@ -179,9 +186,11 @@ export function installFetchStub() {
       if (sys.includes('內部職員助理')) return json(fakeStaffRoute(userText));
       if (sys.includes('意圖判斷器')) return json(fakeReporterRoute(userText));
 
-      // 問答：system prompt 裡會帶該場的知識庫，從中反推是哪一場回答的
+      // 問答：system prompt 裡會帶該場的知識庫，從中反推是哪一場回答的。
+      // sys 一併存起來——媒體邀請函測試要驗證 system prompt 裡到底帶的是正式新聞稿
+      // 還是邀請函內容，不能只看「有沒有回答」。
       const ev = state.events.find(e => sys.includes(e[1]))?.[0] || 'unknown';
-      sent.push({ kind: 'answer', event: ev, text: '（假回答）' });
+      sent.push({ kind: 'answer', event: ev, text: '（假回答）', sys });
       return { ok: true, json: async () => ({ content: [{ type: 'text', text: '（假回答）' }] }) };
     }
     return { ok: false, status: 500, text: async () => '', json: async () => ({}) };

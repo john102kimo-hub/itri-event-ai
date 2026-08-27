@@ -59,13 +59,13 @@ const res = { status() { return this; }, json() { return this; }, end() { return
 async function send(text, userId) {
   sent.length = 0;
   await handler(makeReq(text, userId), res);
-  return sent.map(s => ({ kind: s.kind, text: s.text, event: s.event, quickReply: s.quickReply }));
+  return sent.map(s => ({ kind: s.kind, text: s.text, event: s.event, quickReply: s.quickReply, sys: s.sys }));
 }
 
 async function sendGroup(text, opts) {
   sent.length = 0;
   await handler(makeGroupReq(text, opts), res);
-  return sent.map(s => ({ kind: s.kind, text: s.text, event: s.event, quickReply: s.quickReply }));
+  return sent.map(s => ({ kind: s.kind, text: s.text, event: s.event, quickReply: s.quickReply, sys: s.sys }));
 }
 
 let pass = 0, fail = 0;
@@ -584,6 +584,33 @@ reset(); await freshModule();
 out = await sendGroup('@我 邀訪：生醫', { mentionSelf: true, mentionText: '@我 ' });
 check('群組裡點主題按鈕（@ 到）→ 一樣直接給聯絡窗口',
   out.length === 1 && /丁嘉琳/.test(out[0]?.text || ''), JSON.stringify(out));
+
+// ── 情境 14：媒體邀請函（活動前只給邀請函，不給正式新聞稿／照片）─────────
+// fixture 見 test/fakes.mjs 的 'soon'：活動日期是「明天」，knowledge_base 是正式
+// 新聞稿，invite_letter 是邀請函文字，兩者刻意不同，才驗證得出來 system prompt
+// 裡到底帶的是哪一份。
+
+// 記者（不管有沒有綁定，這裡走自然語言命中）問到這場 → 只看得到邀請函
+reset(); await freshModule();
+out = await send('奈米材料前瞻應用發表會的重點是什麼');
+check('活動前記者提問 → 有正常回答（沒有被卡住）',
+  out.some(o => o.kind === 'answer' && o.event === 'soon'), JSON.stringify(out));
+{
+  const answered = out.find(o => o.kind === 'answer' && o.event === 'soon');
+  check('system prompt 帶的是邀請函內容', /邀請函.*誠摯邀請貴媒體蒞臨採訪/.test(answered?.sys || ''), answered?.sys?.slice(0, 200));
+  check('system prompt 不含正式新聞稿內容', !/正式新聞稿.*完整技術規格與時程/.test(answered?.sys || ''), answered?.sys?.slice(0, 200));
+}
+
+// 職員模式問同一場 → 要看得到真正的新聞稿內容準備活動，不能被自己設的「活動前」卡住
+reset(); await freshModule();
+state.staff.push(['U_staff', '', '2026-08-27', '', '']);
+out = await send('奈米材料前瞻應用發表會的重點', 'U_staff');
+{
+  const answered = out.find(o => o.kind === 'answer' && o.event === 'soon');
+  check('職員模式有正常回答', !!answered, JSON.stringify(out));
+  check('職員模式看到的是正式新聞稿，不是邀請函（同仁要準備真正的活動內容）',
+    /正式新聞稿.*完整技術規格與時程/.test(answered?.sys || ''), answered?.sys?.slice(0, 200));
+}
 
 console.log(`\n${fail === 0 ? '✅' : '❌'} 流程測試通過 ${pass}／失敗 ${fail}`);
 process.exit(fail === 0 ? 0 : 1);
