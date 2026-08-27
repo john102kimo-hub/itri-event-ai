@@ -62,20 +62,22 @@ function html(menu) {
   .cell {
     background:#FFFFFF;
     display:flex; flex-direction:column;
-    align-items:center; justify-content:center; gap:24px;
-    padding:32px 24px;
+    align-items:center; justify-content:center; gap:20px;
+    padding:16px 12px;
     /* 格線用 inset box-shadow 畫：完全不影響版面尺寸，格子仍精準等於可點區域。
        border 會吃進寬高、gap 會多出縫隙，兩者都會破壞上面那組對齊。 */
     box-shadow:inset -2px 0 0 #E8ECEA, inset 0 -2px 0 #E8ECEA;
   }
+  /* 回報的意見：手機上看起來字跟圖都太小——縮小 padding、放大圖示與字級，讓內容
+     盡量撐滿每一格，而不是留一堆空白邊。 */
   .icon {
-    width:210px; height:210px; border-radius:50%;
+    width:280px; height:280px; border-radius:50%;
     background:#E7F6F1;
     display:flex; align-items:center; justify-content:center;
-    font-size:108px; line-height:1;
+    font-size:150px; line-height:1;
   }
-  .label { font-size:70px; font-weight:700; color:#14202E; letter-spacing:2px; text-align:center; }
-  .sub   { font-size:42px; color:#7C8794; letter-spacing:1px; text-align:center; }
+  .label { font-size:92px; font-weight:700; color:#14202E; letter-spacing:2px; text-align:center; }
+  .sub   { font-size:52px; color:#7C8794; letter-spacing:1px; text-align:center; }
   /* 頂端一條主色：圖文選單貼著聊天室下緣，這是選單與對話內容的分界 */
   body::before {
     content:""; position:fixed; top:0; left:0; right:0; height:14px;
