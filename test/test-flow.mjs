@@ -317,5 +317,65 @@ reset(); await freshModule();
     /提問太頻繁/.test(last[0]?.text || ''), JSON.stringify(last));
 }
 
+// ── 情境 9：群組的免 @ 續問視窗（實際回報的體感落差）──────────────────
+// 回報的操作：群組裡 @ 問「最近有哪些活動」拿到清單之後，接著（沒有再 @）打清單裡
+// 某場的活動名稱，完全沒反應。每則都要 @ 的規則本身沒錯，但體感是「剛剛不是才理
+// 我嗎」。修法是 GROUP_SESSION_MS 續問視窗：@ 到並回答之後，短時間內同一群組不用
+// 重新 @ 也算在跟我們對話。
+reset(); await freshModule();
+
+out = await sendGroup('@我 最近有哪些活動', { mentionSelf: true, mentionText: '@我 ' });
+check('第一步：@ 問活動列表，正常拿到清單', out[0]?.kind === 'text' && /近期活動/.test(out[0].text), JSON.stringify(out));
+
+out = await sendGroup('半導體先進封裝技術發表會', { mentionSelf: false });
+check('第二步：沒有再 @，接著打一個真的存在的活動名稱 → 續問視窗內照樣回答，不是回報時的「完全沒反應」',
+  out.length > 0 && out[0]?.kind === 'answer' && out[0].event === 'semi', JSON.stringify(out));
+
+out = await sendGroup('那合作廠商有哪些', { mentionSelf: false });
+check('第三步：續問視窗內繼續追問（已經軟綁定 semi），一樣不用 @',
+  out[0]?.kind === 'answer' && out[0].event === 'semi', JSON.stringify(out));
+
+console.log('── 續問視窗：判不出意圖時要安靜，不能沒事插話 ──');
+reset(); await freshModule();
+await sendGroup('@我 最近有哪些活動', { mentionSelf: true, mentionText: '@我 ' });
+out = await sendGroup('大家中午吃什麼', { mentionSelf: false });
+check('續問視窗內、沒有 @、又猜不出問題在問什麼 → 安靜，不會跳出「不確定您想問哪一場」插話群組聊天',
+  out.length === 0, JSON.stringify(out));
+
+console.log('── 續問視窗：非文字訊息（貼圖）安靜略過 ──');
+reset(); await freshModule();
+await sendGroup('@我 最近有哪些活動', { mentionSelf: true, mentionText: '@我 ' });
+{
+  const body = JSON.stringify({
+    events: [{ type: 'message', replyToken: 'rt_' + Math.random(), source: { type: 'group', groupId: 'Cgroup1' }, message: { type: 'sticker' } }]
+  });
+  const req = new EventEmitter();
+  req.method = 'POST';
+  req.headers = { 'x-line-signature': createHmac('sha256', 'testsecret').update(Buffer.from(body)).digest('base64') };
+  setImmediate(() => { req.emit('data', Buffer.from(body)); req.emit('end'); });
+  sent.length = 0;
+  await handler(req, res);
+  check('續問視窗內傳貼圖（非文字）→ 安靜略過，不會亂回', sent.length === 0, JSON.stringify(sent));
+}
+
+console.log('── 續問視窗：超過時間就失效，退回一定要 @ ──');
+reset(); await freshModule();
+await sendGroup('@我 最近有哪些活動', { mentionSelf: true, mentionText: '@我 ' });
+state.bindings.get('Cgroup1').groupSessionUntil = Date.now() - 1000; // 模擬視窗已過期
+out = await sendGroup('半導體先進封裝技術發表會', { mentionSelf: false });
+check('視窗過期後，沒 @ 的訊息又變回完全不回應', out.length === 0, JSON.stringify(out));
+
+console.log('── 續問視窗：只有真的 @ 到／回答成功才續命，不是每個事件都續 ──');
+reset(); await freshModule();
+await sendGroup('@我 最近有哪些活動', { mentionSelf: true, mentionText: '@我 ' });
+check('第一次 @ 之後有建立續問視窗', state.bindings.get('Cgroup1')?.groupSessionUntil > Date.now(),
+  JSON.stringify(state.bindings.get('Cgroup1')));
+
+// 1 對 1（非群組）完全不受這個機制影響——沒有 mention 概念，本來每則就都算在對我們講話
+reset(); await freshModule();
+state.bindings.set('U_reporter', { event_id: 'quad', media_name: '', note: '', bound_at: Date.now() });
+out = await send('這場的重點是什麼');
+check('1 對 1 完全不受群組續問視窗機制影響，維持原本行為', out[0]?.kind === 'answer' && out[0].event === 'quad', JSON.stringify(out));
+
 console.log(`\n${fail === 0 ? '✅' : '❌'} 流程測試通過 ${pass}／失敗 ${fail}`);
 process.exit(fail === 0 ? 0 : 1);

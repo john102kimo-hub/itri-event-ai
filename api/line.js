@@ -52,7 +52,10 @@ import {
 } from '../lib/staff.js';
 
 const EVENTS_RANGE = 'events!A2:O';
-const LINE_USERS_RANGE = 'line_users!A2:F';
+// line_user_id | event_id | media_name | bound_at | last_active | note | group_session_until
+// G 欄只有群組會用到（1 對 1 每則訊息本來就都是對我們講的，不需要這個概念），見
+// getGroupSessionUntil()／touchGroupSession() 的說明。
+const LINE_USERS_RANGE = 'line_users!A2:G';
 const BIND_TTL_MS = 6 * 60 * 60 * 1000; // 6 小時；沒有這個 TTL，記者三個月後問別場會被鎖在當初掃的那一場
 const CACHE_TTL_MS = 60 * 1000; // 跟 api/chat.js 的 eventCache 同一套邏輯
 
@@ -118,7 +121,7 @@ let sheetsEnsured = false;
 async function ensureLineUsersSheet() {
   if (sheetsEnsured) return;
   try {
-    await ensureSheets({ line_users: ['line_user_id', 'event_id', 'media_name', 'bound_at', 'last_active', 'note'] });
+    await ensureSheets({ line_users: ['line_user_id', 'event_id', 'media_name', 'bound_at', 'last_active', 'note', 'group_session_until'] });
   } catch (e) {
     console.error('ensureSheets(line_users) 失敗:', e.message);
   }
@@ -188,6 +191,59 @@ async function clearBinding(userId) {
     await updateRange(`line_users!D${idx + 2}:F${idx + 2}`, [['', String(Date.now()), '']]);
   } catch (e) {
     console.error('clearBinding 失敗:', e.message);
+  } finally {
+    invalidateLineUsersCache();
+  }
+}
+
+// ── 群組的「還算不算在跟我們對話」──────────────────────────────────────
+// 實際回報的情況：在群組裡 @ 了我們一次、拿到活動清單之後，接著（沒有再 @）打了
+// 清單裡某場的名稱，完全沒反應——因為當時的規則是「每一則都要 @」，這則沒 @ 到
+// 就被 handleGroupEvent 安靜擋掉了。規則本身沒有邏輯錯誤，但體感是「剛剛不是才
+// 理我嗎，怎麼問下去就不理了」。
+//
+// 解法是給一個很短的「對話還算活著」的時間窗：被 @ 到並且我們真的回答了之後，
+// 接下來 GROUP_SESSION_MS 之內，同一個群組不用 @ 也會被當作還在跟我們講話；
+// 超過時間窗，或這段期間都沒人開口，就退回「一定要 @」的預設安全模式。
+//
+// ⚠️ 這個「session」刻意跟活動綁定（bound_at／event_id，TTL 6 小時）分開存在
+// 獨立的 G 欄，不能共用同一個時間戳：
+//   - 活動綁定管的是「這個群組現在問的是哪一場」，就算沒人 @、只要在 6 小時內
+//     持續問同一場都有效，日期抓比較長
+//   - session 管的是「剛剛是不是才被 @ 過」，只有幾分鐘，用來讓使用者不用每一句
+//     都重新 @——沒有活動綁定時 getBinding() 會回傳 { event_id: '' }，把兩者混在
+//     同一欄會讓「還沒問過任何一場」的群組被誤判成「綁定了一個空字串的活動」，
+//     answerQuestion() 拿到空 event_id 直接找不到活動、整個掛掉。
+const GROUP_SESSION_MS = 5 * 60 * 1000; // 5 分鐘：夠讀完清單、想一下、再打字問下一句
+
+async function getGroupSessionUntil(groupId) {
+  try {
+    const rows = await readRange(LINE_USERS_RANGE);
+    const row = rows.find(r => r[0] === groupId);
+    return row ? Number(row[6]) || 0 : 0;
+  } catch (e) {
+    console.error('getGroupSessionUntil 失敗:', e.message);
+    return 0; // 查詢失敗就當作沒有活躍中的對話——安全方向是要求重新 @，不是誤觸插話
+  }
+}
+
+// 每次我們真的在群組裡回答了什麼，就呼叫這支幫時間窗續命。跟 upsertBinding() 分開
+// 寫，是因為呼叫時機不一樣：這支要在「所有」有回答的路徑後面都呼叫一次（活動列表、
+// 換場提示、真正的問答…），upsertBinding() 只在換場／軟綁定那幾個特定時機才呼叫。
+async function touchGroupSession(groupId) {
+  try {
+    await ensureLineUsersSheet();
+    const rows = await readRange(LINE_USERS_RANGE);
+    const idx = rows.findIndex(r => r[0] === groupId);
+    const until = String(Date.now() + GROUP_SESSION_MS);
+    if (idx === -1) {
+      await appendRows('line_users!A:G', [[groupId, '', '', '', String(Date.now()), '', until]]);
+    } else {
+      // 只動 G 欄，A:F（活動綁定那幾欄）完全不碰——這支不該影響綁定狀態。
+      await updateRange(`line_users!G${idx + 2}`, [[until]]);
+    }
+  } catch (e) {
+    console.error('touchGroupSession 失敗:', e.message);
   } finally {
     invalidateLineUsersCache();
   }
@@ -590,7 +646,12 @@ async function handleMetaIntent(replyToken, userId, text, metaIntent, binding) {
 // 沒有有效綁定時的自然語言處理（批次 3）：讓路由判斷這是查活動列表、問特定一場、
 // 還是無關問題。路由失敗或判不出來，一律退回批次 2 原本的引導文案，不會卡住、
 // 也不會誤觸問答。
-async function handleUnbound(replyToken, userId, text) {
+//
+// silentOnOther：群組的「免 @ 續問視窗」（見 handleGroupEvent）在用，判不出來要
+// 問哪一場時，1 對 1 給引導文案是體貼，群組裡沒被直接 @ 又給同一句引導文案就是
+// 插話——這種情況安靜比較安全，等真的被 @ 到再回。1 對 1 呼叫端不傳這個參數，
+// 維持原本一定會給引導文案的行為。
+async function handleUnbound(replyToken, userId, text, { silentOnOther = false } = {}) {
   const rows = await getAllEventRows();
   const cards = buildCalendarCards(rows);
   const { intent, event_ids, confidence } = await routeIntent(text, cards);
@@ -622,36 +683,55 @@ async function handleUnbound(replyToken, userId, text) {
     }
   }
 
-  // intent === 'other'，或 qa 但完全比對不到、或路由本身失敗 → 統一導引，
-  // 跟批次 2 原本沒綁定時的文案一致，只是多給「或直接打活動名稱」這條路。
+  // intent === 'other'，或 qa 但完全比對不到、或路由本身失敗。
+  if (silentOnOther) return; // 群組裡沒被直接 @、又猜不到問題在問什麼 → 安靜，不要沒事跳出來說「不確定」
+
+  // 統一導引，跟批次 2 原本沒綁定時的文案一致，只是多給「或直接打活動名稱」這條路。
   await replyOrPush(replyToken, userId,
     '不確定您想問哪一場活動——可以直接輸入活動名稱、或問「最近有哪些活動」查看清單，也可以掃描現場 QR code 綁定。',
     ['最近有哪些活動', '使用說明']);
 }
 
-// ── 群組／多人聊天（批次 5，仿美玉姨：被 @ 到才開口）──────────────────
+// ── 群組／多人聊天（批次 5/6，仿美玉姨：被 @ 到才開口，短暫續問視窗）──────
 // 前置作業（人類要做的事，程式碼管不到）：LINE Official Account Manager →
 // 「設定 → 回應設定」把「允許加入群組/多人聊天」打開，官方帳號才有辦法被邀進群組；
 // 沒開這個，LINE 根本不會讓人把帳號拉進群組，這支永遠不會被觸發。
 //
-// 核心規矩只有一條，但很重要：沒被 @ 到就完全安靜——不回覆、不留任何痕跡。這支
-// 帳號要是每則群組訊息都插話，很快就會被關靜音或直接被踢出群組，這個通道就毀了
-// （跟 LINE-PLAN.md 第 8 節「不要做推播行銷」同一種風險：一旦刷了存在感，就再也
-// 回不去了）。isBotMentioned() 判斷用的是 LINE 官方為此加的 mentionee.isSelf 欄位，
-// 見 lib/line.js 開頭的說明；這個欄位不存在或不是 true，一律當作沒被叫到。
+// 核心規矩：沒被 @ 到、也不在剛互動過的短暫視窗內，就完全安靜——不回覆、不留任何
+// 痕跡。這支帳號要是每則群組訊息都插話，很快就會被關靜音或直接被踢出群組，這個
+// 通道就毀了（跟 LINE-PLAN.md 第 8 節「不要做推播行銷」同一種風險：一旦刷了存在
+// 感，就再也回不去了）。isBotMentioned() 判斷用的是 LINE 官方為此加的
+// mentionee.isSelf 欄位，見 lib/line.js 開頭的說明；這個欄位不存在或不是 true，
+// 一律當作沒被叫到。
+//
+// ⚠️ 實際回報的體感落差：@ 一次拿到活動清單之後，接著（沒有再 @）打清單裡的活動
+// 名稱，完全沒反應——每則都要 @ 的規則本身沒有邏輯錯誤，但使用者會覺得「剛剛不是
+// 才理我嗎」。解法是 GROUP_SESSION_MS 那段續問視窗（見上面 touchGroupSession() 的
+// 說明）：被 @ 到並回答之後，接下來幾分鐘內同一個群組不用重新 @ 也算在跟我們對話；
+// 這段期間如果猜不出問題在問什麼，安靜略過（silentOnOther）而不是跳出來說「不確定
+// 您想問哪一場」——那句話對一個直接 @ 我們的人是體貼，對群組裡剛好聊到別的事的人
+// 就是插話。
 async function handleGroupEvent(replyToken, ev) {
   const groupId = ev.source?.groupId || ev.source?.roomId || null;
   if (!groupId) return; // 不明來源，安全起見不回覆
 
-  if (!isBotMentioned(ev.message?.mention)) return;
+  const mentioned = isBotMentioned(ev.message?.mention);
+  if (!mentioned) {
+    const sessionUntil = await getGroupSessionUntil(groupId);
+    if (!sessionUntil || Date.now() > sessionUntil) return; // 沒被 @、也不在續問視窗內 → 安靜
+    if (ev.message?.type !== 'text') return; // 續問視窗內的非文字訊息（貼圖…）安靜略過，不用來亂回
+  } else if (ev.message?.type !== 'text') {
+    await replyOrPush(replyToken, groupId, '目前群組內僅支援文字訊息提問，請直接輸入您的問題。');
+    return;
+  }
 
-  // 把 @ 的那段文字拿掉，只留真正的問題。非文字訊息（貼圖、圖片…）本來就不會帶
-  // mention 資料，走不到這裡；就算哪天 LINE 端行為改變、真的帶了 mention 卻不是
-  // 文字訊息，stripMentionText 對 undefined 文字會回傳空字串，一樣會落進下面
-  // 「沒問題」那個分支，不會噴例外。
+  // 把 @ 的那段文字拿掉，只留真正的問題；沒被 @ 到（續問視窗內）時 mention 是
+  // undefined，stripMentionText 會原樣回傳（trim 過）。
   const text = stripMentionText(ev.message?.text, ev.message?.mention);
   if (!text) {
-    await replyOrPush(replyToken, groupId, '請在 @ 我的後面接您的問題，例如：@我 最近有哪些活動');
+    // 只 @ 沒接問題——這句提示只在「真的被 @ 到」時才有意義；續問視窗內若剛好
+    // 出現空文字（理論上不會發生，防呆而已）不用多嘴。
+    if (mentioned) await replyOrPush(replyToken, groupId, '請在 @ 我的後面接您的問題，例如：@我 最近有哪些活動');
     return;
   }
 
@@ -663,31 +743,34 @@ async function handleGroupEvent(replyToken, ev) {
     return;
   }
 
-  // ⚠️ 群組裡刻意不接職員模式：密語比對／#代碼綁定完全跳過，被 @ 到一律走記者端
-  // 的自然語言路由。同一群組裡可能同時有記者、公關同仁、甚至長官，密語一旦在
-  // 群組裡打出來，所有在場的人都看得到——職員身分只能在私訊裡取得，這裡沒有例外。
-  await handleGroupMessage(replyToken, groupId, text);
+  // ⚠️ 群組裡刻意不接職員模式：密語比對／#代碼綁定完全跳過，一律走記者端的自然
+  // 語言路由。同一群組裡可能同時有記者、公關同仁、甚至長官，密語一旦在群組裡打
+  // 出來，所有在場的人都看得到——職員身分只能在私訊裡取得，這裡沒有例外。
+  await handleGroupMessage(replyToken, groupId, text, { mentioned });
 }
 
-// 跟 1 對 1（handleUnbound／handleMetaIntent／答題）共用整套邏輯，只有兩個差異：
+// 跟 1 對 1（handleUnbound／handleMetaIntent／答題）共用整套邏輯，差異只有：
 //   - 沒有 #代碼／ask_name 媒體名稱擷取——群組裡不會有人主動報媒體名稱，qa_log
 //     統一記成「（群組提問）」
 //   - answerQuestion() 傳 loading:false——「輸入中」動畫不支援 group/room，見
 //     answerQuestion() 開頭的註解
+//   - mentioned 決定猜不出問題時要不要出聲（見 handleGroupEvent 開頭的說明）
 // 其餘（跳出本場意圖、換場、軟綁定）完全沿用 1 對 1 那一套，用 groupId 當
 // line_users 表的 key——等於「這個群組」自己有一份軟綁定狀態，直接複用整套 TTL／
 // 換場機制，不必為群組另外維護一份幾乎一樣的邏輯。
-async function handleGroupMessage(replyToken, groupId, text) {
+async function handleGroupMessage(replyToken, groupId, text, { mentioned }) {
   const binding = await getBinding(groupId);
 
   const metaIntent = detectMetaIntent(text);
   if (metaIntent) {
     await handleMetaIntent(replyToken, groupId, text, metaIntent, binding);
+    await touchGroupSession(groupId); // 這一輪有回答 → 續問視窗重新計時
     return;
   }
 
   if (!binding) {
-    await handleUnbound(replyToken, groupId, text);
+    await handleUnbound(replyToken, groupId, text, { silentOnOther: !mentioned });
+    await touchGroupSession(groupId); // 不管有沒有真的答上，只要走到這裡就算還在互動，續命
     return;
   }
 
@@ -697,17 +780,21 @@ async function handleGroupMessage(replyToken, groupId, text) {
     if (isUsable(target)) {
       await upsertBinding(groupId, target.id, '');
       await answerQuestion(replyToken, groupId, target, '（群組提問）', text, { loading: false });
+      await touchGroupSession(groupId);
       return;
     }
   }
 
   const event = await getEventById(binding.event_id);
   if (!isUsable(event)) {
-    await replyOrPush(replyToken, groupId, '這場活動目前無法問答，請洽現場工作人員。');
+    // 綁定指向的活動變成不可問答（例如被下架）——這種邊界情況比照 silentOnOther
+    // 的邏輯：真的被 @ 到才值得說明，續問視窗內安靜跳過就好。
+    if (mentioned) await replyOrPush(replyToken, groupId, '這場活動目前無法問答，請洽現場工作人員。');
     return;
   }
 
   await answerQuestion(replyToken, groupId, event, '（群組提問）', text, { loading: false });
+  await touchGroupSession(groupId);
 }
 
 async function logQa(event, mediaName, question, reply) {

@@ -516,6 +516,28 @@ image 訊息送出（`lib/staff.js` 的 `buildGeoTrendChartUrl()`）。沒有另
   `answerQuestion()` 群組呼叫端傳 `loading:false` 跳過，不然每則群組提問都送一次
   注定失敗的 API 呼叫，白白在 log 裡累積錯誤
 
+⚠️ **實際回報的體感落差，修過一次**：一開始的版本是「每一則都要 @」——群組裡 @ 問
+「最近有哪些活動」拿到清單之後，接著（沒有再 @）打清單裡某場的活動名稱，完全沒反應。
+規則本身沒有邏輯錯誤，但使用者的體感是「剛剛不是才理我嗎」；而且我們自己組的
+quick reply 按鈕（`calendarQuickReplyItems()`）在群組裡點下去送出的也只是純文字，
+不會自動帶 @，所以連我們自己給的按鈕都會踩到這個坑。
+
+修法是加一個 `GROUP_SESSION_MS`（5 分鐘）續問視窗：被 @ 到並且我們真的回答之後，
+接下來 5 分鐘內同一個群組不用重新 @ 也算在跟我們對話；超過時間窗，或這段期間都沒人
+開口，就退回「一定要 @」的預設安全模式。視窗時間戳存在 `line_users` 新增的 G 欄
+（`group_session_until`），持久化而不是放記憶體——跟 `pending`（職員追問）踩過同一個
+坑：Vercel 的 serverless instance 不保證下一則訊息會落在同一個 instance 上。
+
+⚠️ 這個時間戳刻意跟活動綁定（`bound_at`／`event_id`，TTL 6 小時）分開存在獨立欄位，
+不能共用：綁定管的是「這個群組現在問的是哪一場」，沒 @ 也可能持續有效很久；session
+管的是「剛剛是不是才被 @ 過」，只有幾分鐘。混在同一欄會讓「還沒問過任何一場」的群組
+被誤判成「綁定了一個空字串的活動」，`answerQuestion()` 拿到空 `event_id` 會直接掛掉。
+
+續問視窗內如果判不出問題在問什麼（`routeIntent()` 判成 `other`、或完全比對不到活動），
+`handleUnbound()` 新增的 `silentOnOther` 參數會讓它安靜略過，不會跳出「不確定您想問
+哪一場活動」——那句引導文案對一個直接 @ 我們的人是體貼，對群組裡剛好在聊別的事的人
+就是插話。非文字訊息（貼圖…）在續問視窗內也是安靜略過，不用來亂回。
+
 **還沒做、仍是選配的部分（人工接手轉接標記）**：
 
 - AI 判定「資料裡沒有」或屬敏感題時，多回一則 quick reply「需要真人回覆嗎？」→ 按下
@@ -533,7 +555,8 @@ image 訊息送出（`lib/staff.js` 的 `buildGeoTrendChartUrl()`）。沒有另
 `test/test-geo-chart.mjs`（17 項，狀態文字精簡與圖表 URL 組法）、`test/test-mention.mjs`
 （14 項，`isBotMentioned`／`stripMentionText` 純函式）；`test/test-flow.mjs` 新增群組
 情境（沒被 @ 到不回應、@ 到才回答、群組軟綁定、密語與 #代碼在群組裡不接、room 來源、
-群組限流）。`npm test` 全部合計 255 項。
+群組限流、續問視窗成功／過期／非文字訊息略過、silentOnOther）。`npm test` 全部
+合計 263 項。
 
 ---
 
