@@ -250,6 +250,11 @@
       <span>這是<b>長期關注議題</b>（例如長官在意的無人機、機器人），不是特定發稿活動——不會算半衰期／基線抬升，只單純長期看走勢與議題排行</span>
     </label>
 
+    <label style="display:flex;align-items:flex-start;gap:8px;margin-top:6px;font-size:.84rem;cursor:pointer">
+      <input type="checkbox" id="s-structured" style="margin-top:3px">
+      <span>這則稿件是<b>結構化稿</b>（有清楚標題／摘要／可查證數字，且有獨立主題頁可連）——事後會拿來對照這場的半衰期與基線抬升，看結構化寫法有沒有真的留下更多記憶</span>
+    </label>
+
     <div id="gen-out"></div>
   </div>
 
@@ -308,8 +313,8 @@
 
   <div class="card">
     <h2><i class="ti ti-flag" style="color:var(--event)"></i> 事件效應：這一場替你留下幾天記憶</h2>
-    <div class="desc">半衰期＝峰值掉回「峰值與基線的中點」要幾天；基線抬升＝事件後第 15–30 天的均分減掉事前 14 天基線。抬升是真正能寫進績效的數字。<b>點任一列看這場的診斷與下一步。</b>
-      這兩個數字<b>做不到回溯</b>：要在活動前兩週就開始追蹤，才算得出基線。</div>
+    <div class="desc">半衰期＝峰值掉回「峰值與基線的中點」要幾天；首次引用＝事件日起自家網域第一次被 AI 引用隔了幾天（每天一次取樣，精度只到天，不是新聞稿本身的引用時間，只看相對快慢）；基線抬升＝事件後第 15–30 天的均分減掉事前 14 天基線。抬升是真正能寫進績效的數字。<b>點任一列看這場的診斷與下一步。</b>
+      這幾個數字<b>做不到回溯</b>：要在活動前兩週就開始追蹤，才算得出基線。</div>
     <div id="events" class="tbl"></div>
   </div>
 
@@ -1201,22 +1206,28 @@ function renderEvents(events){
   }
   box.innerHTML = `<table><thead><tr>
       <th>#</th><th>日期</th><th>活動</th><th>鎖定議題</th>
-      <th>事前基線</th><th>峰值</th><th>半衰期</th><th>基線抬升</th></tr></thead><tbody>` +
+      <th>事前基線</th><th>峰值</th><th>半衰期</th><th>首次引用</th><th>基線抬升</th></tr></thead><tbody>` +
     events.map((e,i)=>{
       const lift = e.lift===null ? (e.settled?'—':'<span class="flat">觀察中</span>')
         : `<span class="${e.lift>0?'up':e.lift<0?'down':'flat'}">${e.lift>0?'+':''}${e.lift}</span>`;
+      const firstCite = e.daysToFirstCitation===null
+        ? (e.citationWindowComplete?'<span class="down">未引用</span>':'<span class="flat">觀察中</span>')
+        : `${e.daysToFirstCitation} 天`;
+      const structBadge = e.structured===true ? '<span class="pill" style="background:#dcfce7;color:#166534">結構化</span>'
+        : e.structured===false ? '<span class="pill" style="background:#f3f4f6;color:#6b7280">非結構化</span>' : '';
       return `<tr class="clickable" onclick="toggleFinds(this)">
         <td><span class="pill" style="background:#fef3c7;color:#92400e">${i+1}</span></td>
         <td>${e.date}</td>
-        <td><b>${esc(e.title)}</b>
+        <td><b>${esc(e.title)}</b> ${structBadge}
           <br><button class="linkbtn" onclick="event.stopPropagation();stopTracking('${e.id}','${esc(e.title).replace(/'/g,"\\'")}')">
             <i class="ti ti-trash"></i> 停止追蹤</button></td>
         <td>${e.matchedKeyword?esc(e.matchedKeyword):'<span class="flat">整體</span>'}</td>
         <td class="num-cell">${e.baseline??'—'}</td>
         <td class="num-cell">${e.peak??'—'}${e.peakDate?`<br><span style="color:var(--muted);font-size:.72rem;font-weight:400">${e.peakDate.slice(5)}</span>`:''}</td>
         <td class="num-cell">${e.halfLifeDays===null?'<span class="flat">未回落</span>':e.halfLifeDays+' 天'}</td>
+        <td class="num-cell">${firstCite}</td>
         <td class="num-cell">${lift}</td></tr>
-        <tr class="find-row" style="display:none"><td colspan="8">${findsHtml(e.findings, e.windowSamples)}</td></tr>`;
+        <tr class="find-row" style="display:none"><td colspan="9">${findsHtml(e.findings, e.windowSamples)}</td></tr>`;
     }).join('') + '</tbody></table>';
 }
 
@@ -1382,6 +1393,7 @@ async function startTracking(){
     title: bound ? (opt?.dataset.name||'') : document.getElementById('s-title').value.trim(),
     date:  document.getElementById('s-date').value,   // 一律以畫面上那格為準
     type: standing ? '持續關注' : undefined,
+    structured: document.getElementById('s-structured').checked,
     competitors: (document.getElementById('gen-comp')?.value||'')
       .split(/[、,，]/).map(s=>s.trim()).filter(Boolean),
   };
@@ -1397,6 +1409,7 @@ async function startTracking(){
        <div class="d">正在跑第一次掃描，結果會出現在下面「現況快照」。之後每天早上自動跑。</div>
      </div>`;
   document.getElementById('s-kw').value = '';
+  document.getElementById('s-structured').checked = false;
   sel.value = ''; onPickEvent();
   loadPrompts(); loadEvents();
   await scan();
