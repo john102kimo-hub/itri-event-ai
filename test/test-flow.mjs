@@ -103,6 +103,21 @@ check('綁定中打另一場完整名稱 → 換過去並用新那場回答',
   out[0]?.kind === 'answer' && out[0].event === 'semi', JSON.stringify(out));
 check('換場後綁定指向新場次', state.bindings.get('U_reporter')?.event_id === 'semi');
 check('換場保留媒體名稱', state.bindings.get('U_reporter')?.media_name === '中央社');
+check('已經有媒體名稱時換場不會再補問一次',
+  out.length === 2 && !out.some(o => /方便留個貴媒體的名稱/.test(o.text || '')), JSON.stringify(out));
+
+// ⚠️ 實際回報的坑：換場這條路一直都不會問媒體名稱，不管換過去之前有沒有被問過——
+// 只靠打活動名稱換場的記者，media_name 永遠是空字串，後台分析永遠看到「（未填寫）」。
+reset(); await freshModule();
+state.bindings.set('U_reporter', { event_id: 'quad', media_name: '', note: '', bound_at: Date.now() });
+out = await send('半導體先進封裝技術發表會');
+check('換場前從沒被問過媒體名稱 → 換場後用 push 補問一次（不擋住剛剛的答案）',
+  out.length === 3 && out[1]?.kind === 'text' && out[2]?.text?.includes('方便留個貴媒體的名稱'),
+  JSON.stringify(out));
+check('補問會設 ask_name 旗標，沿用既有的一次性擷取機制',
+  state.bindings.get('U_reporter')?.note === 'ask_name');
+out = await send('中央社');
+check('補問視窗內回名稱 → 正常記錄', state.bindings.get('U_reporter')?.media_name === '中央社', JSON.stringify(out));
 
 // ── 情境 3：ask_name 視窗不能吃掉真正的問題 ──────────────────────────
 reset(); await freshModule();
@@ -121,11 +136,15 @@ out = await send('中央社');
 check('ask_name 視窗內回媒體名稱 → 仍正常記錄', /已記錄/.test(out[0]?.text || ''), JSON.stringify(out));
 check('媒體名稱有寫進去', state.bindings.get('U_reporter')?.media_name === '中央社');
 
-// 換場也要清掉 ask_name
+// 換場一定要先清掉舊的 ask_name（不管等一下會不會重新設回去），不然新舊兩次的
+// 「一次性」語意會疊在一起搞混。這個人剛好還沒被問過名稱（media_name 是空字串），
+// 所以換場後 note 會被換場邏輯重新設回 'ask_name'（見上面新增的補問測試），不是
+// 停留在空字串——重點是接下來真正的問題不能被誤判成在報名稱。
 reset(); await freshModule();
 state.bindings.set('U_reporter', { event_id: 'quad', media_name: '', note: 'ask_name', bound_at: Date.now() });
 await send('半導體先進封裝技術發表會');
-check('用「打別場名稱」換場也會清掉 ask_name 旗標', state.bindings.get('U_reporter')?.note === '');
+check('換場後 note 是重新設定的 ask_name（因為還沒填過名稱），不是舊視窗殘留',
+  state.bindings.get('U_reporter')?.note === 'ask_name');
 out = await send('給我完整新聞稿');
 check('換場後的第一個問題沒被媒體名稱擷取吃掉',
   out[0]?.kind === 'answer' && out[0].event === 'semi', JSON.stringify(out));
