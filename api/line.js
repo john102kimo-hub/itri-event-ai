@@ -15,8 +15,12 @@
 // 狀態／新增活動並直接拿到同仁編輯連結／要某場的媒體訓練連結。安全模型見 lib/staff.js
 // 開頭註解。
 //
-// 批次 2/3/4 刻意不做的事（batch 5 才做，見 LINE-PLAN.md）：
-//   - 群組模式、真人接手轉接標記、邀訪收單（記者端的 media_requests）
+// 群組／多人聊天（批次 5，仿美玉姨模式）：加進群組後預設完全安靜，只有被 @ 到
+// 才回答，見 handleGroupEvent() 開頭的說明。密語／職員指令、#代碼綁定在群組裡
+// 完全不接——同一群組可能同時有記者跟公關同仁，職員身分只能私訊取得。
+//
+// 批次 2/3/4 刻意不做、目前仍未做的事（見 LINE-PLAN.md）：
+//   - 真人接手轉接標記、邀訪收單（記者端的 media_requests）
 //
 // 安全與坑，詳見 LINE-PLAN.md 第 3 節：
 //   - 簽章驗證必須用原始 bytes，不能碰 req.body（見 lib/line.js 開頭註解）
@@ -31,7 +35,8 @@ import { buildSystemPrompt } from '../lib/prompt.js';
 import {
   readRawBody, verifySignature, replyOrPush, replyOrPushMessages, startLoading, pushImages,
   createRichMenu, uploadRichMenuImage, setDefaultRichMenu, listRichMenus, deleteRichMenu,
-  linkRichMenuToUser, unlinkRichMenuFromUser
+  linkRichMenuToUser, unlinkRichMenuFromUser, pushChartImage,
+  isBotMentioned, stripMentionText
 } from '../lib/line.js';
 import { buildCalendarCards, buildAllCalendarCards, routeIntent, formatCalendarReply, calendarQuickReplyItems } from '../lib/router.js';
 import {
@@ -42,6 +47,7 @@ import {
   isPasscodeMatch, isStaffAuthenticated, authenticateStaff, routeStaffIntent,
   createDraftEvent, editLink, trainingLink, ensureEventEditCode, getEventRawById,
   getEventAnalyticsSummary, formatEventAnalyticsReply, getGeoStatusSummary, formatGeoStatusReply,
+  getGeoTrendSeries, buildGeoTrendChartUrl,
   isExitStaffCommand, revokeStaff, listActiveStaffIds, getStaffPending, setStaffPending
 } from '../lib/staff.js';
 
@@ -266,8 +272,13 @@ async function askAnthropic(systemPrompt, userText) {
 // 正式問答：開輸入中動畫 → 呼叫 Anthropic → reply（失敗 fallback push）→ 寫 qa_log。
 // 綁定路徑（#代碼）跟路由命中路徑（自然語言直接命中某一場）最後都走這支，避免兩邊各自
 // 維護一份幾乎一樣的邏輯、之後改一邊忘了改另一邊。
-async function answerQuestion(replyToken, userId, event, mediaName, text) {
-  await startLoading(userId, 55);
+async function answerQuestion(replyToken, userId, event, mediaName, text, { loading = true } = {}) {
+  // 「輸入中」動畫（/chat/loading/start）只支援一對一聊天，LINE 官方文件明講
+  // group／room 不能傳這個端點；group 訊息呼叫它每次都是穩定失敗，只會在
+  // Vercel Logs 裡累積一堆沒意義的錯誤。startLoading() 內部已經吞掉例外不影響
+  // 主流程，但既然知道一定會失敗，group 呼叫端直接傳 loading:false 跳過，
+  // 而不是每一則群組提問都送一次注定失敗的 API 呼叫。
+  if (loading) await startLoading(userId, 55);
   const systemPrompt = buildSystemPrompt(event, lineExtraRules(event));
   const reply = await askAnthropic(systemPrompt, text);
   // 診斷用途，不是必要邏輯：路由判斷得準不準、AI 答得順不順，靠這行在 Vercel Logs
@@ -439,6 +450,19 @@ async function handleStaffMessage(replyToken, userId, text) {
 
   if (routed.intent === 'geo_status') {
     await replyOrPush(replyToken, userId, formatGeoStatusReply(await getGeoStatusSummary()));
+    // 文字答案之後再補一張趨勢圖，跟活動照片同一個理由獨立呼叫（見 answerQuestion()
+    // 的附圖註解）：reply token 已經被上面那則文字用掉了，這裡本來就只能走 push；
+    // 圖表資料查不到或還沒有掃描資料時 buildGeoTrendChartUrl() 回 null，直接跳過，
+    // 不會讓同仁收到一張空白圖，也不能讓這步的失敗拖累已經送出去的文字答案。
+    try {
+      const chartUrl = buildGeoTrendChartUrl(await getGeoTrendSeries());
+      if (chartUrl) {
+        const res = await pushChartImage(userId, chartUrl);
+        if (!res.ok && !res.skipped) console.error('GEO 趨勢圖 push 失敗:', res.status);
+      }
+    } catch (e) {
+      console.error('GEO 趨勢圖處理例外:', e.message);
+    }
     return;
   }
 
@@ -605,6 +629,87 @@ async function handleUnbound(replyToken, userId, text) {
     ['最近有哪些活動', '使用說明']);
 }
 
+// ── 群組／多人聊天（批次 5，仿美玉姨：被 @ 到才開口）──────────────────
+// 前置作業（人類要做的事，程式碼管不到）：LINE Official Account Manager →
+// 「設定 → 回應設定」把「允許加入群組/多人聊天」打開，官方帳號才有辦法被邀進群組；
+// 沒開這個，LINE 根本不會讓人把帳號拉進群組，這支永遠不會被觸發。
+//
+// 核心規矩只有一條，但很重要：沒被 @ 到就完全安靜——不回覆、不留任何痕跡。這支
+// 帳號要是每則群組訊息都插話，很快就會被關靜音或直接被踢出群組，這個通道就毀了
+// （跟 LINE-PLAN.md 第 8 節「不要做推播行銷」同一種風險：一旦刷了存在感，就再也
+// 回不去了）。isBotMentioned() 判斷用的是 LINE 官方為此加的 mentionee.isSelf 欄位，
+// 見 lib/line.js 開頭的說明；這個欄位不存在或不是 true，一律當作沒被叫到。
+async function handleGroupEvent(replyToken, ev) {
+  const groupId = ev.source?.groupId || ev.source?.roomId || null;
+  if (!groupId) return; // 不明來源，安全起見不回覆
+
+  if (!isBotMentioned(ev.message?.mention)) return;
+
+  // 把 @ 的那段文字拿掉，只留真正的問題。非文字訊息（貼圖、圖片…）本來就不會帶
+  // mention 資料，走不到這裡；就算哪天 LINE 端行為改變、真的帶了 mention 卻不是
+  // 文字訊息，stripMentionText 對 undefined 文字會回傳空字串，一樣會落進下面
+  // 「沒問題」那個分支，不會噴例外。
+  const text = stripMentionText(ev.message?.text, ev.message?.mention);
+  if (!text) {
+    await replyOrPush(replyToken, groupId, '請在 @ 我的後面接您的問題，例如：@我 最近有哪些活動');
+    return;
+  }
+
+  // 用 groupId 當限流 key，跟 1 對 1 用 line_user_id 同一個理由：LINE webhook
+  // 全部來自 LINE 自己的伺服器，用單一額度保護的是「這個群組」，不會因為某個人
+  // 連環發問就把同一群組其他人也一起鎖住（額度本來就是共用的，這是刻意的）。
+  if (rateLimited(groupId)) {
+    await replyOrPush(replyToken, groupId, '提問太頻繁，請稍候片刻再試。');
+    return;
+  }
+
+  // ⚠️ 群組裡刻意不接職員模式：密語比對／#代碼綁定完全跳過，被 @ 到一律走記者端
+  // 的自然語言路由。同一群組裡可能同時有記者、公關同仁、甚至長官，密語一旦在
+  // 群組裡打出來，所有在場的人都看得到——職員身分只能在私訊裡取得，這裡沒有例外。
+  await handleGroupMessage(replyToken, groupId, text);
+}
+
+// 跟 1 對 1（handleUnbound／handleMetaIntent／答題）共用整套邏輯，只有兩個差異：
+//   - 沒有 #代碼／ask_name 媒體名稱擷取——群組裡不會有人主動報媒體名稱，qa_log
+//     統一記成「（群組提問）」
+//   - answerQuestion() 傳 loading:false——「輸入中」動畫不支援 group/room，見
+//     answerQuestion() 開頭的註解
+// 其餘（跳出本場意圖、換場、軟綁定）完全沿用 1 對 1 那一套，用 groupId 當
+// line_users 表的 key——等於「這個群組」自己有一份軟綁定狀態，直接複用整套 TTL／
+// 換場機制，不必為群組另外維護一份幾乎一樣的邏輯。
+async function handleGroupMessage(replyToken, groupId, text) {
+  const binding = await getBinding(groupId);
+
+  const metaIntent = detectMetaIntent(text);
+  if (metaIntent) {
+    await handleMetaIntent(replyToken, groupId, text, metaIntent, binding);
+    return;
+  }
+
+  if (!binding) {
+    await handleUnbound(replyToken, groupId, text);
+    return;
+  }
+
+  const switchTo = matchEventByName(text, buildCalendarCards(await getAllEventRows()), binding.event_id);
+  if (switchTo) {
+    const target = await getEventById(switchTo.id);
+    if (isUsable(target)) {
+      await upsertBinding(groupId, target.id, '');
+      await answerQuestion(replyToken, groupId, target, '（群組提問）', text, { loading: false });
+      return;
+    }
+  }
+
+  const event = await getEventById(binding.event_id);
+  if (!isUsable(event)) {
+    await replyOrPush(replyToken, groupId, '這場活動目前無法問答，請洽現場工作人員。');
+    return;
+  }
+
+  await answerQuestion(replyToken, groupId, event, '（群組提問）', text, { loading: false });
+}
+
 async function logQa(event, mediaName, question, reply) {
   if (!process.env.GOOGLE_SPREADSHEET_ID) return;
   try {
@@ -642,14 +747,18 @@ async function handleEvent(ev) {
 
   if (ev.type !== 'message') return; // unfollow／join／postback 等批次 2 不處理，也沒有可用的 replyToken
 
-  const userId = ev.source?.userId;
   const replyToken = ev.replyToken;
-  if (!userId || !replyToken) return;
+  if (!replyToken) return;
 
+  // 群組／多人聊天：被 @ 到才回答（見 handleGroupEvent() 開頭的說明），跟下面
+  // 1 對 1 的流程分開走，不共用職員模式／#代碼綁定那一段。
   if (ev.source?.type !== 'user') {
-    await replyOrPush(replyToken, userId, '目前僅支援一對一聊天使用，請直接加官方帳號好友後私訊提問。');
+    await handleGroupEvent(replyToken, ev);
     return;
   }
+
+  const userId = ev.source?.userId;
+  if (!userId) return;
 
   if (ev.message?.type !== 'text') {
     await replyOrPush(replyToken, userId, '目前僅支援文字訊息提問，請直接輸入您的問題。');

@@ -37,7 +37,7 @@ export const ensureSheets = (...a) => sheets.ensureSheets(...a);`
     return {
       format: 'module', shortCircuit: true,
       source: `import { line } from ${JSON.stringify(FAKES)};
-export { readRawBody, verifySignature } from ${JSON.stringify(url.replace('?stub=line', '?real=1'))};
+export { readRawBody, verifySignature, isBotMentioned, stripMentionText } from ${JSON.stringify(url.replace('?stub=line', '?real=1'))};
 export const replyOrPush = (...a) => line.replyOrPush(...a);
 export const replyOrPushMessages = (...a) => line.replyOrPushMessages(...a);
 export const startLoading = (...a) => line.startLoading(...a);
@@ -48,6 +48,7 @@ export const setDefaultRichMenu = (...a) => line.setDefaultRichMenu(...a);
 export const listRichMenus = (...a) => line.listRichMenus(...a);
 export const deleteRichMenu = (...a) => line.deleteRichMenu(...a);
 export const linkRichMenuToUser = (...a) => line.linkRichMenuToUser(...a);
+export const pushChartImage = (...a) => line.pushChartImage(...a);
 export const unlinkRichMenuFromUser = (...a) => line.unlinkRichMenuFromUser(...a);
 export const getProfile = (...a) => line.getProfile(...a);
 export const replyMessage = (...a) => line.replyOrPush(null, null, ...a);

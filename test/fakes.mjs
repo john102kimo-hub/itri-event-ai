@@ -96,6 +96,11 @@ export const line = {
   async deleteRichMenu() { return true; },
   async linkRichMenuToUser(userId, id) { state.linkedMenus.set(userId, id); return true; },
   async unlinkRichMenuFromUser(userId) { state.linkedMenus.delete(userId); return true; },
+  async pushChartImage(userId, url) {
+    if (!url) return { ok: true, skipped: true };
+    sent.push({ kind: 'chart', url });
+    return { ok: true };
+  },
   async getProfile() { return null; }
 };
 
