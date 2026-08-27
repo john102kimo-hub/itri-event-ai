@@ -59,13 +59,13 @@ const res = { status() { return this; }, json() { return this; }, end() { return
 async function send(text, userId) {
   sent.length = 0;
   await handler(makeReq(text, userId), res);
-  return sent.map(s => ({ kind: s.kind, text: s.text, event: s.event }));
+  return sent.map(s => ({ kind: s.kind, text: s.text, event: s.event, quickReply: s.quickReply }));
 }
 
 async function sendGroup(text, opts) {
   sent.length = 0;
   await handler(makeGroupReq(text, opts), res);
-  return sent.map(s => ({ kind: s.kind, text: s.text, event: s.event }));
+  return sent.map(s => ({ kind: s.kind, text: s.text, event: s.event, quickReply: s.quickReply }));
 }
 
 let pass = 0, fail = 0;
@@ -376,6 +376,45 @@ reset(); await freshModule();
 state.bindings.set('U_reporter', { event_id: 'quad', media_name: '', note: '', bound_at: Date.now() });
 out = await send('這場的重點是什麼');
 check('1 對 1 完全不受群組續問視窗機制影響，維持原本行為', out[0]?.kind === 'answer' && out[0].event === 'quad', JSON.stringify(out));
+
+// ── 情境 10：綁定後的答案要附同仁自訂的快速提問按鈕（chips）──────────────
+// 回報的意見：網頁版問答介面一直都有同仁在後台設定的快速提問 chips（活動的
+// 「本場次提供資料」欄位），記者點一下就能問；LINE 這邊之前完全沒接這個資料，
+// 同仁特地設定的關鍵字記者在 LINE 上根本看不到。
+reset(); await freshModule();
+state.bindings.set('U_reporter', { event_id: 'quad', media_name: '中央社', note: '', bound_at: Date.now() });
+
+out = await send('這場的重點是什麼');
+check('綁定中的答案要附上這場自訂的 chips（quad 的 fixture 是「重點／應用」）',
+  JSON.stringify(out[1]?.quickReply) === JSON.stringify(['重點', '應用']), JSON.stringify(out));
+
+reset(); await freshModule();
+state.bindings.set('U_reporter', { event_id: 'semi', media_name: '', note: '', bound_at: Date.now() });
+out = await send('這場的重點是什麼');
+check('活動沒設定自訂 chips 時（semi 的 fixture 是空字串）退回預設問題，不是空按鈕列',
+  out[1]?.quickReply?.length > 0 && !JSON.stringify(out[1]?.quickReply).includes('重點'), JSON.stringify(out));
+
+// #代碼綁定：ask_name 解決的那一刻（「已記錄，謝謝」）就要看得到 chips，
+// 不用等問完第一題才第一次看到
+reset(); await freshModule();
+out = await send('#quad');
+check('#代碼綁定確認訊息本身不附 chips（避免跟 ask_name 擷取衝突）',
+  !(out[0]?.quickReply?.length > 0), JSON.stringify(out));
+out = await send('中央社');
+check('回覆媒體名稱、ask_name 解決之後，「已記錄」那則就附上 chips',
+  JSON.stringify(out[0]?.quickReply) === JSON.stringify(['重點', '應用']), JSON.stringify(out));
+
+// 職員模式問活動內容一樣要看得到 chips（同一支 answerQuestion()，沒有另外分岔邏輯）
+reset(); await freshModule();
+state.staff.push(['U_staff', '', '2026-08-27', '', '']);
+out = await send('四足機器人的重點', 'U_staff');
+check('職員模式問活動內容一樣附 chips（走同一支 answerQuestion）',
+  JSON.stringify(out[1]?.quickReply) === JSON.stringify(['重點', '應用']), JSON.stringify(out));
+
+// 群組問答也要附 chips，跟 1 對 1 一致
+reset(); await freshModule();
+out = await sendGroup('@我 四足機器人記者會的重點', { mentionSelf: true, mentionText: '@我 ' });
+check('群組問答也附 chips', JSON.stringify(out[1]?.quickReply) === JSON.stringify(['重點', '應用']), JSON.stringify(out));
 
 console.log(`\n${fail === 0 ? '✅' : '❌'} 流程測試通過 ${pass}／失敗 ${fail}`);
 process.exit(fail === 0 ? 0 : 1);

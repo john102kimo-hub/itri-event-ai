@@ -71,7 +71,7 @@ function rowToEvent(row) {
   return {
     id: row[0], name: row[1], color: row[2] || '#0F9E7A',
     knowledge_base: row[3] || '', status: row[4] || 'active',
-    images: row[7] || '', organizer: row[9] || '工研院',
+    chips: row[6] || '', images: row[7] || '', organizer: row[9] || '工研院',
     press_contact: row[14] || ''
   };
 }
@@ -325,6 +325,33 @@ async function askAnthropic(systemPrompt, userText) {
   }
 }
 
+// 網頁版 public/event.html 沒有自訂 chips 時的預設建議問題（見該檔的 defaultChips）。
+// ⚠️ 兩邊各自維護一份同樣的文字，不是共用模組：event.html 是純瀏覽器 <script>，
+// 沒有打包流程可以匯入 lib/ 底下的 ESM 模組。這份只是「建議問題的預設文案」，跟
+// LINE-PLAN.md 說的「不要做兩邊同步」講的是知識庫／答案內容那種一改就走鐘、記者
+// 會拿到錯誤資訊的東西，性質不一樣——這裡頂多措辭跟網頁版不完全同步，不是功能壞掉。
+const DEFAULT_CHIPS = [
+  '這次活動的主要發表內容是什麼？',
+  '有哪些合作廠商參與？',
+  '這項技術的應用場域為何？',
+  '請問主要的技術突破點是什麼？',
+  '這項技術預計何時商業化？'
+];
+
+// 回報的意見：網頁版問答介面一直都有同仁自訂的快速提問 chips（活動的「本場次提供
+// 資料」欄位，見 events!G／public/event.html 的 chipList），記者不用自己想問題、
+// 點一下就能問。LINE 這邊之前完全沒有——綁定後只能靠打字，公關同仁在後台特地設定
+// 的關鍵字（新聞稿、新聞照片…）記者根本看不到，等於功能做了一半沒用到。
+//
+// 直接把同一組 chips 轉成 LINE 的 quick reply 按鈕，跟網頁版用同一個資料來源
+// （event.chips），不需要另外維護一份「LINE 專用關鍵字」——同仁在後台改一次，
+// 網頁跟 LINE 同步生效。沒設定自訂 chips 的活動退回 DEFAULT_CHIPS，跟網頁版行為
+// 一致，不會讓記者看到空的按鈕列。
+function eventQuickChips(event) {
+  const custom = String(event?.chips || '').split('\n').map(s => s.trim()).filter(Boolean);
+  return custom.length ? custom : DEFAULT_CHIPS;
+}
+
 // 正式問答：開輸入中動畫 → 呼叫 Anthropic → reply（失敗 fallback push）→ 寫 qa_log。
 // 綁定路徑（#代碼）跟路由命中路徑（自然語言直接命中某一場）最後都走這支，避免兩邊各自
 // 維護一份幾乎一樣的邏輯、之後改一邊忘了改另一邊。
@@ -340,7 +367,10 @@ async function answerQuestion(replyToken, userId, event, mediaName, text, { load
   // 診斷用途，不是必要邏輯：路由判斷得準不準、AI 答得順不順，靠這行在 Vercel Logs
   // 裡直接看得到，不用另外接工具。刻意截斷長度，避免整份新聞稿灌爆單行 log。
   console.log(`[line] answer event=${event.id} status=${event.status} q="${text.slice(0, 60)}" reply="${reply.slice(0, 200)}"`);
-  await replyOrPush(replyToken, userId, reply);
+  // 每則答案都附上這場的快速提問按鈕（同仁自訂的 chips，或沒設定時的預設問題）——
+  // 跟網頁版一樣，chips 不是「選過一次就收起來」的一次性選單，而是隨時都在，記者
+  // 問完一題還想繼續問別的方向，點一下就好，不用自己想下一句要打什麼。
+  await replyOrPush(replyToken, userId, reply, eventQuickChips(event));
   if (event.images && looksLikePhotoRequest(text)) {
     // 附圖是錦上添花、獨立一次 push：reply token 已經被上面那則文字答案用掉了，
     // 這裡本來就只能用 push；就算某張照片網址被 LINE 拒絕，也只記 log，不能讓
@@ -950,7 +980,9 @@ async function handleEvent(ev) {
     if (looksLikeNameOrSkip(text)) {
       const isSkip = /^(略過|skip|跳過)$/i.test(text);
       await setMediaName(userId, isSkip ? '（未提供）' : sanitize(text, 40));
-      await replyOrPush(replyToken, userId, '已記錄，謝謝！請直接輸入您的問題即可。');
+      // 這裡就是記者準備開始問問題的第一個時間點，順手把快速提問按鈕帶上——
+      // 不用等他問完第一題、answerQuestion() 自己送出來的答案才第一次看到。
+      await replyOrPush(replyToken, userId, '已記錄，謝謝！請直接輸入您的問題即可。', eventQuickChips(event));
       return;
     }
     // 不像名稱、比較像直接問問題 → 不回「已記錄」，直接當問題往下走，
