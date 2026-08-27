@@ -26,7 +26,8 @@ export function reset() {
 
 function bindingRows() {
   return [...state.bindings.entries()].map(([id, b]) => [
-    id, b.event_id || '', b.media_name || '', b.bound_at ? String(b.bound_at) : '', String(Date.now()), b.note || ''
+    id, b.event_id || '', b.media_name || '', b.bound_at ? String(b.bound_at) : '', String(Date.now()), b.note || '',
+    b.groupSessionUntil ? String(b.groupSessionUntil) : ''
   ]);
 }
 
@@ -40,7 +41,10 @@ export const sheets = {
   },
   async appendRows(range, rows) {
     if (range.startsWith('line_users!')) {
-      for (const r of rows) state.bindings.set(r[0], { event_id: r[1], media_name: r[2], bound_at: Number(r[3]), note: r[5] });
+      for (const r of rows) state.bindings.set(r[0], {
+        event_id: r[1], media_name: r[2], bound_at: Number(r[3]), note: r[5],
+        groupSessionUntil: r[6] ? Number(r[6]) : 0
+      });
     }
     if (range.startsWith('line_staff!')) state.staff.push(...rows.map(r => [...r]));
     if (range.startsWith('events!')) state.events.push(...rows.map(r => [...r]));
@@ -59,7 +63,7 @@ export const sheets = {
       if (row) values[0].forEach((v, i) => { row[staffM[1].charCodeAt(0) - 65 + i] = v; });
       return;
     }
-    const m = range.match(/^line_users!([A-F])(\d+)(?::([A-F])(\d+))?$/);
+    const m = range.match(/^line_users!([A-G])(\d+)(?::([A-G])(\d+))?$/);
     if (!m) return;
     const rowNum = Number(m[2]);
     const keys = [...state.bindings.keys()];
@@ -68,13 +72,14 @@ export const sheets = {
     const b = state.bindings.get(userId);
     const startCol = m[1].charCodeAt(0) - 65;
     const row = values[0];
-    // 欄位對應：0=id 1=event_id 2=media_name 3=bound_at 4=last_active 5=note
+    // 欄位對應：0=id 1=event_id 2=media_name 3=bound_at 4=last_active 5=note 6=group_session_until
     row.forEach((v, i) => {
       const col = startCol + i;
       if (col === 1) b.event_id = v;
       if (col === 2) b.media_name = v;
       if (col === 3) b.bound_at = v === '' ? 0 : Number(v);
       if (col === 5) b.note = v;
+      if (col === 6) b.groupSessionUntil = v === '' ? 0 : Number(v);
     });
   },
   async ensureSheets() {}
