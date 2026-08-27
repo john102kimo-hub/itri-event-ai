@@ -28,7 +28,7 @@
 
 import { readRange, appendRows, updateRange, ensureSheets } from '../lib/sheets.js';
 import { buildSystemPrompt } from '../lib/prompt.js';
-import { readRawBody, verifySignature, replyOrPush, startLoading } from '../lib/line.js';
+import { readRawBody, verifySignature, replyOrPush, startLoading, pushImages } from '../lib/line.js';
 import { buildCalendarCards, buildAllCalendarCards, routeIntent, formatCalendarReply, calendarQuickReplyItems } from '../lib/router.js';
 import {
   isPasscodeMatch, isStaffAuthenticated, authenticateStaff, routeStaffIntent,
@@ -96,7 +96,7 @@ async function getBinding(userId) {
   if (!row) return null;
   const boundAt = Number(row[3]) || 0;
   if (!boundAt || Date.now() - boundAt > BIND_TTL_MS) return null;
-  return { event_id: row[1] || '', media_name: row[2] || '' };
+  return { event_id: row[1] || '', media_name: row[2] || '', note: row[5] || '' };
 }
 
 let sheetsEnsured = false;
@@ -111,18 +111,23 @@ async function ensureLineUsersSheet() {
                         // 後續讀寫會自然拿到空陣列或被 catch，不會讓整支掛掉
 }
 
-async function upsertBinding(userId, eventId) {
+// noteOverride 沒帶時，既有列會保留原本的 note（F 欄）不動；帶了（包含空字串）
+// 就直接覆蓋。#代碼綁定會傳 'ask_name' 標記「下一則要試著擷取媒體名稱」，
+// 自然語言軟綁定（handleUnbound）不傳，維持原本「這位記者沒被問過名稱」的狀態，
+// 不會被誤標成「等待輸入名稱」。見下面 note==='ask_name' 那段的說明。
+async function upsertBinding(userId, eventId, noteOverride) {
   await ensureLineUsersSheet();
   const now = String(Date.now());
   const rows = await readRange(LINE_USERS_RANGE); // 寫入路徑要讀最新，不吃快取，正確性優先
   const idx = rows.findIndex(r => r[0] === userId);
   try {
     if (idx === -1) {
-      await appendRows('line_users!A:F', [[userId, eventId, '', now, now, '']]);
+      await appendRows('line_users!A:F', [[userId, eventId, '', now, now, noteOverride ?? '']]);
     } else {
       const existing = rows[idx];
       await updateRange(`line_users!A${idx + 2}:F${idx + 2}`, [[
-        userId, eventId, existing[2] || '', now, now, existing[5] || ''
+        userId, eventId, existing[2] || '', now, now,
+        noteOverride !== undefined ? noteOverride : (existing[5] || '')
       ]]);
     }
   } finally {
@@ -138,6 +143,20 @@ async function setMediaName(userId, name) {
     await updateRange(`line_users!C${idx + 2}`, [[name]]);
   } catch (e) {
     console.error('setMediaName 失敗:', e.message);
+  } finally {
+    invalidateLineUsersCache();
+  }
+}
+
+// 只清 F 欄（note）的一次性旗標，跟 setMediaName 對稱、各自只動自己的欄位。
+async function setBindingNote(userId, note) {
+  try {
+    const rows = await readRange(LINE_USERS_RANGE);
+    const idx = rows.findIndex(r => r[0] === userId);
+    if (idx === -1) return;
+    await updateRange(`line_users!F${idx + 2}`, [[note]]);
+  } catch (e) {
+    console.error('setBindingNote 失敗:', e.message);
   } finally {
     invalidateLineUsersCache();
   }
@@ -162,15 +181,24 @@ function rateLimited(key) {
 
 const sanitize = (s, max) => String(s || '').replace(/\s+/g, ' ').trim().slice(0, max);
 
-// 判斷一則短訊息「看起來像媒體名稱／略過」而不是提問——只在記者剛綁定、media_name
-// 還沒填過時才會用到這個判斷。誤判也不會損毀資料，最多就是這句沒被當成問題回答，
-// 記者再問一次就好，所以用簡單的啟發式即可，不需要另外呼叫 AI 判斷意圖。
+// 判斷一則短訊息「看起來像媒體名稱／略過」而不是提問——只在 note==='ask_name'
+// 那一次性視窗內才會用到（見下面 handleEvent 裡的說明）。誤判的代價很小：最壞
+// 情況是這一則被錯記成媒體名稱，記者的問題就再多打一次，之後也不會再被攔——
+// 所以用簡單的啟發式即可，不需要另外呼叫 AI 判斷意圖。
 function looksLikeNameOrSkip(text) {
   if (/^(略過|skip|跳過)$/i.test(text)) return true;
   if (text.length > 20) return false;
   if (/[?？]/.test(text)) return false;
-  if (/^(請問|為什麼|什麼|怎麼|哪裡|哪一|何時|多少|是否|能不能|可以|會不會|有沒有)/.test(text)) return false;
+  if (/^(請問|為什麼|什麼|怎麼|哪裡|哪一|何時|多少|是否|能不能|可以|會不會|有沒有|給我|請給|麻煩|幫我|提供|傳給我|傳送|寄送|附上|想問|想要|需要|來一份|給一份)/.test(text)) return false;
   return true;
+}
+
+// 判斷這句問題是不是在要照片——命中就在文字答案之後追加真正的圖片訊息（不是塞
+// 進同一則，見 answerQuestion() 跟 lib/line.js pushImages() 的註解）。誤判的兩種
+// 結果都沒有使用者感受得到的壞處：多附幾張用不到的照片，或沒附但文字答案裡本來
+// 就有網址可以點開，所以用關鍵字比對就夠，不必為此多打一次 AI。
+function looksLikePhotoRequest(text) {
+  return /(照片|圖片|相片|圖檔|新聞照|相關圖|image|photo)/i.test(text);
 }
 
 function lineExtraRules(event) {
@@ -221,6 +249,17 @@ async function answerQuestion(replyToken, userId, event, mediaName, text) {
   // 裡直接看得到，不用另外接工具。刻意截斷長度，避免整份新聞稿灌爆單行 log。
   console.log(`[line] answer event=${event.id} status=${event.status} q="${text.slice(0, 60)}" reply="${reply.slice(0, 200)}"`);
   await replyOrPush(replyToken, userId, reply);
+  if (event.images && looksLikePhotoRequest(text)) {
+    // 附圖是錦上添花、獨立一次 push：reply token 已經被上面那則文字答案用掉了，
+    // 這裡本來就只能用 push；就算某張照片網址被 LINE 拒絕，也只記 log，不能讓
+    // 附圖失敗連累記者根本沒收到文字答案（文字答案早在上一行就已經送出去了）。
+    try {
+      const res = await pushImages(userId, event.images);
+      if (!res.ok && !res.skipped) console.error('LINE 附圖 push 失敗:', res.status);
+    } catch (e) {
+      console.error('LINE 附圖 push 例外:', e.message);
+    }
+  }
   await logQa(event, mediaName, text, reply);
 }
 
@@ -426,7 +465,7 @@ async function handleEvent(ev) {
     const code = text.slice(1).trim();
     const event = await findEventByCode(code);
     if (isUsable(event)) {
-      await upsertBinding(userId, event.id);
+      await upsertBinding(userId, event.id, 'ask_name');
       await replyOrPush(replyToken, userId,
         `已為您接上《${event.name}》✅\n\n請問您是哪家媒體？（方便新聞聯絡人後續服務，打媒體名稱即可，或回「略過」）\n\n之後就可以直接問問題了。`);
       return;
@@ -449,13 +488,27 @@ async function handleEvent(ev) {
     return;
   }
 
-  // 媒體名稱擷取：只在還沒填過、且這則訊息「看起來像名稱／略過」時才擷取，
-  // 誤判也不會損毀資料，記者正常提問一樣會被正確送進問答流程。
-  if (!binding.media_name && looksLikeNameOrSkip(text)) {
-    const isSkip = /^(略過|skip|跳過)$/i.test(text);
-    await setMediaName(userId, isSkip ? '（未提供）' : sanitize(text, 40));
-    await replyOrPush(replyToken, userId, '已記錄，謝謝！請直接輸入您的問題即可。');
-    return;
+  // 媒體名稱擷取：只在 #代碼綁定當下明確問過一次（note==='ask_name'）的「下一則」
+  // 才嘗試擷取，而且無論這則判斷結果是不是像名稱，用掉這一次後就立刻清掉旗標，
+  // 之後永遠不會再被攔截。
+  //
+  // ⚠️ 這是實際在正式環境發生過的 bug 修正：舊版判斷式只看「media_name 還沒填」，
+  // 不管有沒有真的被問過名稱——軟綁定（自然語言命中，見 handleUnbound）的記者
+  // 從頭到尾沒被問過名稱，media_name 永遠是空字串，於是只要問題剛好不含「？」
+  // 也沒用疑問詞開頭（例如「給我完整新聞稿」），就會被 looksLikeNameOrSkip 誤判成
+  // 「像名稱」，永遠卡在「已記錄，謝謝」、問幾次都一樣，真正的問題從沒被回答過。
+  // ⚠️ note 欄位（line_users F 欄）批次 5 規劃另外要用來標 pending（真人接手），
+  // 兩者目前不會同時發生，但要做批次 5 時請先看 LINE-PLAN.md 這段的完整說明。
+  if (binding.note === 'ask_name') {
+    await setBindingNote(userId, ''); // 一次性：不管這則判斷結果如何，用掉就清掉
+    if (looksLikeNameOrSkip(text)) {
+      const isSkip = /^(略過|skip|跳過)$/i.test(text);
+      await setMediaName(userId, isSkip ? '（未提供）' : sanitize(text, 40));
+      await replyOrPush(replyToken, userId, '已記錄，謝謝！請直接輸入您的問題即可。');
+      return;
+    }
+    // 不像名稱、比較像直接問問題 → 不回「已記錄」，直接當問題往下走，
+    // 記者不會因為系統誤判而被迫多問一次。
   }
 
   await answerQuestion(replyToken, userId, event, binding.media_name, text);
