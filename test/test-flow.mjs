@@ -33,11 +33,38 @@ function makeReq(text, userId = 'U_reporter') {
   setImmediate(() => { req.emit('data', Buffer.from(body)); req.emit('end'); });
   return req;
 }
+// 群組事件：mentionSelf 決定送出的訊息有沒有 @ 到機器人（isSelf: true）。
+// mentionText 是要 @ 掉的那段字串（預設整個 '@我 '），用來算 index/length——
+// 跟 lib/line.js stripMentionText() 真正吃的是同一種偏移量格式。
+function makeGroupReq(text, { groupId = 'Cgroup1', mentionSelf = true, mentionText = '@我 ', asRoom = false } = {}) {
+  const mention = mentionSelf
+    ? { mentionees: [{ index: 0, length: mentionText.length, type: 'user', userId: 'Ubot', isSelf: true }] }
+    : undefined;
+  const source = asRoom ? { type: 'room', roomId: groupId } : { type: 'group', groupId };
+  const body = JSON.stringify({
+    events: [{
+      type: 'message', replyToken: 'rt_' + Math.random(), source,
+      message: { type: 'text', text, ...(mention ? { mention } : {}) }
+    }]
+  });
+  const req = new EventEmitter();
+  req.method = 'POST';
+  req.headers = { 'x-line-signature': createHmac('sha256', 'testsecret').update(Buffer.from(body)).digest('base64') };
+  setImmediate(() => { req.emit('data', Buffer.from(body)); req.emit('end'); });
+  return req;
+}
+
 const res = { status() { return this; }, json() { return this; }, end() { return this; }, setHeader() { return this; }, send() { return this; } };
 
 async function send(text, userId) {
   sent.length = 0;
   await handler(makeReq(text, userId), res);
+  return sent.map(s => ({ kind: s.kind, text: s.text, event: s.event }));
+}
+
+async function sendGroup(text, opts) {
+  sent.length = 0;
+  await handler(makeGroupReq(text, opts), res);
   return sent.map(s => ({ kind: s.kind, text: s.text, event: s.event }));
 }
 
@@ -242,6 +269,53 @@ reset(); await freshModule();
 state.staff.push(['U_staff', '', '2026-08-27', '', `event_analytics:${Date.now() - 11 * 60 * 1000}`]);
 out = await send('四足', 'U_staff');
 check('pending 超過 10 分鐘就失效，不會誤接成查數據', out[0]?.kind === 'answer', JSON.stringify(out));
+
+// ── 情境 8：群組／多人聊天，仿美玉姨——只有被 @ 到才回答 ──────────────
+reset(); await freshModule();
+
+out = await sendGroup('這場記者會的重點是什麼', { mentionSelf: false });
+check('群組裡沒有 @ 到我們 → 完全不回應（不能在群組裡自己插話）', out.length === 0, JSON.stringify(out));
+
+out = await sendGroup('@我 這是四足機器人記者會的重點嗎', { mentionSelf: true, mentionText: '@我 ' });
+check('群組裡 @ 到我們 → 有回應', out.length > 0, JSON.stringify(out));
+check('@ 到我們時走一般問答（比對到 quad）', out[0]?.kind === 'answer' && out[0].event === 'quad', JSON.stringify(out));
+
+out = await sendGroup('@我 最近有哪些活動', { mentionSelf: true, mentionText: '@我 ' });
+check('群組問活動列表 → 走 calendar，不會被當成活動內容提問',
+  out[0]?.kind === 'text' && /近期活動/.test(out[0].text), JSON.stringify(out));
+
+out = await sendGroup('@我', { mentionSelf: true, mentionText: '@我' });
+check('只 @ 沒接問題 → 引導怎麼問，不會噴例外或送空白問題給 AI',
+  out[0]?.kind === 'text' && /請在 @ 我的後面接您的問題/.test(out[0].text), JSON.stringify(out));
+
+// 群組軟綁定：@ 問過一次某場之後，同群組其他人 @ 問後續問題不用重打活動名稱
+reset(); await freshModule();
+await sendGroup('@我 半導體先進封裝技術發表會的重點', { mentionSelf: true, mentionText: '@我 ' });
+out = await sendGroup('@我 那合作廠商有哪些', { mentionSelf: true, mentionText: '@我 ' });
+check('群組軟綁定：後續 @ 問題直接回答上次那場，不用重打活動名稱',
+  out[0]?.kind === 'answer' && out[0].event === 'semi', JSON.stringify(out));
+
+// 密語與 #代碼在群組裡完全不接——不能讓群組意外開啟職員模式
+reset(); await freshModule();
+out = await sendGroup('@我 openseasame', { mentionSelf: true, mentionText: '@我 ' });
+check('群組裡講密語不會進入職員模式（走一般路由，判成 other 或找不到活動）',
+  !/職員模式已啟用/.test(out[0]?.text || ''), JSON.stringify(out));
+out = await sendGroup('@我 #quad', { mentionSelf: true, mentionText: '@我 ' });
+check('群組裡打 #代碼不會觸發綁定文案', !/已為您接上/.test(out[0]?.text || ''), JSON.stringify(out));
+
+// room（多人聊天室，非群組）也要走同一條路
+reset(); await freshModule();
+out = await sendGroup('@我 最近有哪些活動', { mentionSelf: true, mentionText: '@我 ', asRoom: true, groupId: 'Rroom1' });
+check('room 來源一樣支援 @ 提及問答', out[0]?.kind === 'text' && /近期活動/.test(out[0].text), JSON.stringify(out));
+
+// 限流用 groupId 為 key，不會被個別使用者的額度互相影響
+reset(); await freshModule();
+{
+  let last;
+  for (let i = 0; i < 16; i++) last = await sendGroup(`@我 問題${i}`, { mentionSelf: true, mentionText: '@我 ' });
+  check('群組限流：超過額度後給出提示，不會一直往下噴 AI 呼叫',
+    /提問太頻繁/.test(last[0]?.text || ''), JSON.stringify(last));
+}
 
 console.log(`\n${fail === 0 ? '✅' : '❌'} 流程測試通過 ${pass}／失敗 ${fail}`);
 process.exit(fail === 0 ? 0 : 1);
