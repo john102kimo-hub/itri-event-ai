@@ -132,18 +132,24 @@ function extractPressBody(kb) {
 }
 
 // LINE / FB 的連結預覽卡：og:image 沒填，多數情況下卡片直接不出現（LINE 甚至
-// 完全不顯示預覽，不是退化成純文字卡）。活動目前沒有專屬的靜態品牌圖可用，
-// 所以借用後台已經上傳的活動照片（images 欄位）當封面——跟 lib/line.js
-// buildImageMessages() 用同一套解析規則：取「網址｜圖說」的網址部分，只認
-// https 開頭的 jpg/png（LINE 的限制，順便也是安全的預覽圖格式）。
-// 活動還沒上傳任何照片時就不給 og:image，讓平台自己退回純文字連結。
+// 完全不顯示預覽，不是退化成純文字卡）。
+//
+// 首選是後台已經上傳的活動照片（images 欄位）——實際的新聞照片當封面最有說服力。
+// 解析規則跟 lib/line.js buildImageMessages() 同一套：取「網址｜圖說」的網址部分，
+// 只認 https 開頭的 jpg/png（LINE 的限制，順便也是安全的預覽圖格式）。
+//
+// ⚠️ 但實際查過線上資料：目前唯一已發布的場次一張照片都沒有，images 欄位是空的。
+// 「沒照片就不給 og:image」等於這個修法對現況完全不生效，貼連結照樣沒有預覽卡——
+// 所以一定要有 OG_FALLBACK 這條退路，讓每一場都至少有卡片可出。
+const OG_FALLBACK = `${SITE}/og-default.png`;
+
 function firstImageUrl(images) {
   const extRe = /\.(jpe?g|png)(\?.*)?$/i;
   const line = String(images || '')
     .split('\n').map(s => s.trim()).filter(Boolean)
     .map(l => { const i = l.search(/[|｜]/); return (i === -1 ? l : l.slice(0, i)).trim(); })
     .find(url => /^https:\/\//i.test(url) && extRe.test(url));
-  return line || '';
+  return line || OG_FALLBACK;
 }
 
 // 摘要：給 meta description / og:description 用，控制在 155 字內
@@ -311,11 +317,17 @@ async function serveEventPage(req, res) {
     `<meta property="og:description" content="${esc(summary)}">`,
     `<meta property="og:url" content="${esc(pageUrl)}">`,
     `<meta property="og:locale" content="zh_TW">`,
-    ogImage ? `<meta property="og:image" content="${esc(ogImage)}">` : '',
-    `<meta name="twitter:card" content="${ogImage ? 'summary_large_image' : 'summary'}">`,
+    `<meta property="og:image" content="${esc(ogImage)}">`,
+    // 尺寸要明講：LINE 與 FB 在還沒抓完圖片前就是靠這兩個值決定要不要留版位，
+    // 沒有的話第一次分享常常會先出一張空白卡。預設圖是 1200x630，活動照片多半也
+    // 是 16:9 上下的橫圖，用同一組值不會差太多；真的差很多時平台會以實際圖為準。
+    `<meta property="og:image:width" content="1200">`,
+    `<meta property="og:image:height" content="630">`,
+    `<meta property="og:image:alt" content="${esc(ev.name)}">`,
+    `<meta name="twitter:card" content="summary_large_image">`,
     `<meta name="twitter:title" content="${esc(ev.name)}">`,
     `<meta name="twitter:description" content="${esc(summary)}">`,
-    ogImage ? `<meta name="twitter:image" content="${esc(ogImage)}">` : '',
+    `<meta name="twitter:image" content="${esc(ogImage)}">`,
     `<script type="application/ld+json">${JSON.stringify(jsonLd).replace(/</g, '\\u003c')}</script>`
   ].filter(Boolean).join('\n');
 

@@ -5,7 +5,7 @@
   "type": "module",
   "engines": { "node": ">=18" },
   "scripts": {
-    "test": "node test/test-menu.mjs && node test/test-flow.mjs"
+    "test": "node test/test-menu.mjs && node test/test-flow.mjs && node test/test-og.mjs"
   },
   "dependencies": {
     "@vercel/blob": "2.6.1"
