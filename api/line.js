@@ -36,7 +36,7 @@ import {
   readRawBody, verifySignature, replyOrPush, replyOrPushMessages, startLoading, pushImages,
   createRichMenu, uploadRichMenuImage, setDefaultRichMenu, listRichMenus, deleteRichMenu,
   linkRichMenuToUser, unlinkRichMenuFromUser, pushChartImage,
-  isBotMentioned, stripMentionText
+  isBotMentioned, stripMentionText, pushMessage
 } from '../lib/line.js';
 import { buildCalendarCards, buildAllCalendarCards, routeIntent, formatCalendarReply, calendarQuickReplyItems } from '../lib/router.js';
 import {
@@ -51,7 +51,7 @@ import {
   isExitStaffCommand, revokeStaff, listActiveStaffIds, getStaffPending, setStaffPending
 } from '../lib/staff.js';
 
-const EVENTS_RANGE = 'events!A2:O';
+const EVENTS_RANGE = 'events!A2:P'; // P 欄是 contacts（邀訪窗口分工），見 rowToEvent()
 // line_user_id | event_id | media_name | bound_at | last_active | note | group_session_until
 // G 欄只有群組會用到（1 對 1 每則訊息本來就都是對我們講的，不需要這個概念），見
 // getGroupSessionUntil()／touchGroupSession() 的說明。
@@ -72,7 +72,7 @@ function rowToEvent(row) {
     id: row[0], name: row[1], color: row[2] || '#0F9E7A',
     knowledge_base: row[3] || '', status: row[4] || 'active',
     chips: row[6] || '', images: row[7] || '', organizer: row[9] || '工研院',
-    press_contact: row[14] || ''
+    press_contact: row[14] || '', contacts: row[15] || ''
   };
 }
 async function findEventByCode(code) {
@@ -115,6 +115,16 @@ async function getBinding(userId) {
   const boundAt = Number(row[3]) || 0;
   if (!boundAt || Date.now() - boundAt > BIND_TTL_MS) return null;
   return { event_id: row[1] || '', media_name: row[2] || '', note: row[5] || '' };
+}
+
+// 媒體名稱（C 欄）沒有 TTL 概念，是跟著這個人走的個人資料，不是「這次綁定」的一部分——
+// 記者三個月後再回來問別場，名字還在，不用重問。跟 getBinding() 分開一支的原因：
+// getBinding() 的 6 小時 TTL 過期就回 null，但過期只代表「不知道現在要問哪一場」，
+// 不代表「不知道這個人是誰」，兩者不能混在一起判斷。
+async function getStoredMediaName(userId) {
+  const rows = await getAllLineUserRows();
+  const row = rows.find(r => r[0] === userId);
+  return row ? (row[2] || '') : '';
 }
 
 let sheetsEnsured = false;
@@ -347,9 +357,52 @@ const DEFAULT_CHIPS = [
 // （event.chips），不需要另外維護一份「LINE 專用關鍵字」——同仁在後台改一次，
 // 網頁跟 LINE 同步生效。沒設定自訂 chips 的活動退回 DEFAULT_CHIPS，跟網頁版行為
 // 一致，不會讓記者看到空的按鈕列。
+// 送出這句就是要看邀訪聯絡窗口的清單，見下面 handleMetaIntent() 的 'contacts' 分支跟
+// lib/menu.js 的 detectMetaIntent()。固定加在每則答案的按鈕最後一格，記者不用先知道
+// 要打這句話才找得到這個功能——跟內容 chips 放在一起才會被看到。
+const CONTACT_MENU_LABEL = '媒體邀訪需求';
+
+// LINE quick reply 上限 13 顆，扣掉固定的「媒體邀訪需求」那一格，內容 chips 最多留
+// 12 格——同仁在後台放了 13 題以上的自訂問題不是常態，但真的放了也不能讓陣列超過
+// LINE 的硬限制，寧可截斷內容 chips 也不能把邀訪窗口的入口擠掉。
 function eventQuickChips(event) {
   const custom = String(event?.chips || '').split('\n').map(s => s.trim()).filter(Boolean);
-  return custom.length ? custom : DEFAULT_CHIPS;
+  const contentChips = (custom.length ? custom : DEFAULT_CHIPS).slice(0, 12);
+  return [...contentChips, CONTACT_MENU_LABEL];
+}
+
+// ── 邀訪聯絡窗口分工（events!P，同仁在後台設定）───────────────────────
+// 回報的意見：不同議題該找誰，記者常常猜不到，只能一律洽詢單一的「新聞聯絡人」。
+// 同仁在後台可以設定多組「關鍵字｜姓名｜電話｜LINE ID」，記者點對應關鍵字就能拿到
+// 精準的窗口，而不是每次都轉一手。
+//
+// 每行一組，用跟 images／chips 同一套「半形｜全形都收」的分隔規則：
+//   關鍵字｜姓名｜電話｜LINE ID(選填)
+function parseEventContacts(event) {
+  return String(event?.contacts || '')
+    .split('\n').map(s => s.trim()).filter(Boolean)
+    .map(line => {
+      const [keyword, name, phone, lineId] = line.split(/[|｜]/).map(s => (s || '').trim());
+      return { keyword, name, phone, lineId };
+    })
+    .filter(c => c.keyword && c.name); // 缺關鍵字或姓名的行直接略過，不要讓半填的資料跑出去
+}
+
+// 訊息文字精準命中某個窗口的關鍵字才回覆聯絡資訊——只認完全比對（去空白、忽略大小寫），
+// 不做模糊比對：這類回覆是「精準的聯絡方式」，寧可命中不了、讓記者換句話問一次，也不要
+// 把「技術規格」跟「技術突破」這種相近但不同的關鍵字搞混、給錯聯絡人。
+function matchContact(text, contactsField) {
+  const norm = s => String(s || '').replace(/\s+/g, '').toLowerCase();
+  const t = norm(text);
+  if (!t) return null;
+  return parseEventContacts({ contacts: contactsField }).find(c => norm(c.keyword) === t) || null;
+}
+
+function formatContactReply(contact) {
+  const lines = [`【${contact.keyword}】邀訪聯絡窗口`, contact.name];
+  if (contact.phone) lines.push(`📞 ${contact.phone}`);
+  if (contact.lineId) lines.push(`LINE：${contact.lineId}`);
+  return lines.join('\n');
 }
 
 // 正式問答：開輸入中動畫 → 呼叫 Anthropic → reply（失敗 fallback push）→ 寫 qa_log。
@@ -362,6 +415,20 @@ async function answerQuestion(replyToken, userId, event, mediaName, text, { load
   // 主流程，但既然知道一定會失敗，group 呼叫端直接傳 loading:false 跳過，
   // 而不是每一則群組提問都送一次注定失敗的 API 呼叫。
   if (loading) await startLoading(userId, 55);
+
+  // 命中同仁設定的邀訪窗口關鍵字就直接回聯絡資訊，不呼叫 AI——這類回覆要求精準，
+  // 電話號碼、LINE ID 這種資訊不該讓 AI 用自然語言重新生成一次（打錯一碼就是
+  // 記者聯絡不到人）。放在 answerQuestion() 裡而不是呼叫端各自檢查，是因為
+  // 1 對 1、群組、職員模式最後都走這支，寫一次三邊都受惠。
+  const contact = matchContact(text, event.contacts);
+  if (contact) {
+    const reply = formatContactReply(contact);
+    console.log(`[line] contact match event=${event.id} keyword="${contact.keyword}"`);
+    await replyOrPush(replyToken, userId, reply, eventQuickChips(event));
+    await logQa(event, mediaName, text, reply);
+    return;
+  }
+
   const systemPrompt = buildSystemPrompt(event, lineExtraRules(event));
   const reply = await askAnthropic(systemPrompt, text);
   // 診斷用途，不是必要邏輯：路由判斷得準不準、AI 答得順不順，靠這行在 Vercel Logs
@@ -651,6 +718,32 @@ async function handleMetaIntent(replyToken, userId, text, metaIntent, binding) {
     return;
   }
 
+  if (metaIntent === 'contacts') {
+    // 邀訪窗口是「某一場活動」的資料，沒先知道問哪一場就列不出來——跟 qa 意圖
+    // 一樣要有綁定才能回答，沒綁定就引導記者先選活動，不用另外呼叫路由。
+    const current = binding ? await getEventById(binding.event_id) : null;
+    if (!isUsable(current)) {
+      await replyOrPush(replyToken, userId,
+        '請先告訴我您想問哪一場活動（直接打活動名稱，或問「最近有哪些活動」），我再幫您列出這場的邀訪聯絡窗口。',
+        ['最近有哪些活動']);
+      return;
+    }
+    const contacts = parseEventContacts(current);
+    if (!contacts.length) {
+      // 同仁還沒設定窗口分工——退回既有的單一「新聞聯絡人」欄位，不能讓記者點了
+      // 按鈕卻什麼都拿不到；那個欄位幾乎每場都會填（見後台表單的提示文案）。
+      const fallback = current.press_contact
+        ? `《${current.name}》的新聞聯絡人：\n${current.press_contact}`
+        : `《${current.name}》目前沒有設定聯絡窗口，請洽現場工作人員。`;
+      await replyOrPush(replyToken, userId, fallback, eventQuickChips(current));
+      return;
+    }
+    await replyOrPush(replyToken, userId,
+      `《${current.name}》的邀訪聯絡窗口：\n請選擇想聯絡的主題，或直接打關鍵字。`,
+      contacts.map(c => c.keyword));
+    return;
+  }
+
   const cards = buildCalendarCards(await getAllEventRows());
 
   if (metaIntent === 'switch') {
@@ -681,7 +774,12 @@ async function handleMetaIntent(replyToken, userId, text, metaIntent, binding) {
 // 問哪一場時，1 對 1 給引導文案是體貼，群組裡沒被直接 @ 又給同一句引導文案就是
 // 插話——這種情況安靜比較安全，等真的被 @ 到再回。1 對 1 呼叫端不傳這個參數，
 // 維持原本一定會給引導文案的行為。
-async function handleUnbound(replyToken, userId, text, { silentOnOther = false } = {}) {
+//
+// askMediaName：回報的意見——用打活動名稱軟綁定（這支）的記者從頭到尾沒被問過
+// 媒體名稱，跟 #代碼 QR 掃碼綁定（有 ask_name 一次性擷取視窗）不一樣，後台的問答
+// 分析永遠看到「（未填寫）」，沒辦法統計哪些媒體來過。群組不能問——一個群組裡有
+// 多個不同媒體的人，「貴媒體名稱」這句話對群組沒有意義，group 呼叫端傳 false。
+async function handleUnbound(replyToken, userId, text, { silentOnOther = false, askMediaName = true } = {}) {
   const rows = await getAllEventRows();
   const cards = buildCalendarCards(rows);
   const { intent, event_ids, confidence } = await routeIntent(text, cards);
@@ -698,7 +796,16 @@ async function handleUnbound(replyToken, userId, text, { silentOnOther = false }
       // 路由命中就順手軟綁定——下一題不用再重打一次活動名稱，也能重複利用
       // 6 小時 TTL 那套過期機制，不用另外維護一套「路由記憶」。
       await upsertBinding(userId, event.id);
-      await answerQuestion(replyToken, userId, event, '', text);
+      // 媒體名稱是跟著這個人走的（見 getStoredMediaName 的說明），不是這場才有——
+      // 之前來問過別場、報過名字或按過略過的人，這裡沿用，不用再問一次。
+      const existingName = askMediaName ? await getStoredMediaName(userId) : '';
+      await answerQuestion(replyToken, userId, event, existingName, text);
+      // 只在「這個人從沒被問過」時才順手問一次，而且不擋住剛剛的答案——用 push
+      // 補問，記者不用先回答完媒體名稱才拿得到他真正想要的內容。
+      if (askMediaName && !existingName) {
+        await setBindingNote(userId, 'ask_name');
+        await pushMessage(userId, '對了，方便留個貴媒體的名稱嗎？（打名稱即可，或回「略過」——之後就不會再問了）');
+      }
       return;
     }
   }
@@ -799,7 +906,7 @@ async function handleGroupMessage(replyToken, groupId, text, { mentioned }) {
   }
 
   if (!binding) {
-    await handleUnbound(replyToken, groupId, text, { silentOnOther: !mentioned });
+    await handleUnbound(replyToken, groupId, text, { silentOnOther: !mentioned, askMediaName: false });
     await touchGroupSession(groupId); // 不管有沒有真的答上，只要走到這裡就算還在互動，續命
     return;
   }

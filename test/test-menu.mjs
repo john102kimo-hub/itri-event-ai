@@ -136,5 +136,18 @@ for (const t of ['退出', '離開', '結束', '取消', '退出這場活動', '
   eq(isExitStaffCommand(t), false, `「${t}」不應被當成退出指令`);
 }
 
+console.log('── 邀訪聯絡窗口意圖（contacts）比對 ──');
+for (const t of ['媒體邀訪需求', '邀訪需求', '邀訪', '聯絡窗口', '聯繫窗口', '窗口分工', '媒體聯絡', '採訪窗口', '邀訪？']) {
+  eq(detectMetaIntent(t), 'contacts', `「${t}」應被判成 contacts`);
+}
+for (const t of [
+  '我想採訪你們固態電池的團隊',   // 含「採訪」但不是整句就是那幾個固定詞
+  '這場記者會安排了哪些媒體採訪', // 同上
+  '請問邀訪流程是什麼',           // 含「邀訪」但不是完全比對
+  '窗口分工表在哪裡下載'          // 含「窗口分工」但後面還接著別的內容
+]) {
+  eq(detectMetaIntent(t), null, `「${t}」是正常提問，不該被 contacts 攔走`);
+}
+
 console.log(`\n${fail === 0 ? '✅' : '❌'} 通過 ${pass}／失敗 ${fail}`);
 process.exit(fail === 0 ? 0 : 1);
