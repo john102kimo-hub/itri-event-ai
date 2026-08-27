@@ -386,7 +386,7 @@ state.bindings.set('U_reporter', { event_id: 'quad', media_name: '中央社', no
 
 out = await send('這場的重點是什麼');
 check('綁定中的答案要附上這場自訂的 chips（quad 的 fixture 是「重點／應用」）',
-  JSON.stringify(out[1]?.quickReply) === JSON.stringify(['重點', '應用']), JSON.stringify(out));
+  JSON.stringify(out[1]?.quickReply) === JSON.stringify(['重點', '應用', '媒體邀訪需求']), JSON.stringify(out));
 
 reset(); await freshModule();
 state.bindings.set('U_reporter', { event_id: 'semi', media_name: '', note: '', bound_at: Date.now() });
@@ -402,19 +402,108 @@ check('#代碼綁定確認訊息本身不附 chips（避免跟 ask_name 擷取�
   !(out[0]?.quickReply?.length > 0), JSON.stringify(out));
 out = await send('中央社');
 check('回覆媒體名稱、ask_name 解決之後，「已記錄」那則就附上 chips',
-  JSON.stringify(out[0]?.quickReply) === JSON.stringify(['重點', '應用']), JSON.stringify(out));
+  JSON.stringify(out[0]?.quickReply) === JSON.stringify(['重點', '應用', '媒體邀訪需求']), JSON.stringify(out));
 
 // 職員模式問活動內容一樣要看得到 chips（同一支 answerQuestion()，沒有另外分岔邏輯）
 reset(); await freshModule();
 state.staff.push(['U_staff', '', '2026-08-27', '', '']);
 out = await send('四足機器人的重點', 'U_staff');
 check('職員模式問活動內容一樣附 chips（走同一支 answerQuestion）',
-  JSON.stringify(out[1]?.quickReply) === JSON.stringify(['重點', '應用']), JSON.stringify(out));
+  JSON.stringify(out[1]?.quickReply) === JSON.stringify(['重點', '應用', '媒體邀訪需求']), JSON.stringify(out));
 
 // 群組問答也要附 chips，跟 1 對 1 一致
 reset(); await freshModule();
 out = await sendGroup('@我 四足機器人記者會的重點', { mentionSelf: true, mentionText: '@我 ' });
-check('群組問答也附 chips', JSON.stringify(out[1]?.quickReply) === JSON.stringify(['重點', '應用']), JSON.stringify(out));
+check('群組問答也附 chips', JSON.stringify(out[1]?.quickReply) === JSON.stringify(['重點', '應用', '媒體邀訪需求']), JSON.stringify(out));
+
+// ── 情境 11：自然語言綁定時順手問媒體名稱（回報的分析缺口）────────────
+// 回報的問題：用打活動名稱軟綁定（handleUnbound 的 qa 高信心分支）的記者從頭到尾
+// 沒被問過媒體名稱，跟 #代碼 QR 掃碼綁定（有 ask_name 一次性擷取視窗）不一樣，
+// 後台的問答分析永遠只看到「（未填寫）」。
+reset(); await freshModule();
+
+out = await send('四足機器人的重點');
+check('自然語言命中照樣直接回答（不被補問卡住）',
+  out[0]?.kind === 'answer' && out[0].event === 'quad', JSON.stringify(out));
+check('答案本身還是附著 chips（補問是額外一則，不影響原本的回答格式）',
+  JSON.stringify(out[1]?.quickReply) === JSON.stringify(['重點', '應用', '媒體邀訪需求']), JSON.stringify(out));
+check('沒問過名字的人，答完之後會多一則補問媒體名稱（不擋住答案本身）',
+  out[2]?.kind === 'text' && /方便留個貴媒體的名稱/.test(out[2].text), JSON.stringify(out));
+check('補問時設定 ask_name 旗標，下一則會走既有的擷取機制',
+  state.bindings.get('U_reporter')?.note === 'ask_name', JSON.stringify(state.bindings.get('U_reporter')));
+
+out = await send('中央社');
+check('回覆名稱 → 沿用既有 ask_name 擷取機制正常記錄', /已記錄/.test(out[0]?.text || ''), JSON.stringify(out));
+check('媒體名稱真的寫進去了', state.bindings.get('U_reporter')?.media_name === '中央社');
+
+// 綁定過期（6 小時 TTL）不代表「不知道這個人是誰」——媒體名稱要留著，不能再問一次
+state.bindings.get('U_reporter').bound_at = Date.now() - 7 * 60 * 60 * 1000;
+await freshModule();
+out = await send('智慧醫療解決方案記者會的重點');
+check('綁定過期後再次自然語言命中 → 沿用先前的媒體名稱，不再補問',
+  out.length === 2 && out[0]?.kind === 'answer' && out[0].event === 'med', JSON.stringify(out));
+
+// 回「略過」的人也要記得住——同樣不再重複補問
+reset(); await freshModule();
+await send('四足機器人的重點');
+await send('略過');
+check('回「略過」後媒體名稱記成「（未提供）」', state.bindings.get('U_reporter')?.media_name === '（未提供）');
+// 綁定過期後再進一次 handleUnbound（還在綁定期間內會走「換場」而不是這條路，
+// 見 matchEventByName 對完整句子跟純活動名稱的比對差異），驗證「略過」也記得住
+state.bindings.get('U_reporter').bound_at = Date.now() - 7 * 60 * 60 * 1000;
+await freshModule();
+out = await send('半導體先進封裝技術發表會');
+check('之前回過「略過」的人，綁定過期後再次自然語言命中不會又被補問一次',
+  out.length === 2 && out[0]?.kind === 'answer' && out[0].event === 'semi', JSON.stringify(out));
+
+// 群組不會被問「貴媒體名稱」——群組裡沒有單一個人身分的概念
+reset(); await freshModule();
+out = await sendGroup('@我 四足機器人記者會的重點', { mentionSelf: true, mentionText: '@我 ' });
+check('群組裡自然語言命中不會被追問媒體名稱（只有答案本身兩則，沒有第三則補問）',
+  out.length === 2 && out[0]?.kind === 'answer', JSON.stringify(out));
+
+// ── 情境 12：邀訪聯絡窗口分工（回報的新功能）────────────────────────────
+// quad 的 fixture 設定了兩組窗口：技術規格／新聞稿（見 test/fakes.mjs）
+reset(); await freshModule();
+state.bindings.set('U_reporter', { event_id: 'quad', media_name: '中央社', note: '', bound_at: Date.now() });
+
+out = await send('媒體邀訪需求');
+check('點「媒體邀訪需求」→ 列出這場設定過的關鍵字，不呼叫 AI',
+  out.length === 1 && JSON.stringify(out[0]?.quickReply) === JSON.stringify(['技術規格', '新聞稿']),
+  JSON.stringify(out));
+check('文字裡有提示可以直接打關鍵字', /請選擇想聯絡的主題|直接打關鍵字/.test(out[0]?.text || ''), out[0]?.text);
+
+out = await send('技術規格');
+check('打中設定過的關鍵字 → 直接回聯絡資訊，不呼叫 AI（out.length===1，沒有 answer 標記）',
+  out.length === 1, JSON.stringify(out));
+check('聯絡資訊包含姓名、電話、LINE ID', /陳美玲/.test(out[0]?.text || '') && /03-1111111/.test(out[0]?.text || '') && /lineid_amy/.test(out[0]?.text || ''),
+  out[0]?.text);
+
+out = await send('　技術規格　'); // 前後帶全形空白，驗證比對有先正規化
+check('關鍵字比對會忽略前後空白', out.length === 1 && /陳美玲/.test(out[0]?.text || ''), JSON.stringify(out));
+
+out = await send('技術');
+check('只打關鍵字的一部分不算命中（精準比對，避免給錯窗口）→ 走一般問答',
+  out[0]?.kind === 'answer', JSON.stringify(out));
+
+// 活動沒設定窗口分工時退回既有的單一新聞聯絡人欄位
+reset(); await freshModule();
+state.bindings.set('U_reporter', { event_id: 'semi', media_name: '', note: '', bound_at: Date.now() });
+out = await send('媒體邀訪需求');
+check('沒設定過窗口分工的活動 → 退回單一新聞聯絡人，不是空清單',
+  /陳大文/.test(out[0]?.text || '') && /新聞聯絡人/.test(out[0]?.text || ''), out[0]?.text);
+
+// 連單一新聞聯絡人都沒填的活動
+reset(); await freshModule();
+state.bindings.set('U_reporter', { event_id: 'med', media_name: '', note: '', bound_at: Date.now() });
+out = await send('媒體邀訪需求');
+check('連新聞聯絡人都沒填時給明確訊息，不是報錯或空白',
+  /目前沒有設定聯絡窗口/.test(out[0]?.text || ''), out[0]?.text);
+
+// 還沒綁定任何活動時點「媒體邀訪需求」
+reset(); await freshModule();
+out = await send('媒體邀訪需求');
+check('沒綁定活動時問邀訪需求 → 引導先選活動，不是報錯', /請先告訴我您想問哪一場活動/.test(out[0]?.text || ''), out[0]?.text);
 
 console.log(`\n${fail === 0 ? '✅' : '❌'} 流程測試通過 ${pass}／失敗 ${fail}`);
 process.exit(fail === 0 ? 0 : 1);

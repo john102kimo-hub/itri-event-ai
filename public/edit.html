@@ -180,6 +180,13 @@ textarea.form-control { min-height: 240px; resize: vertical; line-height: 1.65; 
       <div class="form-hint">AI 答不出來時，會請記者洽詢這裡填的人；也是未來 LINE 查詢「這場還沒有內容」時唯一能給的線索，建議填。</div>
     </div>
     <div class="form-group">
+      <label><i class="ti ti-address-book"></i> 邀訪聯絡窗口分工（選填，每行一組）</label>
+      <textarea class="form-control" id="input-contacts" rows="4"
+        placeholder="新聞稿｜王小明｜03-1234567 分機8888&#10;技術規格｜陳美玲｜03-1234567 分機9999｜LINE ID"
+        style="font-size:16px;min-height:auto"></textarea>
+      <div class="form-hint">記者在 LINE 點「媒體邀訪需求」時會列出這裡的關鍵字，點了直接給對應窗口的聯絡方式；LINE ID 選填。格式：<code>關鍵字｜姓名｜電話｜LINE ID</code>，半形 <code>|</code> 或全形 <code>｜</code> 都可以。留空則只給上面的「新聞聯絡人」。</div>
+    </div>
+    <div class="form-group">
       <label><i class="ti ti-building"></i> 主辦單位</label>
       <input class="form-control" id="input-organizer" list="organizer-list" placeholder="工研院">
       <datalist id="organizer-list">
@@ -405,6 +412,7 @@ async function load() {
     document.getElementById('input-venue').value = ev.venue || '';
     document.getElementById('input-type').value = ev.event_type || '';
     document.getElementById('input-contact').value = ev.press_contact || '';
+    document.getElementById('input-contacts').value = ev.contacts || '';
     loadedStatus = ev.status || 'active';
     document.getElementById('input-status').value = loadedStatus;
     updateStatusHint();
@@ -531,7 +539,8 @@ async function save() {
         event_time: document.getElementById('input-time').value.trim(),
         venue: document.getElementById('input-venue').value.trim(),
         event_type: document.getElementById('input-type').value.trim(),
-        press_contact: document.getElementById('input-contact').value.trim()
+        press_contact: document.getElementById('input-contact').value.trim(),
+        contacts: document.getElementById('input-contacts').value.trim()
       })
     });
     const data = await res.json();

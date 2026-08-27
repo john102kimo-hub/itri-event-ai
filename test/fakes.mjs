@@ -1,11 +1,13 @@
 // 假的 Sheets／LINE／Anthropic，給 test-flow.mjs 用。
-// events 欄位順序照 events!A2:O：A id, B name, C color, D kb, E status, F date,
-// G chips, H images, I greeting, J organizer, K edit_code, L time, M venue, N type, O contact
+// events 欄位順序照 events!A2:P：A id, B name, C color, D kb, E status, F date,
+// G chips, H images, I greeting, J organizer, K edit_code, L time, M venue, N type,
+// O press_contact, P contacts（邀訪窗口分工）
 export const state = {
   events: [
-    ['quad', '經濟部四足機器人國產研發平台發表記者會', '#0F9E7A', '【新聞稿】四足機器人…', 'ended', '2026-08-08', '重點\n應用', '', '', '工研院', 'code1', '', '', '', ''],
-    ['semi', '半導體先進封裝技術發表會', '#0F9E7A', '【新聞稿】先進封裝…', 'active', '2026-09-20', '', '', '', '工研院', 'code2', '', '', '', ''],
-    ['med', '智慧醫療解決方案記者會', '#0F9E7A', '【新聞稿】智慧醫療…', 'active', '2026-10-01', '', '', '', '工研院', 'code3', '', '', '', '']
+    ['quad', '經濟部四足機器人國產研發平台發表記者會', '#0F9E7A', '【新聞稿】四足機器人…', 'ended', '2026-08-08', '重點\n應用', '', '', '工研院', 'code1', '', '', '', '王小明 03-1111111',
+      '技術規格｜陳美玲｜03-1111111 分機9999｜lineid_amy\n新聞稿｜王小明｜03-1111111 分機1234'],
+    ['semi', '半導體先進封裝技術發表會', '#0F9E7A', '【新聞稿】先進封裝…', 'active', '2026-09-20', '', '', '', '工研院', 'code2', '', '', '', '陳大文 03-2222222 分機5678', ''],
+    ['med', '智慧醫療解決方案記者會', '#0F9E7A', '【新聞稿】智慧醫療…', 'active', '2026-10-01', '', '', '', '工研院', 'code3', '', '', '', '', '']
   ],
   bindings: new Map(),
   staff: [],                 // line_staff!A2:D 的列：userId | name | authorized_at | note
@@ -51,7 +53,7 @@ export const sheets = {
   },
   async updateRange(range, values) {
     // events!K12 這種單欄寫入（補編輯碼）。A=0 起算，K 是索引 10。
-    const evM = range.match(/^events!([A-O])(\d+)(?::([A-O])(\d+))?$/);
+    const evM = range.match(/^events!([A-P])(\d+)(?::([A-P])(\d+))?$/);
     if (evM) {
       const row = state.events[Number(evM[2]) - 2];
       if (row) values[0].forEach((v, i) => { row[evM[1].charCodeAt(0) - 65 + i] = v; });
