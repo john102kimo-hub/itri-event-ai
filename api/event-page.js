@@ -131,6 +131,21 @@ function extractPressBody(kb) {
   return lines.slice(i).join('\n').trim();
 }
 
+// LINE / FB 的連結預覽卡：og:image 沒填，多數情況下卡片直接不出現（LINE 甚至
+// 完全不顯示預覽，不是退化成純文字卡）。活動目前沒有專屬的靜態品牌圖可用，
+// 所以借用後台已經上傳的活動照片（images 欄位）當封面——跟 lib/line.js
+// buildImageMessages() 用同一套解析規則：取「網址｜圖說」的網址部分，只認
+// https 開頭的 jpg/png（LINE 的限制，順便也是安全的預覽圖格式）。
+// 活動還沒上傳任何照片時就不給 og:image，讓平台自己退回純文字連結。
+function firstImageUrl(images) {
+  const extRe = /\.(jpe?g|png)(\?.*)?$/i;
+  const line = String(images || '')
+    .split('\n').map(s => s.trim()).filter(Boolean)
+    .map(l => { const i = l.search(/[|｜]/); return (i === -1 ? l : l.slice(0, i)).trim(); })
+    .find(url => /^https:\/\//i.test(url) && extRe.test(url));
+  return line || '';
+}
+
 // 摘要：給 meta description / og:description 用，控制在 155 字內
 function makeSummary(name, organizer, pressBody, concluded) {
   if (concluded && pressBody) {
@@ -238,6 +253,7 @@ async function serveEventPage(req, res) {
     status: row[4] || 'active',
     date: row[5] || '',
     chips: row[6] || '',
+    images: row[7] || '',
     organizer: row[9] || '工研院'
   };
 
@@ -247,6 +263,7 @@ async function serveEventPage(req, res) {
   const pressBody = concluded ? extractPressBody(ev.knowledge_base) : '';
   const summary = makeSummary(ev.name, ev.organizer, pressBody, concluded);
   const chipList = ev.chips.split('\n').map(s => s.trim()).filter(Boolean);
+  const ogImage = firstImageUrl(ev.images);
 
   // ── head 注入：title / meta / Open Graph / JSON-LD ────────────────
   const jsonLd = {
@@ -294,11 +311,13 @@ async function serveEventPage(req, res) {
     `<meta property="og:description" content="${esc(summary)}">`,
     `<meta property="og:url" content="${esc(pageUrl)}">`,
     `<meta property="og:locale" content="zh_TW">`,
-    `<meta name="twitter:card" content="summary_large_image">`,
+    ogImage ? `<meta property="og:image" content="${esc(ogImage)}">` : '',
+    `<meta name="twitter:card" content="${ogImage ? 'summary_large_image' : 'summary'}">`,
     `<meta name="twitter:title" content="${esc(ev.name)}">`,
     `<meta name="twitter:description" content="${esc(summary)}">`,
+    ogImage ? `<meta name="twitter:image" content="${esc(ogImage)}">` : '',
     `<script type="application/ld+json">${JSON.stringify(jsonLd).replace(/</g, '\\u003c')}</script>`
-  ].join('\n');
+  ].filter(Boolean).join('\n');
 
   let html = template.replace('<title>AI 新聞助理</title>', headBlock);
 
