@@ -599,6 +599,13 @@ check('活動前記者提問 → 有正常回答（沒有被卡住）',
   const answered = out.find(o => o.kind === 'answer' && o.event === 'soon');
   check('system prompt 帶的是邀請函內容', /邀請函.*誠摯邀請貴媒體蒞臨採訪/.test(answered?.sys || ''), answered?.sys?.slice(0, 200));
   check('system prompt 不含正式新聞稿內容', !/正式新聞稿.*完整技術規格與時程/.test(answered?.sys || ''), answered?.sys?.slice(0, 200));
+
+  // 回報的意見：chips 沒跟著換，記者點原本的「活動內容」問句只會得到「沒有資料」。
+  const textReply = out.find(o => o.kind === 'text');
+  check('活動前的快速提問按鈕換成 invite_letter_chips，不是原本問活動內容那組',
+    textReply?.quickReply?.includes('邀請函內容是什麼？') && textReply?.quickReply?.includes('採訪申請方式？') &&
+    !textReply?.quickReply?.includes('這場的技術突破是什麼？'),
+    JSON.stringify(textReply?.quickReply));
 }
 
 // 職員模式問同一場 → 要看得到真正的新聞稿內容準備活動，不能被自己設的「活動前」卡住

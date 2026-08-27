@@ -813,12 +813,45 @@ textarea 貼過去存檔，比維護多欄表格好編輯，也不用另外做�
 反而會被自己設的「活動前」規則卡住、看不到真正的新聞稿內容。加了
 `allowPreEventSubstitution` 選項（預設 `true`），職員模式呼叫端明確傳 `false`。
 
-**測試**：新增 `test/test-prompt.mjs`（18 項，純函式單元測試，不需要 fake Sheets／
-LINE），涵蓋 `isPreEventMode`／`resolveEventContent`／`buildSystemPrompt` 的日期
-邊界（明天／今天／昨天／沒填日期）、沒填邀請函不受影響、日期兩種既有格式都認得。
+**測試**：新增 `test/test-prompt.mjs`（單元測試，不需要 fake Sheets／LINE），涵蓋
+`isPreEventMode`／`resolveEventContent`／`buildSystemPrompt` 的日期邊界（明天／
+今天／昨天／沒填日期）、沒填邀請函不受影響、日期兩種既有格式都認得。
 `test/test-flow.mjs` 新增情境 14（整合測試，用假的 fixture `soon`：日期動態算
 「明天」，knowledge_base 跟 invite_letter 刻意不同）驗證記者拿到的是邀請函、
-職員拿到的是正式新聞稿。`npm test` 全部合計 338 項。
+職員拿到的是正式新聞稿。
+
+#### 批次 10.1：chips 沒跟著換、公開活動頁也要擋（回報的追問）
+
+**問題一**：`resolveEventContent()` 一開始只換 `knowledge_base`／`images`，沒換
+`chips`（快速提問按鈕，LINE quick reply 跟網頁版共用）。活動前記者點原本那組
+「這次活動的主要發表內容是什麼？」，AI 只能照實說「這部分我沒有資料」——不是壞掉，
+但沒有用。回報問「有可能活動前關鍵字另外設嗎」。
+
+**修法**：`events` 表加 **R 欄 `invite_letter_chips`**（活動前快速提問，格式跟
+`chips` 一樣一行一題）。`resolveEventContent()` 活動前模式一併把 `chips` 換成
+`event.invite_letter_chips || event.chips`——有填就用活動前那組，沒填就退回原本
+的 chips（不會讓活動前的按鈕整排消失，這是新增欄位、舊活動不填也要正常運作）。
+`api/line.js` 的 `eventQuickChips()` 內部直接呼叫 `resolveEventContent()`，呼叫端
+不用先自己判斷、也不用先手動 resolve 一次——`resolveEventContent()` 對已經 resolve
+過的 event 再呼叫一次是安全的（`invite_letter`／`event_date` 欄位在 spread 之後
+還在物件上，重算會得到同一個結果，不會疊加或跑掉）。
+
+**問題二**（追查 chips 時順便發現的相關漏洞）：`public/event.html`（記者前台頁面）
+直接顯示 `event.chips`／`event.images`，資料來源是 `api/events.js` 的
+`get_public` action——這支完全沒套用 `resolveEventContent()`。等於 AI 問答那邊
+擋了活動前的正式照片，但公開網頁的活動頁面照樣把 `images` 欄位的官方照片原封不動
+顯示出來，防了一半。
+
+**修法**：`get_public` 也套一次 `resolveEventContent()`，只是輸入輸出都要小心：
+- 輸入只給 `resolveEventContent()` 判斷跟替換需要的欄位（`status`／`event_date`／
+  `chips`／`images`／`invite_letter`／`invite_letter_chips`），不要把整列都餵進去
+- 輸出要把 `invite_letter`／`invite_letter_chips` 這兩個原始欄位濾掉才送出去——
+  公開頁面只需要「已經算好」的 `chips`／`images`，不需要邀請函文字本身通過這支
+  公開 API 外流（邀請函是要給 AI 問答用的，不是要在網頁上顯示全文）
+
+**測試**：`test-prompt.mjs` 補上 chips 替換與「沒填 invite_letter_chips 時退回原本
+chips」的斷言；`test-flow.mjs` 情境 14 補上「活動前的快速提問按鈕真的換了一組」的
+整合測試（用兩組刻意不同的問句，證明不是剛好長一樣）。`npm test` 全部合計 341 項。
 
 ---
 

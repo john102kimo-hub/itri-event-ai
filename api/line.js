@@ -55,7 +55,7 @@ import {
   parseContactsDirectory, formatGlobalContact, matchGlobalContactByText
 } from '../lib/contacts-directory.js';
 
-const EVENTS_RANGE = 'events!A2:Q'; // P 欄是 contacts（邀訪窗口分工），Q 欄是 invite_letter（媒體邀請函），見 rowToEvent()
+const EVENTS_RANGE = 'events!A2:R'; // P 欄是 contacts（邀訪窗口分工），Q 欄是 invite_letter（媒體邀請函），R 欄是 invite_letter_chips（活動前快速提問），見 rowToEvent()
 // line_user_id | event_id | media_name | bound_at | last_active | note | group_session_until
 // G 欄只有群組會用到（1 對 1 每則訊息本來就都是對我們講的，不需要這個概念），見
 // getGroupSessionUntil()／touchGroupSession() 的說明。
@@ -76,7 +76,8 @@ function rowToEvent(row) {
     id: row[0], name: row[1], color: row[2] || '#0F9E7A',
     knowledge_base: row[3] || '', status: row[4] || 'active', event_date: row[5] || '',
     chips: row[6] || '', images: row[7] || '', organizer: row[9] || '工研院',
-    press_contact: row[14] || '', contacts: row[15] || '', invite_letter: row[16] || ''
+    press_contact: row[14] || '', contacts: row[15] || '', invite_letter: row[16] || '',
+    invite_letter_chips: row[17] || ''
   };
 }
 async function findEventByCode(code) {
@@ -403,7 +404,14 @@ const CONTACT_MENU_LABEL = '媒體邀訪需求';
 // LINE quick reply 上限 13 顆，扣掉固定的「媒體邀訪需求」那一格，內容 chips 最多留
 // 12 格——同仁在後台放了 13 題以上的自訂問題不是常態，但真的放了也不能讓陣列超過
 // LINE 的硬限制，寧可截斷內容 chips 也不能把邀訪窗口的入口擠掉。
-function eventQuickChips(event) {
+//
+// 內部先過一次 resolveEventContent()：活動前（見 lib/prompt.js 的說明）自訂 chips
+// 若還是原本那組「問活動內容」的問句，記者點下去常常只會得到「這部分我沒有資料」——
+// 不是壞掉，但沒有用。呼叫端不用先自己判斷是不是活動前、也不用先手動 resolve 一次，
+// 這裡永遠拿到「當下該用哪組 chips」的正確答案；resolveEventContent() 對已經 resolve
+// 過的 event 再呼叫一次是安全的（同一批欄位只會算出同樣的結果，不會疊加）。
+function eventQuickChips(rawEvent) {
+  const event = resolveEventContent(rawEvent || {});
   const custom = String(event?.chips || '').split('\n').map(s => s.trim()).filter(Boolean);
   const contentChips = (custom.length ? custom : DEFAULT_CHIPS).slice(0, 12);
   return [...contentChips, CONTACT_MENU_LABEL];
