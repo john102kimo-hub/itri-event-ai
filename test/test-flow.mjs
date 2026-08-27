@@ -493,17 +493,78 @@ out = await send('媒體邀訪需求');
 check('沒設定過窗口分工的活動 → 退回單一新聞聯絡人，不是空清單',
   /陳大文/.test(out[0]?.text || '') && /新聞聯絡人/.test(out[0]?.text || ''), out[0]?.text);
 
-// 連單一新聞聯絡人都沒填的活動
+// 連單一新聞聯絡人都沒填的活動 → 退到全域技術窗口清單（不再是「目前沒有設定聯絡窗口」
+// 死路一條，這場什麼都沒設定也還有跨活動的清單可以查）
 reset(); await freshModule();
 state.bindings.set('U_reporter', { event_id: 'med', media_name: '', note: '', bound_at: Date.now() });
 out = await send('媒體邀訪需求');
-check('連新聞聯絡人都沒填時給明確訊息，不是報錯或空白',
-  /目前沒有設定聯絡窗口/.test(out[0]?.text || ''), out[0]?.text);
+check('這場活動兩個窗口欄位都沒填 → 退到全域技術窗口清單，不是死路',
+  /請問想了解哪個技術領域/.test(out[0]?.text || ''), out[0]?.text);
 
-// 還沒綁定任何活動時點「媒體邀訪需求」
+// ── 情境 13：全域技術窗口分工（跨活動，不需要先綁定，回報的新功能）───────────
+// fixture 見 test/fakes.mjs 的 state.contactsDirectory：生醫→丁嘉琳、機械→林潔玲、
+// 其他→朱則瑋。
+
+// 還沒綁定任何活動時點「媒體邀訪需求」→ 不再引導先選活動，直接給全域主題選單
 reset(); await freshModule();
 out = await send('媒體邀訪需求');
-check('沒綁定活動時問邀訪需求 → 引導先選活動，不是報錯', /請先告訴我您想問哪一場活動/.test(out[0]?.text || ''), out[0]?.text);
+check('沒綁定活動時問邀訪需求 → 直接給全域技術主題選單，不再要求先選活動',
+  /請問想了解哪個技術領域/.test(out[0]?.text || ''), out[0]?.text);
+{
+  const labels = (out[0]?.quickReply || []).map(i => (typeof i === 'object' ? i.label : i));
+  check('全域選單含活動名稱／技術主題／其他，且不超過 13 顆',
+    labels.includes('活動名稱') && labels.includes('生醫') && labels.includes('其他') && labels.length <= 13,
+    JSON.stringify(labels));
+  const texts = (out[0]?.quickReply || []).map(i => (typeof i === 'object' ? i.text : i));
+  check('主題按鈕送出的文字帶「邀訪：」前綴，不會跟記者自己打字問問題撞在一起',
+    texts.includes('邀訪：生醫') && texts.includes('最近有哪些活動'), JSON.stringify(texts));
+}
+
+// 點主題按鈕（送出「邀訪：生醫」）→ 直接回聯絡資訊，不管有沒有綁定活動
+out = await send('邀訪：生醫');
+check('點「生醫」主題按鈕 → 直接給生醫所的聯絡窗口',
+  /丁嘉琳/.test(out[0]?.text || '') && /03-1111111/.test(out[0]?.text || '') && /lineid_ding/.test(out[0]?.text || ''),
+  out[0]?.text);
+
+// 綁定某場活動的情況下，點全域主題按鈕仍然要能查到（不會被當前綁定的活動問答吃掉）
+reset(); await freshModule();
+state.bindings.set('U_reporter', { event_id: 'semi', media_name: '', note: '', bound_at: Date.now() }); // semi 沒設定 events!P
+out = await send('邀訪：機械');
+check('已綁定活動時點主題按鈕，一樣直接查全域窗口，不會被送進當前活動的問答',
+  out.length === 1 && /林潔玲/.test(out[0]?.text || ''), JSON.stringify(out));
+
+// 查不到的主題
+reset(); await freshModule();
+out = await send('邀訪：不存在的主題');
+check('主題查不到 → 給明確訊息，不是報錯或空白',
+  /目前還沒有設定聯絡窗口/.test(out[0]?.text || ''), out[0]?.text);
+
+// 「其他」→ 提示自由輸入，下一則消費掉這個一次性旗標
+reset(); await freshModule();
+out = await send('邀訪：其他');
+check('點「其他」→ 提示直接打字描述想問的主題', /請直接輸入想了解的技術主題/.test(out[0]?.text || ''), out[0]?.text);
+
+out = await send('我想了解一下貴單位的機械手臂技術');
+check('「其他」後自由輸入，句子裡含「機械」→ 寬鬆比對命中機械所',
+  /林潔玲/.test(out[0]?.text || ''), out[0]?.text);
+
+out = await send('隨便問一句跟任何主題都不相關的話');
+check('「其他」旗標只消費一次——上一則已經用掉了，這則不該再被當成主題自由輸入',
+  !/請直接輸入想了解的技術主題|目前沒有抓到明確對應的窗口/.test(out[0]?.text || ''), out[0]?.text);
+
+// 「其他」→ 打的內容完全比對不到任何主題或單位 → 退回綜合聯絡人（朱則瑋）
+reset(); await freshModule();
+await send('邀訪：其他');
+out = await send('這是一個完全查不到對應窗口的奇怪問題內容');
+check('「其他」自由輸入比對不到任何主題 → 退回綜合聯絡人（朱則瑋）',
+  /目前沒有抓到明確對應的窗口/.test(out[0]?.text || '') && /朱則瑋/.test(out[0]?.text || ''), out[0]?.text);
+
+// 群組裡也要能查到全域技術窗口——跟 1 對 1 共用同一支 handleContactTopicMessage()，
+// 這裡只驗證兩邊的 dispatch 有接上，不重複測比對邏輯本身。
+reset(); await freshModule();
+out = await sendGroup('@我 邀訪：生醫', { mentionSelf: true, mentionText: '@我 ' });
+check('群組裡點主題按鈕（@ 到）→ 一樣直接給聯絡窗口',
+  out.length === 1 && /丁嘉琳/.test(out[0]?.text || ''), JSON.stringify(out));
 
 console.log(`\n${fail === 0 ? '✅' : '❌'} 流程測試通過 ${pass}／失敗 ${fail}`);
 process.exit(fail === 0 ? 0 : 1);

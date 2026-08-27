@@ -343,6 +343,9 @@ textarea.form-control { min-height: 200px; resize: vertical; line-height: 1.6; }
     <button class="nav-item" data-view="analytics" onclick="showView('analytics')">
       <i class="ti ti-chart-bar"></i> 問答分析
     </button>
+    <button class="nav-item" data-view="contacts" onclick="showView('contacts')">
+      <i class="ti ti-address-book"></i> 邀訪窗口分工
+    </button>
     <!-- 這條不能開新分頁。彙整訓練（event_id=all）後端只認管理員密碼，密碼放在 sessionStorage，
          新分頁不保證帶得過去，帶不過去就會被擋在「這個功能只給內部同仁使用」。同分頁開才穩。 -->
     <a class="nav-item" href="/training" style="text-decoration:none;color:rgba(255,255,255,0.7)">
@@ -454,6 +457,33 @@ textarea.form-control { min-height: 200px; resize: vertical; line-height: 1.6; }
         <div style="text-align:center;padding:60px;color:var(--muted)">
           <i class="ti ti-loader" style="font-size:32px;display:block;margin-bottom:12px"></i>
           載入中…
+        </div>
+      </div>
+    </div>
+
+    <!-- 全域技術窗口分工（跨活動，不綁定特定場次）-->
+    <div id="view-contacts" style="display:none">
+      <div class="topbar">
+        <h1><i class="ti ti-address-book" style="color:var(--primary)"></i> 邀訪窗口分工</h1>
+        <div class="topbar-actions">
+          <button class="btn btn-outline" onclick="loadContactsDirectory()"><i class="ti ti-refresh"></i> 重整</button>
+          <button class="btn btn-primary" onclick="saveContactsDirectory()"><i class="ti ti-device-floppy"></i> 儲存</button>
+        </div>
+      </div>
+      <div class="content">
+        <div class="section-block">
+          <div class="section-header">
+            <h2><i class="ti ti-list-details"></i> 全站技術主題聯絡窗口</h2>
+          </div>
+          <div class="form-hint" style="margin-bottom:12px">
+            這份清單跟活動無關，記者在 LINE 隨時問「媒體邀訪需求」，只要目前沒有綁定活動（或綁定的那場沒有另外設定專屬窗口），就會看到這份清單的主題按鈕。<br>
+            每行一組，格式：<code>主題｜單位｜聯絡人｜電話｜LINE ID(選填)｜一行簡介(選填)</code>——電話／LINE ID 沒有可以先留空，之後再補。<br>
+            主題是「其他」的那一行，是記者按了「其他」自己打字、又比對不到任何主題時的綜合聯絡人，不會出現在按鈕上。
+          </div>
+          <textarea class="form-control" id="input-contacts-directory" rows="16"
+            placeholder="生醫｜生醫所｜丁嘉琳｜03-1234567｜lineid_xxx｜智慧醫療、醫材相關技術"
+            style="font-size:0.85rem;font-family:ui-monospace,Menlo,Consolas,monospace"></textarea>
+          <div class="form-hint" style="margin-top:8px" id="contacts-directory-status"></div>
         </div>
       </div>
     </div>
@@ -650,13 +680,48 @@ if (savedPwd) {
 // 用 data-view 屬性比對，不用陣列位置——之前用「第 N 個 .nav-item」對應「第 N 個視圖名稱」，
 // 側邊欄一旦插入新項目（例如行事曆）順序就會全部錯位，改成屬性比對就不怕再加項目。
 function showView(name) {
-  ['events','analytics'].forEach(v => {
+  ['events','analytics','contacts'].forEach(v => {
     document.getElementById(`view-${v}`).style.display = v === name ? 'block' : 'none';
   });
   document.querySelectorAll('.nav-item[data-view]').forEach(el => {
     el.classList.toggle('active', el.dataset.view === name);
   });
   if (name === 'analytics') loadAnalytics();
+  if (name === 'contacts') loadContactsDirectory();
+}
+
+// ── 全域技術窗口分工 ──────────────────────────────────────
+async function loadContactsDirectory() {
+  const statusEl = document.getElementById('contacts-directory-status');
+  statusEl.textContent = '載入中…';
+  try {
+    const res = await authedFetch('/api/events?action=contacts_directory');
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || '載入失敗');
+    document.getElementById('input-contacts-directory').value = data.content || '';
+    statusEl.textContent = '';
+  } catch (e) {
+    statusEl.textContent = '載入失敗：' + e.message;
+  }
+}
+
+async function saveContactsDirectory() {
+  const statusEl = document.getElementById('contacts-directory-status');
+  const content = document.getElementById('input-contacts-directory').value;
+  statusEl.textContent = '儲存中…';
+  try {
+    const res = await authedFetch('/api/events', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'contacts_directory_save', password: state.password, content })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || '儲存失敗');
+    statusEl.textContent = '已儲存';
+    toast('邀訪窗口分工已儲存');
+  } catch (e) {
+    statusEl.textContent = '儲存失敗：' + e.message;
+  }
 }
 
 // ── 載入所有資料 ──────────────────────────────────────────
