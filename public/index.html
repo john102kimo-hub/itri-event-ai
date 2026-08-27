@@ -545,6 +545,13 @@ textarea.form-control { min-height: 200px; resize: vertical; line-height: 1.6; }
       <div class="form-hint">記者在 LINE 點「媒體邀訪需求」時會列出這裡的關鍵字，點了直接給對應窗口的聯絡方式；LINE ID 選填。格式：<code>關鍵字｜姓名｜電話｜LINE ID</code>，半形 <code>|</code> 或全形 <code>｜</code> 都可以。留空則只給上面的「新聞聯絡人」。</div>
     </div>
     <div class="form-group">
+      <label><i class="ti ti-mail-forward"></i> 媒體邀請函（選填，活動前用）</label>
+      <textarea class="form-control" id="input-invite-letter" rows="6"
+        placeholder="貼入邀請媒體來採訪時附的說明文字…"
+        style="font-size:0.85rem"></textarea>
+      <div class="form-hint">活動日期還沒到、又有填這裡的話，記者問答（LINE 跟網頁都算）只會用這份內容回答，不會提前給正式新聞稿全文或活動照片——避免新聞稿還在改、照片還沒有正式版就先曝光。活動當天起自動改回用上面的「活動知識庫」正常回答，不用手動切換。留空則沒有這層限制。</div>
+    </div>
+    <div class="form-group">
       <label><i class="ti ti-building"></i> 主辦單位</label>
       <input class="form-control" id="input-organizer" list="organizer-list" value="工研院" placeholder="工研院">
       <datalist id="organizer-list">
@@ -1000,6 +1007,7 @@ function showCreateModal(prefillDate) {
   document.getElementById('input-type').value = '';
   document.getElementById('input-contact').value = '';
   document.getElementById('input-contacts').value = '';
+  document.getElementById('input-invite-letter').value = '';
   document.getElementById('input-kb').value = KB_TEMPLATE;
   document.getElementById('kb-count').textContent = KB_TEMPLATE.length + ' / 8000 字';
   document.getElementById('input-chips').value = '';
@@ -1068,6 +1076,7 @@ async function showEditModal(eventId) {
     document.getElementById('input-type').value = ev.event_type || '';
     document.getElementById('input-contact').value = ev.press_contact || '';
     document.getElementById('input-contacts').value = ev.contacts || '';
+    document.getElementById('input-invite-letter').value = ev.invite_letter || '';
     document.getElementById('input-status').value = ev.status || 'active';
     // 解析活動日期為 date input 格式（YYYY-MM-DD）；event_date 是新別名，created_at 是舊欄名相容
     const dateStr = ev.event_date || ev.created_at || '';
@@ -1105,6 +1114,7 @@ async function saveEvent() {
   const event_type = document.getElementById('input-type').value.trim();
   const press_contact = document.getElementById('input-contact').value.trim();
   const contacts = document.getElementById('input-contacts').value.trim();
+  const invite_letter = document.getElementById('input-invite-letter').value.trim();
 
   if (!name) { toast('活動名稱必填'); return; }
   if (!knowledge_base) { toast('知識庫不可為空'); return; }
@@ -1121,7 +1131,7 @@ async function saveEvent() {
         password: state.password,
         id: id || undefined,
         name, organizer, color, knowledge_base, chips, images, greeting, status, event_date,
-        event_time, venue, event_type, press_contact, contacts
+        event_time, venue, event_type, press_contact, contacts, invite_letter
       })
     });
     const data = await res.json();

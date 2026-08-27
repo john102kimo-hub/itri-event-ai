@@ -30,7 +30,9 @@ const CONTACTS_DIR_MAX_LEN = 20000;
 //               L event_time, M venue, N event_type, O press_contact,
 //               P contacts（邀訪聯絡窗口分工；每行「關鍵字｜姓名｜電話｜LINE ID(選填)」，
 //                 這支只負責存取原始字串，解析邏輯在 api/line.js 的 parseEventContacts()）
-const RANGE = 'events!A2:P';
+//               Q invite_letter（媒體邀請函；活動日期還沒到時，問答只用這份內容回答，
+//                 不給正式新聞稿與照片——解析邏輯在 lib/prompt.js 的 resolveEventContent()）
+const RANGE = 'events!A2:Q';
 
 // Google Sheets 單一儲存格上限約 5 萬字元；留一點餘裕避免踩線寫入失敗
 const KB_MAX_LEN = 45000;
@@ -65,7 +67,8 @@ function buildContentRow(existing, b) {
     pick(b.venue, 12, ''),                          // M venue
     pick(b.event_type, 13, ''),                     // N event_type
     pick(b.press_contact, 14, ''),                  // O press_contact
-    pick(b.contacts, 15, '')                        // P contacts（邀訪窗口分工）
+    pick(b.contacts, 15, ''),                       // P contacts（邀訪窗口分工）
+    pick(b.invite_letter, 16, '')                   // Q invite_letter（媒體邀請函）
   ];
 }
 
@@ -127,7 +130,7 @@ export default async function handler(req, res) {
           knowledge_base: row[3] || '', status: row[4] || 'active', created_at: row[5] || '', event_date: row[5] || '',
           chips: row[6] || '', images: row[7] || '', greeting: row[8] || '', organizer: row[9] || '工研院',
           event_time: row[11] || '', venue: row[12] || '', event_type: row[13] || '', press_contact: row[14] || '',
-          contacts: row[15] || ''
+          contacts: row[15] || '', invite_letter: row[16] || ''
         };
         // 「以既有活動為範本」：同仁已用自己這一場的 edit_code 通過驗證，即視為可信的內部同仁，
         // 可再指定 copy_from 帶出另一場活動的知識庫供複製參考——跟後台管理員版的複製範本邏輯一致，
@@ -155,7 +158,7 @@ export default async function handler(req, res) {
           chips: row[6] || '', images: row[7] || '', greeting: row[8] || '', organizer: row[9] || '工研院',
           edit_code: row[10] || '',
           event_time: row[11] || '', venue: row[12] || '', event_type: row[13] || '', press_contact: row[14] || '',
-          contacts: row[15] || ''
+          contacts: row[15] || '', invite_letter: row[16] || ''
         });
       }
 
@@ -238,14 +241,14 @@ export default async function handler(req, res) {
           return res.status(400).json({ error: '狀態值不正確' });
         }
         const updated = buildContentRow(existing, body);
-        await updateRange(`events!A${rowIndex + 2}:P${rowIndex + 2}`, [updated]);
+        await updateRange(`events!A${rowIndex + 2}:Q${rowIndex + 2}`, [updated]);
         return res.status(200).json({ success: true });
       }
 
       // ── 以下皆需管理員密碼 ────────────────────────────────────────────
       const {
         password, id, name, color, knowledge_base, chips, status, images, event_date, greeting, organizer,
-        event_time, venue, event_type, press_contact, contacts
+        event_time, venue, event_type, press_contact, contacts, invite_letter
       } = body;
       if (password !== adminPassword) return res.status(401).json({ error: '密碼錯誤' });
       if (knowledge_base !== undefined && String(knowledge_base).length > KB_MAX_LEN) {
@@ -263,10 +266,10 @@ export default async function handler(req, res) {
         // 預設 draft（未發布）：新活動先只在後台看得到，記者前台、公開列表都查不到，
         // 按活動卡片上的「發布」（其實是 action=update 帶 status=active）之後才對外開放。
         const initialStatus = status || 'draft';
-        await appendRows('events!A:P', [[
+        await appendRows('events!A:Q', [[
           newId, name, color || '#0F9E7A', knowledge_base || '', initialStatus, created_at,
           chips || '', images || '', greeting || '', organizer || '工研院', editCode,
-          event_time || '', venue || '', event_type || '', press_contact || '', contacts || ''
+          event_time || '', venue || '', event_type || '', press_contact || '', contacts || '', invite_letter || ''
         ]]);
         return res.status(200).json({ success: true, id: newId, edit_code: editCode, status: initialStatus });
       }
@@ -293,9 +296,10 @@ export default async function handler(req, res) {
           venue !== undefined ? venue : (existing[12] || ''),
           event_type !== undefined ? event_type : (existing[13] || ''),
           press_contact !== undefined ? press_contact : (existing[14] || ''),
-          contacts !== undefined ? contacts : (existing[15] || '')
+          contacts !== undefined ? contacts : (existing[15] || ''),
+          invite_letter !== undefined ? invite_letter : (existing[16] || '')
         ];
-        await updateRange(`events!A${rowIndex + 2}:P${rowIndex + 2}`, [updated]);
+        await updateRange(`events!A${rowIndex + 2}:Q${rowIndex + 2}`, [updated]);
         return res.status(200).json({ success: true, edit_code: updated[10] });
       }
 
@@ -318,9 +322,9 @@ export default async function handler(req, res) {
 
         const updated = [
           e[0], e[1], e[2], e[3], 'archived', e[5], e[6] || '', '', e[8] || '', e[9] || '工研院', e[10] || '',
-          e[11] || '', e[12] || '', e[13] || '', e[14] || '', e[15] || ''
+          e[11] || '', e[12] || '', e[13] || '', e[14] || '', e[15] || '', e[16] || ''
         ];
-        await updateRange(`events!A${rowIndex + 2}:P${rowIndex + 2}`, [updated]);
+        await updateRange(`events!A${rowIndex + 2}:Q${rowIndex + 2}`, [updated]);
         return res.status(200).json({ success: true });
       }
 

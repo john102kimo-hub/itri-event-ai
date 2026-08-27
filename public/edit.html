@@ -187,6 +187,13 @@ textarea.form-control { min-height: 240px; resize: vertical; line-height: 1.65; 
       <div class="form-hint">記者在 LINE 點「媒體邀訪需求」時會列出這裡的關鍵字，點了直接給對應窗口的聯絡方式；LINE ID 選填。格式：<code>關鍵字｜姓名｜電話｜LINE ID</code>，半形 <code>|</code> 或全形 <code>｜</code> 都可以。留空則只給上面的「新聞聯絡人」。</div>
     </div>
     <div class="form-group">
+      <label><i class="ti ti-mail-forward"></i> 媒體邀請函（選填，活動前用）</label>
+      <textarea class="form-control" id="input-invite-letter" rows="6"
+        placeholder="貼入邀請媒體來採訪時附的說明文字…"
+        style="font-size:16px;min-height:auto"></textarea>
+      <div class="form-hint">活動日期還沒到、又有填這裡的話，記者問答只會用這份內容回答，不會提前給正式新聞稿全文或活動照片。活動當天起自動改回正常回答，不用手動切換。留空則沒有這層限制。</div>
+    </div>
+    <div class="form-group">
       <label><i class="ti ti-building"></i> 主辦單位</label>
       <input class="form-control" id="input-organizer" list="organizer-list" placeholder="工研院">
       <datalist id="organizer-list">
@@ -413,6 +420,7 @@ async function load() {
     document.getElementById('input-type').value = ev.event_type || '';
     document.getElementById('input-contact').value = ev.press_contact || '';
     document.getElementById('input-contacts').value = ev.contacts || '';
+    document.getElementById('input-invite-letter').value = ev.invite_letter || '';
     loadedStatus = ev.status || 'active';
     document.getElementById('input-status').value = loadedStatus;
     updateStatusHint();
@@ -540,7 +548,8 @@ async function save() {
         venue: document.getElementById('input-venue').value.trim(),
         event_type: document.getElementById('input-type').value.trim(),
         press_contact: document.getElementById('input-contact').value.trim(),
-        contacts: document.getElementById('input-contacts').value.trim()
+        contacts: document.getElementById('input-contacts').value.trim(),
+        invite_letter: document.getElementById('input-invite-letter').value.trim()
       })
     });
     const data = await res.json();

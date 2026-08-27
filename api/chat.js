@@ -5,20 +5,24 @@
 //   2. 沒帶 → 維持原本一次回傳 { reply } 的 JSON（舊前端／外部呼叫者不會被打斷）
 
 import { readRange, appendRows, warmAuth } from '../lib/sheets.js';
-import { buildSystemPrompt } from '../lib/prompt.js';
+import { buildSystemPrompt, resolveEventContent } from '../lib/prompt.js';
 
 // 活動設定快取（60 秒；記者會現場臨時改稿也能很快生效）
 const eventCache = new Map();
 const CACHE_TTL_MS = 60 * 1000;
 
+// 讀到 Q 欄（invite_letter，媒體邀請函）——原本只讀到 J 就夠，批次 9.1 加了「活動前
+// 只給邀請函」（見 lib/prompt.js resolveEventContent()），這裡也要跟著讀，不然網頁版
+// 問答永遠拿不到邀請函內容，活動前一樣把還沒定案的新聞稿端出去，等於 LINE 端擋了、
+// 網頁端沒擋。
 async function fetchEventConfig(eventId) {
-  const rows = await readRange('events!A2:J'); // O 欄的新增欄位（時間/地點/類型/聯絡人）這裡用不到，讀到 J 就夠
+  const rows = await readRange('events!A2:Q');
   const row = rows.find(r => r[0] === eventId);
   if (!row) return null;
   return {
     id: row[0], name: row[1], color: row[2] || '#0F9E7A',
-    knowledge_base: row[3] || '', status: row[4] || 'active', organizer: row[9] || '工研院',
-    images: row[7] || ''
+    knowledge_base: row[3] || '', status: row[4] || 'active', event_date: row[5] || '',
+    organizer: row[9] || '工研院', images: row[7] || '', invite_letter: row[16] || ''
   };
 }
 
@@ -119,12 +123,14 @@ export default async function handler(req, res) {
     // 等到最後要寫 qa_log 時 token 通常已經備妥，省下一趟 OAuth 往返。
     warmAuth();
 
-    const event = await getEventConfig(event_id);
+    const rawEvent = await getEventConfig(event_id);
     // draft 是「後台先開好框架、內容還在填」的未發布狀態，跟 archived 一樣不讓記者問到——
     // 差別只在 archived 是「問過了、現在下架」，draft 是「根本還沒對外」。
-    if (!event || event.status === 'archived' || event.status === 'draft') {
+    if (!rawEvent || rawEvent.status === 'archived' || rawEvent.status === 'draft') {
       return res.status(404).json({ error: '活動不存在或已結束' });
     }
+    // 活動前只給媒體邀請函，不給正式新聞稿與照片（見 lib/prompt.js 的說明）。
+    const event = resolveEventContent(rawEvent);
 
     const eventName = event.name;
     const systemPrompt = buildSystemPrompt(event);

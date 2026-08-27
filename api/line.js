@@ -31,7 +31,7 @@
 //     Anthropic」同一條原則；draft／archived 場次一律不進行事曆清單、不會被路由到
 
 import { readRange, appendRows, updateRange, ensureSheets } from '../lib/sheets.js';
-import { buildSystemPrompt } from '../lib/prompt.js';
+import { buildSystemPrompt, resolveEventContent } from '../lib/prompt.js';
 import {
   readRawBody, verifySignature, replyOrPush, replyOrPushMessages, startLoading, pushImages,
   createRichMenu, uploadRichMenuImage, setDefaultRichMenu, listRichMenus, deleteRichMenu,
@@ -55,7 +55,7 @@ import {
   parseContactsDirectory, formatGlobalContact, matchGlobalContactByText
 } from '../lib/contacts-directory.js';
 
-const EVENTS_RANGE = 'events!A2:P'; // P 欄是 contacts（邀訪窗口分工），見 rowToEvent()
+const EVENTS_RANGE = 'events!A2:Q'; // P 欄是 contacts（邀訪窗口分工），Q 欄是 invite_letter（媒體邀請函），見 rowToEvent()
 // line_user_id | event_id | media_name | bound_at | last_active | note | group_session_until
 // G 欄只有群組會用到（1 對 1 每則訊息本來就都是對我們講的，不需要這個概念），見
 // getGroupSessionUntil()／touchGroupSession() 的說明。
@@ -74,9 +74,9 @@ async function getAllEventRows() {
 function rowToEvent(row) {
   return {
     id: row[0], name: row[1], color: row[2] || '#0F9E7A',
-    knowledge_base: row[3] || '', status: row[4] || 'active',
+    knowledge_base: row[3] || '', status: row[4] || 'active', event_date: row[5] || '',
     chips: row[6] || '', images: row[7] || '', organizer: row[9] || '工研院',
-    press_contact: row[14] || '', contacts: row[15] || ''
+    press_contact: row[14] || '', contacts: row[15] || '', invite_letter: row[16] || ''
   };
 }
 async function findEventByCode(code) {
@@ -524,7 +524,15 @@ async function handleContactTopicMessage(replyToken, targetId, text) {
 // 正式問答：開輸入中動畫 → 呼叫 Anthropic → reply（失敗 fallback push）→ 寫 qa_log。
 // 綁定路徑（#代碼）跟路由命中路徑（自然語言直接命中某一場）最後都走這支，避免兩邊各自
 // 維護一份幾乎一樣的邏輯、之後改一邊忘了改另一邊。
-async function answerQuestion(replyToken, userId, event, mediaName, text, { loading = true } = {}) {
+async function answerQuestion(replyToken, userId, rawEvent, mediaName, text, { loading = true, allowPreEventSubstitution = true } = {}) {
+  // 活動前只給媒體邀請函、不給正式新聞稿與照片（見 lib/prompt.js resolveEventContent()
+  // 的說明）。放在這裡而不是呼叫端各自判斷，理由跟下面的邀訪窗口比對一樣：1 對 1、
+  // 群組最後都走這支，寫一次兩邊都受惠。
+  //
+  // ⚠️ 職員模式呼叫這支時會傳 allowPreEventSubstitution:false——同仁需要看到真正的
+  // 新聞稿內容準備活動，不能被自己設的「活動前」邏輯反過來卡住自己。
+  const event = allowPreEventSubstitution ? resolveEventContent(rawEvent) : rawEvent;
+
   // 「輸入中」動畫（/chat/loading/start）只支援一對一聊天，LINE 官方文件明講
   // group／room 不能傳這個端點；group 訊息呼叫它每次都是穩定失敗，只會在
   // Vercel Logs 裡累積一堆沒意義的錯誤。startLoading() 內部已經吞掉例外不影響
@@ -791,8 +799,10 @@ async function handleStaffMessage(replyToken, userId, text) {
   if (routed.intent === 'qa' && routed.event_ids.length === 1 && routed.confidence === 'high') {
     const event = await getEventRawById(routed.event_ids[0]);
     if (event) {
-      // 職員模式刻意不呼叫 isUsable()：draft／archived 場次的內容同仁都問得到
-      await answerQuestion(replyToken, userId, event, '（內部職員）', text);
+      // 職員模式刻意不呼叫 isUsable()：draft／archived 場次的內容同仁都問得到。
+      // allowPreEventSubstitution:false——同仁自己要看真正的新聞稿內容準備活動，
+      // 不能被「活動前只給邀請函」這條規則反過來卡住自己人。
+      await answerQuestion(replyToken, userId, event, '（內部職員）', text, { allowPreEventSubstitution: false });
       return;
     }
   }

@@ -764,6 +764,62 @@ textarea 貼過去存檔，比維護多欄表格好編輯，也不用另外做�
 單純清空——重點還是接下來真正的問題不會被誤判成在報名稱。`npm test` 全部合計
 315 項。
 
+### 批次 10：媒體邀請函（活動前只給邀請函，不給正式新聞稿／照片，回報的新功能）
+
+**問題**：新聞稿常常活動前都還在改、照片也還沒有正式版；記者臨時問「給我新聞稿」
+「給我照片」，直接把 `knowledge_base`／`images` 端出去，等於提早曝光還沒定案的
+內容。回報想加一個「媒體邀請函」欄位（活動前對外說的版本），活動前問答只用這份
+內容，不要碰正式新聞稿與照片。
+
+**設計決策**（AskUserQuestion 問過，三題都選推薦選項）：
+1. 邀請函內容用**貼文字**存進系統，不是上傳 Word 檔——貼文字才能讓 AI 直接引用
+   內容回答，跟專案「零外部套件」的既有原則一致（上傳 Word 檔案要嘛額外裝一套
+   docx 解析套件，要嘛只能給記者一個下載連結、AI 完全答不出內容細節，兩者都比
+   貼文字差）
+2. 活動前**所有**問答都只用邀請函回答，不是只攔「給我新聞稿」「給我照片」這幾句——
+   知識庫換掉是全域的，比另外維護一份「哪些問題該攔」的關鍵字清單簡單，也比較
+   不會漏防（記者換句話問一樣問得到還沒定案的內容）
+3. 系統**自動**用活動日期判斷是不是「活動前」（`event_date` 嚴格晚於今天），
+   不是同仁手動切換的開關——activity 越接近，資料通常越準，讓程式自動接手，
+   同仁不用記得在活動當天手動切換
+
+**資料模型**：`events` 表新增 **Q 欄 `invite_letter`**，跟 `knowledge_base` 同一種
+「一格塞多行文字」欄位，`api/events.js`／`public/index.html`／`public/edit.html`
+補上這個欄位（同仁自助編輯跟管理員後台都能填），**刻意不放進「以既有活動為範本」的
+複製範本邏輯**，跟 `press_contact`／`contacts` 一樣——邀請函是這場活動專屬的內容，
+複製範本時帶過去等於給新活動配錯邀請函。
+
+**替換邏輯集中在 `lib/prompt.js`**（不是讓 `api/chat.js`、`api/line.js` 各自判斷）：
+- `isBeforeEventDate(rawDate)`：跟 `lib/router.js` 的 `parseEventDate()` 同一套
+  日期格式判斷（`events!F` 欄兩種既有格式），這是第四份重複的日期解析（`router.js`／
+  `event-page.js`／`index.html`／這裡），是專案已經接受的低風險重複，不是新增一種
+  重複的種類。沒填日期或解析不出來一律當「不是活動前」——保守方向，不要誤鎖進
+  邀請函模式回不去。
+- `isPreEventMode(event)`：`event.invite_letter` 有值 **且** `isBeforeEventDate(event.event_date)`
+  才算——沒填邀請函的活動完全不受影響，這是新增欄位，舊活動不能因為沒填新欄位就
+  被回答不出東西。
+- `resolveEventContent(event)`：活動前模式時回傳 `{ ...event, knowledge_base: event.invite_letter, images: '' }`，
+  否則原樣回傳。`buildSystemPrompt()` 內部也呼叫 `isPreEventMode()`（可以，因為
+  `invite_letter`／`event_date` 欄位在 `resolveEventContent()` 的 spread 之後還在
+  物件上）幫 AI 補一條規則，提醒它「這是邀請函不是正式新聞稿，記者要完整新聞稿或
+  照片時要說明活動當天才會發布」，不要讓 AI 把邀請函內容講成新聞稿全文。
+
+**兩個管道都要接**：`api/chat.js`（網頁版）跟 `api/line.js`（LINE）都在丟進
+`buildSystemPrompt()` 之前呼叫一次 `resolveEventContent()`——只接一邊的話，記者從
+另一個管道一樣問得到還沒定案的內容，等於防了一半。
+
+**⚠️ 職員模式要排除在外**：`answerQuestion()` 的內容問答是 1 對 1、群組、職員模式
+共用的同一支函式，如果無條件套用 `resolveEventContent()`，同仁自己在準備活動時
+反而會被自己設的「活動前」規則卡住、看不到真正的新聞稿內容。加了
+`allowPreEventSubstitution` 選項（預設 `true`），職員模式呼叫端明確傳 `false`。
+
+**測試**：新增 `test/test-prompt.mjs`（18 項，純函式單元測試，不需要 fake Sheets／
+LINE），涵蓋 `isPreEventMode`／`resolveEventContent`／`buildSystemPrompt` 的日期
+邊界（明天／今天／昨天／沒填日期）、沒填邀請函不受影響、日期兩種既有格式都認得。
+`test/test-flow.mjs` 新增情境 14（整合測試，用假的 fixture `soon`：日期動態算
+「明天」，knowledge_base 跟 invite_letter 刻意不同）驗證記者拿到的是邀請函、
+職員拿到的是正式新聞稿。`npm test` 全部合計 338 項。
+
 ---
 
 ## 6. system prompt 要加的規則
