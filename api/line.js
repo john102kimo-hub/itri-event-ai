@@ -50,6 +50,10 @@ import {
   getGeoTrendSeries, buildGeoTrendChartUrl,
   isExitStaffCommand, revokeStaff, listActiveStaffIds, getStaffPending, setStaffPending
 } from '../lib/staff.js';
+import {
+  CONTACTS_DIR_RANGE, GLOBAL_CONTACT_TOPICS, ensureContactsDirectorySheet,
+  parseContactsDirectory, formatGlobalContact, matchGlobalContactByText
+} from '../lib/contacts-directory.js';
 
 const EVENTS_RANGE = 'events!A2:P'; // P 欄是 contacts（邀訪窗口分工），見 rowToEvent()
 // line_user_id | event_id | media_name | bound_at | last_active | note | group_session_until
@@ -127,6 +131,16 @@ async function getStoredMediaName(userId) {
   return row ? (row[2] || '') : '';
 }
 
+// note（F 欄）的原始值，不管綁定是否過期——跟 getStoredMediaName() 同一個理由：
+// getBinding() 過期就回 null，但「有沒有等待中的一次性旗標」跟「活動綁定還算不算數」
+// 是兩件事，全域邀訪窗口的 await_contact_topic 旗標（見 setContactPending()）常常是
+// 在完全沒有活動綁定的情況下設的，不能透過 getBinding() 去讀。
+async function getStoredNote(userId) {
+  const rows = await getAllLineUserRows();
+  const row = rows.find(r => r[0] === userId);
+  return row ? (row[5] || '') : '';
+}
+
 let sheetsEnsured = false;
 async function ensureLineUsersSheet() {
   if (sheetsEnsured) return;
@@ -185,6 +199,30 @@ async function setBindingNote(userId, note) {
     await updateRange(`line_users!F${idx + 2}`, [[note]]);
   } catch (e) {
     console.error('setBindingNote 失敗:', e.message);
+  } finally {
+    invalidateLineUsersCache();
+  }
+}
+
+// 跟 setBindingNote() 的差異：這支在完全沒有 line_users 列的情況下也要能標記——
+// 全域邀訪窗口的「其他」選項是常見的第一次互動（記者可能從沒綁定過任何活動就直接
+// 問邀訪窗口），這時候 setBindingNote() 會因為 idx===-1 直接放棄，旗標永遠標不上，
+// 記者打了主題文字也不會被接住。這裡改成「沒有列就新增一列」，event_id／bound_at
+// 都留空——getBinding() 讀到 bound_at=0 一樣會判定成沒有活動綁定，不會誤觸發任何
+// 跟活動有關的邏輯。
+async function setContactPending(targetId, note) {
+  try {
+    await ensureLineUsersSheet();
+    const rows = await readRange(LINE_USERS_RANGE);
+    const idx = rows.findIndex(r => r[0] === targetId);
+    if (idx === -1) {
+      if (!note) return; // 沒有列可清，本來就沒有 pending
+      await appendRows('line_users!A:F', [[targetId, '', '', '', String(Date.now()), note]]);
+    } else {
+      await updateRange(`line_users!F${idx + 2}`, [[note]]);
+    }
+  } catch (e) {
+    console.error('setContactPending 失敗:', e.message);
   } finally {
     invalidateLineUsersCache();
   }
@@ -403,6 +441,84 @@ function formatContactReply(contact) {
   if (contact.phone) lines.push(`📞 ${contact.phone}`);
   if (contact.lineId) lines.push(`LINE：${contact.lineId}`);
   return lines.join('\n');
+}
+
+// ── 全域技術窗口分工（跨活動，同仁在後台維護，不綁定特定場次）───────────
+// 資料格式、預設種子、比對邏輯都在 lib/contacts-directory.js——api/events.js 的
+// 後台編輯 API 也要讀寫同一份資料，兩邊共用一份定義才不會格式或種子內容兜不起來。
+const CONTACT_TOPIC_RE = /^邀訪[:：](.+)$/; // 主題按鈕送出的固定格式，見 sendGlobalContactMenu()
+const CONTACT_PENDING_NOTE = 'await_contact_topic'; // 按了「其他」，等記者自己打主題的一次性旗標
+
+let contactsDirCache = { list: null, expiry: 0 };
+async function getContactsDirectory() {
+  if (contactsDirCache.list && Date.now() < contactsDirCache.expiry) return contactsDirCache.list;
+  await ensureContactsDirectorySheet(ensureSheets, updateRange);
+  let raw = '';
+  try {
+    const rows = await readRange(CONTACTS_DIR_RANGE);
+    raw = rows[0]?.[0] || '';
+  } catch { raw = ''; }
+  const list = parseContactsDirectory(raw);
+  contactsDirCache = { list, expiry: Date.now() + CACHE_TTL_MS };
+  return list;
+}
+
+// metaIntent==='contacts' 且沒有活動專屬窗口可用時的入口（見 handleMetaIntent()）。
+// 主題按鈕文字刻意用「邀訪：主題」而不是主題本身：LINE quick reply 現在支援
+// {label,text} 分開（見 lib/line.js buildQuickReply()），按鈕上看到的字很短
+// （例如「生醫」），但送出的文字帶固定前綴，才不會跟記者自己打的真正問題撞在一起
+// （萬一剛好在問某場跟「生醫」有關的活動內容，不會被誤判成在找邀訪窗口）。
+async function sendGlobalContactMenu(replyToken, userId) {
+  const items = [
+    { label: '活動名稱', text: '最近有哪些活動' },
+    ...GLOBAL_CONTACT_TOPICS.map(t => ({ label: t, text: `邀訪：${t}` })),
+    { label: '其他', text: '邀訪：其他' }
+  ];
+  await replyOrPush(replyToken, userId,
+    '請問想了解哪個技術領域，或想找哪一場活動的邀訪窗口？可以直接點下面按鈕，或輸入活動名稱。',
+    items);
+}
+
+// 攔截「邀訪：主題」按鈕點擊，以及按過「其他」之後的下一則自由輸入——不管目前有沒有
+// 活動綁定、綁定的是哪一場，這兩種情況都要優先攔下來，不能被送進當前那場活動的問答
+// （記者按「邀訪：生醫」不是在問「生醫」這兩個字，是要查聯絡窗口）。命中就處理完並
+// 回傳 true，呼叫端據此判斷要不要繼續往下走原本的流程；沒命中回傳 false。
+async function handleContactTopicMessage(replyToken, targetId, text) {
+  const m = String(text || '').match(CONTACT_TOPIC_RE);
+  if (m) {
+    const topic = m[1].trim();
+    if (topic === '其他') {
+      await setContactPending(targetId, CONTACT_PENDING_NOTE);
+      await replyOrPush(replyToken, targetId, '請直接輸入想了解的技術主題，或想邀訪的議題，我幫您媒合對應窗口。');
+      return true;
+    }
+    // 按了別的主題按鈕，代表放棄了「其他」那個等待輸入的視窗（如果有的話）——不清掉
+    // 的話，記者接下來打的第一句真正的問題會被誤當成在找邀訪窗口的自由輸入。
+    await setContactPending(targetId, '');
+    const directory = await getContactsDirectory();
+    const contact = directory.find(c => c.topic === topic);
+    await replyOrPush(replyToken, targetId,
+      contact ? formatGlobalContact(contact) : '這個主題目前還沒有設定聯絡窗口，請洽現場工作人員。');
+    return true;
+  }
+
+  const pendingNote = await getStoredNote(targetId);
+  if (pendingNote === CONTACT_PENDING_NOTE) {
+    await setContactPending(targetId, ''); // 一次性：不管這則有沒有比對到，用掉就清掉
+    const directory = await getContactsDirectory();
+    const hit = matchGlobalContactByText(text, directory);
+    const fallback = directory.find(c => c.topic === '其他');
+    if (hit) {
+      await replyOrPush(replyToken, targetId, formatGlobalContact(hit));
+    } else if (fallback) {
+      await replyOrPush(replyToken, targetId, `目前沒有抓到明確對應的窗口，${formatGlobalContact(fallback)}`);
+    } else {
+      await replyOrPush(replyToken, targetId, '目前還沒有設定綜合聯絡窗口，請洽現場工作人員。');
+    }
+    return true;
+  }
+
+  return false;
 }
 
 // 正式問答：開輸入中動畫 → 呼叫 Anthropic → reply（失敗 fallback push）→ 寫 qa_log。
@@ -712,6 +828,11 @@ async function handleMetaIntent(replyToken, userId, text, metaIntent, binding) {
   // 不清掉的話，等他選完活動再回來打的第一句真正的問題，會被 looksLikeNameOrSkip()
   // 誤判成媒體名稱吃掉（就是上面 handleEvent 註解裡已經修過一次的那個坑）。
   if (binding?.note === 'ask_name') await setBindingNote(userId, '');
+  // await_contact_topic 是「按了『其他』，等記者自己打技術主題」的一次性旗標——
+  // 記者這時候改按了別的選單按鈕（不管是不是邀訪相關），代表他放棄了那個自由輸入，
+  // 旗標要當場作廢，不然他接下來打的第一句真正的問題會被誤判成在找邀訪窗口
+  // （這裡沒辦法只看 binding?.note，因為這個旗標常常是在完全沒有活動綁定時設的）。
+  if ((await getStoredNote(userId)) === CONTACT_PENDING_NOTE) await setContactPending(userId, '');
 
   if (metaIntent === 'help') {
     await replyOrPush(replyToken, userId, HELP_TEXT, ['最近有哪些活動']);
@@ -719,28 +840,27 @@ async function handleMetaIntent(replyToken, userId, text, metaIntent, binding) {
   }
 
   if (metaIntent === 'contacts') {
-    // 邀訪窗口是「某一場活動」的資料，沒先知道問哪一場就列不出來——跟 qa 意圖
-    // 一樣要有綁定才能回答，沒綁定就引導記者先選活動，不用另外呼叫路由。
+    // 邀訪窗口分兩層：先看這場活動自己有沒有設定專屬窗口（events!P，同仁在後台
+    // 針對這一場填的），有就照舊給精準的那組；這場沒設定（或根本還沒綁定任何
+    // 活動）就退到跨活動的全域技術窗口清單（見 sendGlobalContactMenu()）——
+    // 不管有沒有綁定活動都拿得到，不會再卡在「請先告訴我您想問哪一場」。
     const current = binding ? await getEventById(binding.event_id) : null;
-    if (!isUsable(current)) {
-      await replyOrPush(replyToken, userId,
-        '請先告訴我您想問哪一場活動（直接打活動名稱，或問「最近有哪些活動」），我再幫您列出這場的邀訪聯絡窗口。',
-        ['最近有哪些活動']);
-      return;
+    if (isUsable(current)) {
+      const contacts = parseEventContacts(current);
+      if (contacts.length) {
+        await replyOrPush(replyToken, userId,
+          `《${current.name}》的邀訪聯絡窗口：\n請選擇想聯絡的主題，或直接打關鍵字。`,
+          contacts.map(c => c.keyword));
+        return;
+      }
+      if (current.press_contact) {
+        await replyOrPush(replyToken, userId,
+          `《${current.name}》的新聞聯絡人：\n${current.press_contact}`, eventQuickChips(current));
+        return;
+      }
+      // 這場活動兩個都沒設定 → 往下退到全域技術窗口清單，比什麼都拿不到好。
     }
-    const contacts = parseEventContacts(current);
-    if (!contacts.length) {
-      // 同仁還沒設定窗口分工——退回既有的單一「新聞聯絡人」欄位，不能讓記者點了
-      // 按鈕卻什麼都拿不到；那個欄位幾乎每場都會填（見後台表單的提示文案）。
-      const fallback = current.press_contact
-        ? `《${current.name}》的新聞聯絡人：\n${current.press_contact}`
-        : `《${current.name}》目前沒有設定聯絡窗口，請洽現場工作人員。`;
-      await replyOrPush(replyToken, userId, fallback, eventQuickChips(current));
-      return;
-    }
-    await replyOrPush(replyToken, userId,
-      `《${current.name}》的邀訪聯絡窗口：\n請選擇想聯絡的主題，或直接打關鍵字。`,
-      contacts.map(c => c.keyword));
+    await sendGlobalContactMenu(replyToken, userId);
     return;
   }
 
@@ -905,6 +1025,13 @@ async function handleGroupMessage(replyToken, groupId, text, { mentioned }) {
     return;
   }
 
+  // 全域邀訪窗口的主題按鈕／自由輸入（見 handleContactTopicMessage() 的說明）——
+  // 跟 metaIntent 同一優先順序，命中就直接處理，不會被送進當前綁定活動的問答。
+  if (await handleContactTopicMessage(replyToken, groupId, text)) {
+    await touchGroupSession(groupId);
+    return;
+  }
+
   if (!binding) {
     await handleUnbound(replyToken, groupId, text, { silentOnOther: !mentioned, askMediaName: false });
     await touchGroupSession(groupId); // 不管有沒有真的答上，只要走到這裡就算還在互動，續命
@@ -1042,6 +1169,10 @@ async function handleEvent(ev) {
     await handleMetaIntent(replyToken, userId, text, metaIntent, binding);
     return;
   }
+
+  // 全域邀訪窗口的主題按鈕／自由輸入（見 handleContactTopicMessage() 的說明）——
+  // 跟 metaIntent 同一優先順序，命中就直接處理，不會被送進當前綁定活動的問答。
+  if (await handleContactTopicMessage(replyToken, userId, text)) return;
 
   if (!binding) {
     await handleUnbound(replyToken, userId, text);

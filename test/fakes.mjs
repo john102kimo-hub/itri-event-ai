@@ -12,7 +12,14 @@ export const state = {
   bindings: new Map(),
   staff: [],                 // line_staff!A2:D 的列：userId | name | authorized_at | note
   richMenus: [],             // listRichMenus() 回傳的 [{richMenuId, name}]
-  linkedMenus: new Map()     // userId → richMenuId（per-user 連結）
+  linkedMenus: new Map(),    // userId → richMenuId（per-user 連結）
+  // 全域技術窗口分工（contacts_directory!A2，見 lib/contacts-directory.js）。
+  // 格式：主題｜單位｜聯絡人｜電話｜LINE ID｜簡介，一行一組。
+  contactsDirectory: [
+    '生醫｜生醫所｜丁嘉琳｜03-1111111｜lineid_ding｜智慧醫療、醫材相關技術',
+    '機械｜機械所｜林潔玲｜｜｜機械、自動化系統相關技術',
+    '其他｜｜朱則瑋｜03-9999999｜｜找不到對應窗口時的綜合聯絡人'
+  ].join('\n')
 };
 export const sent = [];
 
@@ -39,6 +46,7 @@ export const sheets = {
     if (range.startsWith('events!')) return state.events.map(r => [...r]);
     if (range.startsWith('line_users!')) return bindingRows();
     if (range.startsWith('line_staff!')) return state.staff.map(r => [...r]);
+    if (range.startsWith('contacts_directory!')) return state.contactsDirectory ? [[state.contactsDirectory]] : [];
     return [];
   },
   async appendRows(range, rows) {
@@ -52,6 +60,7 @@ export const sheets = {
     if (range.startsWith('events!')) state.events.push(...rows.map(r => [...r]));
   },
   async updateRange(range, values) {
+    if (range === 'contacts_directory!A2') { state.contactsDirectory = values[0][0]; return; }
     // events!K12 這種單欄寫入（補編輯碼）。A=0 起算，K 是索引 10。
     const evM = range.match(/^events!([A-P])(\d+)(?::([A-P])(\d+))?$/);
     if (evM) {
@@ -84,7 +93,10 @@ export const sheets = {
       if (col === 6) b.groupSessionUntil = v === '' ? 0 : Number(v);
     });
   },
-  async ensureSheets() {}
+  // 回傳空陣列＝「分頁本來就存在」，不觸發 lib/contacts-directory.js 的
+  // 「剛建立就種預設名單」那段——測試要用的是上面 state.contactsDirectory 那份
+  // 固定小名單，不是正式站的完整種子內容。
+  async ensureSheets() { return []; }
 };
 
 // ── lib/line.js（只換掉會對外送東西的那幾支）─────────────────────────

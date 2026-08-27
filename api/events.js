@@ -12,10 +12,17 @@
 // POST {action:'update',...}           → 更新活動（後台的「發布／收回」按鈕也是打這個，帶 status）
 // POST {action:'archive',...}          → 封存活動
 // POST {action:'ensure_edit_code',id}  → 確保該活動有 edit_code（沒有就補上），回傳
+// GET  ?action=contacts_directory&password=..     → 全域技術窗口分工原始文字（後台編輯用）
+// POST {action:'contacts_directory_save',password,content} → 整份覆蓋儲存
 
-import { readRange, appendRows, updateRange } from '../lib/sheets.js';
+import { readRange, appendRows, updateRange, ensureSheets } from '../lib/sheets.js';
 import { generateId, generateEditCode } from '../lib/ids.js';
 import { del } from '@vercel/blob';
+import { CONTACTS_DIR_RANGE, ensureContactsDirectorySheet } from '../lib/contacts-directory.js';
+
+// 跟 events 的 knowledge_base 同一個上限理由：Google Sheets 單一儲存格上限約 5 萬字元，
+// 這份清單目前十幾行遠遠用不到，留餘裕只是避免同仁哪天貼了整份含備註的原始文件進來。
+const CONTACTS_DIR_MAX_LEN = 20000;
 
 // events 表欄位：A id, B name, C color, D knowledge_base, E status,
 //               F created_at（實際存的是活動日期，欄名是舊的，見下方 event_date 別名）,
@@ -75,6 +82,19 @@ export default async function handler(req, res) {
     const { action, id, code } = req.query;
     // 管理員密碼優先讀 header，避免留在網址列／瀏覽器歷史／伺服器存取紀錄裡
     const password = req.headers['x-admin-password'] || req.query.password;
+
+    // 全域技術窗口分工：跟活動表無關，不需要先讀 events，獨立處理完就回傳。
+    if (action === 'contacts_directory') {
+      if (password !== adminPassword) return res.status(401).json({ error: '密碼錯誤' });
+      try {
+        await ensureContactsDirectorySheet(ensureSheets, updateRange);
+        const dirRows = await readRange(CONTACTS_DIR_RANGE);
+        return res.status(200).json({ content: dirRows[0]?.[0] || '' });
+      } catch (err) {
+        return res.status(500).json({ error: err.message });
+      }
+    }
+
     try {
       const rows = await readRange(RANGE);
 
@@ -182,6 +202,20 @@ export default async function handler(req, res) {
     if (!action) return res.status(400).json({ error: '缺少 action 參數' });
 
     try {
+      // 全域技術窗口分工：整份文字直接覆蓋儲存，跟 events!P 那組窗口分工同一套
+      // 「textarea 整段貼上存檔」邏輯，不做逐行 CRUD——同仁常常是整批調整（換人、
+      // 加新單位），一次貼過去比一格一格改方便，也不用另外做欄位對應的表單 UI。
+      if (action === 'contacts_directory_save') {
+        const { password, content } = body;
+        if (password !== adminPassword) return res.status(401).json({ error: '密碼錯誤' });
+        if (String(content || '').length > CONTACTS_DIR_MAX_LEN) {
+          return res.status(400).json({ error: `內容過長（上限 ${CONTACTS_DIR_MAX_LEN} 字），請刪減後再存` });
+        }
+        await ensureContactsDirectorySheet(ensureSheets, updateRange);
+        await updateRange('contacts_directory!A2', [[content || '']]);
+        return res.status(200).json({ success: true });
+      }
+
       // ── 同仁自助編輯：用 edit_code 驗證，不需管理員密碼 ──────────────
       if (action === 'update_edit') {
         const { id, code } = body;
