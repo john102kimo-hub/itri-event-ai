@@ -29,7 +29,7 @@
 import { readRange, appendRows, updateRange, ensureSheets } from '../lib/sheets.js';
 import { buildSystemPrompt } from '../lib/prompt.js';
 import { readRawBody, verifySignature, replyOrPush, startLoading } from '../lib/line.js';
-import { buildCalendarCards, buildAllCalendarCards, routeIntent, formatCalendarReply } from '../lib/router.js';
+import { buildCalendarCards, buildAllCalendarCards, routeIntent, formatCalendarReply, calendarQuickReplyItems } from '../lib/router.js';
 import {
   isPasscodeMatch, isStaffAuthenticated, authenticateStaff, routeStaffIntent,
   createDraftEvent, editLink, trainingLink, getEventEditCode, getEventRawById,
@@ -241,7 +241,7 @@ async function handleStaffMessage(replyToken, userId, text) {
   const cardName = id => cards.find(c => c.id === id)?.name || id;
 
   if (routed.intent === 'calendar') {
-    await replyOrPush(replyToken, userId, formatCalendarReply(cards));
+    await replyOrPush(replyToken, userId, formatCalendarReply(cards), calendarQuickReplyItems(cards));
     return;
   }
 
@@ -269,7 +269,8 @@ async function handleStaffMessage(replyToken, userId, text) {
     }
     if (routed.event_ids.length > 1) {
       await replyOrPush(replyToken, userId,
-        `是想查這幾場的哪一場？\n${routed.event_ids.map(id => '・' + cardName(id)).join('\n')}`);
+        `是想查這幾場的哪一場？\n${routed.event_ids.map(id => '・' + cardName(id)).join('\n')}`,
+        routed.event_ids.map(cardName));
       return;
     }
     const eventId = routed.event_ids[0];
@@ -297,12 +298,14 @@ async function handleStaffMessage(replyToken, userId, text) {
   }
   if (routed.intent === 'qa' && routed.event_ids.length > 1) {
     await replyOrPush(replyToken, userId,
-      `是想問這幾場的哪一場？\n${routed.event_ids.map(id => '・' + cardName(id)).join('\n')}`);
+      `是想問這幾場的哪一場？\n${routed.event_ids.map(id => '・' + cardName(id)).join('\n')}`,
+      routed.event_ids.map(cardName));
     return;
   }
 
   await replyOrPush(replyToken, userId,
-    '職員模式可以問：活動列表／某場活動內容／某場後台數據／GEO 狀態／新增活動（會給編輯連結）／某場媒體訓練連結。直接打活動名稱或說明需求即可。');
+    '職員模式可以問：活動列表／某場活動內容／某場後台數據／GEO 狀態／新增活動（會給編輯連結）／某場媒體訓練連結。直接打活動名稱或說明需求即可。',
+    ['最近有哪些活動', 'GEO現在狀況']);
 }
 
 // 沒有有效綁定時的自然語言處理（批次 3）：讓路由判斷這是查活動列表、問特定一場、
@@ -315,7 +318,7 @@ async function handleUnbound(replyToken, userId, text) {
   console.log(`[line] reporter route q="${text.slice(0, 60)}" → intent=${intent} event_ids=${JSON.stringify(event_ids)} confidence=${confidence}`);
 
   if (intent === 'calendar') {
-    await replyOrPush(replyToken, userId, formatCalendarReply(cards));
+    await replyOrPush(replyToken, userId, formatCalendarReply(cards), calendarQuickReplyItems(cards));
     return;
   }
 
@@ -334,7 +337,8 @@ async function handleUnbound(replyToken, userId, text) {
     const names = event_ids.map(id => cards.find(c => c.id === id)?.name).filter(Boolean).slice(0, 3);
     if (names.length) {
       await replyOrPush(replyToken, userId,
-        `您是想問這幾場的哪一場呢？\n${names.map(n => '・' + n).join('\n')}\n\n請直接打完整或部分活動名稱。`);
+        `您是想問這幾場的哪一場呢？\n${names.map(n => '・' + n).join('\n')}\n\n請直接打完整或部分活動名稱。`,
+        names);
       return;
     }
   }
@@ -342,7 +346,8 @@ async function handleUnbound(replyToken, userId, text) {
   // intent === 'other'，或 qa 但完全比對不到、或路由本身失敗 → 統一導引，
   // 跟批次 2 原本沒綁定時的文案一致，只是多給「或直接打活動名稱」這條路。
   await replyOrPush(replyToken, userId,
-    '不確定您想問哪一場活動——可以直接輸入活動名稱、或問「最近有哪些活動」查看清單，也可以掃描現場 QR code 綁定。');
+    '不確定您想問哪一場活動——可以直接輸入活動名稱、或問「最近有哪些活動」查看清單，也可以掃描現場 QR code 綁定。',
+    ['最近有哪些活動']);
 }
 
 async function logQa(event, mediaName, question, reply) {
@@ -368,7 +373,8 @@ async function handleEvent(ev) {
     const userId = ev.source?.userId;
     if (!userId || !ev.replyToken) return;
     await replyOrPush(ev.replyToken, userId,
-      '感謝加入好友！\n\n請掃描活動現場的 QR code，或直接輸入「#活動代碼」開始問答。\n\n本帳號會記錄您的提問內容以改善新聞服務，不會蒐集您的個人資料。');
+      '感謝加入好友！\n\n請掃描活動現場的 QR code，或直接輸入「#活動代碼」開始問答；也可以直接打活動名稱，或點下面的按鈕看看目前有哪些活動。\n\n本帳號會記錄您的提問內容以改善新聞服務，不會蒐集您的個人資料。',
+      ['最近有哪些活動']);
     return;
   }
 
@@ -406,7 +412,8 @@ async function handleEvent(ev) {
     const { displayName } = await authenticateStaff(userId);
     console.log(`[line] 新職員登入 user=${userId} name=${displayName || '(無)'}`);
     await replyOrPush(replyToken, userId,
-      `職員模式已啟用${displayName ? `，${displayName} 您好` : ''}！\n\n可以問我：活動列表／某場活動內容／某場後台數據／GEO 狀態／新增活動（直接給您同仁編輯連結）／某場媒體訓練連結。\n\n您的 LINE ID：${userId}\n（想在「有新的人用密語登入」時收到通知，把這組 ID 設成 LINE_ADMIN_USER_ID 環境變數即可）`);
+      `職員模式已啟用${displayName ? `，${displayName} 您好` : ''}！\n\n可以問我：活動列表／某場活動內容／某場後台數據／GEO 狀態／新增活動（直接給您同仁編輯連結）／某場媒體訓練連結。\n\n您的 LINE ID：${userId}\n（想在「有新的人用密語登入」時收到通知，把這組 ID 設成 LINE_ADMIN_USER_ID 環境變數即可）`,
+      ['最近有哪些活動', 'GEO現在狀況']);
     return;
   }
   if (await isStaffAuthenticated(userId)) {
