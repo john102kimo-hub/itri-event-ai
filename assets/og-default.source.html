@@ -1,0 +1,62 @@
+<!doctype html>
+<!--
+  public/og-default.png 的原始檔（1200x630，社群預覽卡的標準尺寸）。
+  這個目錄不會被 Vercel 部署（只有 public/ 是靜態資源）。
+
+  改完重新產圖（開發機要有 Chromium）：
+    chromium --headless --no-sandbox --hide-scrollbars --force-device-scale-factor=1 \
+      --window-size=1200,630 --screenshot=public/og-default.png \
+      --default-background-color=FFFFFFFF file://$PWD/assets/og-default.source.html
+
+  ⚠️ 刻意不寫任何主辦單位名稱：events 表有 organizer 欄位，平台本來就設計成
+  多主辦單位共用，這張是「所有沒上傳照片的場次」共用的預設封面，寫死「工研院」
+  會在非工研院的場次上變成錯誤資訊。主辦單位與活動名稱都由 og:title／
+  og:description 逐場帶出，那兩個欄位才是每場不同的部分。
+-->
+<html lang="zh-TW">
+<head>
+<meta charset="utf-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 1200px; height: 630px; overflow: hidden; }
+  body {
+    font-family: "WenQuanYi Zen Hei", "Noto Sans CJK TC", sans-serif;
+    background: #0F9E7A;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 56px;
+  }
+  .card {
+    width: 100%; height: 100%;
+    background: #FFFFFF;
+    border-radius: 28px;
+    padding: 76px 84px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 30px;
+  }
+  .eyebrow {
+    display: inline-flex; align-self: flex-start; align-items: center; gap: 14px;
+    background: #E7F6F1; color: #0B7A5E;
+    font-size: 30px; font-weight: 700; letter-spacing: 2px;
+    padding: 14px 28px; border-radius: 999px;
+  }
+  h1 {
+    font-size: 94px; font-weight: 700; color: #14202E;
+    line-height: 1.22; letter-spacing: 2px;
+  }
+  .desc { font-size: 38px; color: #5B6672; line-height: 1.6; letter-spacing: 1px; }
+  .rule { height: 8px; width: 132px; background: #0F9E7A; border-radius: 4px; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="eyebrow">記者會新聞資料</div>
+    <h1>AI 新聞助理</h1>
+    <div class="rule"></div>
+    <div class="desc">新聞稿、技術規格、合作廠商、聯絡窗口<br>無需登入，直接提問即時取得</div>
+  </div>
+</body>
+</html>

@@ -28,12 +28,21 @@
 
 import { readRange, appendRows, updateRange, ensureSheets } from '../lib/sheets.js';
 import { buildSystemPrompt } from '../lib/prompt.js';
-import { readRawBody, verifySignature, replyOrPush, startLoading, pushImages } from '../lib/line.js';
+import {
+  readRawBody, verifySignature, replyOrPush, replyOrPushMessages, startLoading, pushImages,
+  createRichMenu, uploadRichMenuImage, setDefaultRichMenu, listRichMenus, deleteRichMenu,
+  linkRichMenuToUser, unlinkRichMenuFromUser
+} from '../lib/line.js';
 import { buildCalendarCards, buildAllCalendarCards, routeIntent, formatCalendarReply, calendarQuickReplyItems } from '../lib/router.js';
+import {
+  detectMetaIntent, matchEventByName, HELP_TEXT, buildWelcomeFlex,
+  buildRichMenuDefinition, ALL_MENUS, REPORTER_MENU, STAFF_MENU
+} from '../lib/menu.js';
 import {
   isPasscodeMatch, isStaffAuthenticated, authenticateStaff, routeStaffIntent,
   createDraftEvent, editLink, trainingLink, getEventEditCode, getEventRawById,
-  getEventAnalyticsSummary, formatEventAnalyticsReply, getGeoStatusSummary, formatGeoStatusReply
+  getEventAnalyticsSummary, formatEventAnalyticsReply, getGeoStatusSummary, formatGeoStatusReply,
+  isExitStaffCommand, revokeStaff, listActiveStaffIds
 } from '../lib/staff.js';
 
 const EVENTS_RANGE = 'events!A2:O';
@@ -162,6 +171,22 @@ async function setBindingNote(userId, note) {
   }
 }
 
+// 解除綁定：把 bound_at（D 欄）清空，getBinding() 讀到 0 就會當作沒綁定。
+// 不刪整列——line_users 的媒體名稱是記者自報的，下次他綁別場時還用得到，
+// 刪掉等於每換一場就要重問一次「請問哪家媒體」。
+async function clearBinding(userId) {
+  try {
+    const rows = await readRange(LINE_USERS_RANGE);
+    const idx = rows.findIndex(r => r[0] === userId);
+    if (idx === -1) return;
+    await updateRange(`line_users!D${idx + 2}:F${idx + 2}`, [['', String(Date.now()), '']]);
+  } catch (e) {
+    console.error('clearBinding 失敗:', e.message);
+  } finally {
+    invalidateLineUsersCache();
+  }
+}
+
 // ── 陽春限流：同一 line_user_id 60 秒內最多 15 次問答 ───────────────────
 // 跟 api/chat.js 的 ipHits 同一套邏輯，只是 key 換成 line_user_id——LINE 的 webhook
 // 全部來自 LINE 自己的伺服器 IP，用 IP 當 key 會讓全部記者共用同一個額度、互相誤殺。
@@ -263,12 +288,110 @@ async function answerQuestion(replyToken, userId, event, mediaName, text) {
   await logQa(event, mediaName, text, reply);
 }
 
+// ── 安裝圖文選單（職員指令）─────────────────────────────────────────
+// 做成職員模式的一句話指令、而不是新開一支 API：Vercel Hobby 的 12 支 Function
+// 上限目前已經用掉 11 支，這個功能一輩子大概只會執行個位數次，不值得占掉最後一格
+// （見 api/event-page.js 開頭那段三合一的同一個理由）。
+//
+// 底圖是去自己網站抓 /richmenu.png，不用 includeFiles 把檔案打包進 Function——
+// 這是一次性動作，多一次 HTTP 往返完全無所謂，換來的是不必動 vercel.json，
+// 也不會讓每次 webhook 的冷啟動多背一個 73KB 的檔案。
+const SITE = 'https://itri-event-ai.vercel.app';
+
+// 職員的快速回覆按鈕。LINE 上限 13 顆，這裡用 7 顆——圖文選單那六格全部列出來
+// （選單被收起來時仍然點得到），再加「設定圖文選單」這顆選單本身放不進去的。
+// 原本只給兩顆（活動列表／GEO 狀態），其餘功能同仁得自己知道要打什麼才用得到，
+// 等於功能做了卻沒人找得到。
+const STAFF_QUICK_REPLIES = [...STAFF_MENU.buttons.map(b => b.text), '設定圖文選單'];
+
+// 職員登入／設定選單時要拿到職員選單的 id。不另外存一份到試算表——選單本來就有
+// name 欄位，用它反查即可，少一個會跟 LINE 那邊不同步的狀態。
+async function findRichMenuIdByName(name) {
+  const menus = await listRichMenus();
+  return menus.find(m => m.name === name)?.richMenuId || null;
+}
+
+// 把某個 userId 換成職員選單。整段包在 try 裡：選單是體驗加分，綁失敗不能讓
+// 「密語登入」這件事本身失敗——他仍然是職員，只是先看到記者選單而已。
+async function applyStaffMenu(userId) {
+  try {
+    const id = await findRichMenuIdByName(STAFF_MENU.name);
+    if (!id) return; // 還沒跑過「設定圖文選單」，正常情況，不用吵
+    await linkRichMenuToUser(userId, id);
+  } catch (e) {
+    console.error('綁定職員選單失敗（不影響職員身分）:', e.message);
+  }
+}
+
+async function handleSetupRichMenu(replyToken, userId) {
+  if (!process.env.LINE_CHANNEL_ACCESS_TOKEN) {
+    await replyOrPush(replyToken, userId, '尚未設定 LINE_CHANNEL_ACCESS_TOKEN，無法建立圖文選單。');
+    return;
+  }
+  await startLoading(userId, 45);
+
+  try {
+    // 先記下現有的，等新選單全部確定上線後才刪——順序反過來的話，中間只要有一步
+    // 失敗，記者就會看到一個完全沒有選單的帳號。
+    const before = await listRichMenus();
+
+    const created = {};
+    for (const menu of ALL_MENUS) {
+      const imgRes = await fetch(`${SITE}/richmenu-${menu.key}.png`);
+      if (!imgRes.ok) throw new Error(`抓取 ${menu.name} 底圖失敗 ${imgRes.status}`);
+      const id = await createRichMenu(buildRichMenuDefinition(menu));
+      await uploadRichMenuImage(id, Buffer.from(await imgRes.arrayBuffer()), 'image/png');
+      created[menu.key] = id;
+    }
+
+    // 記者選單設為預設（所有人），職員再逐一覆蓋成職員選單。
+    // per-user 連結的優先度高於預設，所以記者永遠看不到「新增活動」「後台數據」
+    // 這些內部功能的入口。
+    await setDefaultRichMenu(created[REPORTER_MENU.key]);
+
+    const staffIds = await listActiveStaffIds();
+    let linked = 0;
+    for (const sid of staffIds) {
+      try { await linkRichMenuToUser(sid, created[STAFF_MENU.key]); linked++; }
+      catch (e) { console.error(`綁定職員選單失敗 user=${sid}:`, e.message); }
+    }
+
+    const keep = new Set(Object.values(created));
+    for (const old of before) {
+      if (old.richMenuId && !keep.has(old.richMenuId)) await deleteRichMenu(old.richMenuId);
+    }
+
+    console.log(`[line] 圖文選單已設定 ${JSON.stringify(created)} 職員綁定 ${linked}/${staffIds.length} 清掉舊的 ${before.length} 個`);
+    await replyOrPush(replyToken, userId,
+      '圖文選單已設定完成 ✅\n\n' +
+      `【記者看到的】\n${REPORTER_MENU.buttons.map(b => `・${b.label}`).join('\n')}\n\n` +
+      `【職員看到的】（已套用到 ${linked} 位職員）\n${STAFF_MENU.buttons.map(b => `・${b.label}`).join('\n')}\n\n` +
+      '記者不會看到職員那一套。已經加過好友的人可能要把對話關掉重開才會看到。');
+  } catch (e) {
+    console.error('設定圖文選單失敗:', e.message);
+    await replyOrPush(replyToken, userId, `設定圖文選單失敗：${e.message}\n\n請確認 LINE_CHANNEL_ACCESS_TOKEN 有效，且網站已部署最新版本。`);
+  }
+}
+
 // 職員模式指令分派（批次 4）。跟 handleUnbound 的差異：
 //   - qa 意圖不套用 isUsable()——同仁本來就該問得到 draft／archived 場次的內容
 //   - 不做軟綁定：職員一次對話常常在不同活動之間跳來跳去（查完 A 場數據又問 B 場
 //     內容），鎖定單一活動反而綁手綁腳
 //   - 多了 geo_status／event_analytics／create_event／training_link 四種指令
 async function handleStaffMessage(replyToken, userId, text) {
+  // ⚠️ 退出一定要在 routeStaffIntent() 之前用字面比對攔下來。交給 AI 判意圖會被歸到
+  // 'other'，使用者只會拿到一份能力清單、永遠退不出去（實際回報過的狀況）。
+  // 權限的關閉不該取決於模型當下判得準不準。
+  if (isExitStaffCommand(text)) {
+    await revokeStaff(userId);
+    await unlinkRichMenuFromUser(userId); // 解除個人連結 → 自動落回記者選單
+    console.log(`[line] 職員退出 user=${userId}`);
+    await replyOrPush(replyToken, userId,
+      '已退出職員模式 ✅\n\n您現在跟一般記者看到的一樣，下方選單也換回記者版。\n要再進來，重新輸入一次密語即可。',
+      ['最近有哪些活動', '使用說明']);
+    return;
+  }
+
   const rows = await getAllEventRows();
   // 職員要用「全部場次」的候選清單，不能用記者版的 buildCalendarCards()——
   // 那支會濾掉 draft／archived，職員問得到的場次卻不在候選清單裡，路由回傳的
@@ -286,6 +409,11 @@ async function handleStaffMessage(replyToken, userId, text) {
 
   if (routed.intent === 'geo_status') {
     await replyOrPush(replyToken, userId, formatGeoStatusReply(await getGeoStatusSummary()));
+    return;
+  }
+
+  if (routed.intent === 'setup_richmenu') {
+    await handleSetupRichMenu(replyToken, userId);
     return;
   }
 
@@ -343,8 +471,56 @@ async function handleStaffMessage(replyToken, userId, text) {
   }
 
   await replyOrPush(replyToken, userId,
-    '職員模式可以問：活動列表／某場活動內容／某場後台數據／GEO 狀態／新增活動（會給編輯連結）／某場媒體訓練連結。直接打活動名稱或說明需求即可。',
-    ['最近有哪些活動', 'GEO現在狀況']);
+    '職員模式可以做這些事（下面按鈕直接點，或用講的也可以）：\n' +
+    STAFF_MENU.buttons.map(b => `・${b.label}——${b.sub}`).join('\n') +
+    '\n・某場活動內容——直接打活動名稱\n・設定圖文選單——重設下方選單',
+    STAFF_QUICK_REPLIES);
+}
+
+// ── 「跳出本場」意圖（活動列表／換一場／使用說明）─────────────────────
+// ⚠️ 這是實際回報的問題：原本只要 line_users 有有效綁定，handleEvent 就把每一則
+// 訊息無條件送進 answerQuestion()，記者打「最近活動」會被當成「請那一場的 AI 回答
+// 『最近活動』」——AI 手上只有那一場的知識庫，只能再自我介紹一次，記者等於被鎖死在
+// 掃到的那場，沒有任何出口。
+//
+// 解法是在進問答之前先攔三種「這句話不是在問某一場內容」的意圖。判斷放在
+// lib/menu.js、純關鍵字不呼叫 AI（理由見該檔開頭），所以綁定中的正常提問一個字節
+// 都沒變慢，也不會多一分錢。
+//
+// 放在綁定判斷「之前」是刻意的：沒綁定的記者問「使用說明」一樣要拿到說明，而不是
+// 掉進 routeIntent() 被判成 other、只拿到「不確定您想問哪一場」。
+async function handleMetaIntent(replyToken, userId, text, metaIntent, binding) {
+  // ask_name 是「#代碼綁定後問了媒體名稱，下一則要試著擷取」的一次性旗標。
+  // 記者在那個視窗裡改按了選單按鈕，代表他跳過了報名字這件事，旗標要當場作廢——
+  // 不清掉的話，等他選完活動再回來打的第一句真正的問題，會被 looksLikeNameOrSkip()
+  // 誤判成媒體名稱吃掉（就是上面 handleEvent 註解裡已經修過一次的那個坑）。
+  if (binding?.note === 'ask_name') await setBindingNote(userId, '');
+
+  if (metaIntent === 'help') {
+    await replyOrPush(replyToken, userId, HELP_TEXT, ['最近有哪些活動']);
+    return;
+  }
+
+  const cards = buildCalendarCards(await getAllEventRows());
+
+  if (metaIntent === 'switch') {
+    // 真的解除綁定，不只是回一句提示：記者說「換一場」之後打的下一句多半是新場次
+    // 的名稱，留著舊綁定的話那句會先被當成對舊場次的提問。
+    if (binding) await clearBinding(userId);
+    await replyOrPush(replyToken, userId,
+      `好的，已經離開原本那一場。\n\n請直接輸入想問的活動名稱，或從下面挑一場。\n\n${formatCalendarReply(cards)}`,
+      calendarQuickReplyItems(cards));
+    return;
+  }
+
+  // calendar：只列清單，不解除綁定——記者多半只是想看看有什麼，看完還會繼續問
+  // 原本那場。真的要換，按下清單的按鈕（送出的就是完整活動名稱）會走
+  // matchEventByName() 自動切過去，不需要他先「離開」再「進入」。
+  const current = binding ? await getEventById(binding.event_id) : null;
+  const suffix = isUsable(current)
+    ? `\n\n（您目前在問的是《${current.name}》，直接發問就會回答這一場；想換場點下面的按鈕即可。）`
+    : '';
+  await replyOrPush(replyToken, userId, formatCalendarReply(cards) + suffix, calendarQuickReplyItems(cards));
 }
 
 // 沒有有效綁定時的自然語言處理（批次 3）：讓路由判斷這是查活動列表、問特定一場、
@@ -386,7 +562,7 @@ async function handleUnbound(replyToken, userId, text) {
   // 跟批次 2 原本沒綁定時的文案一致，只是多給「或直接打活動名稱」這條路。
   await replyOrPush(replyToken, userId,
     '不確定您想問哪一場活動——可以直接輸入活動名稱、或問「最近有哪些活動」查看清單，也可以掃描現場 QR code 綁定。',
-    ['最近有哪些活動']);
+    ['最近有哪些活動', '使用說明']);
 }
 
 async function logQa(event, mediaName, question, reply) {
@@ -411,9 +587,16 @@ async function handleEvent(ev) {
   if (ev.type === 'follow') {
     const userId = ev.source?.userId;
     if (!userId || !ev.replyToken) return;
-    await replyOrPush(ev.replyToken, userId,
-      '感謝加入好友！\n\n請掃描活動現場的 QR code，或直接輸入「#活動代碼」開始問答；也可以直接打活動名稱，或點下面的按鈕看看目前有哪些活動。\n\n本帳號會記錄您的提問內容以改善新聞服務，不會蒐集您的個人資料。',
-      ['最近有哪些活動']);
+    // 加好友只有這一次機會講清楚「這是什麼、怎麼開始」。純文字會被滑過去，改送
+    // 有三步驟與按鈕的 Flex 圖卡（見 lib/menu.js buildWelcomeFlex）。
+    // Flex 送失敗（欄位打錯、LINE 版本太舊）不能讓新記者收到一片空白，
+    // 所以退回原本那則純文字歡迎詞——文案本身仍然是完整可用的引導。
+    const ok = await replyOrPushMessages(ev.replyToken, userId, [buildWelcomeFlex()]);
+    if (!ok) {
+      await replyOrPush(ev.replyToken, userId,
+        '感謝加入好友！\n\n請掃描活動現場的 QR code，或直接輸入「#活動代碼」開始問答；也可以直接打活動名稱，或點下面的按鈕看看目前有哪些活動。\n\n本帳號會記錄您的提問內容以改善新聞服務，不會蒐集您的個人資料。',
+        ['最近有哪些活動', '使用說明']);
+    }
     return;
   }
 
@@ -449,10 +632,11 @@ async function handleEvent(ev) {
       return;
     }
     const { displayName } = await authenticateStaff(userId);
+    await applyStaffMenu(userId); // 下方選單換成職員版
     console.log(`[line] 新職員登入 user=${userId} name=${displayName || '(無)'}`);
     await replyOrPush(replyToken, userId,
-      `職員模式已啟用${displayName ? `，${displayName} 您好` : ''}！\n\n可以問我：活動列表／某場活動內容／某場後台數據／GEO 狀態／新增活動（直接給您同仁編輯連結）／某場媒體訓練連結。\n\n您的 LINE ID：${userId}\n（想在「有新的人用密語登入」時收到通知，把這組 ID 設成 LINE_ADMIN_USER_ID 環境變數即可）`,
-      ['最近有哪些活動', 'GEO現在狀況']);
+      `職員模式已啟用${displayName ? `，${displayName} 您好` : ''}！\n\n下方選單已換成職員版，也可以直接用講的。\n\n您的 LINE ID：${userId}\n（想在「有新的人用密語登入」時收到通知，把這組 ID 設成 LINE_ADMIN_USER_ID 環境變數即可）`,
+      STAFF_QUICK_REPLIES);
     return;
   }
   if (await isStaffAuthenticated(userId)) {
@@ -477,9 +661,35 @@ async function handleEvent(ev) {
   }
 
   const binding = await getBinding(userId);
+
+  // 活動列表／換一場／使用說明——不管有沒有綁定都要先攔，見 handleMetaIntent() 的說明
+  const metaIntent = detectMetaIntent(text);
+  if (metaIntent) {
+    console.log(`[line] meta intent=${metaIntent} user=${userId} q="${text.slice(0, 40)}"`);
+    await handleMetaIntent(replyToken, userId, text, metaIntent, binding);
+    return;
+  }
+
   if (!binding) {
     await handleUnbound(replyToken, userId, text);
     return;
+  }
+
+  // 綁定中但整句就是「另一場活動的名稱」（多半是剛按了活動清單的按鈕）→ 直接換過去。
+  // 不做這件事的話，按了按鈕只會讓舊那場的 AI 去回答「某某記者會」這句話。
+  const switchTo = matchEventByName(text, buildCalendarCards(await getAllEventRows()), binding.event_id);
+  if (switchTo) {
+    const target = await getEventById(switchTo.id);
+    if (isUsable(target)) {
+      console.log(`[line] 換場 ${binding.event_id} → ${target.id} user=${userId}`);
+      // 第三個參數傳空字串是要「清掉」note，不是省略。記者掃 QR 綁定後被問了媒體
+      // 名稱（note='ask_name'），卻改打另一場的名稱換過去——這代表他跳過了報名字。
+      // 不在這裡清掉的話旗標會跟著新綁定留下來，他換場後打的第一句真正的問題會被
+      // 下面 looksLikeNameOrSkip() 誤判成媒體名稱吃掉（同下方 ⚠️ 那個已修過的坑）。
+      await upsertBinding(userId, target.id, '');
+      await answerQuestion(replyToken, userId, target, binding.media_name, text);
+      return;
+    }
   }
 
   const event = await getEventById(binding.event_id);
