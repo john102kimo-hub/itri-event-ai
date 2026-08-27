@@ -1192,6 +1192,16 @@ async function handleEvent(ev) {
       // 下面 looksLikeNameOrSkip() 誤判成媒體名稱吃掉（同下方 ⚠️ 那個已修過的坑）。
       await upsertBinding(userId, target.id, '');
       await answerQuestion(replyToken, userId, target, binding.media_name, text);
+      // ⚠️ 實際回報的坑：換場這條路一直都不會問媒體名稱——不管換過去之前有沒有
+      // 被問過。原本只有「掃 QR／#代碼」跟「自然語言軟綁定」兩條路會問，這位記者
+      // 從頭到尾都是靠打活動名稱換場，於是永遠沒被問過，後台分析永遠看到
+      // 「（未填寫）」。補問邏輯跟 handleUnbound() 的軟綁定分支同一套：只在「這個人
+      // 從沒被問過」才問（media_name 已有值就不重問），而且用 push 補問，不擋住
+      // 剛剛送出的答案。
+      if (!binding.media_name) {
+        await setBindingNote(userId, 'ask_name');
+        await pushMessage(userId, '對了，方便留個貴媒體的名稱嗎？（打名稱即可，或回「略過」——之後就不會再問了）');
+      }
       return;
     }
   }
