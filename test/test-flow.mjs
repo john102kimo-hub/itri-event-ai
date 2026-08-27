@@ -176,5 +176,72 @@ state.bindings.set('U_reporter', { event_id: 'quad', media_name: '', note: '', b
 out = await send('退出');
 check('記者打「退出」不會被當成職員指令', out[0]?.kind === 'answer', JSON.stringify(out));
 
+// ── 情境 7：職員追問「哪一場」要接得住 ──────────────────────────────
+// 回報的 bug：「查活動後台數據」→「請問是想查哪一場？」→ 打「四足」→ 跑去問答。
+process.env.ADMIN_PASSWORD = '';   // getGeoStatusSummary() 會回 null，走沒資料那條
+reset(); await freshModule();
+state.staff.push(['U_staff', '', '2026-08-27', '', '']);
+
+out = await send('查活動後台數據', 'U_staff');
+check('問後台數據沒指定場次 → 反問哪一場', /哪一場的後台數據/.test(out[0]?.text || ''), JSON.stringify(out));
+check('反問時附上活動名稱按鈕', (sent[0]?.quickReply || []).length > 0, JSON.stringify(sent[0]?.quickReply));
+check('記下 pending', /^event_analytics:/.test(state.staff[0][4] || ''), String(state.staff[0][4]));
+
+out = await send('四足', 'U_staff');
+check('追問回「四足」→ 給後台數據，不是跑去問答（回報的 bug）',
+  /後台數據/.test(out[0]?.text || '') && out[0]?.kind !== 'answer', JSON.stringify(out));
+check('後台數據要附後台連結', /itri-event-ai\.vercel\.app\/admin/.test(out[0]?.text || ''), out[0]?.text);
+check('後台數據要附這場的記者問答頁連結',
+  /itri-event-ai\.vercel\.app\/event\?id=quad/.test(out[0]?.text || ''), out[0]?.text);
+check('pending 用掉後清空', !state.staff[0][4], String(state.staff[0][4]));
+
+// 用掉之後不能再影響下一則——不然之後每次打活動名稱都會變成查數據
+out = await send('四足', 'U_staff');
+check('pending 清掉後，再打活動名稱回到正常問答', out[0]?.kind === 'answer', JSON.stringify(out));
+
+// 媒體訓練連結：同一套追問，且要真的給出連結
+reset(); await freshModule();
+state.staff.push(['U_staff', '', '2026-08-27', '', '']);
+out = await send('要媒體訓練連結', 'U_staff');
+check('問媒體訓練沒指定場次 → 反問哪一場', /哪一場的媒體訓練連結/.test(out[0]?.text || ''), JSON.stringify(out));
+out = await send('半導體先進封裝技術發表會', 'U_staff');
+check('追問後給媒體訓練連結', /\/training\?id=semi&code=/.test(out[0]?.text || ''), out[0]?.text);
+check('同時附上同仁編輯連結', /\/edit\?id=semi&code=/.test(out[0]?.text || ''), out[0]?.text);
+
+// 舊活動沒有編輯碼時要當場補、不能把同仁踢回後台
+reset(); await freshModule();
+state.staff.push(['U_staff', '', '2026-08-27', '', '']);
+state.events.find(e => e[0] === 'semi')[10] = ''; // 清掉編輯碼，模擬舊活動
+out = await send('要 半導體先進封裝技術發表會 的媒體訓練連結', 'U_staff');
+check('沒有編輯碼時當場補一個，仍然給得出連結',
+  /\/training\?id=semi&code=/.test(out[0]?.text || ''), out[0]?.text);
+check('補出來的編輯碼有寫回 events 表', !!state.events.find(e => e[0] === 'semi')[10]);
+
+// GEO 狀態要附連結
+reset(); await freshModule();
+state.staff.push(['U_staff', '', '2026-08-27', '', '']);
+out = await send('GEO現在狀況', 'U_staff');
+check('GEO 狀態要附 /geo 連結', /itri-event-ai\.vercel\.app\/geo/.test(out[0]?.text || ''), out[0]?.text);
+
+// 新增活動的追問：整句就是名稱，不能被重判成問活動內容
+reset(); await freshModule();
+state.staff.push(['U_staff', '', '2026-08-27', '', '']);
+out = await send('新增活動', 'U_staff');
+check('新增活動沒給名稱 → 反問名稱', /請告訴我新活動的名稱/.test(out[0]?.text || ''), JSON.stringify(out));
+check('記下 create_event pending', /^create_event:/.test(state.staff[0][4] || ''), String(state.staff[0][4]));
+const before = state.events.length;
+out = await send('智慧製造技術發表會', 'U_staff');
+check('追問回名稱 → 真的建立活動，不是跑去問答',
+  /已建立《智慧製造技術發表會》/.test(out[0]?.text || ''), JSON.stringify(out));
+check('活動有寫進 events 表', state.events.length === before + 1);
+check('新活動是 draft', state.events[state.events.length - 1][4] === 'draft');
+check('回覆附上同仁編輯連結', /\/edit\?id=.+&code=/.test(out[0]?.text || ''), out[0]?.text);
+
+// pending 過期不能誤接
+reset(); await freshModule();
+state.staff.push(['U_staff', '', '2026-08-27', '', `event_analytics:${Date.now() - 11 * 60 * 1000}`]);
+out = await send('四足', 'U_staff');
+check('pending 超過 10 分鐘就失效，不會誤接成查數據', out[0]?.kind === 'answer', JSON.stringify(out));
+
 console.log(`\n${fail === 0 ? '✅' : '❌'} 流程測試通過 ${pass}／失敗 ${fail}`);
 process.exit(fail === 0 ? 0 : 1);

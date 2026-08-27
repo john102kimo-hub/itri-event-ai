@@ -40,9 +40,9 @@ import {
 } from '../lib/menu.js';
 import {
   isPasscodeMatch, isStaffAuthenticated, authenticateStaff, routeStaffIntent,
-  createDraftEvent, editLink, trainingLink, getEventEditCode, getEventRawById,
+  createDraftEvent, editLink, trainingLink, ensureEventEditCode, getEventRawById,
   getEventAnalyticsSummary, formatEventAnalyticsReply, getGeoStatusSummary, formatGeoStatusReply,
-  isExitStaffCommand, revokeStaff, listActiveStaffIds
+  isExitStaffCommand, revokeStaff, listActiveStaffIds, getStaffPending, setStaffPending
 } from '../lib/staff.js';
 
 const EVENTS_RANGE = 'events!A2:O';
@@ -398,9 +398,39 @@ async function handleStaffMessage(replyToken, userId, text) {
   // event_id 會被 routeStaffIntent() 自己的白名單過濾掉，變成「查得到內容、卻永遠
   // 比對不到活動」。見 lib/router.js 的註解。
   const cards = buildAllCalendarCards(rows);
+
+  // ⚠️ 承接上一則的追問。實際回報的 bug：打「查活動後台數據」→ 系統問「哪一場？」→
+  // 打「四足」→ 卻跑去回答四足那場的活動內容。
+  //
+  // 職員模式原本每一則訊息都各自重新路由一次，完全沒有記憶。「四足」單獨看就是一個
+  // 活動名稱，模型判成 qa 完全合理——問題不在模型判錯，而在沒有人告訴它「上一句我問
+  // 的是哪一場的後台數據」。所以這裡先把 pending 讀回來（讀取免費，isStaffAuthenticated
+  // 本來就要讀同一批列），再用它覆寫這次的意圖。
+  const pending = await getStaffPending(userId);
+  if (pending) await setStaffPending(userId, ''); // 一次性，用掉就清
+
   const routed = await routeStaffIntent(text, cards);
+
+  if (pending) {
+    if (pending === 'create_event' && routed.intent !== 'create_event') {
+      // 上一則問的是「新活動叫什麼名字」，這一則整句就是答案。不能交給模型重判——
+      // 「半導體技術發表會」這種輸入看起來就像在問某場活動的內容。
+      routed.intent = 'create_event';
+      routed.new_event_name = text;
+    } else if ((pending === 'event_analytics' || pending === 'training_link') && routed.event_ids.length > 0) {
+      // 上一則問的是「哪一場」，這一則模型已經比對出場次了，只要把意圖換回來
+      routed.intent = pending;
+    }
+    console.log(`[line] staff 承接追問 pending=${pending} → intent=${routed.intent}`);
+  }
+
   console.log(`[line] staff route user=${userId} q="${text.slice(0, 60)}" → ${JSON.stringify(routed)}`);
   const cardName = id => cards.find(c => c.id === id)?.name || id;
+
+  // 追問時附上活動名稱按鈕：點按鈕送出的是完整活動名稱，模型比對得到、pending 也
+  // 還在，兩條路都通。只列有意義的前幾場，LINE 上限 13 顆。
+  const eventQuickReplies = (ids) =>
+    (ids && ids.length ? ids.map(cardName) : cards.slice(0, 8).map(c => c.name)).slice(0, 13);
 
   if (routed.intent === 'calendar') {
     await replyOrPush(replyToken, userId, formatCalendarReply(cards), calendarQuickReplyItems(cards));
@@ -419,7 +449,9 @@ async function handleStaffMessage(replyToken, userId, text) {
 
   if (routed.intent === 'create_event') {
     if (!routed.new_event_name) {
-      await replyOrPush(replyToken, userId, '請告訴我新活動的名稱，例如：「新增活動 半導體技術發表會」。');
+      // 記下「我正在等新活動名稱」，下一則整句就會被當成名稱（見上面承接追問那段）
+      await setStaffPending(userId, 'create_event');
+      await replyOrPush(replyToken, userId, '請告訴我新活動的名稱，直接打名稱就好，例如：\n半導體先進封裝技術發表會');
       return;
     }
     const created = await createDraftEvent(routed.new_event_name, routed.new_event_date);
@@ -430,14 +462,20 @@ async function handleStaffMessage(replyToken, userId, text) {
   }
 
   if (routed.intent === 'event_analytics' || routed.intent === 'training_link') {
+    const what = routed.intent === 'event_analytics' ? '後台數據' : '媒體訓練連結';
     if (routed.event_ids.length === 0) {
-      await replyOrPush(replyToken, userId, '請問是想查哪一場活動？直接打活動名稱即可。');
+      // 記下「我正在等他回答哪一場」，否則他打「四足」會被重新判成問活動內容
+      await setStaffPending(userId, routed.intent);
+      await replyOrPush(replyToken, userId,
+        `請問是想查哪一場的${what}？直接打活動名稱，或點下面的按鈕。`,
+        eventQuickReplies());
       return;
     }
     if (routed.event_ids.length > 1) {
+      await setStaffPending(userId, routed.intent);
       await replyOrPush(replyToken, userId,
-        `是想查這幾場的哪一場？\n${routed.event_ids.map(id => '・' + cardName(id)).join('\n')}`,
-        routed.event_ids.map(cardName));
+        `是想查這幾場的哪一場的${what}？\n${routed.event_ids.map(id => '・' + cardName(id)).join('\n')}`,
+        eventQuickReplies(routed.event_ids));
       return;
     }
     const eventId = routed.event_ids[0];
@@ -445,12 +483,14 @@ async function handleStaffMessage(replyToken, userId, text) {
       const summary = await getEventAnalyticsSummary(eventId, cardName(eventId));
       await replyOrPush(replyToken, userId, formatEventAnalyticsReply(summary));
     } else {
-      const editCode = await getEventEditCode(eventId);
+      // 舊活動可能還沒有編輯碼，當場補一個（冪等），不要把同仁踢回後台自己弄一次
+      const editCode = await ensureEventEditCode(eventId);
       if (!editCode) {
-        await replyOrPush(replyToken, userId, '這場活動還沒有編輯碼，請先到後台開啟一次該活動的編輯連結。');
+        await replyOrPush(replyToken, userId, '這場活動的編輯碼產生失敗，請稍後再試，或到後台開啟一次該活動的編輯連結。');
         return;
       }
-      await replyOrPush(replyToken, userId, `《${cardName(eventId)}》媒體訓練連結：\n${trainingLink(eventId, editCode)}`);
+      await replyOrPush(replyToken, userId,
+        `《${cardName(eventId)}》\n\n媒體訓練（發言練習）：\n${trainingLink(eventId, editCode)}\n\n同仁編輯連結（改內容用，不需後台密碼）：\n${editLink(eventId, editCode)}`);
     }
     return;
   }
