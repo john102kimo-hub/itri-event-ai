@@ -21,7 +21,7 @@ const SHEETS = {
   geo_prompts: ['id', 'topic', 'prompt', 'keyword', 'brand', 'competitors', 'active', 'created_at'],
   geo_runs: ['date', 'run_at', 'prompt_id', 'topic', 'keyword', 'engine', 'mentioned', 'rank',
     'cited', 'citations', 'specifics', 'score', 'competitors_found', 'excerpt', 'error'],
-  geo_events: ['id', 'date', 'title', 'type', 'keywords', 'note', 'itri_event_id'],
+  geo_events: ['id', 'date', 'title', 'type', 'keywords', 'note', 'itri_event_id', 'structured'],
   geo_settings: ['key', 'value'],
 };
 
@@ -79,6 +79,18 @@ const nowTW = () => new Date().toLocaleString('zh-TW', { timeZone: 'Asia/Taipei'
 
 async function safeRead(range) {
   try { return await readRange(range); } catch { return []; }
+}
+
+/**
+ * ensureSheets() 只在整張分頁還不存在時才會寫表頭；geo_events 分頁多半已經在用了
+ * （只到舊版的 G 欄），這種情況 ensureSheets 不會幫忙補新欄位的表頭。
+ * 沒補的話，H 欄的資料照樣寫得進去，只是試算表上那欄看起來沒有名字。
+ * 只補表頭文字，不動任何既有資料列。
+ */
+async function ensureEventsHeader() {
+  const head = await safeRead('geo_events!A1:H1');
+  if (head[0]?.[7]) return;
+  await updateRange('geo_events!H1', [['structured']]);
 }
 
 /* ────────────────────────────── 引擎註冊 ────────────────────────────── */
@@ -907,6 +919,18 @@ function eventEffects(events, runs) {
     const windowRuns = runs.filter((r) =>
       r.score !== null && r.date >= ev.date && r.date <= to && (!kw || r.keyword === kw));
 
+    /*
+     * 首次引用時間差：事件日起，這個議題第一次被判定「AI 答案引用了自家網域」隔了幾天。
+     * 對照 GlobeNewswire 2026-06 那份研究（8,000+ 篇新聞稿、平均 8 小時內被 ChatGPT/Claude
+     * 首次引用）——這裡量的不是同一件事，是每天一次取樣的離散量測，精度只到「天」，
+     * 也不是「新聞稿本身被引用」而是「不指名提問下 AI 有沒有引到 itri.org.tw」，
+     * 兩者不能直接對比小時數，只能拿來看「這場活動之後，自家網域多快開始被引」這個相對趨勢。
+     */
+    const firstCitedDate = windowRuns.filter((r) => r.cited).map((r) => r.date).sort()[0] || null;
+    const windowComplete = to <= todayTW();
+    result.daysToFirstCitation = firstCitedDate ? dayDiff(ev.date, firstCitedDate) : null;
+    result.citationWindowComplete = windowComplete;
+
     result.findings = [...diagnoseEvent(result), ...diagnose(windowRuns)];
     result.windowSamples = windowRuns.length;
     return result;
@@ -1012,6 +1036,42 @@ function diagnoseEvent(ev) {
       todo: '把這場的發稿與落地頁作法記錄下來，當成之後的範本。',
     });
   }
+
+  // 首次引用時間差：對照 GlobeNewswire「新聞稿平均 8 小時內被首次引用」的方法論，
+  // 這裡量的是「事件日起，自家網域第一次被 AI 引用隔了幾天」——精度只到天，
+  // 且看的是「不指名提問下有沒有引到 itri.org.tw」，跟原研究的量測對象不同，不能直接比小時數，
+  // 只拿來看「這場之後多快開始被引」的相對快慢。
+  if (ev.citationWindowComplete && ev.daysToFirstCitation === null) {
+    out.push({
+      level: 'bad', title: '30 天內自家網域從沒被引用過',
+      why: 'AI 提到這個議題時一次都沒引到 itri.org.tw，主體容易被寫成別人的頁面在講你。',
+      todo: '確認這個主題有沒有獨立主題頁可以連，且該頁有一句能被整句引用的話。',
+    });
+  } else if (ev.daysToFirstCitation !== null && ev.daysToFirstCitation > 14) {
+    out.push({
+      level: 'warn', title: `自家網域等了 ${ev.daysToFirstCitation} 天才第一次被引用`,
+      why: '晚，通常代表發稿當下沒有同步上線頁面，AI 索引到之前只能引別人轉載的版本。',
+      todo: '下次發稿當天就要有頁面上線，不要等媒體轉載後才補。',
+    });
+  }
+
+  // 結構化稿：只在同仁有登記過（true/false，不是留白的 null）才給建議，避免對舊資料亂猜。
+  if (ev.structured === false
+    && ((ev.halfLifeDays !== null && ev.halfLifeDays <= 7) || (ev.lift !== null && ev.lift <= 0))) {
+    out.push({
+      level: 'warn', title: '這場稿件登記為非結構化',
+      why: '沒有清楚標題／摘要／數據區塊、沒有獨立主題頁的稿件通常留不下記憶——這跟上面的留存數字對得起來。',
+      todo: '下一場試試結構化寫法：明確標題＋摘要段＋至少一個可查證數字＋獨立主題頁，再比較這場與下一場的半衰期。',
+    });
+  } else if (ev.structured === true
+    && ((ev.lift !== null && ev.lift > 5) || (ev.daysToFirstCitation !== null && ev.daysToFirstCitation <= 3))) {
+    out.push({
+      level: 'good', title: '這場稿件登記為結構化，成效也不錯',
+      why: '結構化稿＋留存數字對得起來，是可以複製的做法。',
+      todo: '把這場的標題／摘要／主題頁寫法存成範本，套用到下一場。',
+    });
+  }
+
   return out;
 }
 
@@ -1054,6 +1114,10 @@ const parseRun = (r) => ({
 const parseEvent = (r) => ({
   id: r[0], date: r[1], title: r[2], type: r[3] || '記者會',
   keywords: r[4] || '', note: r[5] || '', itri_event_id: r[6] || '',
+  // 結構化稿：發布時有沒有清楚標題／摘要／數據區塊＋可連結的獨立主題頁。
+  // 只有明確填過 TRUE 才算「是」，其餘（含舊資料、留白）一律 null＝未登記，
+  // 不能把「沒填」當「否」算，那會汙染下面的結構化 vs 非結構化比較。
+  structured: r[7] === 'TRUE' ? true : r[7] === 'FALSE' ? false : null,
 });
 
 /* ────────────────────────────── 預設題庫 ────────────────────────────── */
@@ -1151,7 +1215,7 @@ export default async function handler(req, res) {
       }
 
       if (action === 'events') {
-        const rows = await safeRead('geo_events!A2:G');
+        const rows = await safeRead('geo_events!A2:H');
         return ok(res, { events: rows.filter((r) => r[0]).map(parseEvent) });
       }
 
@@ -1321,7 +1385,7 @@ export default async function handler(req, res) {
         /* ── 績效區塊：發稿前 vs 發稿後 ──
          * 沒有這一段就不是績效報告，只是現況盤點。
          * 績效的定義是「我做了什麼，數字從 A 變成 B」，所以一定要有事前對照。 */
-        const evAll = (await safeRead('geo_events!A2:G')).filter((r) => r[0]).map(parseEvent);
+        const evAll = (await safeRead('geo_events!A2:H')).filter((r) => r[0]).map(parseEvent);
         const ev = evAll.filter((e) => !kw || (e.keywords || '').includes(kw))
           .sort((a, b) => b.date.localeCompare(a.date))[0] || null;
 
@@ -1558,7 +1622,7 @@ export default async function handler(req, res) {
       if (action === 'series') {
         const n = Math.min(Math.max(parseInt(days, 10) || 90, 7), 365);
         const [runRows, evRows] = await Promise.all([
-          safeRead('geo_runs!A2:O'), safeRead('geo_events!A2:G'),
+          safeRead('geo_runs!A2:O'), safeRead('geo_events!A2:H'),
         ]);
         const runs = runRows.filter((r) => r[0]).map(parseRun);
         // 「持續關注」是長官在意的議題但沒有特定發稿日，不是一次性活動——
@@ -1664,6 +1728,7 @@ export default async function handler(req, res) {
      */
     if (body.action === 'track_start') {
       await ensureSheets(SHEETS);
+      await ensureEventsHeader();
       const keyword = String(body.keyword || '').trim();
       if (!keyword) return res.status(400).json({ error: '請填這場活動的關鍵字' });
 
@@ -1696,9 +1761,13 @@ export default async function handler(req, res) {
         uid('gp'), keyword, p, keyword, BRAND_DEFAULT, compStr, 'TRUE', stamp,
       ]));
 
+      // 結構化稿：同仁在③打完題目、按「開始追蹤」前順手勾一下。
+      // 沒勾＝FALSE，跟「不知道」（舊資料留白）分開存，兩者含意不同。
+      const structured = body.structured ? 'TRUE' : 'FALSE';
+
       const evId = uid('ge');
-      await appendRows('geo_events!A:G', [[
-        evId, date, title, body.type || '記者會', keyword, '', refId,
+      await appendRows('geo_events!A:H', [[
+        evId, date, title, body.type || '記者會', keyword, '', refId, structured,
       ]]);
 
       return ok(res, { success: true, added: list.length, event: { id: evId, date, title, keyword } });
@@ -1743,7 +1812,7 @@ export default async function handler(req, res) {
      * 那是花錢換來的歷史資料，不受這個動作影響。
      */
     if (body.action === 'track_stop') {
-      const evRows = await safeRead('geo_events!A2:G');
+      const evRows = await safeRead('geo_events!A2:H');
       const target = evRows.find((r) => r[0] === body.id);
       if (!target) return res.status(404).json({ error: '找不到這場追蹤' });
       const keyword = target[4] || '';
@@ -1763,9 +1832,9 @@ export default async function handler(req, res) {
 
       const kept = evRows.filter((r) => r[0] && r[0] !== body.id);
       if (evRows.length) {
-        await updateRange(`geo_events!A2:G${evRows.length + 1}`, evRows.map(() => new Array(7).fill('')));
+        await updateRange(`geo_events!A2:H${evRows.length + 1}`, evRows.map(() => new Array(8).fill('')));
       }
-      if (kept.length) await updateRange(`geo_events!A2:G${kept.length + 1}`, kept);
+      if (kept.length) await updateRange(`geo_events!A2:H${kept.length + 1}`, kept);
 
       return ok(res, { success: true, removed: stopped, keyword });
     }
@@ -1825,21 +1894,29 @@ export default async function handler(req, res) {
 
     if (body.action === 'event_save') {
       await ensureSheets(SHEETS);
+      await ensureEventsHeader();
       const e = body.event || {};
       if (!e.date || !e.title) return res.status(400).json({ error: '日期與名稱為必填' });
-      const rows = await safeRead('geo_events!A2:G');
+      const rows = await safeRead('geo_events!A2:H');
       const idx = rows.findIndex((r) => r[0] === e.id);
-      const row = [e.id || uid('ge'), e.date, e.title, e.type || '記者會', e.keywords || '', e.note || ''];
-      if (idx >= 0) await updateRange(`geo_events!A${idx + 2}:F${idx + 2}`, [row]);
-      else await appendRows('geo_events!A:G', [row]);
+      // 原本這裡只寫到 F 欄，編輯既有事件時會把 itri_event_id（G 欄）留空覆蓋掉；
+      // 保留舊值再寫回去，同時補上 H 欄的 structured。
+      const prev = rows[idx] || [];
+      const row = [
+        e.id || uid('ge'), e.date, e.title, e.type || '記者會', e.keywords || '', e.note || '',
+        e.itri_event_id !== undefined ? e.itri_event_id : (prev[6] || ''),
+        e.structured !== undefined ? (e.structured ? 'TRUE' : 'FALSE') : (prev[7] || ''),
+      ];
+      if (idx >= 0) await updateRange(`geo_events!A${idx + 2}:H${idx + 2}`, [row]);
+      else await appendRows('geo_events!A:H', [row]);
       return ok(res, { success: true, id: row[0] });
     }
 
     if (body.action === 'event_delete') {
-      const rows = await safeRead('geo_events!A2:G');
+      const rows = await safeRead('geo_events!A2:H');
       const kept = rows.filter((r) => r[0] && r[0] !== body.id);
-      if (rows.length) await updateRange(`geo_events!A2:G${rows.length + 1}`, rows.map(() => new Array(7).fill('')));
-      if (kept.length) await updateRange(`geo_events!A2:G${kept.length + 1}`, kept);
+      if (rows.length) await updateRange(`geo_events!A2:H${rows.length + 1}`, rows.map(() => new Array(8).fill('')));
+      if (kept.length) await updateRange(`geo_events!A2:H${kept.length + 1}`, kept);
       return ok(res, { success: true });
     }
 
