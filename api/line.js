@@ -437,6 +437,11 @@ function calendarQuickRepliesForReporter(cards) {
   return [...calendarQuickReplyItems(cards), CONTACT_MENU_LABEL];
 }
 
+// 回報的意見：按鈕列最後一格的「媒體邀訪需求」不夠明顯，滑一排按鈕容易漏看——
+// 直接把入口寫進文字裡，不能只靠按鈕。跟 calendarQuickRepliesForReporter() 同一組、
+// 同樣只給記者端的活動清單用，固定接在 formatCalendarReply() 的結果後面。
+const CONTACT_MENU_TEXT_HINT = '\n\n（如果是跨活動的採訪需求，不是問特定一場，直接打「媒體邀訪需求」或點下面的按鈕即可。）';
+
 // ── 邀訪聯絡窗口分工（events!P，同仁在後台設定）───────────────────────
 // 回報的意見：不同議題該找誰，記者常常猜不到，只能一律洽詢單一的「新聞聯絡人」。
 // 同仁在後台可以設定多組「關鍵字｜姓名｜電話｜LINE ID」，記者點對應關鍵字就能拿到
@@ -912,7 +917,7 @@ async function handleMetaIntent(replyToken, userId, text, metaIntent, binding) {
     // 的名稱，留著舊綁定的話那句會先被當成對舊場次的提問。
     if (binding) await clearBinding(userId);
     await replyOrPush(replyToken, userId,
-      `好的，已經離開原本那一場。\n\n請直接輸入想問的活動名稱，或從下面挑一場。\n\n${formatCalendarReply(cards)}`,
+      `好的，已經離開原本那一場。\n\n請直接輸入想問的活動名稱，或從下面挑一場。\n\n${formatCalendarReply(cards)}${CONTACT_MENU_TEXT_HINT}`,
       calendarQuickRepliesForReporter(cards));
     return;
   }
@@ -924,7 +929,7 @@ async function handleMetaIntent(replyToken, userId, text, metaIntent, binding) {
   const suffix = isUsable(current)
     ? `\n\n（您目前在問的是《${current.name}》，直接發問就會回答這一場；想換場點下面的按鈕即可。）`
     : '';
-  await replyOrPush(replyToken, userId, formatCalendarReply(cards) + suffix, calendarQuickRepliesForReporter(cards));
+  await replyOrPush(replyToken, userId, formatCalendarReply(cards) + suffix + CONTACT_MENU_TEXT_HINT, calendarQuickRepliesForReporter(cards));
 }
 
 // 沒有有效綁定時的自然語言處理（批次 3）：讓路由判斷這是查活動列表、問特定一場、
@@ -947,7 +952,7 @@ async function handleUnbound(replyToken, userId, text, { silentOnOther = false, 
   console.log(`[line] reporter route q="${text.slice(0, 60)}" → intent=${intent} event_ids=${JSON.stringify(event_ids)} confidence=${confidence}`);
 
   if (intent === 'calendar') {
-    await replyOrPush(replyToken, userId, formatCalendarReply(cards), calendarQuickRepliesForReporter(cards));
+    await replyOrPush(replyToken, userId, formatCalendarReply(cards) + CONTACT_MENU_TEXT_HINT, calendarQuickRepliesForReporter(cards));
     return;
   }
 

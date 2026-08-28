@@ -732,12 +732,16 @@ out = await send('換一場活動');
 {
   const labels = (out[0]?.quickReply || []).map(i => (typeof i === 'object' ? i.label : i));
   check('「換一場活動」的按鈕列最後一格是媒體邀訪需求', labels[labels.length - 1] === '媒體邀訪需求', JSON.stringify(labels));
+  // 回報的意見：按鈕不夠明顯，容易被忽略——文字裡也要有這個入口，不能只靠按鈕。
+  check('「換一場活動」的文字裡也提到媒體邀訪需求（不只靠按鈕）',
+    /媒體邀訪需求/.test(out[0]?.text || ''), out[0]?.text);
 }
 
 out = await send('最近有哪些活動');
 {
   const labels = (out[0]?.quickReply || []).map(i => (typeof i === 'object' ? i.label : i));
   check('綁定中查「最近有哪些活動」的按鈕列最後一格也是媒體邀訪需求', labels[labels.length - 1] === '媒體邀訪需求', JSON.stringify(labels));
+  check('綁定中查活動列表的文字裡也提到媒體邀訪需求', /媒體邀訪需求/.test(out[0]?.text || ''), out[0]?.text);
 }
 
 // 沒綁定時要真的走 handleUnbound() 自己的 'calendar' 分支（跟上面兩個測試不同
@@ -748,19 +752,21 @@ out = await send('最近如何');
 {
   const labels = (out[0]?.quickReply || []).map(i => (typeof i === 'object' ? i.label : i));
   check('沒綁定時查活動列表的按鈕列最後一格也是媒體邀訪需求', labels[labels.length - 1] === '媒體邀訪需求', JSON.stringify(labels));
+  check('沒綁定時查活動列表的文字裡也提到媒體邀訪需求', /媒體邀訪需求/.test(out[0]?.text || ''), out[0]?.text);
 }
 out = await send('媒體邀訪需求');
 check('點下去真的會走全域技術窗口清單，不是被當成活動名稱去問答',
   /請問想了解哪個技術領域/.test(out[0]?.text || ''), out[0]?.text);
 
-// 職員模式自己的活動列表不套用這顆按鈕——「媒體邀訪需求」是講給記者聽的措辭，
-// 同仁已經有整套 STAFF_QUICK_REPLIES，多這顆只是用不到的雜訊。
+// 職員模式自己的活動列表不套用這顆按鈕、也不套用文字提示——「媒體邀訪需求」是
+// 講給記者聽的措辭，同仁已經有整套 STAFF_QUICK_REPLIES，多這些只是用不到的雜訊。
 reset(); await freshModule();
 state.staff.push(['U_staff', '', '2026-08-27', '', '']);
 out = await send('最近有哪些活動', 'U_staff');
 {
   const labels = (out[0]?.quickReply || []).map(i => (typeof i === 'object' ? i.label : i));
   check('職員模式查活動列表不會多出媒體邀訪需求這顆按鈕', !labels.includes('媒體邀訪需求'), JSON.stringify(labels));
+  check('職員模式查活動列表的文字裡也不會多出媒體邀訪需求', !/媒體邀訪需求/.test(out[0]?.text || ''), out[0]?.text);
 }
 
 console.log(`\n${fail === 0 ? '✅' : '❌'} 流程測試通過 ${pass}／失敗 ${fail}`);
