@@ -1118,8 +1118,21 @@ async function handleGroupMessage(replyToken, groupId, text, { mentioned }) {
   // 跟 1:1 那段同一套邏輯（完整說明見 handleEvent()）：綁定是預設值不是鎖，問句
   // 明確指向別場才自動換，其餘留在原場。群組共用一份綁定，換場會影響整個群組
   // 接下來的預設場次——跟現有「打整句活動名稱換台」本來就是同一種風險，不是
-  // 這裡新增的。
-  const routed = await routeIntent(text, buildCalendarCards(await getAllEventRows()));
+  // 這裡新增的。currentEventId 帶目前這場給 routeIntent()，讓它分得出「延續這場
+  // 的討論」跟「真的無關」（見 lib/router.js 的說明），下面的安靜門檻才靠得住。
+  const routed = await routeIntent(text, buildCalendarCards(await getAllEventRows()), { currentEventId: event.id });
+
+  // 回報的意見：批次 14 只擋得住「明確 @ 別人」這種訊號很強的情況，續問視窗內
+  // 純聊天、答非所問的訊息（例如「友信你覺得呢」）當時沒有安全的判斷依據——
+  // routeIntent() 沒有對話記憶，分不出這種話跟「那合作廠商有哪些」這種合法續問
+  // 的差別，一律判成 other。現在多了 currentEventId 提示，other 已經是「連目前
+  // 這場都接不上」的結果，才能放心拿來當安靜門檻，不會連續問視窗本身要保護的
+  // 案例一起擋掉。
+  //
+  // 真的被 @ 到時不受影響——跟 1 對 1、跟 handleUnbound() 的 silentOnOther:false
+  // 同一個原則，明確叫了機器人就不能不理人。
+  if (!mentioned && routed.intent === 'other') return;
+
   let answerEvent = event;
   let switchNotice = '';
   if (routed.intent === 'qa' && routed.confidence === 'high' &&
@@ -1326,8 +1339,10 @@ async function handleEvent(ev) {
   // 只有 confidence high、剛好指到一場、而且不是目前這場，才自動換；其餘一律
   // 留在原場繼續回答——寧可誤判成「留在原場」也不要誤判成「換去別場」，換錯場
   // 比換不了場更糟：記者不會發現答案其實來自另一場，還可能直接截圖引用
-  // （同一種風險見 LINE-PLAN.md 坑 6）。
-  const routed = await routeIntent(text, buildCalendarCards(await getAllEventRows()));
+  // （同一種風險見 LINE-PLAN.md 坑 6）。currentEventId 帶目前這場給 routeIntent()，
+  // 讓它分得出「延續這場的討論」跟「真的指向別場」（見 lib/router.js 的說明），
+  // 減少沒有明確線索時被誤判成 other、進而誤觸換場判斷的機會。
+  const routed = await routeIntent(text, buildCalendarCards(await getAllEventRows()), { currentEventId: event.id });
   let answerEvent = event;
   let switchNotice = '';
   if (routed.intent === 'qa' && routed.confidence === 'high' &&

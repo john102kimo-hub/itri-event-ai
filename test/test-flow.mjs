@@ -387,6 +387,38 @@ console.log('── 續問視窗：@ 到別人（不是我們）→ 安靜，不
     state.bindings.get('Cgroup1')?.groupSessionUntil === before, String(state.bindings.get('Cgroup1')?.groupSessionUntil));
 }
 
+// 回報的意見：批次 14 的「@ 別人」否決只擋得住訊號很強的那個子集，續問視窗內
+// 一般的純聊天（例如回報案例「友信你覺得呢」，沒有 @ 任何人）當時還是會被硬答
+// 一段答非所問的內容。批次 16 給 routeIntent() 加上 currentEventId 提示，讓它
+// 分得出「延續目前這場」跟「真的無關」，other 才能放心拿來當安靜門檻。
+console.log('── 續問視窗：訊息跟目前這場活動無關（沒有 @ 別人）→ 也要安靜 ──');
+{
+  const before = Date.now() + 60000;
+  reset(); await freshModule();
+  state.bindings.set('Cgroup1', { event_id: 'quad', media_name: '', note: '', bound_at: Date.now(), groupSessionUntil: before });
+  out = await sendGroup('友信你覺得呢', { mentionSelf: false });
+  check('續問視窗內、訊息跟目前這場活動及所有場次都無關 → 安靜，不會硬答一段答非所問的內容',
+    out.length === 0, JSON.stringify(out));
+  check('沒有因為這則亂回而幫續問視窗續命（groupSessionUntil 沒被延長）',
+    state.bindings.get('Cgroup1')?.groupSessionUntil === before, String(state.bindings.get('Cgroup1')?.groupSessionUntil));
+}
+
+// 同一句話真的被 @ 到時完全不受影響——明確叫了機器人就不能不理人，跟批次 14
+// 的原則一致，這裡用目前綁定的場次回答。
+reset(); await freshModule();
+state.bindings.set('U_reporter', { event_id: 'quad', media_name: '', note: '', bound_at: Date.now() });
+out = await send('友信你覺得呢');
+check('1 對 1 完全不受影響——每則訊息本來就都算在跟我們講話，照樣用目前這場回答',
+  out[0]?.kind === 'answer' && out[0].event === 'quad', JSON.stringify(out));
+
+// 迴歸驗證：合法的續問（依賴上一句才聽得懂，見情境 9 第三步）不能被連帶擋掉——
+// 這正是批次 14 曾經考慮、後來否決「直接用 intent==='other' 當門檻」的原因。
+reset(); await freshModule();
+await sendGroup('@我 半導體先進封裝技術發表會的重點', { mentionSelf: true, mentionText: '@我 ' });
+out = await sendGroup('那合作廠商有哪些', { mentionSelf: false });
+check('加了 currentEventId 提示之後，續問視窗內的合法續問依然正常回答，沒有被連帶擋掉',
+  out[0]?.kind === 'answer' && out[0].event === 'semi', JSON.stringify(out));
+
 console.log('── 續問視窗：判不出意圖時要安靜，不能沒事插話 ──');
 reset(); await freshModule();
 await sendGroup('@我 最近有哪些活動', { mentionSelf: true, mentionText: '@我 ' });

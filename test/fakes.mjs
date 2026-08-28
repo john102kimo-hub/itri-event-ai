@@ -169,10 +169,16 @@ function fakeStaffRoute(text) {
   return { ...base, intent: 'other', confidence: 'low' };
 }
 
-function fakeReporterRoute(text) {
+// currentEventHint：批次 16，模擬 lib/router.js routeIntent() 多的 currentEventId
+// 提示——沒有其他場次的線索、也不是查活動列表時，「看起來像是在延續目前這場」
+// 還是「真的無關」。這裡不是要精準模擬真的 LLM 判斷（那要看真的跑），只用夠讓
+// 測試分得清楚「續問視窗合法追問」跟「回報案例的閒聊」兩種情況的簡單規則：
+// 文字裡出現「你覺得」這種問別人主觀意見的語氣，判定跟活動無關；否則當作延續。
+function fakeReporterRoute(text, currentEventHint) {
   const ids = matchEventIds(text);
   if (/最近|哪些活動|活動列表/.test(text)) return { intent: 'calendar', event_ids: [], confidence: 'high' };
   if (ids.length) return { intent: 'qa', event_ids: ids, confidence: 'high' };
+  if (currentEventHint && !/你覺得/.test(text)) return { intent: 'qa', event_ids: [currentEventHint], confidence: 'high' };
   return { intent: 'other', event_ids: [], confidence: 'low' };
 }
 
@@ -183,12 +189,18 @@ export function installFetchStub() {
     if (u.includes('api.anthropic.com')) {
       const body = JSON.parse(opts.body);
       const sys = body.system?.[0]?.text || '';
+      // routeIntent() 的 currentEventId 提示是獨立的第二個 system 區塊（見
+      // lib/router.js 的說明，刻意不塞進第一塊以免打散 ephemeral cache）——
+      // 從那段話裡把活動名稱抓出來，反查回 id 給 fakeReporterRoute() 用。
+      const sysHint = body.system?.[1]?.text || '';
+      const hintName = sysHint.match(/目前這個對話正在問的是「(.+?)」/)?.[1];
+      const currentEventHint = hintName ? state.events.find(e => e[1] === hintName)?.[0] : null;
       const userText = body.messages?.[0]?.content || '';
 
       // 路由呼叫跟問答呼叫都打同一個端點，用 system prompt 的特徵分辨
       const json = o => ({ ok: true, json: async () => ({ content: [{ type: 'text', text: JSON.stringify(o) }] }) });
       if (sys.includes('內部職員助理')) return json(fakeStaffRoute(userText));
-      if (sys.includes('意圖判斷器')) return json(fakeReporterRoute(userText));
+      if (sys.includes('意圖判斷器')) return json(fakeReporterRoute(userText, currentEventHint));
 
       // 問答：system prompt 裡會帶該場的知識庫，從中反推是哪一場回答的。
       // sys 一併存起來——媒體邀請函測試要驗證 system prompt 裡到底帶的是正式新聞稿
