@@ -539,7 +539,7 @@ async function handleContactTopicMessage(replyToken, targetId, text) {
 // 正式問答：開輸入中動畫 → 呼叫 Anthropic → reply（失敗 fallback push）→ 寫 qa_log。
 // 綁定路徑（#代碼）跟路由命中路徑（自然語言直接命中某一場）最後都走這支，避免兩邊各自
 // 維護一份幾乎一樣的邏輯、之後改一邊忘了改另一邊。
-async function answerQuestion(replyToken, userId, rawEvent, mediaName, text, { loading = true, allowPreEventSubstitution = true } = {}) {
+async function answerQuestion(replyToken, userId, rawEvent, mediaName, text, { loading = true, allowPreEventSubstitution = true, switchNotice = '' } = {}) {
   // 活動前只給媒體邀請函、不給正式新聞稿與照片（見 lib/prompt.js resolveEventContent()
   // 的說明）。放在這裡而不是呼叫端各自判斷，理由跟下面的邀訪窗口比對一樣：1 對 1、
   // 群組最後都走這支，寫一次兩邊都受惠。
@@ -559,9 +559,13 @@ async function answerQuestion(replyToken, userId, rawEvent, mediaName, text, { l
   // 電話號碼、LINE ID 這種資訊不該讓 AI 用自然語言重新生成一次（打錯一碼就是
   // 記者聯絡不到人）。放在 answerQuestion() 裡而不是呼叫端各自檢查，是因為
   // 1 對 1、群組、職員模式最後都走這支，寫一次三邊都受惠。
+  // switchNotice：批次 13「綁定改成預設值」加的提示字首（見 handleEvent／
+  // handleGroupMessage 裡呼叫端判斷這題其實在問別場時傳進來的「🔄 已切換到《X》：」）。
+  // 兩個分支（命中邀訪關鍵字／走 AI 問答）都要接上，記者才看得出這題是被自動切去
+  // 別場回答的——悄悄換掉答案卻不說一聲，比根本不能換更危險（LINE-PLAN.md 坑 6）。
   const contact = matchContact(text, event.contacts);
   if (contact) {
-    const reply = formatContactReply(contact);
+    const reply = switchNotice + formatContactReply(contact);
     console.log(`[line] contact match event=${event.id} keyword="${contact.keyword}"`);
     await replyOrPush(replyToken, userId, reply, eventQuickChips(event));
     await logQa(event, mediaName, text, reply);
@@ -569,7 +573,8 @@ async function answerQuestion(replyToken, userId, rawEvent, mediaName, text, { l
   }
 
   const systemPrompt = buildSystemPrompt(event, lineExtraRules(event));
-  const reply = await askAnthropic(systemPrompt, text);
+  const aiReply = await askAnthropic(systemPrompt, text);
+  const reply = switchNotice + aiReply;
   // 診斷用途，不是必要邏輯：路由判斷得準不準、AI 答得順不順，靠這行在 Vercel Logs
   // 裡直接看得到，不用另外接工具。刻意截斷長度，避免整份新聞稿灌爆單行 log。
   console.log(`[line] answer event=${event.id} status=${event.status} q="${text.slice(0, 60)}" reply="${reply.slice(0, 200)}"`);
@@ -1082,7 +1087,24 @@ async function handleGroupMessage(replyToken, groupId, text, { mentioned }) {
     return;
   }
 
-  await answerQuestion(replyToken, groupId, event, '（群組提問）', text, { loading: false });
+  // 跟 1:1 那段同一套邏輯（完整說明見 handleEvent()）：綁定是預設值不是鎖，問句
+  // 明確指向別場才自動換，其餘留在原場。群組共用一份綁定，換場會影響整個群組
+  // 接下來的預設場次——跟現有「打整句活動名稱換台」本來就是同一種風險，不是
+  // 這裡新增的。
+  const routed = await routeIntent(text, buildCalendarCards(await getAllEventRows()));
+  let answerEvent = event;
+  let switchNotice = '';
+  if (routed.intent === 'qa' && routed.confidence === 'high' &&
+      routed.event_ids.length === 1 && routed.event_ids[0] !== event.id) {
+    const target = await getEventById(routed.event_ids[0]);
+    if (isUsable(target)) {
+      await upsertBinding(groupId, target.id, '');
+      answerEvent = target;
+      switchNotice = `🔄 已切換到《${target.name}》：\n`;
+    }
+  }
+
+  await answerQuestion(replyToken, groupId, answerEvent, '（群組提問）', text, { loading: false, switchNotice });
   await touchGroupSession(groupId);
 }
 
@@ -1267,7 +1289,31 @@ async function handleEvent(ev) {
     // 記者不會因為系統誤判而被迫多問一次。
   }
 
-  await answerQuestion(replyToken, userId, event, binding.media_name, text);
+  // 綁定不再是鎖，是預設值：每則問題都用同一支 routeIntent()（跟未綁定時
+  // handleUnbound() 用的是同一套）檢查一次「這其實是在問別場」——回報的意見：
+  // 換一場活動，記者就再也問不到其他場。matchEventByName() 只認得出「整句就是
+  // 活動名稱」的選台動作，一句夾著別場線索的完整問題（多半帶著問號）認不出來，
+  // 前面才會掉到這裡。
+  //
+  // 只有 confidence high、剛好指到一場、而且不是目前這場，才自動換；其餘一律
+  // 留在原場繼續回答——寧可誤判成「留在原場」也不要誤判成「換去別場」，換錯場
+  // 比換不了場更糟：記者不會發現答案其實來自另一場，還可能直接截圖引用
+  // （同一種風險見 LINE-PLAN.md 坑 6）。
+  const routed = await routeIntent(text, buildCalendarCards(await getAllEventRows()));
+  let answerEvent = event;
+  let switchNotice = '';
+  if (routed.intent === 'qa' && routed.confidence === 'high' &&
+      routed.event_ids.length === 1 && routed.event_ids[0] !== event.id) {
+    const target = await getEventById(routed.event_ids[0]);
+    if (isUsable(target)) {
+      console.log(`[line] 問答中自動換場 ${event.id} → ${target.id} user=${userId} q="${text.slice(0, 40)}"`);
+      await upsertBinding(userId, target.id, '');
+      answerEvent = target;
+      switchNotice = `🔄 已切換到《${target.name}》：\n`;
+    }
+  }
+
+  await answerQuestion(replyToken, userId, answerEvent, binding.media_name, text, { switchNotice });
 }
 
 export default async function handler(req, res) {

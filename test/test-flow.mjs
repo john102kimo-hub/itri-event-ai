@@ -630,5 +630,42 @@ out = await send('奈米材料前瞻應用發表會的重點', 'U_staff');
     /正式新聞稿.*完整技術規格與時程/.test(answered?.sys || ''), answered?.sys?.slice(0, 200));
 }
 
+// ── 情境 15：綁定改成預設值——問到別場內容時自動換場並直接回答（批次 7）─────
+// 回報的意見：選哪個活動，LINE 就變那場的專屬機器人；換一場活動，記者就再也
+// 問不到其他場——因為綁定原本是鎖，不是預設值。現在每則問題都會先過一次跟
+// handleUnbound() 同一支 routeIntent()，訊息明確指向別場（confidence high、
+// 只指到一場、且不是目前這場）才自動換，其餘維持原場繼續回答。
+reset(); await freshModule();
+state.bindings.set('U_reporter', { event_id: 'quad', media_name: '中央社', note: '', bound_at: Date.now() });
+
+out = await send('智慧醫療解決方案記者會有提到什麼技術突破？');
+check('問句明確指向別場 → 自動換場並直接回答那一場，不用先手動切換',
+  out[0]?.kind === 'answer' && out[0].event === 'med', JSON.stringify(out));
+check('綁定真的換過去了', state.bindings.get('U_reporter')?.event_id === 'med',
+  JSON.stringify(state.bindings.get('U_reporter')));
+check('回答附上換場提示，記者看得出來這題被切去別場回答',
+  /已切換到《智慧醫療解決方案記者會》/.test(out[1]?.text || ''), JSON.stringify(out));
+check('換場保留原本的媒體名稱', state.bindings.get('U_reporter')?.media_name === '中央社');
+
+// 換場後接著問，不用再點名活動名稱——已經是新的預設場次，也不會每次都跳提示
+out = await send('這場的技術突破是什麼');
+check('換場後續問直接沿用新場次，不用重打名稱', out[0]?.kind === 'answer' && out[0].event === 'med', JSON.stringify(out));
+check('沿用新場次時不會又跳出換場提示（問句沒有指向別場）', !/已切換到/.test(out[1]?.text || ''), JSON.stringify(out));
+
+// 問不出明確場次線索的問題 → 留在原場，不會亂跳
+reset(); await freshModule();
+state.bindings.set('U_reporter', { event_id: 'quad', media_name: '', note: '', bound_at: Date.now() });
+out = await send('這項技術大概什麼時候可以商業化？');
+check('問句沒有指向任何別場的線索 → 留在原場繼續回答，不會誤判亂跳',
+  out[0]?.kind === 'answer' && out[0].event === 'quad', JSON.stringify(out));
+check('沒有換場，binding 維持原本那場', state.bindings.get('U_reporter')?.event_id === 'quad');
+
+// 群組一樣適用——跟 1:1 同一套邏輯（見 handleGroupMessage() 的說明）
+reset(); await freshModule();
+await sendGroup('@我 半導體先進封裝技術發表會的重點', { mentionSelf: true, mentionText: '@我 ' });
+out = await sendGroup('@我 智慧醫療解決方案記者會有什麼技術突破', { mentionSelf: true, mentionText: '@我 ' });
+check('群組裡問到別場內容一樣會自動換場', out[0]?.kind === 'answer' && out[0].event === 'med', JSON.stringify(out));
+check('群組綁定真的換過去了', state.bindings.get('Cgroup1')?.event_id === 'med');
+
 console.log(`\n${fail === 0 ? '✅' : '❌'} 流程測試通過 ${pass}／失敗 ${fail}`);
 process.exit(fail === 0 ? 0 : 1);
