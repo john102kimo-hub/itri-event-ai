@@ -55,7 +55,7 @@ function fakeRes() {
   return res;
 }
 
-const { default: handler } = await import('file:///C:/Users/User/Documents/Claude/itri-event-ai-port/api/analytics.js');
+const { default: handler } = await import('../api/analytics.js');
 
 let pass = true;
 const check = (label, cond) => { console.log(`[${cond ? 'PASS' : 'FAIL'}] ${label}`); pass = pass && cond; };
