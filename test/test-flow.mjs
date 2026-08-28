@@ -99,20 +99,23 @@ check('綁定真的被清掉', !state.bindings.get('U_reporter')?.bound_at,
 reset(); await freshModule();
 state.bindings.set('U_reporter', { event_id: 'quad', media_name: '中央社', note: '', bound_at: Date.now() });
 out = await send('半導體先進封裝技術發表會');
-check('綁定中打另一場完整名稱 → 換過去並用新那場回答',
-  out[0]?.kind === 'answer' && out[0].event === 'semi', JSON.stringify(out));
+// ⚠️ 純粹選台不是問題，不該呼叫 AI／寫 qa_log（review 抓到的坑：這裡原本會把
+// 「半導體先進封裝技術發表會」這句話當成提問送給 AI，灌水「累積回答題數」）——
+// 改成只回確認訊息，kind 應該是 'text' 不是 'answer'。
+check('綁定中打另一場完整名稱 → 換過去並回確認訊息，不當提問處理（不寫 qa_log）',
+  out[0]?.kind === 'text' && /已為您換到.*半導體先進封裝技術發表會/.test(out[0].text), JSON.stringify(out));
 check('換場後綁定指向新場次', state.bindings.get('U_reporter')?.event_id === 'semi');
 check('換場保留媒體名稱', state.bindings.get('U_reporter')?.media_name === '中央社');
 check('已經有媒體名稱時換場不會再補問一次',
-  out.length === 2 && !out.some(o => /方便留個貴媒體的名稱/.test(o.text || '')), JSON.stringify(out));
+  out.length === 1 && !out.some(o => /方便留個貴媒體的名稱/.test(o.text || '')), JSON.stringify(out));
 
 // ⚠️ 實際回報的坑：換場這條路一直都不會問媒體名稱，不管換過去之前有沒有被問過——
 // 只靠打活動名稱換場的記者，media_name 永遠是空字串，後台分析永遠看到「（未填寫）」。
 reset(); await freshModule();
 state.bindings.set('U_reporter', { event_id: 'quad', media_name: '', note: '', bound_at: Date.now() });
 out = await send('半導體先進封裝技術發表會');
-check('換場前從沒被問過媒體名稱 → 換場後用 push 補問一次（不擋住剛剛的答案）',
-  out.length === 3 && out[1]?.kind === 'text' && out[2]?.text?.includes('方便留個貴媒體的名稱'),
+check('換場前從沒被問過媒體名稱 → 換場後用 push 補問一次（不擋住剛剛的確認訊息）',
+  out.length === 2 && out[0]?.kind === 'text' && out[1]?.text?.includes('方便留個貴媒體的名稱'),
   JSON.stringify(out));
 check('補問會設 ask_name 旗標，沿用既有的一次性擷取機制',
   state.bindings.get('U_reporter')?.note === 'ask_name');

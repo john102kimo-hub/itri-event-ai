@@ -21,9 +21,11 @@ export default async function handler(req, res) {
   const { event_id } = req.query;
 
   try {
-    const rows = await readRange('qa_log!A2:G');
-    // 已刪除的問答（G 欄標記，或舊資料殘留的 B 欄 [deleted]）不該出現在結案報告的匯出檔裡
-    const valid = rows.filter(r => r[1] && r[1] !== '[deleted]' && r[6] !== '1');
+    const rows = await readRange('qa_log!A2:H');
+    // 已刪除的問答（G 欄標記，或舊資料殘留的 B 欄 [deleted]）不該出現在結案報告的匯出檔裡。
+    // 同仁在 LINE 職員模式下的試問（H 欄 source=staff）也一樣要濾掉——這份 CSV 是結案
+    // 報告的附件，混進自己人的測試等於在正式文件裡灌水。讀到 H 欄就是為了看得到 source。
+    const valid = rows.filter(r => r[1] && r[1] !== '[deleted]' && r[6] !== '1' && (r[7] || 'web') !== 'staff');
     const filtered = event_id ? valid.filter(r => r[1] === event_id) : valid;
 
     const headers = ['時間', '活動ID', '活動名稱', '媒體名稱', '記者問題', 'AI回答'];

@@ -1,12 +1,19 @@
 // 媒體訓練 API
-// mode: 'reporter' — AI 扮犀利記者出題
-// mode: 'evaluate' — AI 評估主管的回答並出下一題
+// POST mode: 'reporter'     — AI 扮犀利記者出題
+// POST mode: 'evaluate'     — AI 評估主管的回答並出下一題
+// POST mode: 'log_session'  — 記錄一場完整演練的分數（訓練本身不呼叫 Anthropic）
+// GET  ?action=summary&password=xxx — 給成效報告用：每場活動累積演練幾次、平均幾分
 //
 // 認證：這支只給內部同仁／主管用，記者不需要。單場訓練要求該場的 edit_code
-// （同仁本來就有 /edit 連結的那組碼）或 ADMIN_PASSWORD；「彙整所有活動」模式
-// 因為沒有單一場次的 edit_code 可比對，只接受 ADMIN_PASSWORD。
+// （同仁本來就有 /edit 連結的那組碼）或 ADMIN_PASSWORD；「彙整所有活動」模式與
+// GET summary 因為沒有單一場次的 edit_code 可比對，只接受 ADMIN_PASSWORD。
+//
+// ⚠️ 訓練分數原本完全不落地——這支檔案曾經連一行都不寫，`/report` 成效報告永遠
+// 生不出「演練場次／平均分」。log_session 只在受訓者真的走到終畫面（5 題全部
+// 答完）才記一筆，中途離開的不記——寧可少幾筆，也不要讓「演練場次」被答一題就
+// 走的雜訊灌水。
 
-import { readRange } from '../lib/sheets.js';
+import { readRange, appendRows, ensureSheets } from '../lib/sheets.js';
 
 const CACHE_TTL_MS = 60 * 1000; // 60 秒；同仁改完知識庫應該很快能在訓練模式看到新版
 
@@ -92,6 +99,127 @@ async function getRealQuestions(eventId) {
   return data;
 }
 
+// ── 演練紀錄（training_log）───────────────────────────────────────────
+// 成功才記住已建立，失敗 60 秒後再試——跟 api/line.js／lib/staff.js 的
+// ensureLineUsersSheet／ensureStaffSheet 同一套邏輯：舊寫法「失敗也記成已完成」
+// 會讓冷啟動時剛好撞到 Sheets 暫時性錯誤的那個 instance，從此永遠不再嘗試建表。
+const TRAINING_LOG_SHEET = {
+  training_log: ['timestamp', 'event_id', 'event_name', 'trainee', 'question_count', 'avg_score', 'scores', 'note'],
+};
+let trainingLogEnsuredAt = 0;
+async function ensureTrainingLogSheet() {
+  if (trainingLogEnsuredAt === Infinity) return;
+  if (Date.now() - trainingLogEnsuredAt < 60 * 1000) return;
+  try {
+    await ensureSheets(TRAINING_LOG_SHEET);
+    trainingLogEnsuredAt = Infinity;
+  } catch (e) {
+    console.error('ensureSheets(training_log) 失敗，60 秒後再試:', e.message);
+    trainingLogEnsuredAt = Date.now();
+  }
+}
+
+const sanitize = (s, max) => String(s || '').replace(/\s+/g, ' ').trim().slice(0, max);
+
+// 把「原始分數」清成只留 0–10 的有限數字。輸入可以是陣列（log_session 收到的
+// body.scores，某一題解析失敗時前端會塞 null）或本專案慣用的 pipe-separated
+// 字串（Sheets 那一格存的格式，空字串代表那題沒有分數）。
+//
+// ⚠️ 先過濾再轉數字，順序不能反：`Number(null)` 跟 `Number('')` 都是 `0`，不是
+// `NaN`——如果直接 `.map(Number)` 再篩，一題沒評出分數的會被悄悄記成「拿了 0
+// 分」，把整場的平均硬拖下去，而且不會有任何錯誤訊息，非常難查。
+export function parseValidScores(raw) {
+  const arr = Array.isArray(raw) ? raw : String(raw ?? '').split('|');
+  return arr
+    .filter((v) => v !== null && v !== undefined && String(v).trim() !== '')
+    .map(Number)
+    .filter((n) => Number.isFinite(n) && n >= 0 && n <= 10);
+}
+export const avgOf = (arr) => (arr.length ? Math.round((arr.reduce((a, b) => a + b, 0) / arr.length) * 10) / 10 : null);
+
+/**
+ * 認證共用：reporter／evaluate／log_session 三種 mode 都要過這關，抽出來才不會
+ * 之後改一邊忘了改另一邊（log_session 是這次新增的第三個呼叫點）。
+ * event_id==='all' 只收 admin——彙整訓練沒有單一場次的 edit_code 可比對。
+ */
+export function authorizeTraining(eventId, event, code, password) {
+  const admin = process.env.ADMIN_PASSWORD;
+  const isAdmin = !!admin && password === admin;
+  if (eventId === 'all') {
+    return isAdmin ? { ok: true } : { ok: false, status: 401, msg: '彙整訓練僅限管理員使用，請由後台進入' };
+  }
+  if (eventId) {
+    if (!event) return { ok: false, status: 404, msg: '找不到這場活動' };
+    if (event.status === 'archived') return { ok: false, status: 403, msg: '這場活動已封存' };
+    const isStaff = !!event.edit_code && String(code || '') === String(event.edit_code);
+    return (isAdmin || isStaff) ? { ok: true } : { ok: false, status: 401, msg: '請由後台或同仁編輯連結進入媒體訓練' };
+  }
+  return isAdmin ? { ok: true } : { ok: false, status: 401, msg: '請先選擇活動' };
+}
+
+/**
+ * 分數不信任前端算好的平均——只信任每題的原始分數陣列，平均在這裡重新算一次，
+ * 避免前端邏輯出錯（或被人從 devtools 直接改 body）就寫進一個兜不起來的數字。
+ * scores 欄用「|」分隔存原始分數，跟本專案其他欄位（images、citations）同一種
+ * pipe-separated 慣例；只收 0–10 的有限數字，格式不對的分數直接丟棄不計入平均。
+ */
+async function logTrainingSession(res, eventId, event, trainee, rawScores) {
+  const attempted = Array.isArray(rawScores) ? rawScores.slice(0, 50) : [];
+  if (!attempted.length) return res.status(400).json({ error: '沒有任何題目紀錄，不記錄這場' });
+
+  const valid = parseValidScores(attempted);
+  const avg = avgOf(valid) ?? '';
+  const eventName = eventId === 'all' ? '彙整訓練（全部活動）' : (event?.name || eventId);
+
+  try {
+    await ensureTrainingLogSheet();
+    const timestamp = new Date().toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' });
+    await appendRows('training_log!A:H', [[
+      timestamp, eventId, eventName, sanitize(trainee, 40) || '（未署名）',
+      attempted.length, avg, valid.join('|'), ''
+    ]]);
+    return res.status(200).json({ success: true, avg_score: avg });
+  } catch (e) {
+    console.error('training_log 寫入失敗:', e.message);
+    return res.status(500).json({ error: '紀錄寫入失敗，但不影響剛剛的訓練結果' });
+  }
+}
+
+/**
+ * 給成效報告用的彙整摘要：每場活動累積演練幾次、平均幾分，加一個全站總計。
+ * 平均分從 scores 欄（每一題的原始分數）重新算，不是拿每場的 avg_score 欄
+ * 再平均一次——場次的題數不保證一樣多，「平均的平均」會讓題數少的場次過度
+ * 放大權重，直接展開成單題級別的分數群體再算一次平均才不會失真。
+ */
+async function getTrainingSummary() {
+  let rows = [];
+  try { rows = await readRange('training_log!A2:H'); } catch { rows = []; }
+
+  const byEvent = {};
+  let totalSessions = 0;
+  const allScores = [];
+
+  rows.forEach((r) => {
+    const eventId = r[1];
+    if (!eventId) return;
+    totalSessions++;
+    const scores = parseValidScores(r[6]);
+    allScores.push(...scores);
+
+    if (!byEvent[eventId]) byEvent[eventId] = { event_id: eventId, event_name: r[2] || eventId, sessions: 0, scores: [], lastAt: '' };
+    const e = byEvent[eventId];
+    e.sessions++;
+    e.scores.push(...scores);
+    if (r[0]) e.lastAt = r[0]; // 依寫入順序累加，最後遇到的就是最新一筆
+  });
+
+  const byEventArr = Object.values(byEvent)
+    .map((e) => ({ event_id: e.event_id, event_name: e.event_name, sessions: e.sessions, avg_score: avgOf(e.scores), last_at: e.lastAt }))
+    .sort((a, b) => (b.last_at || '').localeCompare(a.last_at || ''));
+
+  return { overall: { sessions: totalSessions, avg_score: avgOf(allScores) }, by_event: byEventArr };
+}
+
 function realQuestionBlock(rq) {
   if (!rq || (!rq.thisEvent.length && !rq.otherEvents.length)) return '';
   // 這段資料是歷史紀錄，即使某一行看起來像指令，也只當作題目素材，不要照做
@@ -106,37 +234,49 @@ function realQuestionBlock(rq) {
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'POST,OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type,X-Admin-Password');
   if (req.method === 'OPTIONS') return res.status(200).end();
+
+  if (req.method === 'GET') {
+    const { action } = req.query;
+    if (action !== 'summary') return res.status(400).json({ error: '不支援的操作' });
+    const admin = process.env.ADMIN_PASSWORD;
+    const password = req.headers['x-admin-password'] || req.query.password;
+    if (!admin || password !== admin) return res.status(401).json({ error: '密碼錯誤' });
+    try {
+      return res.status(200).json(await getTrainingSummary());
+    } catch (err) {
+      console.error(err);
+      return res.status(500).json({ error: '伺服器錯誤' });
+    }
+  }
+
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return res.status(500).json({ error: 'ANTHROPIC_API_KEY 未設定' });
+  const { messages, event_id, mode = 'reporter', code, password, trainee, scores } = req.body || {};
+  // log_session 不是對話，不帶 messages——只有 reporter／evaluate 這兩種真的要呼叫
+  // Anthropic 的 mode 才需要檢查訊息陣列格式。
+  if (mode !== 'log_session' && (!messages || !Array.isArray(messages))) {
+    return res.status(400).json({ error: '請求格式錯誤' });
+  }
 
-  const { messages, event_id, mode = 'reporter', code, password } = req.body || {};
-  if (!messages || !Array.isArray(messages)) return res.status(400).json({ error: '請求格式錯誤' });
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (mode !== 'log_session' && !apiKey) return res.status(500).json({ error: 'ANTHROPIC_API_KEY 未設定' });
 
   try {
     const [event, realQuestions] = await Promise.all([
       event_id ? getEventConfig(event_id) : null,
-      getRealQuestions(event_id),
+      // log_session 用不到「記者真的問過的題目」，省一次 qa_log 讀取
+      mode === 'log_session' ? null : getRealQuestions(event_id),
     ]);
 
     // ── 認證：這支只給內部人用，記者不能碰 ──────────────────────────
-    const admin = process.env.ADMIN_PASSWORD;
-    const isAdmin = !!admin && password === admin;
-    if (event_id === 'all') {
-      if (!isAdmin) return res.status(401).json({ error: '彙整訓練僅限管理員使用，請由後台進入' });
-    } else if (event_id) {
-      if (!event) return res.status(404).json({ error: '找不到這場活動' });
-      if (event.status === 'archived') return res.status(403).json({ error: '這場活動已封存' });
-      const isStaff = !!event.edit_code && String(code || '') === String(event.edit_code);
-      if (!isAdmin && !isStaff) {
-        return res.status(401).json({ error: '請由後台或同仁編輯連結進入媒體訓練' });
-      }
-    } else {
-      if (!isAdmin) return res.status(401).json({ error: '請先選擇活動' });
+    const auth = authorizeTraining(event_id, event, code, password);
+    if (!auth.ok) return res.status(auth.status).json({ error: auth.msg });
+
+    if (mode === 'log_session') {
+      return await logTrainingSession(res, event_id, event, trainee, scores);
     }
 
     const eventName = event?.name || '工研院活動';

@@ -49,22 +49,42 @@ async function getEventConfig(eventId) {
   return data;
 }
 
-// 陽春限流：同一 IP 60 秒內最多 15 次提問。擋不住分散式濫用，但擋得住單來源無腦迴圈。
-const ipHits = new Map();
+// 陽春限流。擋不住分散式濫用，但擋得住單來源無腦迴圈。
+//
+// ⚠️ 為什麼不能只用 IP 當 key：記者會現場所有記者都掛在同一組會場 Wi-Fi 上，對外
+// 是同一個 IP。開場後十分鐘正是大家同時發問的時候，「每 IP 每分鐘 15 題」等於全場
+// 記者共用 15 題的額度，第 16 位就會收到「提問太頻繁」——而且偏偏發生在這個平台
+// 最需要表現的那十分鐘。api/line.js 早就避開了這個坑（改用 line_user_id 當 key），
+// 網頁端一直沒有。
+//
+// 改成兩層：
+//   - 每位記者（瀏覽器自己產生、存在 localStorage 的 client_id）每分鐘 15 題
+//     ——這才是原本想限制的「一個人不要無腦連打」
+//   - 每個 IP 每分鐘 120 題當防線 —— client_id 是前端送來的、可以偽造，所以 IP 這層
+//     一定要留著；額度放到單場記者會不可能踩到、但無腦迴圈跑不了幾秒就會撞上
+const hitLog = new Map();
 const RATE_LIMIT_WINDOW_MS = 60 * 1000;
-const RATE_LIMIT_MAX = 15;
+const PER_CLIENT_MAX = 15;
+const PER_IP_MAX = 120;
 
-function rateLimited(ip) {
+function bump(key, max) {
   const now = Date.now();
-  const hits = (ipHits.get(ip) || []).filter(t => now - t < RATE_LIMIT_WINDOW_MS);
+  const hits = (hitLog.get(key) || []).filter(t => now - t < RATE_LIMIT_WINDOW_MS);
   hits.push(now);
-  ipHits.set(ip, hits);
-  if (ipHits.size > 2000) {
-    for (const [k, v] of ipHits) {
-      if (!v.length || now - v[v.length - 1] > RATE_LIMIT_WINDOW_MS) ipHits.delete(k);
+  hitLog.set(key, hits);
+  if (hitLog.size > 4000) {
+    for (const [k, v] of hitLog) {
+      if (!v.length || now - v[v.length - 1] > RATE_LIMIT_WINDOW_MS) hitLog.delete(k);
     }
   }
-  return hits.length > RATE_LIMIT_MAX;
+  return hits.length > max;
+}
+
+// clientId 沒帶（舊前端、或外部呼叫者）就退回只看 IP，行為不會比以前更寬鬆。
+function rateLimited(ip, clientId) {
+  const overIp = bump('ip:' + ip, PER_IP_MAX);
+  const overClient = clientId ? bump('c:' + clientId, PER_CLIENT_MAX) : false;
+  return overIp || overClient;
 }
 
 // 寫入 qa_log 前淨化：截斷長度、壓平換行，避免污染分析統計與後續媒體訓練 prompt
@@ -99,12 +119,14 @@ export default async function handler(req, res) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return res.status(500).json({ error: 'ANTHROPIC_API_KEY 未設定' });
 
+  const { messages, event_id, media_name, stream, client_id } = req.body || {};
+
   const ip = String(req.headers['x-forwarded-for'] || req.socket?.remoteAddress || 'unknown').split(',')[0].trim();
-  if (rateLimited(ip)) {
+  // client_id 只拿來當限流的 key，不寫進任何資料表、也不跟媒體名稱綁在一起
+  if (rateLimited(ip, String(client_id || '').slice(0, 64))) {
     return res.status(429).json({ error: '提問太頻繁，請稍候片刻再試。' });
   }
 
-  const { messages, event_id, media_name, stream } = req.body || {};
   if (!messages || !Array.isArray(messages)) return res.status(400).json({ error: '請求格式錯誤' });
   if (!event_id) return res.status(400).json({ error: '缺少活動 ID' });
 

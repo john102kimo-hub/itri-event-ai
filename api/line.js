@@ -142,16 +142,23 @@ async function getStoredNote(userId) {
   return row ? (row[5] || '') : '';
 }
 
-let sheetsEnsured = false;
+// 成功才記住，失敗就等 60 秒再試一次。
+// 舊版是「失敗也記成已完成」，理由是避免每個請求都多打一次 API——但那代表冷啟動後
+// 第一次呼叫剛好撞到 Sheets 暫時性錯誤（配額、503）時，這個 instance 從此再也不會
+// 建立 line_users 分頁，之後每一次綁定都靜靜寫不進去，而且不會有人發現。60 秒的
+// 冷卻時間同樣達成「不要每個請求都多打一次」，但錯誤是暫時的就會自己好。
+let sheetsEnsuredAt = 0;
+const ENSURE_RETRY_MS = 60 * 1000;
 async function ensureLineUsersSheet() {
-  if (sheetsEnsured) return;
+  if (sheetsEnsuredAt === Infinity) return;
+  if (Date.now() - sheetsEnsuredAt < ENSURE_RETRY_MS) return;
   try {
     await ensureSheets({ line_users: ['line_user_id', 'event_id', 'media_name', 'bound_at', 'last_active', 'note', 'group_session_until'] });
+    sheetsEnsuredAt = Infinity; // 建好了就永遠不用再確認
   } catch (e) {
-    console.error('ensureSheets(line_users) 失敗:', e.message);
+    console.error('ensureSheets(line_users) 失敗，60 秒後再試:', e.message);
+    sheetsEnsuredAt = Date.now();
   }
-  sheetsEnsured = true; // 失敗也不重試，避免每個請求都多打一次 API；分頁真的沒建成的話，
-                        // 後續讀寫會自然拿到空陣列或被 catch，不會讓整支掛掉
 }
 
 // noteOverride 沒帶時，既有列會保留原本的 note（F 欄）不動；帶了（包含空字串）
@@ -1061,7 +1068,9 @@ async function handleGroupMessage(replyToken, groupId, text, { mentioned }) {
     const target = await getEventById(switchTo.id);
     if (isUsable(target)) {
       await upsertBinding(groupId, target.id, '');
-      await answerQuestion(replyToken, groupId, target, '（群組提問）', text, { loading: false });
+      // 純粹選台，不是問題——理由跟 1:1 那段同一套（見上方那段的完整說明），
+      // 不呼叫 AI、不寫 qa_log，避免灌水「累積回答題數」。
+      await replyOrPush(replyToken, groupId, `已為您換到《${target.name}》✅ 請直接問問題即可。`);
       await touchGroupSession(groupId);
       return;
     }
@@ -1209,13 +1218,18 @@ async function handleEvent(ev) {
       // 不在這裡清掉的話旗標會跟著新綁定留下來，他換場後打的第一句真正的問題會被
       // 下面 looksLikeNameOrSkip() 誤判成媒體名稱吃掉（同下方 ⚠️ 那個已修過的坑）。
       await upsertBinding(userId, target.id, '');
-      await answerQuestion(replyToken, userId, target, binding.media_name, text);
+      // ⚠️ 這是純粹「選台」，不是問題——不能走 answerQuestion()。之前這裡直接把
+      // 「某某記者會」這句話當成問題送進 Anthropic、寫進 qa_log，後台的「累積回答
+      // 題數」跟「今日問答」就被按活動清單按鈕的動作灌水，跟記者真的發問混在一起，
+      // report.html 給長官看的數字失真。改成單純回一句換場確認，不呼叫 AI、不寫
+      // qa_log——跟 #代碼綁定拿到的「已為您接上」同一種純確認訊息。
+      await replyOrPush(replyToken, userId, `已為您換到《${target.name}》✅ 請直接問問題即可。`);
       // ⚠️ 實際回報的坑：換場這條路一直都不會問媒體名稱——不管換過去之前有沒有
       // 被問過。原本只有「掃 QR／#代碼」跟「自然語言軟綁定」兩條路會問，這位記者
       // 從頭到尾都是靠打活動名稱換場，於是永遠沒被問過，後台分析永遠看到
       // 「（未填寫）」。補問邏輯跟 handleUnbound() 的軟綁定分支同一套：只在「這個人
       // 從沒被問過」才問（media_name 已有值就不重問），而且用 push 補問，不擋住
-      // 剛剛送出的答案。
+      // 剛剛送出的換場確認。
       if (!binding.media_name) {
         await setBindingNote(userId, 'ask_name');
         await pushMessage(userId, '對了，方便留個貴媒體的名稱嗎？（打名稱即可，或回「略過」——之後就不會再問了）');

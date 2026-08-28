@@ -1,12 +1,36 @@
 // 問答分析 API
-// GET  ?password=xxx             → 全部活動統計（含 row_num 供刪除）
+// GET  ?password=xxx             → 全部活動統計（含 row_num 供刪除／改媒體名稱）
 // GET  ?password=xxx&event_id=xx → 單一活動統計
 // POST {action:'delete', row_num, password, timestamp, question} → 標記刪除單筆 Q&A
+// POST {action:'update_media', row_num, password, timestamp, question, media_name}
+//      → 手動改這筆的媒體名稱。LINE 問答沒辦法強制記者一定要打媒體名稱（見
+//      lib/line.js looksLikeNameOrSkip 附近的說明），現場公關人員多半認得出對方
+//      是哪家媒體，這支就是給他們手動補的入口，不用去試算表直接改。
+// POST {action:'scan_dirty_media', password}
+//      → 掃出「媒體名稱欄其實是記者問題」的髒資料，只回清單不動資料。
+// POST {action:'clean_dirty_media', password, row_nums:[...]}
+//      → 把指定的那幾列媒體名稱清回「（未填寫）」，只清人工看過勾選的列。
 //
 // 管理員密碼也可用 X-Admin-Password header 傳（GET 用這個，不要放在網址上——
 // 網址會留在瀏覽器歷史與伺服器存取紀錄裡）。
 
 import { readRange, updateRange } from '../lib/sheets.js';
+
+// 判斷「已經存進媒體名稱欄的值」其實比較像一句問題，不是真的媒體/記者名稱——
+// LINE 的一次性擷取視窗誤判時會發生（見 lib/line.js looksLikeNameOrSkip 的說明：
+// 誤判的方向刻意選過，寧可漏放過一句問題不擋，也不要誤傷記者的下一題，所以這裡
+// 反過來抓「明顯是問題」的殘留）。判斷刻意保守，寧可漏掃、不要洗掉真的名稱：
+//   - 含問號，或用疑問詞／祈使句開頭 → 幾乎確定是問題
+//   - 長度超過 20 字 → 一次性擷取視窗本來就只收 ≤20 字的訊息當名稱，超過的
+//     不可能是那個機制存進來的，一定是別的管道寫壞的髒資料
+function isDirtyMediaName(name) {
+  const s = String(name || '').trim();
+  if (!s || s === '（未填寫）' || s === '（未提供）' || s === '（內部職員）') return false;
+  if (s.length > 20) return true;
+  if (/[?？]/.test(s)) return true;
+  if (/^(請問|為什麼|什麼|怎麼|哪裡|哪一|何時|多少|是否|能不能|可以|會不會|有沒有|給我|請給|麻煩|幫我|提供|傳給我|傳送|寄送|附上|想問|想要|需要|來一份|給一份)/.test(s)) return true;
+  return false;
+}
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -34,6 +58,55 @@ export default async function handler(req, res) {
       // 這筆問答原本屬於哪一場就永久查不回來了。
       await updateRange(`qa_log!G${row_num}:G${row_num}`, [['1']]);
       return res.status(200).json({ success: true });
+    }
+    if (action === 'update_media' && row_num) {
+      const { media_name } = req.body || {};
+      const name = String(media_name ?? '').trim().slice(0, 60);
+      if (!name) return res.status(400).json({ error: '媒體名稱不可空白，要清空請填「（未填寫）」' });
+      // 跟刪除同一道防線：改之前先比對這一列現在的內容，避免試算表被手動整理過、
+      // row_num 早就指向別筆資料，開著的舊後台頁面一按送出改到別人的問答。
+      if (timestamp !== undefined || question !== undefined) {
+        const check = await readRange(`qa_log!A${row_num}:E${row_num}`);
+        const row = check[0];
+        if (!row || (timestamp !== undefined && row[0] !== timestamp) || (question !== undefined && row[4] !== question)) {
+          return res.status(409).json({ error: '這筆資料已變動，請重新整理後再試' });
+        }
+      }
+      // D 欄是媒體名稱，只動這一欄。
+      await updateRange(`qa_log!D${row_num}:D${row_num}`, [[name]]);
+      return res.status(200).json({ success: true, media_name: name });
+    }
+    if (action === 'scan_dirty_media') {
+      // 找出「媒體名稱欄其實是問題」的髒資料——LINE 的一次性擷取視窗（見 lib/line.js
+      // looksLikeNameOrSkip 附近的說明）誤判時，會把記者的真實問題錯記成媒體名稱，
+      // 這裡用同一套邏輯回頭掃 qa_log 找出來，只回傳清單給人看，不直接動資料
+      // （見下面 clean_dirty_media 的說明——要人看過勾選才會真的寫入）。
+      const rows = await readRange('qa_log!A2:H');
+      const dirty = rows
+        .map((r, i) => ({ r, rowNum: i + 2 }))
+        .filter(({ r }) => r[1] && r[1] !== '[deleted]' && r[6] !== '1' && isDirtyMediaName(r[3]))
+        .map(({ r, rowNum }) => ({
+          row_num: rowNum, timestamp: r[0], event_name: r[2] || r[1],
+          current_name: r[3], question: r[4]
+        }));
+      return res.status(200).json({ dirty });
+    }
+    if (action === 'clean_dirty_media') {
+      // 只清「使用者勾選確認過」的那幾列，不是掃到什麼就清什麼——誤判的代價是把
+      // 一個湊巧很像問句的真實媒體名稱洗掉，人工看過一眼再決定比較保險。
+      const { row_nums } = req.body || {};
+      const nums = Array.isArray(row_nums) ? row_nums.filter(n => Number.isInteger(n) && n > 1).slice(0, 200) : [];
+      if (!nums.length) return res.status(400).json({ error: '沒有指定要清理的資料列' });
+      let cleaned = 0;
+      for (const n of nums) {
+        try {
+          await updateRange(`qa_log!D${n}:D${n}`, [['（未填寫）']]);
+          cleaned++;
+        } catch (e) {
+          console.error(`清理媒體欄失敗 row=${n}:`, e.message);
+        }
+      }
+      return res.status(200).json({ success: true, cleaned });
     }
     return res.status(400).json({ error: '不支援的操作' });
   }
@@ -113,10 +186,19 @@ export default async function handler(req, res) {
       .map(([word, count]) => ({ word, count }));
 
     // 每小時分佈
+    // ⚠️ qa_log 的時間戳是 toLocaleString('zh-TW') 的字串，長這樣：「2026/8/27 下午9:57:22」
+    // ——是 12 小時制帶「上午／下午」。原本只抓 `(\d{1,2}):\d{2}` 的話，下午 9 點會被
+    // 算成 9 點，整個下午與晚上的問答全部疊到早上去（記者會多半在下午開，等於這張圖
+    // 剛好把最重要的時段搬錯位置）。這份資料目前前端還沒有畫出來，但算錯就是算錯。
     const hourly = Array(24).fill(0);
     filtered.forEach(({ r }) => {
-      const match = (r[0] || '').match(/(\d{1,2}):\d{2}/);
-      if (match) { const h = parseInt(match[1]); if (h >= 0 && h < 24) hourly[h]++; }
+      const ts = r[0] || '';
+      const match = ts.match(/(上午|下午)?\s*(\d{1,2}):\d{2}/);
+      if (!match) return;
+      let h = parseInt(match[2], 10);
+      if (match[1] === '下午' && h < 12) h += 12;   // 下午12點就是 12，不再加
+      if (match[1] === '上午' && h === 12) h = 0;    // 上午12點是午夜 0 點
+      if (h >= 0 && h < 24) hourly[h]++;
     });
 
     // 媒體排行
@@ -131,8 +213,17 @@ export default async function handler(req, res) {
 
     // 今日筆數：對「全部」filtered 資料算，不是只看 recent 那截斷後的 50 筆
     // ——記者會當天問答量很容易破 50，只看 recent 會讓「今日問答」數字失真。
-    const todayStr = new Date().toLocaleDateString('zh-TW');
-    const todayCount = filtered.filter(({ r }) => r[0] && r[0].includes(todayStr)).length;
+    //
+    // ⚠️ 兩個都修過的坑：
+    // 1. 時區。qa_log 的時間戳是用 Asia/Taipei 寫的，但這裡原本沒指定時區，Vercel 上
+    //    跑的是 UTC——台灣時間 00:00–08:00 之間，「今天」會算成台灣的昨天，早上開的
+    //    記者會在後台看到的「今日問答」是 0。
+    // 2. 用 includes() 比對。台灣時間 8/2 的 todayStr 是「2026/8/2」，而 8/20～8/29 的
+    //    時間戳都包含這串，於是每個月 2 號都會把下旬的問答算成今天。改成只比對空白前
+    //    的日期部分、而且要完全相等。
+    const todayStr = new Date().toLocaleDateString('zh-TW', { timeZone: 'Asia/Taipei' });
+    const dayOf = (ts) => String(ts || '').trim().split(/[\s ]/)[0];
+    const todayCount = filtered.filter(({ r }) => dayOf(r[0]) === todayStr).length;
 
     return res.status(200).json({
       total: filtered.length,

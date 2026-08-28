@@ -917,6 +917,96 @@ async function deleteQA(rowNum) {
   }
 }
 
+// LINE 問答沒辦法強制記者一定要打媒體名稱（聊天視窗做不出網頁版那種「不填不能問」
+// 的彈窗），現場公關人員多半認得出對方是哪家媒體，這支就是手動補的入口。
+// 用 prompt() 而不是另外做一個編輯彈窗——跟這頁其他操作（刪除用 confirm()）同一種
+// 簡單、低成本的互動方式，這個功能本來就是偶爾手動點幾次，不需要更重的 UI。
+async function editMedia(rowNum) {
+  const row = (state.recentCache || []).find(r => r.row_num === rowNum);
+  const current = row?.media && row.media !== '—' ? row.media : '';
+  const next = prompt('這筆問答的媒體名稱：', current);
+  if (next === null) return; // 按取消
+  const trimmed = next.trim();
+  if (!trimmed) { toast('媒體名稱不可空白'); return; }
+  try {
+    const res = await authedFetch('/api/analytics', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'update_media', row_num: rowNum, password: state.password,
+        timestamp: row?.time, question: row?.question, media_name: trimmed
+      })
+    });
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    toast('已更新媒體名稱');
+    loadAnalytics();
+  } catch(e) {
+    toast('更新失敗：' + e.message);
+  }
+}
+
+// 掃出「媒體名稱欄其實是問題」的髒資料（見 api/analytics.js isDirtyMediaName 的
+// 判斷邏輯），只顯示清單讓人看過勾選，不會自動清——誤判的代價是洗掉一個湊巧很像
+// 問句的真實媒體名稱，人工看過一眼比較保險。
+async function scanDirtyMedia() {
+  const panel = document.getElementById('dirty-media-panel');
+  panel.style.display = 'block';
+  panel.innerHTML = '<div style="color:var(--muted);font-size:0.85rem"><i class="ti ti-loader"></i> 掃描中…</div>';
+  try {
+    const res = await authedFetch('/api/analytics', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'scan_dirty_media', password: state.password })
+    });
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    if (!data.dirty?.length) {
+      panel.innerHTML = '<div style="font-size:0.85rem;color:var(--muted)"><i class="ti ti-check"></i> 沒有找到看起來像問題的媒體名稱，media 欄目前是乾淨的。</div>';
+      return;
+    }
+    panel.innerHTML = `
+      <div style="font-size:0.85rem;font-weight:600;margin-bottom:10px">
+        找到 ${data.dirty.length} 筆媒體名稱看起來其實是問題內容，勾選要清回「（未填寫）」的項目：
+      </div>
+      <div style="max-height:260px;overflow-y:auto;margin-bottom:10px">
+        ${data.dirty.map(d => `
+        <label style="display:flex;gap:8px;align-items:flex-start;padding:6px 0;font-size:0.8rem;border-bottom:1px solid #fde68a">
+          <input type="checkbox" class="dirty-media-check" value="${d.row_num}" checked style="margin-top:3px">
+          <span>
+            <span style="color:var(--muted)">${escHtml(d.timestamp||'')}・${escHtml(d.event_name||'')}</span><br>
+            現在存的媒體名稱：「<strong>${escHtml(d.current_name||'')}</strong>」<br>
+            <span style="color:var(--muted)">問題：${escHtml((d.question||'').slice(0,60))}</span>
+          </span>
+        </label>`).join('')}
+      </div>
+      <button class="btn btn-primary" style="font-size:0.78rem;padding:6px 14px" onclick="applyDirtyMediaClean()">套用清理</button>
+      <button class="btn btn-outline" style="font-size:0.78rem;padding:6px 14px" onclick="document.getElementById('dirty-media-panel').style.display='none'">取消</button>
+    `;
+  } catch(e) {
+    panel.innerHTML = `<div style="color:#ef4444;font-size:0.85rem">掃描失敗：${e.message}</div>`;
+  }
+}
+
+async function applyDirtyMediaClean() {
+  const rowNums = [...document.querySelectorAll('.dirty-media-check:checked')].map(el => parseInt(el.value, 10));
+  if (!rowNums.length) { toast('沒有勾選任何項目'); return; }
+  try {
+    const res = await authedFetch('/api/analytics', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'clean_dirty_media', password: state.password, row_nums: rowNums })
+    });
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    toast(`已清理 ${data.cleaned} 筆`);
+    document.getElementById('dirty-media-panel').style.display = 'none';
+    loadAnalytics();
+  } catch(e) {
+    toast('清理失敗：' + e.message);
+  }
+}
+
 async function loadAnalytics() {
   const eid = document.getElementById('analytics-event-filter').value;
   const view = document.getElementById('analytics-view');
@@ -972,23 +1062,34 @@ function renderAnalytics(data, eid) {
       <span><i class="ti ti-message-circle" style="color:var(--primary)"></i> 最新問答紀錄
         <span style="font-size:0.78rem;font-weight:400;color:var(--muted);margin-left:8px">共 ${data.total} 則</span>
       </span>
-      <button class="btn btn-outline" style="font-size:0.78rem;padding:5px 12px" onclick="exportCSV('${eid}')">
-        <i class="ti ti-download"></i> 匯出 CSV
-      </button>
+      <span style="display:flex;gap:8px">
+        <button class="btn btn-outline" style="font-size:0.78rem;padding:5px 12px" onclick="scanDirtyMedia()" title="找出媒體名稱欄其實是問題內容的髒資料">
+          <i class="ti ti-wand"></i> 清理媒體欄
+        </button>
+        <button class="btn btn-outline" style="font-size:0.78rem;padding:5px 12px" onclick="exportCSV('${eid}')">
+          <i class="ti ti-download"></i> 匯出 CSV
+        </button>
+      </span>
     </div>
+    <div id="dirty-media-panel" style="display:none;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:14px;margin-bottom:16px"></div>
     ${data.recent?.length ? `
     <div style="overflow-x:auto">
     <table class="qa-table">
-      <thead><tr><th>時間</th><th>活動</th><th>媒體</th><th>問題</th><th style="width:60px">操作</th></tr></thead>
+      <thead><tr><th>時間</th><th>活動</th><th>媒體</th><th>問題</th><th style="width:110px">操作</th></tr></thead>
       <tbody>${data.recent.map(r => `
         <tr>
           <td style="white-space:nowrap;font-size:0.78rem;color:var(--muted)">${escHtml(r.time||'')}</td>
           <td style="white-space:nowrap;font-size:0.78rem">${escHtml(r.event||r.event_id||'')}</td>
           <td style="font-size:0.82rem">${escHtml(r.media||'—')}</td>
           <td>${escHtml(r.question||'')}</td>
-          <td><button onclick="deleteQA(${r.row_num})" title="刪除此筆"
-            style="background:#fef2f2;border:1px solid #fecaca;border-radius:6px;cursor:pointer;color:#ef4444;font-size:0.78rem;font-weight:600;padding:4px 10px;white-space:nowrap;font-family:var(--font)">
-            🗑 刪除</button></td>
+          <td style="white-space:nowrap">
+            <button onclick="editMedia(${r.row_num})" title="手動填寫／修改媒體名稱"
+              style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:6px;cursor:pointer;color:#0369a1;font-size:0.78rem;font-weight:600;padding:4px 8px;font-family:var(--font);margin-right:4px">
+              ✎ 媒體</button>
+            <button onclick="deleteQA(${r.row_num})" title="刪除此筆"
+              style="background:#fef2f2;border:1px solid #fecaca;border-radius:6px;cursor:pointer;color:#ef4444;font-size:0.78rem;font-weight:600;padding:4px 8px;font-family:var(--font)">
+              🗑 刪除</button>
+          </td>
         </tr>`).join('')}
       </tbody>
     </table>

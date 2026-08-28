@@ -138,6 +138,7 @@
     color: var(--primary);
     margin-right: 4px;
   }
+  .score-badge .of10 { font-size: 0.9rem; font-weight: 600; color: var(--muted); }
 
   /* Typing */
   .typing-dot { display: inline-block; width: 7px; height: 7px; background: #94a3b8; border-radius: 50%; margin: 0 2px; animation: blink 1.2s infinite; }
@@ -178,9 +179,18 @@
 
   /* 開始按鈕 */
   #start-area {
-    padding: 16px; display: flex; justify-content: center;
+    padding: 16px; display: flex; flex-direction: column; align-items: center; gap: 10px;
     flex-shrink: 0;
   }
+  #trainee-input {
+    width: 100%; max-width: 320px;
+    border: 1.5px solid var(--border); border-radius: 10px;
+    padding: 10px 14px;
+    font-family: var(--font); font-size: 0.9rem;
+    text-align: center; outline: none;
+    transition: border-color 0.2s;
+  }
+  #trainee-input:focus { border-color: var(--primary); }
   #start-btn {
     background: var(--primary); color: white;
     border: none; border-radius: 10px;
@@ -257,6 +267,8 @@
 <div id="messages"></div>
 
 <div id="start-area">
+  <input id="trainee-input" type="text" maxlength="40"
+         placeholder="您的姓名／職稱（選填，方便主管追蹤訓練紀錄）">
   <button id="start-btn">
     <i class="ti ti-player-play"></i> 開始媒體訓練
   </button>
@@ -270,6 +282,7 @@
 <div id="end-screen">
   <div class="trophy">🎯</div>
   <h2>訓練完成！</h2>
+  <p id="end-avg" style="font-weight:700;color:var(--primary);font-size:1.05rem;margin-bottom:6px"></p>
   <p>您已完成本次媒體訓練。請參考各題的評分建議，調整您的發言策略。</p>
   <button id="restart-btn"><i class="ti ti-refresh"></i> 再練一次</button>
 </div>
@@ -287,9 +300,27 @@ let isWaiting = false;
 let awaitingAnswer = false; // 等待使用者回答
 let eventName = '工研院活動';
 
+// 這場的每題分數，null 代表這題的評分文字沒解析出「整體分數：X / 10」（極少見，
+// AI 格式漂移時才會發生）。只在真的走到終畫面（5 題全部答完）才會送去記錄——
+// 中途離開的不算一場，見 startTraining()／submitAnswer() 裡的說明。
+let sessionScores = [];
+
+// 受訓者姓名/職稱記在瀏覽器裡，下次直接帶出來——跟 event.html 記住記者媒體名稱
+// 同一招。純粹方便，不是必填；localStorage 讀不到就當作沒填過，不影響流程。
+const TRAINEE_LS_KEY = 'itri_trainee_name';
+function rememberedTrainee() {
+  try { return localStorage.getItem(TRAINEE_LS_KEY) || ''; } catch (e) { return ''; }
+}
+function rememberTrainee(v) {
+  try { if (v) localStorage.setItem(TRAINEE_LS_KEY, v); } catch (e) { /* 存不了就算了 */ }
+}
+
 async function init() {
   // 設定返回連結
   document.getElementById('back-link').href = '/';
+
+  const prevTrainee = rememberedTrainee();
+  if (prevTrainee) document.getElementById('trainee-input').value = prevTrainee;
 
   if (!TRAINING_CODE && !TRAINING_PWD) {
     document.getElementById('loading').style.display = 'none';
@@ -396,7 +427,9 @@ document.getElementById('start-btn').addEventListener('click', startTraining);
 document.getElementById('restart-btn').addEventListener('click', () => {
   reporterHist = [];
   questionCount = 0;
+  sessionScores = [];
   document.getElementById('messages').innerHTML = '';
+  document.getElementById('end-avg').textContent = '';
   document.getElementById('end-screen').style.display = 'none';
   document.getElementById('input-area').style.display = 'none';
   document.getElementById('start-area').style.display = 'flex';
@@ -404,6 +437,8 @@ document.getElementById('restart-btn').addEventListener('click', () => {
 });
 
 async function startTraining() {
+  sessionScores = [];
+  rememberTrainee(document.getElementById('trainee-input').value.trim());
   document.getElementById('start-area').style.display = 'none';
   document.getElementById('input-area').style.display = 'flex';
   await askNextQuestion();
@@ -495,7 +530,14 @@ async function submitAnswer() {
     const evalPart = parts[0].trim();
     const nextQ = parts[1]?.trim();
 
-    addEvalMsg(evalPart);
+    // 抓「整體分數：X / 10」——prompt 裡要求這個格式，但寬鬆比對比較保險
+    // （半形/全形冒號都收，數字可能帶小數）。抓不到就記 null：這一題不算進平均，
+    // 但仍然算完成了一題（question_count 仍要涵蓋它，見 logSession()）。
+    const scoreMatch = evalPart.match(/整體分數[：:]\s*(\d+(?:\.\d+)?)\s*\/\s*10/);
+    const score = scoreMatch ? Math.max(0, Math.min(10, Number(scoreMatch[1]))) : null;
+    sessionScores.push(score);
+
+    addEvalMsg(evalPart, score);
 
     if (questionCount >= MAX_Q) {
       // 訓練結束
@@ -504,6 +546,7 @@ async function submitAnswer() {
         document.getElementById('end-screen').style.display = 'block';
         updateProgress();
       }, 800);
+      logSession();
     } else if (!nextQ) {
       // 評分沒照格式附上下一題。以前這裡會直接判定訓練結束，五題變兩題就沒了；
       // 改成回頭用記者模式補問一題，格式漂移不該讓整場訓練提早收掉。
@@ -528,6 +571,34 @@ async function submitAnswer() {
   }
 
   isWaiting = false;
+}
+
+// 訓練走到終畫面才呼叫（見 submitAnswer() 裡 questionCount >= MAX_Q 那段）——中途
+// 離開的不記，不然「演練場次」會被答一題就走的雜訊灌水。fire-and-forget：不 await
+// 結果來擋終畫面顯示，訓練本身已經結束，紀錄寫不寫得進去不該讓受訓者等待或看到
+// 錯誤畫面；寫成功的話，把後端重新算好的平均分（不是前端自己算的那份）補上去。
+async function logSession() {
+  if (!sessionScores.length) return; // 一題都沒有（理論上不會發生，防呆）
+  try {
+    const res = await fetch('/api/training', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        mode: 'log_session',
+        event_id: eventId,
+        trainee: document.getElementById('trainee-input').value.trim(),
+        scores: sessionScores,
+        code: TRAINING_CODE || undefined,
+        password: TRAINING_PWD || undefined
+      })
+    });
+    const data = await res.json();
+    if (data.success && data.avg_score !== '' && data.avg_score != null) {
+      document.getElementById('end-avg').textContent = `本次平均分：${data.avg_score} / 10`;
+    }
+  } catch(e) {
+    console.error('訓練紀錄寫入失敗（不影響剛剛的訓練結果）:', e);
+  }
 }
 
 function updateProgress() {
@@ -560,14 +631,17 @@ function addUserMsg(text) {
   el.scrollIntoView({ behavior: 'smooth', block: 'end' });
 }
 
-function addEvalMsg(text) {
+function addEvalMsg(text, score) {
   const el = document.createElement('div');
   el.className = 'msg eval';
+  // 分數已經在內文的「整體分數：X / 10」那行了，這裡另外用徽章放大呈現一次——
+  // 內文是完整記錄，徽章是讓人一眼掃過去就抓到重點，不衝突。
+  const badge = (score != null) ? `<span class="score-badge">${score}<span class="of10">/10</span></span><br>` : '';
   el.innerHTML = `
     <div class="avatar"><i class="ti ti-star"></i></div>
     <div class="bubble">
       <span class="eval-label">訓練師評分</span><br>
-      ${escHtml(text)}
+      ${badge}${escHtml(text)}
     </div>`;
   document.getElementById('messages').appendChild(el);
   el.scrollIntoView({ behavior: 'smooth', block: 'end' });

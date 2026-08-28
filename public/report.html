@@ -99,6 +99,7 @@
 <script>
 let ANALYTICS = null;
 let EXPOSURE = null;
+let TRAINING = null;
 let PASSWORD = '';
 
 // 通用產業詞表，跟 api/analytics.js 的關鍵字統計用同一套邏輯：字典比對，不用貪婪切詞。
@@ -133,6 +134,12 @@ async function load(){
       if(r2.ok){ const d2 = await r2.json(); if(!d2.error) EXPOSURE = d2; }
     }catch(_){ }
 
+    // 媒體訓練演練紀錄（演練場次／平均分）；同樣不影響報告主體——沒人練過就整段不顯示
+    try{
+      const r3 = await fetch('/api/training?action=summary', { headers: { 'X-Admin-Password': PASSWORD } });
+      if(r3.ok){ const d3 = await r3.json(); if(!d3.error) TRAINING = d3; }
+    }catch(_){ }
+
     document.getElementById('gate').style.display='none';
     document.getElementById('report').style.display='block';
     render();
@@ -161,6 +168,9 @@ function render(){
   const mediaUnion = new Set();
   byEvent.forEach(e => (e.media_list||[]).forEach(m => mediaUnion.add(m)));
 
+  // 媒體訓練演練紀錄依 event_id 查——TRAINING.by_event 只有真的被練過的場次會出現
+  const trainingByEvent = new Map((TRAINING && TRAINING.by_event || []).map(t => [t.event_id, t]));
+
   const savedHours = (total * minPerQ / 60);
   const savedStr = savedHours >= 10 ? Math.round(savedHours) : savedHours.toFixed(1);
 
@@ -176,12 +186,16 @@ function render(){
     ${EXPOSURE && EXPOSURE.totalExposure ? `
     <div class="kpi"><div class="num">${EXPOSURE.totalExposure}</div><div class="lab">累積媒體露出則數</div><div class="hint">涵蓋 ${EXPOSURE.eventsWithExposure} 場已登錄露出的活動</div></div>
     <div class="kpi"><div class="num">${EXPOSURE.totalOutlets}</div><div class="lab">露出媒體家數</div><div class="hint">依監測清單媒體名稱去重</div></div>` : ''}
+    ${TRAINING && TRAINING.overall && TRAINING.overall.sessions ? `
+    <div class="kpi"><div class="num">${TRAINING.overall.sessions}</div><div class="lab">累積媒體訓練演練場次</div><div class="hint">發言人會前 AI 記者實戰演練</div></div>
+    <div class="kpi"><div class="num">${TRAINING.overall.avg_score ?? '—'}<span style="font-size:1rem"> / 10</span></div><div class="lab">平均訓練分數</div><div class="hint">AI 訓練師逐題評分之平均</div></div>` : ''}
   `;
 
   const cards = byEvent.map(e=>{
     const topics = topTopics(e.questions, 6);
     const filled = (e.questions||[]).filter(q=>q.media && q.media!=='（未填寫）').length;
     const fillRate = e.count ? Math.round(filled/e.count*100) : 0;
+    const training = trainingByEvent.get(e.event_id);
     return `
     <div class="ev-card">
       <div class="ev-head">
@@ -193,6 +207,8 @@ function render(){
         <div class="ev-stat"><div class="n">${fillRate}%</div><div class="l">媒體填寫率</div></div>
         <div class="ev-stat"><div class="n">${(e.count*minPerQ/60).toFixed(1)}</div><div class="l">估算節省工時</div></div>
         ${e.line_count ? `<div class="ev-stat"><div class="n">${e.line_count}</div><div class="l">來自 LINE</div></div>` : ''}
+        ${training && training.sessions ? `<div class="ev-stat"><div class="n">${training.sessions}</div><div class="l">媒體訓練演練場次</div></div>` : ''}
+        ${training && training.avg_score != null ? `<div class="ev-stat"><div class="n">${training.avg_score}</div><div class="l">平均訓練分數</div></div>` : ''}
       </div>
       <div class="topic-title"><i class="ti ti-flame"></i> 記者最關心的議題</div>
       <div class="topic-tags">
