@@ -424,6 +424,19 @@ function eventQuickChips(rawEvent) {
   return [...contentChips, CONTACT_MENU_LABEL];
 }
 
+// 回報的意見：記者被引導「請直接輸入想問的活動名稱，或從下面挑一場」（換場、或
+// 查活動列表時）只看得到活動名稱按鈕，找不到入口問「媒體邀訪需求」——這件事本來
+// 就不是針對某一場活動，是跨活動的議題／窗口詢問（見 sendGlobalContactMenu()），
+// 塞在「先選一場」的清單裡反而是選錯位置，記者只能自己打字才問得到。
+//
+// 跟 eventQuickChips() 同一招：固定加在清單最後一格，記者不用先知道要打這句話。
+// 只給記者端的活動清單用（handleMetaIntent／handleUnbound）——handleStaffMessage()
+// 自己的 'calendar' 分支刻意不套用，同仁已經有整套 STAFF_QUICK_REPLIES，「媒體
+// 邀訪需求」是講給記者聽的措辭，職員這裡看到只會多一顆用不到的按鈕。
+function calendarQuickRepliesForReporter(cards) {
+  return [...calendarQuickReplyItems(cards), CONTACT_MENU_LABEL];
+}
+
 // ── 邀訪聯絡窗口分工（events!P，同仁在後台設定）───────────────────────
 // 回報的意見：不同議題該找誰，記者常常猜不到，只能一律洽詢單一的「新聞聯絡人」。
 // 同仁在後台可以設定多組「關鍵字｜姓名｜電話｜LINE ID」，記者點對應關鍵字就能拿到
@@ -900,7 +913,7 @@ async function handleMetaIntent(replyToken, userId, text, metaIntent, binding) {
     if (binding) await clearBinding(userId);
     await replyOrPush(replyToken, userId,
       `好的，已經離開原本那一場。\n\n請直接輸入想問的活動名稱，或從下面挑一場。\n\n${formatCalendarReply(cards)}`,
-      calendarQuickReplyItems(cards));
+      calendarQuickRepliesForReporter(cards));
     return;
   }
 
@@ -911,7 +924,7 @@ async function handleMetaIntent(replyToken, userId, text, metaIntent, binding) {
   const suffix = isUsable(current)
     ? `\n\n（您目前在問的是《${current.name}》，直接發問就會回答這一場；想換場點下面的按鈕即可。）`
     : '';
-  await replyOrPush(replyToken, userId, formatCalendarReply(cards) + suffix, calendarQuickReplyItems(cards));
+  await replyOrPush(replyToken, userId, formatCalendarReply(cards) + suffix, calendarQuickRepliesForReporter(cards));
 }
 
 // 沒有有效綁定時的自然語言處理（批次 3）：讓路由判斷這是查活動列表、問特定一場、
@@ -934,7 +947,7 @@ async function handleUnbound(replyToken, userId, text, { silentOnOther = false, 
   console.log(`[line] reporter route q="${text.slice(0, 60)}" → intent=${intent} event_ids=${JSON.stringify(event_ids)} confidence=${confidence}`);
 
   if (intent === 'calendar') {
-    await replyOrPush(replyToken, userId, formatCalendarReply(cards), calendarQuickReplyItems(cards));
+    await replyOrPush(replyToken, userId, formatCalendarReply(cards), calendarQuickRepliesForReporter(cards));
     return;
   }
 
