@@ -689,5 +689,47 @@ out = await sendGroup('@我 智慧醫療解決方案記者會有什麼技術突�
 check('群組裡問到別場內容一樣會自動換場', out[0]?.kind === 'answer' && out[0].event === 'med', JSON.stringify(out));
 check('群組綁定真的換過去了', state.bindings.get('Cgroup1')?.event_id === 'med');
 
+// ── 情境 16：活動清單要附「媒體邀訪需求」按鈕（回報的意見）─────────────────
+// 回報的意見：換場／查活動列表時只列得出活動名稱按鈕，找不到入口問「媒體邀訪
+// 需求」——這件事本來就不是針對某一場活動，是跨活動的議題詢問，塞在「先選一場」
+// 的清單裡反而選錯位置，記者只能自己打字才問得到。
+reset(); await freshModule();
+state.bindings.set('U_reporter', { event_id: 'quad', media_name: '', note: '', bound_at: Date.now() });
+
+out = await send('換一場活動');
+{
+  const labels = (out[0]?.quickReply || []).map(i => (typeof i === 'object' ? i.label : i));
+  check('「換一場活動」的按鈕列最後一格是媒體邀訪需求', labels[labels.length - 1] === '媒體邀訪需求', JSON.stringify(labels));
+}
+
+out = await send('最近有哪些活動');
+{
+  const labels = (out[0]?.quickReply || []).map(i => (typeof i === 'object' ? i.label : i));
+  check('綁定中查「最近有哪些活動」的按鈕列最後一格也是媒體邀訪需求', labels[labels.length - 1] === '媒體邀訪需求', JSON.stringify(labels));
+}
+
+// 沒綁定時要真的走 handleUnbound() 自己的 'calendar' 分支（跟上面兩個測試不同
+// 路徑）——「最近如何」故意不含活動／場次／記者會字樣，過不了 detectMetaIntent()
+// 的 CALENDAR_RE，才不會被 handleMetaIntent() 攔走，落到自然語言路由這條路。
+reset(); await freshModule();
+out = await send('最近如何');
+{
+  const labels = (out[0]?.quickReply || []).map(i => (typeof i === 'object' ? i.label : i));
+  check('沒綁定時查活動列表的按鈕列最後一格也是媒體邀訪需求', labels[labels.length - 1] === '媒體邀訪需求', JSON.stringify(labels));
+}
+out = await send('媒體邀訪需求');
+check('點下去真的會走全域技術窗口清單，不是被當成活動名稱去問答',
+  /請問想了解哪個技術領域/.test(out[0]?.text || ''), out[0]?.text);
+
+// 職員模式自己的活動列表不套用這顆按鈕——「媒體邀訪需求」是講給記者聽的措辭，
+// 同仁已經有整套 STAFF_QUICK_REPLIES，多這顆只是用不到的雜訊。
+reset(); await freshModule();
+state.staff.push(['U_staff', '', '2026-08-27', '', '']);
+out = await send('最近有哪些活動', 'U_staff');
+{
+  const labels = (out[0]?.quickReply || []).map(i => (typeof i === 'object' ? i.label : i));
+  check('職員模式查活動列表不會多出媒體邀訪需求這顆按鈕', !labels.includes('媒體邀訪需求'), JSON.stringify(labels));
+}
+
 console.log(`\n${fail === 0 ? '✅' : '❌'} 流程測試通過 ${pass}／失敗 ${fail}`);
 process.exit(fail === 0 ? 0 : 1);

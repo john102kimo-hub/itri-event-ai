@@ -1040,6 +1040,32 @@ LINE mention 資料還在的地方）新增一道否決——沒被 @ 到（純�
 被續命；同時重跑既有的「續問視窗內繼續追問」情境確認沒有迴歸。`npm test` 全數
 重跑通過（130 項流程測試）。
 
+### 批次 15：活動清單附上「媒體邀訪需求」按鈕（2026-08-28）
+
+長官實測回報：問「換一場活動」或查活動列表時，按鈕列只看得到活動名稱，找不到
+入口問「媒體邀訪需求」——這件事本來就不是針對某一場活動，是跨活動的議題／
+窗口詢問（批次 9 的 `sendGlobalContactMenu()`），塞在「先選一場」的清單裡反而
+選錯位置，記者只能自己打字才問得到。
+
+**根因**：`calendarQuickReplyItems()` 只回傳活動名稱，`handleMetaIntent()` 的
+`switch`／預設 `calendar` 分支跟 `handleUnbound()` 的 `calendar` 分支三處直接拿
+這組結果當按鈕列，都沒有附上批次 7 就已經存在、`eventQuickChips()` 每則問答
+都會附的 `CONTACT_MENU_LABEL`（「媒體邀訪需求」）。
+
+**修法**：新增 `calendarQuickRepliesForReporter()`，跟 `eventQuickChips()` 同一招——
+固定把 `CONTACT_MENU_LABEL` 加在清單最後一格，換掉上述三處記者端的呼叫。點下去
+沿用既有的 `detectMetaIntent()` → `'contacts'` → `sendGlobalContactMenu()` 那條路，
+不需要新邏輯，只是讓記者在「先選一場」的畫面就看得到這顆按鈕。
+
+**刻意不套用的地方**：`handleStaffMessage()` 自己的 `calendar` 分支（第四個
+`calendarQuickReplyItems()` 呼叫點）維持原樣不動——「媒體邀訪需求」是講給記者聽
+的措辭，同仁已經有整套 `STAFF_QUICK_REPLIES`，加這顆只是多一顆用不到的按鈕。
+
+**測試**：`test-flow.mjs` 新增情境 16，涵蓋「換一場活動」、綁定中查列表、沒綁定
+查列表（刻意用不含活動／場次字樣的「最近如何」，確保真的測到 `handleUnbound()`
+自己那條分支，不是被 `detectMetaIntent()` 攔走）三處都附上按鈕、點下去正確導向
+全域窗口清單、以及職員模式不受影響。`npm test` 全數重跑通過（135 項流程測試）。
+
 ---
 
 ## 6. system prompt 要加的規則
