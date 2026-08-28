@@ -36,10 +36,14 @@ function makeReq(text, userId = 'U_reporter') {
 // 群組事件：mentionSelf 決定送出的訊息有沒有 @ 到機器人（isSelf: true）。
 // mentionText 是要 @ 掉的那段字串（預設整個 '@我 '），用來算 index/length——
 // 跟 lib/line.js stripMentionText() 真正吃的是同一種偏移量格式。
-function makeGroupReq(text, { groupId = 'Cgroup1', mentionSelf = true, mentionText = '@我 ', asRoom = false } = {}) {
+function makeGroupReq(text, { groupId = 'Cgroup1', mentionSelf = true, mentionText = '@我 ', asRoom = false, mentionOther = false } = {}) {
   const mention = mentionSelf
     ? { mentionees: [{ index: 0, length: mentionText.length, type: 'user', userId: 'Ubot', isSelf: true }] }
-    : undefined;
+    // mentionOther：模擬「@ 到別人，不是我們」——mentionees 裡有東西，但沒有一個
+    // isSelf:true，用來測 handleGroupEvent() 的人類提及否決（見該處說明）。
+    : mentionOther
+      ? { mentionees: [{ index: 0, length: mentionText.length, type: 'user', userId: 'Uother', isSelf: false }] }
+      : undefined;
   const source = asRoom ? { type: 'room', roomId: groupId } : { type: 'group', groupId };
   const body = JSON.stringify({
     events: [{
@@ -364,6 +368,24 @@ check('第二步：沒有再 @，接著打一個真的存在的活動名稱 → 
 out = await sendGroup('那合作廠商有哪些', { mentionSelf: false });
 check('第三步：續問視窗內繼續追問（已經軟綁定 semi），一樣不用 @',
   out[0]?.kind === 'answer' && out[0].event === 'semi', JSON.stringify(out));
+
+// 回報的意見：續問視窗內只要有人講話就會回，即使明顯是在跟另一個人講話，機器人
+// 還是煞有其事答一段答非所問的內容。已經綁定活動時（跟上面「軟綁定 semi」同一種
+// 狀態）沒有 handleUnbound() 那道 silentOnOther 門檻可用——routeIntent() 沒有對話
+// 記憶，沒辦法分辨「那合作廠商有哪些」這種依賴上一句的續問跟純聊天的差別，用它來
+// 判斷會連上面那個測試的合法續問一起擋掉。改用更精準、免呼叫 AI 的訊號：訊息明確
+// @ 了別人（不是我們）就是最乾脆的「不是在跟我講話」。
+console.log('── 續問視窗：@ 到別人（不是我們）→ 安靜，不是在跟我們講話 ──');
+{
+  const before = Date.now() + 60000;
+  reset(); await freshModule();
+  state.bindings.set('Cgroup1', { event_id: 'quad', media_name: '', note: '', bound_at: Date.now(), groupSessionUntil: before });
+  out = await sendGroup('我再跟＠小明說話', { mentionSelf: false, mentionOther: true, mentionText: '＠小明' });
+  check('續問視窗內、訊息明確 @ 別人 → 安靜，不會硬答一段答非所問的內容',
+    out.length === 0, JSON.stringify(out));
+  check('沒有因為這則亂回而幫續問視窗續命（groupSessionUntil 沒被延長）',
+    state.bindings.get('Cgroup1')?.groupSessionUntil === before, String(state.bindings.get('Cgroup1')?.groupSessionUntil));
+}
 
 console.log('── 續問視窗：判不出意圖時要安靜，不能沒事插話 ──');
 reset(); await freshModule();

@@ -1005,6 +1005,21 @@ async function handleGroupEvent(replyToken, ev) {
     const sessionUntil = await getGroupSessionUntil(groupId);
     if (!sessionUntil || Date.now() > sessionUntil) return; // 沒被 @、也不在續問視窗內 → 安靜
     if (ev.message?.type !== 'text') return; // 續問視窗內的非文字訊息（貼圖…）安靜略過，不用來亂回
+
+    // 回報的意見：續問視窗內只要有人講話就會回，即使明顯是在跟另一個人講話
+    // （例如「我再跟＠小明說話」）——機器人還是煞有其事答一段內容，感覺像亂回。
+    //
+    // 這裡沒被 @ 到、但訊息本身明確 @ 了「別人」（有 mentionee，且沒有一個是我們
+    // 自己）——這是最乾脆的「不是在跟我講話」訊號，比事後用 AI 判斷「這是不是
+    // 閒聊」更準也更省一次呼叫：routeIntent() 沒有對話記憶，看不出「那合作廠商
+    // 有哪些」這種依賴上一句才聽得懂的續問跟純聊天的差別，用它來擋這種情況風險
+    // 太高，會連正常續問一起擋掉；但「@ 了別人」這件事本身就已經很明確，不需要
+    // 靠 AI 猜。
+    //
+    // 安靜（不呼叫 touchGroupSession()）還有第二層效果：目前的雪球是「亂回一次
+    // → 視窗又續命 5 分鐘 → 群組只要持續有人講話，視窗永遠不會真的過期」。不幫
+    // 這種訊息續命，視窗才有機會真的到期。
+    if ((ev.message.mention?.mentionees || []).some(m => m?.isSelf !== true)) return;
   } else if (ev.message?.type !== 'text') {
     await replyOrPush(replyToken, groupId, '目前群組內僅支援文字訊息提問，請直接輸入您的問題。');
     return;
