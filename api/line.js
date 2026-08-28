@@ -437,6 +437,11 @@ function calendarQuickRepliesForReporter(cards) {
   return [...calendarQuickReplyItems(cards), CONTACT_MENU_LABEL];
 }
 
+// 回報的意見：按鈕列最後一格的「媒體邀訪需求」不夠明顯，滑一排按鈕容易漏看——
+// 直接把入口寫進文字裡，不能只靠按鈕。跟 calendarQuickRepliesForReporter() 同一組、
+// 同樣只給記者端的活動清單用，固定接在 formatCalendarReply() 的結果後面。
+const CONTACT_MENU_TEXT_HINT = '\n\n（如果是跨活動的採訪需求，不是問特定一場，直接打「媒體邀訪需求」或點下面的按鈕即可。）';
+
 // ── 邀訪聯絡窗口分工（events!P，同仁在後台設定）───────────────────────
 // 回報的意見：不同議題該找誰，記者常常猜不到，只能一律洽詢單一的「新聞聯絡人」。
 // 同仁在後台可以設定多組「關鍵字｜姓名｜電話｜LINE ID」，記者點對應關鍵字就能拿到
@@ -912,7 +917,7 @@ async function handleMetaIntent(replyToken, userId, text, metaIntent, binding) {
     // 的名稱，留著舊綁定的話那句會先被當成對舊場次的提問。
     if (binding) await clearBinding(userId);
     await replyOrPush(replyToken, userId,
-      `好的，已經離開原本那一場。\n\n請直接輸入想問的活動名稱，或從下面挑一場。\n\n${formatCalendarReply(cards)}`,
+      `好的，已經離開原本那一場。\n\n請直接輸入想問的活動名稱，或從下面挑一場。\n\n${formatCalendarReply(cards)}${CONTACT_MENU_TEXT_HINT}`,
       calendarQuickRepliesForReporter(cards));
     return;
   }
@@ -924,7 +929,7 @@ async function handleMetaIntent(replyToken, userId, text, metaIntent, binding) {
   const suffix = isUsable(current)
     ? `\n\n（您目前在問的是《${current.name}》，直接發問就會回答這一場；想換場點下面的按鈕即可。）`
     : '';
-  await replyOrPush(replyToken, userId, formatCalendarReply(cards) + suffix, calendarQuickRepliesForReporter(cards));
+  await replyOrPush(replyToken, userId, formatCalendarReply(cards) + suffix + CONTACT_MENU_TEXT_HINT, calendarQuickRepliesForReporter(cards));
 }
 
 // 沒有有效綁定時的自然語言處理（批次 3）：讓路由判斷這是查活動列表、問特定一場、
@@ -947,7 +952,7 @@ async function handleUnbound(replyToken, userId, text, { silentOnOther = false, 
   console.log(`[line] reporter route q="${text.slice(0, 60)}" → intent=${intent} event_ids=${JSON.stringify(event_ids)} confidence=${confidence}`);
 
   if (intent === 'calendar') {
-    await replyOrPush(replyToken, userId, formatCalendarReply(cards), calendarQuickRepliesForReporter(cards));
+    await replyOrPush(replyToken, userId, formatCalendarReply(cards) + CONTACT_MENU_TEXT_HINT, calendarQuickRepliesForReporter(cards));
     return;
   }
 
@@ -1118,8 +1123,21 @@ async function handleGroupMessage(replyToken, groupId, text, { mentioned }) {
   // 跟 1:1 那段同一套邏輯（完整說明見 handleEvent()）：綁定是預設值不是鎖，問句
   // 明確指向別場才自動換，其餘留在原場。群組共用一份綁定，換場會影響整個群組
   // 接下來的預設場次——跟現有「打整句活動名稱換台」本來就是同一種風險，不是
-  // 這裡新增的。
-  const routed = await routeIntent(text, buildCalendarCards(await getAllEventRows()));
+  // 這裡新增的。currentEventId 帶目前這場給 routeIntent()，讓它分得出「延續這場
+  // 的討論」跟「真的無關」（見 lib/router.js 的說明），下面的安靜門檻才靠得住。
+  const routed = await routeIntent(text, buildCalendarCards(await getAllEventRows()), { currentEventId: event.id });
+
+  // 回報的意見：批次 14 只擋得住「明確 @ 別人」這種訊號很強的情況，續問視窗內
+  // 純聊天、答非所問的訊息（例如「友信你覺得呢」）當時沒有安全的判斷依據——
+  // routeIntent() 沒有對話記憶，分不出這種話跟「那合作廠商有哪些」這種合法續問
+  // 的差別，一律判成 other。現在多了 currentEventId 提示，other 已經是「連目前
+  // 這場都接不上」的結果，才能放心拿來當安靜門檻，不會連續問視窗本身要保護的
+  // 案例一起擋掉。
+  //
+  // 真的被 @ 到時不受影響——跟 1 對 1、跟 handleUnbound() 的 silentOnOther:false
+  // 同一個原則，明確叫了機器人就不能不理人。
+  if (!mentioned && routed.intent === 'other') return;
+
   let answerEvent = event;
   let switchNotice = '';
   if (routed.intent === 'qa' && routed.confidence === 'high' &&
@@ -1326,8 +1344,10 @@ async function handleEvent(ev) {
   // 只有 confidence high、剛好指到一場、而且不是目前這場，才自動換；其餘一律
   // 留在原場繼續回答——寧可誤判成「留在原場」也不要誤判成「換去別場」，換錯場
   // 比換不了場更糟：記者不會發現答案其實來自另一場，還可能直接截圖引用
-  // （同一種風險見 LINE-PLAN.md 坑 6）。
-  const routed = await routeIntent(text, buildCalendarCards(await getAllEventRows()));
+  // （同一種風險見 LINE-PLAN.md 坑 6）。currentEventId 帶目前這場給 routeIntent()，
+  // 讓它分得出「延續這場的討論」跟「真的指向別場」（見 lib/router.js 的說明），
+  // 減少沒有明確線索時被誤判成 other、進而誤觸換場判斷的機會。
+  const routed = await routeIntent(text, buildCalendarCards(await getAllEventRows()), { currentEventId: event.id });
   let answerEvent = event;
   let switchNotice = '';
   if (routed.intent === 'qa' && routed.confidence === 'high' &&
