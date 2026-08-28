@@ -35,7 +35,7 @@ import { buildSystemPrompt, resolveEventContent } from '../lib/prompt.js';
 import {
   readRawBody, verifySignature, replyOrPush, replyOrPushMessages, startLoading, pushImages,
   createRichMenu, uploadRichMenuImage, setDefaultRichMenu, listRichMenus, deleteRichMenu,
-  linkRichMenuToUser, unlinkRichMenuFromUser, pushChartImage,
+  linkRichMenuToUser, unlinkRichMenuFromUser,
   isBotMentioned, stripMentionText, pushMessage
 } from '../lib/line.js';
 import { buildCalendarCards, buildAllCalendarCards, routeIntent, formatCalendarReply, calendarQuickReplyItems } from '../lib/router.js';
@@ -46,10 +46,10 @@ import {
 import {
   isPasscodeMatch, isStaffAuthenticated, authenticateStaff, routeStaffIntent,
   createDraftEvent, editLink, trainingLink, ensureEventEditCode, getEventRawById,
-  getEventAnalyticsSummary, formatEventAnalyticsReply, getGeoStatusSummary, formatGeoStatusReply,
-  getGeoTrendSeries, buildGeoTrendChartUrl,
+  getEventAnalyticsSummary, formatEventAnalyticsReply, getGeoStatusSummary, getGeoTrendSeries,
   isExitStaffCommand, revokeStaff, listActiveStaffIds, getStaffPending, setStaffPending
 } from '../lib/staff.js';
+import { buildGeoBriefFlex, formatGeoBriefText } from '../lib/geo-brief.js';
 import {
   CONTACTS_DIR_RANGE, GLOBAL_CONTACT_TOPICS, ensureContactsDirectorySheet,
   parseContactsDirectory, formatGlobalContact, matchGlobalContactByText
@@ -741,19 +741,17 @@ async function handleStaffMessage(replyToken, userId, text) {
   }
 
   if (routed.intent === 'geo_status') {
-    await replyOrPush(replyToken, userId, formatGeoStatusReply(await getGeoStatusSummary()));
-    // 文字答案之後再補一張趨勢圖，跟活動照片同一個理由獨立呼叫（見 answerQuestion()
-    // 的附圖註解）：reply token 已經被上面那則文字用掉了，這裡本來就只能走 push；
-    // 圖表資料查不到或還沒有掃描資料時 buildGeoTrendChartUrl() 回 null，直接跳過，
-    // 不會讓同仁收到一張空白圖，也不能讓這步的失敗拖累已經送出去的文字答案。
-    try {
-      const chartUrl = buildGeoTrendChartUrl(await getGeoTrendSeries());
-      if (chartUrl) {
-        const res = await pushChartImage(userId, chartUrl);
-        if (!res.ok && !res.skipped) console.error('GEO 趨勢圖 push 失敗:', res.status);
-      }
-    } catch (e) {
-      console.error('GEO 趨勢圖處理例外:', e.message);
+    // 一則 Flex 訊息把「今日掃描進度」「近 14 天總覽」「監視中的議題」「追蹤中的
+    // 活動」全部帶齊，不再分兩次送（舊版文字+另外 push 一張圖）。長條圖用 LINE
+    // 原生 Flex box 畫（見 lib/geo-brief.js 開頭的說明），不靠外部服務組圖表網址，
+    // 沒有網址長度上限這個天花板——這正是舊版圖片常態性顯示壞掉圖示的根因。
+    const [statusData, seriesData] = await Promise.all([getGeoStatusSummary(), getGeoTrendSeries()]);
+    const flex = buildGeoBriefFlex(statusData, seriesData, SITE);
+    const ok = flex ? await replyOrPushMessages(replyToken, userId, [flex]) : false;
+    if (!ok) {
+      // Flex 送失敗（舊版 LINE App、格式被拒、或兩邊資料都查不到）不能讓同仁收到
+      // 一片空白，退回純文字版——跟 lib/menu.js buildWelcomeFlex 同一套降級模式。
+      await replyOrPush(replyToken, userId, formatGeoBriefText(statusData, seriesData, SITE));
     }
     return;
   }

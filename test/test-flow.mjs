@@ -270,7 +270,15 @@ check('補出來的編輯碼有寫回 events 表', !!state.events.find(e => e[0]
 reset(); await freshModule();
 state.staff.push(['U_staff', '', '2026-08-27', '', '']);
 out = await send('GEO現在狀況', 'U_staff');
-check('GEO 狀態要附 /geo 連結', /itri-event-ai\.vercel\.app\/geo/.test(out[0]?.text || ''), out[0]?.text);
+// geo_status 現在優先送一則 Flex 卡片（見 lib/geo-brief.js），fakes.mjs 的
+// replyOrPushMessages 記成 {kind:'flex', messages}，沒有 .text 欄位可比對。
+// 這裡跑到的時候 ADMIN_PASSWORD 還是情境 7 留下的 ''（見上面那行的註解），
+// getGeoStatusSummary()／getGeoTrendSeries() 都會回 null，buildGeoBriefFlex()
+// 因此也回 null，會直接退回純文字版——用兩種 kind 都找得到 /geo 連結來驗證，
+// 不管兩份資料查不查得到，同仁都要有辦法點到儀表板。
+const geoContent = out[0]?.kind === 'flex' ? JSON.stringify(out[0].messages) : (out[0]?.text || '');
+check('GEO 狀態要附 /geo 連結（有資料送 Flex 卡片、沒資料退回純文字，兩種都要附）',
+  geoContent.includes('itri-event-ai.vercel.app/geo'), JSON.stringify(out));
 
 // 新增活動的追問：整句就是名稱，不能被重判成問活動內容
 reset(); await freshModule();

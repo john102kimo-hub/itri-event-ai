@@ -921,6 +921,52 @@ scan_dirty_media／clean_dirty_media 三個新動作），既有 341 項全數�
 
 ---
 
+### 批次 12：GEO 職員簡報改用 LINE 原生 Flex 長條圖，不再靠外部服務組圖表網址（2026-08-28）
+
+使用者截圖回報：`GEO現在狀況` 回覆的圖表訊息長期顯示一個壞掉的圖示。
+
+**根因**：舊版 `formatGeoStatusReply()` + `buildGeoTrendChartUrl()`（曾在 `lib/staff.js`）
+把 14 天的 Chart.js 設定整包塞進 QuickChart.io 的查詢字串組成一個 GET 網址，直接當
+LINE image 訊息的 `originalContentUrl` 送出去。實測這個網址在 14 天資料量下長度落在
+1200＋字元，**超過 LINE image 訊息 originalContentUrl 官方文件記載的 1000 字元
+上限**——不是偶發網路問題，是這個做法資料量到一定規模後注定會壞，資料愈完整、
+問題愈穩定重現。
+
+**修法**：新增 `lib/geo-brief.js`，改用 LINE 原生 Flex Message 畫圖表——長條圖是
+巢狀 `box` 的寬度百分比（跟 `lib/menu.js` `numberedStep()` 畫圓形號碼同一招），
+沒有網址、沒有外部服務、沒有長度上限這個天花板。一則卡片同時涵蓋：
+- 今日掃描進度＋環境檢查警訊（沿用既有 `action=status`）
+- 近 14 天總覽三個數字（平均分數／提及率／引用率）
+- 監視中的議題排行（長條圖＋漲跌箭頭＋提及率／引用率／樣本數）
+- 追蹤中的活動（基線→峰值→半衰期，**只有 `settled`（30 天觀察期已過）才給留存
+  數字**，還沒到就明講「觀察期還沒到，暫不評斷留存」）
+
+⚠️ **刻意不重新實作評分／半衰期／基線抬升／結構化稿判定的門檻邏輯**——那些規則
+背後是 `api/geo.js` `diagnoseEvent()`／`eventEffects()` 已經校準過的方法論（`settled`
+就是「30 天觀察窗期夠不夠長」的判定，等同批次 4 之前顧慮過的「D+31 門檻」，只是
+命名不同）。這裡直接消費 `action=series` 已經算好的 `events[].findings`／
+`board[].findings`，只負責排版，不重判——避免兩邊各自維護一份判定邏輯、之後改一邊
+忘了改另一邊，也不需要我重新推導那套方法論背後的完整脈絡。
+
+Flex 送不出去（舊版 LINE App、格式被拒、或 `action=status`／`action=series` 兩邊都
+查不到資料）自動退回純文字版，長條圖改用全形方塊字元湊——跟 `lib/menu.js`
+`buildWelcomeFlex()` 同一套「Flex 優先、失敗退文字」的降級模式。兩份資料來源各自
+獨立失敗也不會讓整份簡報開天窗（`Promise.all` 平行查，其中一邊是 `null` 另一邊
+還在就照樣組得出卡片）。
+
+移除舊的 `buildGeoTrendChartUrl()`（已確認是根因，不是能修一修留著的功能）與
+`formatGeoStatusReply()`（併入新版）；`lib/line.js` 的 `pushChartImage()` 本身沒有
+問題（是「用網址組圖」這個手法在資料量大時會爆），留著當通用工具，只是目前沒有
+呼叫端在用了。
+
+**測試**：`test/test-geo-chart.mjs` 整支重寫（原本測的函式已移除），26 項純函式
+測試涵蓋 Flex 結構、長條寬度百分比與分數對得起來、漲跌箭頭、`settled` 門檻正確
+擋住留存數字、兩份資料來源各自失敗的容錯、純文字退版。`test-flow.mjs` 既有的
+GEO 整合測試更新斷言方式（Flex 訊息在測試 fake 裡沒有 `.text` 欄位可比對）。
+`npm test` 全數重跑通過。
+
+---
+
 ## 6. system prompt 要加的規則
 
 沿用 `api/chat.js` 那份（搬到 `lib/prompt.js` 共用），額外附加：
