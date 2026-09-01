@@ -261,9 +261,12 @@ export function installFetchStub() {
 
       // 問答：system prompt 裡會帶該場的知識庫，從中反推是哪一場回答的。
       // sys 一併存起來——媒體邀請函測試要驗證 system prompt 裡到底帶的是正式新聞稿
-      // 還是邀請函內容，不能只看「有沒有回答」。
+      // 還是邀請函內容，不能只看「有沒有回答」。userText 也存起來——實際回報的
+      // bug：按「產業趨勢分析」這種按鈕文字直接當「使用者這一輪的話」丟給 AI，
+      // 記者跟按鈕不是同一種輸入，要能驗證呼叫端到底送了什麼字串上去，不能只看
+      // system prompt。
       const ev = state.events.find(e => sys.includes(e[1]))?.[0] || 'unknown';
-      sent.push({ kind: 'answer', event: ev, text: '（假回答）', sys });
+      sent.push({ kind: 'answer', event: ev, text: '（假回答）', sys, question: userText });
       return { ok: true, json: async () => ({ content: [{ type: 'text', text: '（假回答）' }] }) };
     }
     // lib/industry-trends.js fetchIndustryTrendDigest() 打的 IEK 免費焦點清單頁。
