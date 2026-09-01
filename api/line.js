@@ -54,6 +54,7 @@ import {
   CONTACTS_DIR_RANGE, GLOBAL_CONTACT_TOPICS, ensureContactsDirectorySheet,
   parseContactsDirectory, formatGlobalContact, matchGlobalContactByText
 } from '../lib/contacts-directory.js';
+import { fetchIndustryTrendDigest, formatDigestForPrompt } from '../lib/industry-trends.js';
 
 const EVENTS_RANGE = 'events!A2:R'; // P 欄是 contacts（邀訪窗口分工），Q 欄是 invite_letter（媒體邀請函），R 欄是 invite_letter_chips（活動前快速提問），見 rowToEvent()
 // line_user_id | event_id | media_name | bound_at | last_active | note | group_session_until
@@ -504,6 +505,22 @@ async function getContactsDirectory() {
   return list;
 }
 
+// 產業趨勢清單（lib/industry-trends.js）快取——跟 contactsDirCache 同一個模式，
+// 差別只在 TTL 拉長到 6 小時：這不是 Google Sheets 配額考量（IEKnet 是外部網站，
+// 沒有配額問題），是「沒必要每次提問都重抓一次外部網站」——IEK 免費焦點實測更新
+// 頻率約每週幾篇，6 小時內反覆問同一個話題不需要每次都真的打一次 fetch。
+let industryTrendCache = { items: null, expiry: 0 };
+const INDUSTRY_TREND_CACHE_MS = 6 * 60 * 60 * 1000;
+async function getIndustryTrendDigest() {
+  if (industryTrendCache.items && Date.now() < industryTrendCache.expiry) return industryTrendCache.items;
+  const items = await fetchIndustryTrendDigest();
+  // 抓失敗／解析出 0 筆時 fetchIndustryTrendDigest() 回空陣列——刻意不快取這個
+  // 空結果（TTL 設 0），下一次請求會立刻再試一次，不會被 6 小時的快取卡住連續
+  // 失敗；抓成功才真的快取 6 小時。
+  industryTrendCache = { items, expiry: items.length ? Date.now() + INDUSTRY_TREND_CACHE_MS : 0 };
+  return items;
+}
+
 // metaIntent==='contacts' 且沒有活動專屬窗口可用時的入口（見 handleMetaIntent()）。
 // 主題按鈕文字刻意用「邀訪：主題」而不是主題本身：LINE quick reply 現在支援
 // {label,text} 分開（見 lib/line.js buildQuickReply()），按鈕上看到的字很短
@@ -560,6 +577,59 @@ async function handleContactTopicMessage(replyToken, targetId, text) {
   }
 
   return false;
+}
+
+// ── 產業趨勢問答（批次 20，資料來源見 lib/industry-trends.js）─────────────────
+// 記者問的不是某一場記者會的內容，是整體產業趨勢／市場現況（例如「半導體最近有
+// 什麼趨勢」）——routeIntent() 判成 industry_trend 時走這支，跟現有的 qa／calendar
+// 走同一套自然語言路由，1 對 1、群組都適用，不管有沒有綁定活動都答得到（見三個
+// 呼叫端：handleUnbound()、handleEvent() 綁定中的判斷、handleGroupMessage() 綁定
+// 中的判斷）。
+//
+// 只用 IEK 免費焦點清單本身就有的標題＋日期＋摘要回答，不呼叫網頁版那套帶知識庫
+// 全文的 buildSystemPrompt()——這裡的資料來源、規則完全不同，硬塞進同一支反而
+// 要多加一堆「這不是活動內容」的例外判斷。想要更完整的分析或安排採訪，一律導向
+// events!contacts_directory 裡「產業趨勢分析」這個既有主題的窗口（批次 9 就有，
+// 目前是朱則瑋）——不在這裡另外寫死聯絡資訊，同仁在後台改窗口或補電話，這裡自動
+// 跟著更新，不需要改程式碼。
+async function industryTrendContactLine() {
+  const directory = await getContactsDirectory();
+  const contact = directory.find(c => c.topic === '產業趨勢分析');
+  if (contact) {
+    const phone = contact.phone ? `　📞 ${contact.phone}` : '';
+    const lineId = contact.lineId ? `　LINE：${contact.lineId}` : '';
+    return `\n\n想要更完整的分析或安排採訪，歡迎聯絡：${contact.name}${phone}${lineId}`;
+  }
+  return '\n\n想要更完整的分析或安排採訪，建議洽產業趨勢分析窗口（可請同仁到後台「邀訪窗口分工」設定聯絡方式）。';
+}
+
+async function answerIndustryTrend(replyToken, targetId, text) {
+  const items = await getIndustryTrendDigest();
+  const contactLine = await industryTrendContactLine();
+
+  if (!items.length) {
+    // 抓取失敗（網路問題、IEK 網站改版）——誠實說抓不到，不要硬答或裝死。
+    await replyOrPush(replyToken, targetId,
+      `這部分我暫時抓不到最新的產業趨勢資料。${contactLine}`,
+      ['最近有哪些活動', CONTACT_MENU_LABEL]);
+    return;
+  }
+
+  const systemPrompt = [
+    '你是工研院 LINE 官方帳號裡負責回答產業趨勢問題的助理。下面是「IEK 產業情報網」免費焦點清單（標題／日期／摘要），這是 IEK 自己公開的免費導讀摘要，不是完整報告。',
+    '只能根據下面清單裡的標題與摘要回答，不要延伸、不要用你自己既有的知識補充清單以外的內容、不要臆測完整報告裡才有但摘要沒寫的細節。',
+    '如果清單裡沒有明顯對應記者問題的項目，就誠實說「目前免費焦點清單裡沒有直接對應的資料」，不要硬答或東拼西湊。',
+    '回答控制在 4 行以內，先講最相關的 1-2 則的重點，並標明是哪一篇、什麼時候發布的。不要用 Markdown 語法（LINE 不會渲染）。',
+    '明確讓記者知道這是 IEK 的免費摘要，不是完整報告——不要講得像這就是 IEK 的完整分析或工研院的正式研究結論。',
+    '',
+    '【IEK 產業情報網 免費焦點清單，由新到舊】',
+    formatDigestForPrompt(items)
+  ].join('\n');
+
+  const aiReply = await askAnthropic(systemPrompt, text);
+  const reply = `${aiReply}${contactLine}`;
+  console.log(`[line] industry_trend q="${text.slice(0, 60)}" reply="${reply.slice(0, 200)}"`);
+  await replyOrPush(replyToken, targetId, reply, ['最近有哪些活動', CONTACT_MENU_LABEL]);
 }
 
 // 正式問答：開輸入中動畫 → 呼叫 Anthropic → reply（失敗 fallback push）→ 寫 qa_log。
@@ -964,6 +1034,12 @@ async function handleUnbound(replyToken, userId, text, { silentOnOther = false, 
     return;
   }
 
+  if (intent === 'industry_trend') {
+    // 不做軟綁定——這題跟任何一場活動都無關，沒有「場次」可以綁。
+    await answerIndustryTrend(replyToken, userId, text);
+    return;
+  }
+
   if (intent === 'qa' && event_ids.length === 1 && confidence === 'high') {
     const event = await getEventById(event_ids[0]);
     if (isUsable(event)) {
@@ -1163,6 +1239,15 @@ async function handleGroupMessage(replyToken, groupId, text, { mentioned }) {
   // 真的被 @ 到時不受影響——跟 1 對 1、跟 handleUnbound() 的 silentOnOther:false
   // 同一個原則，明確叫了機器人就不能不理人。
   if (!mentioned && routed.intent === 'other') return;
+
+  // 綁定中，但這題其實在問整體產業趨勢、不是這場活動的內容——不動原本的活動
+  // 綁定（跟「延續這場討論」是兩件事，換場判斷只在下面 qa 分支才做），答完照樣
+  // 續問視窗續命。
+  if (routed.intent === 'industry_trend') {
+    await answerIndustryTrend(replyToken, groupId, text);
+    await touchGroupSession(groupId);
+    return;
+  }
 
   let answerEvent = event;
   let switchNotice = '';
@@ -1374,6 +1459,15 @@ async function handleEvent(ev) {
   // 讓它分得出「延續這場的討論」跟「真的指向別場」（見 lib/router.js 的說明），
   // 減少沒有明確線索時被誤判成 other、進而誤觸換場判斷的機會。
   const routed = await routeIntent(text, buildCalendarCards(await getAllEventRows()), { currentEventId: event.id });
+
+  // 綁定中，但這題其實在問整體產業趨勢、不是這場活動的內容——不動原本的活動綁定
+  // （跟「延續這場討論」是兩件事，換場判斷只在下面才做），記者下一題還是繼續問
+  // 原本那場。
+  if (routed.intent === 'industry_trend') {
+    await answerIndustryTrend(replyToken, userId, text);
+    return;
+  }
+
   let answerEvent = event;
   let switchNotice = '';
   if (routed.intent === 'qa' && routed.confidence === 'high' &&

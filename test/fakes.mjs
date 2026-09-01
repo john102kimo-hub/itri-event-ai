@@ -28,8 +28,15 @@ export const state = {
   contactsDirectory: [
     '生醫｜生醫所｜丁嘉琳｜03-1111111｜lineid_ding｜智慧醫療、醫材相關技術',
     '機械｜機械所｜林潔玲｜｜｜機械、自動化系統相關技術',
+    '產業趨勢分析｜產科國際所｜朱則瑋｜0934-266-766｜｜產業趨勢分析、國際布局相關議題',
     '其他｜｜朱則瑋｜03-9999999｜｜找不到對應窗口時的綜合聯絡人'
-  ].join('\n')
+  ].join('\n'),
+  // lib/industry-trends.js 抓的 IEK 免費焦點清單——api/line.js 的 getIndustryTrendDigest()
+  // 呼叫 fetchIndustryTrendDigest()，內部打 https://ieknet.iek.org.tw/...，這裡用
+  // installFetchStub() 攔截並回傳這份假 HTML（結構節錄自實測的真實網站原始碼，
+  // 見 test-industry-trends.mjs 開頭的說明）。iekFetchFail 設 true 可以模擬抓取失敗。
+  iekHtml: `<div class="listItem row no-gutters"><article class="col-md-11 listText"><h2 class="g-font-weight-600"><a href="./rpt_more.aspx?actiontype=rpt&amp;indu_idno=0&amp;domain=2&amp;rpt_idno=997557802" title="IEK精華包：半導體先進封裝供需展望">IEK精華包：半導體先進封裝供需展望</a></h2><small class="date">2026/08/26</small><p> 先進封裝需求持續攀升，帶動測試與載板產能吃緊。 </p></article></div>`,
+  iekFetchFail: false
 };
 export const sent = [];
 
@@ -40,6 +47,7 @@ export function reset() {
   state.staff.length = 0;
   state.richMenus.length = 0;
   state.linkedMenus.clear();
+  state.iekFetchFail = false; // 個別情境會開這個旗標模擬抓取失敗，其餘情境要看到預設值
   sent.length = 0;
 }
 
@@ -174,9 +182,14 @@ function fakeStaffRoute(text) {
 // 還是「真的無關」。這裡不是要精準模擬真的 LLM 判斷（那要看真的跑），只用夠讓
 // 測試分得清楚「續問視窗合法追問」跟「回報案例的閒聊」兩種情況的簡單規則：
 // 文字裡出現「你覺得」這種問別人主觀意見的語氣，判定跟活動無關；否則當作延續。
+// 產業趨勢題的判斷放在活動關鍵字之前——真的遇到「半導體」這種同時可能是活動
+// 關鍵字（quad 場次沒有，但避免以後加了活動撞到）也可能是產業趨勢問題的字，
+// 「趨勢／市場現況／產業現況」這種明確詞優先判成 industry_trend，比較貼近
+// lib/router.js 系統提示裡「跟清單中任何一場都無關」的判斷精神。
 function fakeReporterRoute(text, currentEventHint) {
   const ids = matchEventIds(text);
   if (/最近|哪些活動|活動列表/.test(text)) return { intent: 'calendar', event_ids: [], confidence: 'high' };
+  if (/趨勢|市場現況|產業現況/.test(text)) return { intent: 'industry_trend', event_ids: [], confidence: 'high' };
   if (ids.length) return { intent: 'qa', event_ids: ids, confidence: 'high' };
   if (currentEventHint && !/你覺得/.test(text)) return { intent: 'qa', event_ids: [currentEventHint], confidence: 'high' };
   return { intent: 'other', event_ids: [], confidence: 'low' };
@@ -208,6 +221,11 @@ export function installFetchStub() {
       const ev = state.events.find(e => sys.includes(e[1]))?.[0] || 'unknown';
       sent.push({ kind: 'answer', event: ev, text: '（假回答）', sys });
       return { ok: true, json: async () => ({ content: [{ type: 'text', text: '（假回答）' }] }) };
+    }
+    // lib/industry-trends.js fetchIndustryTrendDigest() 打的 IEK 免費焦點清單頁。
+    if (u.includes('ieknet.iek.org.tw')) {
+      if (state.iekFetchFail) return { ok: false, status: 500, text: async () => '', json: async () => ({}) };
+      return { ok: true, text: async () => state.iekHtml || '' };
     }
     return { ok: false, status: 500, text: async () => '', json: async () => ({}) };
   };
