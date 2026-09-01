@@ -327,8 +327,8 @@ out = await sendGroup('@我', { mentionSelf: true, mentionText: '@我' });
 check('只 @ 沒接問題 → 友善自我介紹，同時帶出「最近活動」與「媒體邀訪需求」兩種可以問的方向，不會噴例外或送空白問題給 AI',
   out[0]?.kind === 'text' && /米亞/.test(out[0].text) && /最近有哪些活動/.test(out[0].text) && /媒體邀訪需求/.test(out[0].text),
   JSON.stringify(out));
-check('只 @ 沒接問題也附快速回覆按鈕，記者不用自己打字就能點問',
-  JSON.stringify(out[0]?.quickReply) === JSON.stringify(['最近有哪些活動', '媒體邀訪需求', '使用說明']),
+check('只 @ 沒接問題也附快速回覆按鈕，記者不用自己打字就能點問（含新增的產業趨勢分析／想問什麼技術）',
+  JSON.stringify(out[0]?.quickReply) === JSON.stringify(['最近有哪些活動', '產業趨勢分析', '想問什麼技術', '媒體邀訪需求', '使用說明']),
   JSON.stringify(out[0]?.quickReply));
 check('只 @ 沒接問題也算「有回答」，續問視窗要續命——不然按鈕點下去（沒有 @）會被當成沒被 @ 安靜吃掉，按鈕變成按了沒反應',
   state.bindings.get('Cgroup1')?.groupSessionUntil > Date.now(), JSON.stringify(state.bindings.get('Cgroup1')));
@@ -884,6 +884,78 @@ check('IEK 抓取失敗時誠實告知抓不到資料，不會噴例外讓記者
 check('抓取失敗時一樣附上聯絡窗口，不是單純說一句抓不到就結束',
   /朱則瑋/.test(out[0]?.text || ''), out[0]?.text);
 check('抓取失敗時沒有呼叫 Anthropic 硬答（沒有 answer 這個 kind）',
+  !out.some(o => o.kind === 'answer'), JSON.stringify(out));
+
+// ── 情境 18：想問什麼技術（回報的新功能，資料來源見 lib/itri-news.js）───────
+// 記者想直接問工研院自己在某項技術上的研發成果，不是在問某一場記者會、也不是在問
+// 整體產業趨勢（那是 industry_trend／情境 17 的事）——資料來源是工研院官網新聞
+// 中心，用記者給的技術名稱當關鍵字去查。跟產業趨勢問答不同，這裡不能直接答：
+// 「想問什麼技術」按鈕本身不是技術名稱，要先問一次、等記者打了名稱才真的去查
+// （見 handleTechQueryMessage() 的說明）。
+
+reset(); await freshModule();
+out = await send('想問什麼技術');
+check('1 對 1 按「想問什麼技術」→ 先問想了解哪一項技術，不會直接硬答',
+  out.length === 1 && out[0]?.kind === 'text' && /想了解工研院哪一項技術/.test(out[0].text),
+  JSON.stringify(out));
+
+out = await send('機器人');
+check('接著打技術名稱 → 真的去查工研院官網新聞（不是被當成一般提問吃掉）',
+  !out.some(o => o.kind === 'answer' && o.event !== 'unknown'), JSON.stringify(out));
+check('system prompt 帶了工研院官網新聞中心查到的標題與摘要，不是空氣',
+  out.some(o => o.sys?.includes('工研院攜AMRA打造足型機器人新標準') && o.sys?.includes('機器人應用落地的最大課題')),
+  JSON.stringify(out.map(o => o.sys?.slice(0, 60))));
+check('最終回覆比對到「機器人」這個技術領域的專屬窗口（不是只給一句「請洽媒體邀訪窗口」）',
+  out.some(o => o.kind === 'text' && /譚宇哲/.test(o.text) && /03-3333333/.test(o.text)),
+  JSON.stringify(out));
+
+// 群組：按鈕在續問視窗內一樣接得住，不用重新 @——跟「邀訪：其他」自由輸入同一套
+// 一次性旗標機制（見 handleTechQueryMessage() 的說明）。
+reset(); await freshModule();
+await sendGroup('@我 想問什麼技術', { mentionSelf: true, mentionText: '@我 ' });
+out = await sendGroup('機器人', { mentionSelf: false });
+check('群組續問視窗內（沒 @）打技術名稱 → 照樣答得到，不會被安靜擋掉',
+  out.some(o => o.kind === 'text' && /譚宇哲/.test(o.text)), JSON.stringify(out));
+
+// 自然語言直接問（不用先按按鈕）：問句裡明確提到「工研院」，routeIntent() 判成
+// tech_query（見 lib/router.js 的說明），用整句原話當關鍵字去查，不用先問一次。
+reset(); await freshModule();
+out = await send('工研院在機器人技術上有什麼進展');
+check('1 對 1 自然語言直接問「工研院在ＸＸ技術上」→ 不用先問一次，直接答',
+  out.some(o => o.kind === 'text' && /譚宇哲/.test(o.text)), JSON.stringify(out));
+
+// 已經綁定某場活動時自然語言問技術題——不該被硬塞進當前活動的問答（那場的知識庫
+// 跟機器人技術無關），也不該打亂原本的活動綁定，跟情境 17 產業趨勢那段同一個道理。
+reset(); await freshModule();
+state.bindings.set('U_reporter', { event_id: 'quad', media_name: '', note: '', bound_at: Date.now() });
+out = await send('工研院在機器人技術上有什麼進展');
+check('1 對 1 綁定中問工研院技術 → 不會被塞進目前綁定活動（quad）的問答',
+  !out.some(o => o.kind === 'answer' && o.event === 'quad'), JSON.stringify(out));
+out = await send('這場的重點是什麼'); // 沒有新線索，應該還在原本那場
+check('答完技術題，活動綁定沒有被打亂，下一題還是原本那場',
+  out[0]?.kind === 'answer' && out[0].event === 'quad', JSON.stringify(out));
+
+// 查無資料是正常結果（工研院官網不是每個技術都報導過，或記者打的詞比較冷門）——
+// 要老實說查不到，不是網站壞了，也不能硬答或裝死。
+reset(); await freshModule();
+state.itriHtml = '';
+await send('想問什麼技術');
+out = await send('這個技術官網完全沒報導過');
+check('查無資料時老實說查不到，不會硬答或裝死',
+  out.length === 1 && out[0]?.kind === 'text' && /沒有找到跟「這個技術官網完全沒報導過」直接相關的報導/.test(out[0].text),
+  JSON.stringify(out));
+check('查無資料時沒有呼叫 Anthropic 硬答（跟「抓取失敗」不同，查無資料不需要問 AI）',
+  !out.some(o => o.kind === 'answer'), JSON.stringify(out));
+
+// 工研院官網抓不到資料（網路問題／網站改版）——誠實告知，不能整支掛掉或裝死，
+// 跟情境 17 IEK 抓取失敗那段同一個原則。
+reset(); await freshModule();
+state.itriFetchFail = true;
+await send('想問什麼技術');
+out = await send('機器人');
+check('抓取失敗時誠實告知抓不到資料，不會噴例外讓記者什麼都收不到',
+  out.length > 0 && out[0]?.kind === 'text' && /暫時抓不到工研院官網的最新資料/.test(out[0].text), JSON.stringify(out));
+check('抓取失敗時沒有呼叫 Anthropic 硬答',
   !out.some(o => o.kind === 'answer'), JSON.stringify(out));
 
 console.log(`\n${fail === 0 ? '✅' : '❌'} 流程測試通過 ${pass}／失敗 ${fail}`);

@@ -2,7 +2,9 @@
 // https://ieknet.iek.org.tw/iekrpt/DefaultFree.aspx 抓回來的真實原始 HTML 節錄
 // （只精簡到 2 則，結構完全比照原文，包含 script/圖片區塊等雜訊，確保 regex
 // 真的是對著「頁面裡混著其他東西」的情況解析，不是對著手工簡化過的乾淨片段）。
-import { parseDigestHtml, formatDigestForPrompt } from '../lib/industry-trends.js';
+import {
+  parseDigestHtml, formatDigestForPrompt, extractSourceIndices, resolveSourceUrls
+} from '../lib/industry-trends.js';
 
 let pass = 0, fail = 0;
 function check(label, cond, detail) {
@@ -66,6 +68,42 @@ const prompt = formatDigestForPrompt(items);
 check('每則都有編號、日期、標題、摘要', /^1\. \[2026\/08\/26\] IEKView/.test(prompt) && prompt.includes('2. [2026/08/10] IEK精華包'), prompt);
 check('空陣列不會噴例外，回空字串', formatDigestForPrompt([]) === '');
 check('undefined 不會噴例外', formatDigestForPrompt(undefined) === '');
+
+console.log('── extractSourceIndices：切掉「來源編號」那行，不外洩給記者 ──');
+{
+  const r = extractSourceIndices('半導體供應鏈正在重組。\n\n來源編號：1');
+  check('切掉標記行後的文字正確', r.text === '半導體供應鏈正在重組。', JSON.stringify(r.text));
+  check('編號解析正確', JSON.stringify(r.indices) === JSON.stringify([1]), JSON.stringify(r.indices));
+}
+{
+  // 實際回報：記者要求「要提供相關網路連結」——多則、全形冒號、逗號中間有空白都要接得住。
+  const r = extractSourceIndices('AI 資料中心正帶動電力設備轉型（8月10日），機械工具市場也在重組（8月26日）。\n來源編號：2, 1');
+  check('多則情況：文字正確', r.text === 'AI 資料中心正帶動電力設備轉型（8月10日），機械工具市場也在重組（8月26日）。', r.text);
+  check('多則情況：編號依序解析', JSON.stringify(r.indices) === JSON.stringify([2, 1]), JSON.stringify(r.indices));
+}
+check('沒有指定冒號也接得住（半形/全形都可能出現）',
+  JSON.stringify(extractSourceIndices('內容\n來源編號 3').indices) === JSON.stringify([3]));
+check('「沒有直接對應的資料」時 AI 不會加這行 → 原樣回傳，不誤判出編號',
+  JSON.stringify(extractSourceIndices('目前免費焦點清單裡沒有直接對應的資料。')) ===
+  JSON.stringify({ text: '目前免費焦點清單裡沒有直接對應的資料。', indices: [] }));
+check('格式不符（AI 沒照格式加，例如漏了「編號」兩字）不會誤切內容',
+  extractSourceIndices('這句話剛好提到來源：本週共有 5 篇。').text === '這句話剛好提到來源：本週共有 5 篇。');
+check('空字串、undefined 不會噴例外', JSON.stringify(extractSourceIndices(undefined)) === JSON.stringify({ text: '', indices: [] }));
+
+console.log('── resolveSourceUrls：編號換回網址 ──');
+const trendItems = [
+  { url: 'https://ieknet.iek.org.tw/iekrpt/rpt_more.aspx?rpt_idno=1' },
+  { url: 'https://ieknet.iek.org.tw/iekrpt/rpt_more.aspx?rpt_idno=2' },
+  { url: 'https://ieknet.iek.org.tw/iekrpt/rpt_more.aspx?rpt_idno=3' }
+];
+check('單一編號換到對的網址', JSON.stringify(resolveSourceUrls([2], trendItems)) === JSON.stringify([trendItems[1].url]));
+check('多個編號依序換好', JSON.stringify(resolveSourceUrls([1, 3], trendItems)) === JSON.stringify([trendItems[0].url, trendItems[2].url]));
+check('超出範圍的編號跳過，不會噴例外或塞 undefined', JSON.stringify(resolveSourceUrls([1, 99, 0], trendItems)) === JSON.stringify([trendItems[0].url]));
+check('重複編號只留一次', JSON.stringify(resolveSourceUrls([1, 1, 1], trendItems)) === JSON.stringify([trendItems[0].url]));
+check('最多附 3 則，不會讓回答後面拖一長串連結', resolveSourceUrls([1, 2, 3, 1, 2], [...trendItems, { url: 'x4' }, { url: 'x5' }]).length === 3);
+check('空陣列 → 空陣列', JSON.stringify(resolveSourceUrls([], trendItems)) === JSON.stringify([]));
+check('items 是空陣列時不會噴例外', JSON.stringify(resolveSourceUrls([1], [])) === JSON.stringify([]));
+check('indices／items 是 undefined 都不會噴例外', JSON.stringify(resolveSourceUrls(undefined, undefined)) === JSON.stringify([]));
 
 console.log(`\n${fail === 0 ? '✅' : '❌'} 產業趨勢清單解析測試通過 ${pass}／失敗 ${fail}`);
 process.exit(fail === 0 ? 0 : 1);

@@ -5,7 +5,7 @@
   "type": "module",
   "engines": { "node": ">=18" },
   "scripts": {
-    "test": "node test/test-router.mjs && node test/test-menu.mjs && node test/test-geo-chart.mjs && node test/test-mention.mjs && node test/test-prompt.mjs && node test/test-industry-trends.mjs && node test/test-flow.mjs && node test/test-og.mjs && node test/training.test.mjs && node test/analytics-media-edit.test.mjs"
+    "test": "node test/test-router.mjs && node test/test-menu.mjs && node test/test-geo-chart.mjs && node test/test-mention.mjs && node test/test-prompt.mjs && node test/test-industry-trends.mjs && node test/test-itri-news.mjs && node test/test-flow.mjs && node test/test-og.mjs && node test/training.test.mjs && node test/analytics-media-edit.test.mjs"
   },
   "dependencies": {
     "@vercel/blob": "2.6.1"

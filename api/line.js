@@ -54,7 +54,10 @@ import {
   CONTACTS_DIR_RANGE, GLOBAL_CONTACT_TOPICS, ensureContactsDirectorySheet,
   parseContactsDirectory, formatGlobalContact, matchGlobalContactByText
 } from '../lib/contacts-directory.js';
-import { fetchIndustryTrendDigest, formatDigestForPrompt } from '../lib/industry-trends.js';
+import {
+  fetchIndustryTrendDigest, formatDigestForPrompt, extractSourceIndices, resolveSourceUrls
+} from '../lib/industry-trends.js';
+import { fetchItriNews, formatNewsForPrompt } from '../lib/itri-news.js';
 
 const EVENTS_RANGE = 'events!A2:R'; // P 欄是 contacts（邀訪窗口分工），Q 欄是 invite_letter（媒體邀請函），R 欄是 invite_letter_chips（活動前快速提問），見 rowToEvent()
 // line_user_id | event_id | media_name | bound_at | last_active | note | group_session_until
@@ -490,6 +493,12 @@ function formatContactReply(contact) {
 // 後台編輯 API 也要讀寫同一份資料，兩邊共用一份定義才不會格式或種子內容兜不起來。
 const CONTACT_TOPIC_RE = /^邀訪[:：](.+)$/; // 主題按鈕送出的固定格式，見 sendGlobalContactMenu()
 const CONTACT_PENDING_NOTE = 'await_contact_topic'; // 按了「其他」，等記者自己打主題的一次性旗標
+// 按了「想問什麼技術」，等記者自己打技術名稱的一次性旗標——跟 CONTACT_PENDING_NOTE
+// 同一欄（line_users F 欄）、同一支 setContactPending() 讀寫，只是存的字串不同。
+// 沒有另外寫一支 setTechQueryPending()：setContactPending() 內部本來就是「不管值是
+// 什麼，寫進 F 欄」的通用寫法，名字雖然掛著 contact，邏輯跟這裡要的完全一樣，見
+// handleTechQueryMessage() 的說明。
+const TECH_QUERY_PENDING_NOTE = 'await_tech_query';
 
 let contactsDirCache = { list: null, expiry: 0 };
 async function getContactsDirectory() {
@@ -627,15 +636,102 @@ async function answerIndustryTrend(replyToken, targetId, text) {
     '如果清單裡沒有明顯對應記者問題的項目，就誠實說「目前免費焦點清單裡沒有直接對應的資料」，不要硬答或東拼西湊。',
     '回答控制在 4 行以內，先講最相關的 1-2 則的重點，並標明是哪一篇、什麼時候發布的。不要用 Markdown 語法（LINE 不會渲染）。',
     '明確讓記者知道這是 IEK 的免費摘要，不是完整報告——不要講得像這就是 IEK 的完整分析或工研院的正式研究結論。',
+    '回答最後另起一行，只用這個格式標出這次引用了清單中第幾則（從 1 開始的編號，可能不只一則，用逗號分隔），例如「來源編號：2,5」；這行只給程式判讀連結用，不算進上面「4 行以內」的限制。如果清單裡沒有直接對應的資料，就不要加這一行。',
     '',
     '【IEK 產業情報網 免費焦點清單，由新到舊】',
     formatDigestForPrompt(items)
   ].join('\n');
 
-  const aiReply = await askAnthropic(systemPrompt, text);
-  const reply = `${aiReply}${contactLine}`;
+  const rawReply = await askAnthropic(systemPrompt, text);
+  // 「來源編號」那行是給程式看的，不能讓記者在 LINE 上看到——extractSourceIndices()
+  // 負責切掉它，回報的意見裡記者要的是接下來附的連結，不是這行原始標記。
+  const { text: aiReply, indices } = extractSourceIndices(rawReply);
+  const urls = resolveSourceUrls(indices, items);
+  // 沒解析到可信編號（AI 沒加這行、格式不符、或判成「沒有直接對應的資料」）就不附
+  // 連結——見 lib/industry-trends.js resolveSourceUrls() 的說明，寧可沒有也不要附錯。
+  const linksBlock = urls.length ? `\n\n🔗 原文連結：\n${urls.join('\n')}` : '';
+  const reply = `${aiReply}${linksBlock}${contactLine}`;
   console.log(`[line] industry_trend q="${text.slice(0, 60)}" reply="${reply.slice(0, 200)}"`);
   await replyOrPush(replyToken, targetId, reply, ['最近有哪些活動', CONTACT_MENU_LABEL]);
+}
+
+// ── 「想問什麼技術」問答（回報的意見，跟產業趨勢問答平行的另一套）──────────
+// 記者想直接問工研院「自己」在某項技術上的研發成果，不是在問某一場記者會、也不是
+// 在問整體產業趨勢（那是 answerIndustryTrend() 的事）——資料來源是工研院官網新聞
+// 中心自己的報導，用記者給的技術名稱當關鍵字去查（見 lib/itri-news.js
+// fetchItriNews() 的說明）。兩支故意不共用同一支：資料源不同、查詢方式不同（這支
+// 要帶關鍵字去查，answerIndustryTrend() 是固定抓最新清單）、結尾的窗口導引邏輯也
+// 不同（這支盡量比對出對應技術領域的窗口，answerIndustryTrend() 固定導向「產業
+// 趨勢分析」那個窗口）——硬併成一支只會讓兩邊互相牽制對方的邏輯。
+//
+// keywordText 兩種來源：①「想問什麼技術」按鈕之後記者自己打的技術名稱（見下面
+// handleTechQueryMessage()）；②記者直接自然語言問「工研院在ＸＸ技術上有什麼
+// 進展」，routeIntent() 判成 tech_query（見 lib/router.js），這種情況把整句原話
+// 當關鍵字去查——工研院官網的關鍵字搜尋是全文檢索，不要求精準比對單一詞彙，整句
+// 拿去查通常比程式自己再猜一次「技術名稱到底是哪幾個字」可靠。
+async function answerTechQuery(replyToken, targetId, keywordText) {
+  const keyword = sanitize(keywordText, 60);
+  const { ok, items } = await fetchItriNews(keyword);
+
+  if (!ok) {
+    // 抓取失敗（網路問題、官網改版）——誠實說抓不到，不要硬答或裝死，跟
+    // answerIndustryTrend() 抓取失敗那條路同一個原則。
+    await replyOrPush(replyToken, targetId,
+      '這部分我暫時抓不到工研院官網的最新資料，建議直接洽媒體邀訪窗口。',
+      [CONTACT_MENU_LABEL, '最近有哪些活動']);
+    return;
+  }
+  if (!items.length) {
+    // 查無資料是很正常的結果（工研院官網不是每個技術都報導過，或記者打的詞比較
+    // 冷門）——不是網站掛了，見 fetchItriNews() 的說明。老實說查不到，直接給邀訪
+    // 窗口讓記者換個管道問，不要硬答或東拼西湊。
+    await replyOrPush(replyToken, targetId,
+      `工研院官網新聞中心目前沒有找到跟「${keyword}」直接相關的報導，建議直接洽媒體邀訪窗口，會有專人協助確認。`,
+      [CONTACT_MENU_LABEL, '最近有哪些活動']);
+    return;
+  }
+
+  const systemPrompt = [
+    '你是工研院 LINE 官方帳號裡負責回答技術相關問題的助理。下面是用記者提供的關鍵字，在「工研院官網新聞中心」查到的相關報導（標題／日期／摘要），這是工研院自己發布的新聞稿摘要，不是完整報告全文。',
+    '只能根據下面清單裡的標題與摘要回答，不要延伸、不要用你自己既有的知識補充清單以外的內容、不要臆測完整報導裡才有但摘要沒寫的細節。',
+    '如果清單裡的項目其實跟記者問的技術關聯不大，就誠實說「目前工研院官網新聞中心沒有找到直接對應的報導」，不要硬答或東拼西湊。',
+    '回答控制在 4 行以內，先講最相關的 1-2 則的重點，並標明是哪一篇、什麼時候發布的。不要用 Markdown 語法（LINE 不會渲染）。',
+    '回答最後另起一行，只用這個格式標出這次引用了清單中第幾則（從 1 開始的編號，可能不只一則，用逗號分隔），例如「來源編號：2,5」；這行只給程式判讀連結用，不算進上面「4 行以內」的限制。如果清單裡沒有直接對應的報導，就不要加這一行。',
+    '',
+    `【工研院官網新聞中心 搜尋「${keyword}」的結果，由新到舊】`,
+    formatNewsForPrompt(items)
+  ].join('\n');
+
+  const rawReply = await askAnthropic(systemPrompt, keywordText);
+  const { text: aiReply, indices } = extractSourceIndices(rawReply);
+  const urls = resolveSourceUrls(indices, items);
+  const linksBlock = urls.length ? `\n\n🔗 原文連結：\n${urls.join('\n')}` : '';
+
+  // 導引窗口：優先用記者的關鍵字比對出對應技術領域的專屬窗口（跟「媒體邀訪需求」
+  // 按鈕裡「其他」自由輸入同一支比對邏輯，見 lib/contacts-directory.js
+  // matchGlobalContactByText() 的說明），比對不到才退回一般性的邀訪窗口指引——
+  // 給得出精準窗口就不要只給一句「請洽邀訪窗口」，記者還要再點一次按鈕才找得到人。
+  const directory = await getContactsDirectory();
+  const contact = matchGlobalContactByText(keyword, directory);
+  const contactLine = contact
+    ? `\n\n想安排採訪或進一步了解，可直接聯繫：\n${formatGlobalContact(contact)}`
+    : '\n\n想安排採訪或進一步了解，請洽媒體邀訪窗口。';
+
+  const reply = `${aiReply}${linksBlock}${contactLine}`;
+  console.log(`[line] tech_query kw="${keyword}" reply="${reply.slice(0, 200)}"`);
+  await replyOrPush(replyToken, targetId, reply, [CONTACT_MENU_LABEL, '最近有哪些活動']);
+}
+
+// 「想問什麼技術」按鈕之後記者自己打的技術名稱——跟 handleContactTopicMessage()
+// 「其他」自由輸入同一個模式：先記一個一次性旗標，下一則不管長什麼樣都當成技術
+// 名稱直接去查，不逼記者用特定句型（「我想問」「請問」之類），也不用 AI 再判斷
+// 一次「這是不是技術名稱」——反正查不到 answerTechQuery() 自己會老實說查不到。
+async function handleTechQueryMessage(replyToken, targetId, text) {
+  const pendingNote = await getStoredNote(targetId);
+  if (pendingNote !== TECH_QUERY_PENDING_NOTE) return false;
+  await setContactPending(targetId, ''); // 一次性：不管查不查得到，用掉這一次就清掉
+  await answerTechQuery(replyToken, targetId, text);
+  return true;
 }
 
 // 正式問答：開輸入中動畫 → 呼叫 Anthropic → reply（失敗 fallback push）→ 寫 qa_log。
@@ -963,9 +1059,31 @@ async function handleMetaIntent(replyToken, userId, text, metaIntent, binding) {
   // 旗標要當場作廢，不然他接下來打的第一句真正的問題會被誤判成在找邀訪窗口
   // （這裡沒辦法只看 binding?.note，因為這個旗標常常是在完全沒有活動綁定時設的）。
   if ((await getStoredNote(userId)) === CONTACT_PENDING_NOTE) await setContactPending(userId, '');
+  // await_tech_query 是「按了『想問什麼技術』，等記者自己打技術名稱」的一次性
+  // 旗標——同一個道理，記者這時候改按了別的選單按鈕，代表他放棄了那次自由輸入，
+  // 旗標要當場作廢，見 handleTechQueryMessage() 的說明。
+  if ((await getStoredNote(userId)) === TECH_QUERY_PENDING_NOTE) await setContactPending(userId, '');
 
   if (metaIntent === 'help') {
     await replyOrPush(replyToken, userId, HELP_TEXT, ['最近有哪些活動']);
+    return;
+  }
+
+  if (metaIntent === 'industry_trend') {
+    // 直接答，不用像 tech_query 那樣先問一次——「產業趨勢分析」按鈕／文字本身
+    // 就夠明確，answerIndustryTrend() 拿按鈕送出的原始文字當問題也答得出東西
+    // （固定抓最新清單，不需要記者再給關鍵字），見該支開頭的說明。
+    await answerIndustryTrend(replyToken, userId, text);
+    return;
+  }
+
+  if (metaIntent === 'tech_query') {
+    // 跟「產業趨勢分析」不同，這裡不能直接答——「想問什麼技術」本身不是一個技術
+    // 名稱，answerTechQuery() 需要記者給關鍵字才查得到東西。先問一次、記一個
+    // 一次性旗標，下一則不管記者打什麼都當成技術名稱去查，見 handleTechQueryMessage()。
+    await setContactPending(userId, TECH_QUERY_PENDING_NOTE);
+    await replyOrPush(replyToken, userId,
+      '請問您想了解工研院哪一項技術呢？直接輸入技術名稱即可，例如：機器人、半導體封裝、AI 晶片。');
     return;
   }
 
@@ -1043,6 +1161,13 @@ async function handleUnbound(replyToken, userId, text, { silentOnOther = false, 
   if (intent === 'industry_trend') {
     // 不做軟綁定——這題跟任何一場活動都無關，沒有「場次」可以綁。
     await answerIndustryTrend(replyToken, userId, text);
+    return;
+  }
+
+  if (intent === 'tech_query') {
+    // 記者直接問「工研院在ＸＸ技術上有什麼進展」這種完整句子，不用先問一次
+    // 要查什麼——整句原話就有足夠的關鍵字，見 answerTechQuery() 開頭的說明。
+    await answerTechQuery(replyToken, userId, text);
     return;
   }
 
@@ -1147,12 +1272,16 @@ async function handleGroupEvent(replyToken, ev) {
     // 回報的意見：舊文案只教「怎麼問」（例句只有「最近有哪些活動」），沒講「可以
     // 問什麼」——群組裡第一次 @ 我們的人常常就是只打個 @ 試探，看到的卻只有一句
     // 操作說明，猜不到「媒體邀訪需求」這條路也走得通。改成先簡短自我介紹，同時
-    // 把記者最常問的兩個方向（活動查詢／邀訪窗口）都講出來，再附快速回覆按鈕讓
-    // 對方不用自己打字。
+    // 把記者最常問的方向都講出來，再附快速回覆按鈕讓對方不用自己打字。
+    //
+    // 回報的意見（第二次）：群組快速回覆也要加上「產業趨勢分析」「想問什麼技術」
+    // 這兩個新入口，跟 1 對 1 圖文選單同步——群組裡沒有持續顯示的圖文選單，這則
+    // 歡迎訊息附的按鈕就是群組唯一一次看得到「還能問什麼」的機會，兩個新能力沒
+    // 放進來的話，群組裡的記者根本不會知道可以這樣問。
     if (mentioned) {
       await replyOrPush(replyToken, groupId,
-        '你好，我是工研院 AI 助手米亞 🙂\n想了解最近有哪些活動、或是媒體邀訪需求，都歡迎直接問我！\n請在 @ 我的後面接著打問題，或點下面的按鈕：',
-        ['最近有哪些活動', CONTACT_MENU_LABEL, '使用說明']);
+        '你好，我是工研院 AI 助手米亞 🙂\n想了解最近有哪些活動、產業趨勢、工研院技術，或是媒體邀訪需求，都歡迎直接問我！\n請在 @ 我的後面接著打問題，或點下面的按鈕：',
+        ['最近有哪些活動', '產業趨勢分析', '想問什麼技術', CONTACT_MENU_LABEL, '使用說明']);
       // 這則回覆本身也附了按鈕，記者點下去送出的是沒有 @ 的純文字——續問視窗沒開
       // 的話會被 handleGroupEvent() 開頭那段「沒被 @ 又不在視窗內 → 安靜」擋掉，
       // 按鈕就變成「按了沒反應」。跟其餘所有「有回答」的路徑一樣，這裡也要續命。
@@ -1197,6 +1326,13 @@ async function handleGroupMessage(replyToken, groupId, text, { mentioned }) {
   // 全域邀訪窗口的主題按鈕／自由輸入（見 handleContactTopicMessage() 的說明）——
   // 跟 metaIntent 同一優先順序，命中就直接處理，不會被送進當前綁定活動的問答。
   if (await handleContactTopicMessage(replyToken, groupId, text)) {
+    await touchGroupSession(groupId);
+    return;
+  }
+
+  // 「想問什麼技術」按鈕之後記者打的技術名稱（見 handleTechQueryMessage() 的說明）——
+  // 同一優先順序，命中就直接查、不會被送進當前綁定活動的問答。
+  if (await handleTechQueryMessage(replyToken, groupId, text)) {
     await touchGroupSession(groupId);
     return;
   }
@@ -1251,6 +1387,13 @@ async function handleGroupMessage(replyToken, groupId, text, { mentioned }) {
   // 續問視窗續命。
   if (routed.intent === 'industry_trend') {
     await answerIndustryTrend(replyToken, groupId, text);
+    await touchGroupSession(groupId);
+    return;
+  }
+
+  // 同上，只是問的是工研院自己的技術，不是整體產業趨勢——一樣不動活動綁定。
+  if (routed.intent === 'tech_query') {
+    await answerTechQuery(replyToken, groupId, text);
     await touchGroupSession(groupId);
     return;
   }
@@ -1384,6 +1527,9 @@ async function handleEvent(ev) {
   // 跟 metaIntent 同一優先順序，命中就直接處理，不會被送進當前綁定活動的問答。
   if (await handleContactTopicMessage(replyToken, userId, text)) return;
 
+  // 「想問什麼技術」按鈕之後記者打的技術名稱（見 handleTechQueryMessage() 的說明）。
+  if (await handleTechQueryMessage(replyToken, userId, text)) return;
+
   if (!binding) {
     await handleUnbound(replyToken, userId, text);
     return;
@@ -1471,6 +1617,12 @@ async function handleEvent(ev) {
   // 原本那場。
   if (routed.intent === 'industry_trend') {
     await answerIndustryTrend(replyToken, userId, text);
+    return;
+  }
+
+  // 同上，只是問的是工研院自己的技術，不是整體產業趨勢——一樣不動活動綁定。
+  if (routed.intent === 'tech_query') {
+    await answerTechQuery(replyToken, userId, text);
     return;
   }
 
