@@ -828,8 +828,9 @@ check('沒綁定、1 對 1 問產業趨勢 → 走 industry_trend，不是掉進
 check('system prompt 裡帶了 IEK 清單的標題與摘要，不是空氣',
   out.some(o => o.sys?.includes('半導體先進封裝供需展望') && o.sys?.includes('先進封裝需求持續攀升')),
   JSON.stringify(out.map(o => o.sys?.slice(0, 50))));
-check('最終回覆附上「產業趨勢分析」這個既有全域窗口的聯絡資訊（朱則瑋）',
-  out.some(o => o.kind === 'text' && /朱則瑋/.test(o.text) && /0934-266-766/.test(o.text)), JSON.stringify(out));
+check('最終回覆附上警語＋公關窗口聯絡資訊，用使用者要求的措辭（僅供參考，正式媒體報導引用請聯繫 公關窗口）',
+  out.some(o => o.kind === 'text' && /僅供參考，正式媒體報導引用請聯繫 公關窗口 朱則瑋/.test(o.text) && /0934-266-766/.test(o.text)),
+  JSON.stringify(out));
 check('最終回覆附快速回覆按鈕（活動列表／媒體邀訪需求），不是只丟一句話就結束',
   out.some(o => o.kind === 'text' && JSON.stringify(o.quickReply) === JSON.stringify(['最近有哪些活動', '媒體邀訪需求'])),
   JSON.stringify(out));
@@ -838,6 +839,17 @@ reset(); await freshModule();
 out = await sendGroup('@我 AI晶片產業現況如何', { mentionSelf: true, mentionText: '@我 ' });
 check('群組 @ 問產業趨勢 → 一樣答得到',
   out.some(o => o.kind === 'text' && /朱則瑋/.test(o.text)), JSON.stringify(out));
+
+// 後台「邀訪窗口分工」還沒填「產業趨勢分析」這個主題的電話（或整個主題都還沒建）
+// 時，要退回使用者確認過的預設號碼，讓功能一上線就能用，不用等同仁先去後台補
+// 資料；一旦後台補上了任一欄，上面的情境已經證明會改用後台那組，這裡只測「完全
+// 沒有」的那條退路。
+reset(); await freshModule();
+state.contactsDirectory = ['生醫｜生醫所｜丁嘉琳｜03-1111111｜lineid_ding｜智慧醫療、醫材相關技術'].join('\n');
+out = await send('半導體現在有什麼趨勢');
+check('後台完全沒設定「產業趨勢分析」窗口時，退回程式內建的預設聯絡人與電話',
+  out.some(o => o.kind === 'text' && /僅供參考，正式媒體報導引用請聯繫 公關窗口 朱則瑋　📞 0934-267-766/.test(o.text)),
+  JSON.stringify(out));
 
 // 已經綁定某場活動時問產業趨勢題——不該被硬塞進當前活動的問答（那場的知識庫
 // 跟半導體產業趨勢無關，AI 只會說「這部分我沒有資料」），也不該打亂原本的

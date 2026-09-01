@@ -588,19 +588,25 @@ async function handleContactTopicMessage(replyToken, targetId, text) {
 //
 // 只用 IEK 免費焦點清單本身就有的標題＋日期＋摘要回答，不呼叫網頁版那套帶知識庫
 // 全文的 buildSystemPrompt()——這裡的資料來源、規則完全不同，硬塞進同一支反而
-// 要多加一堆「這不是活動內容」的例外判斷。想要更完整的分析或安排採訪，一律導向
-// events!contacts_directory 裡「產業趨勢分析」這個既有主題的窗口（批次 9 就有，
-// 目前是朱則瑋）——不在這裡另外寫死聯絡資訊，同仁在後台改窗口或補電話，這裡自動
-// 跟著更新，不需要改程式碼。
+// 要多加一堆「這不是活動內容」的例外判斷。回答結尾一律附上警語＋公關窗口聯絡
+// 資訊（使用者原話：「僅供參考，正式媒體報導引用請聯繫 公關窗口 朱則瑋」）——
+// 這是 IEK 的免費摘要，不是正式新聞稿，記者可能直接截圖引用，跟
+// lib/prompt.js buildSystemPrompt() 既有的「內容僅供參考，以工研院官網新聞稿
+// 或發言為準」警語同一種目的。
+//
+// 優先讀 events!contacts_directory 裡「產業趨勢分析」這個既有主題的窗口
+// （批次 9 就有，同仁可在後台「邀訪窗口分工」改名字或補電話，這裡自動跟著
+// 更新，不需要改程式碼）；那個主題目前還沒填電話，name／phone 個別退回使用者
+// 確認過的號碼當預設值，讓這個功能一上線就能用，不用等同仁先去後台補資料——
+// 之後同仁在後台把任一欄填了，這裡就自動改用後台那組，不是永遠鎖死這組預設值。
+const FALLBACK_INDUSTRY_TREND_CONTACT = { name: '朱則瑋', phone: '0934-267-766' };
+
 async function industryTrendContactLine() {
   const directory = await getContactsDirectory();
-  const contact = directory.find(c => c.topic === '產業趨勢分析');
-  if (contact) {
-    const phone = contact.phone ? `　📞 ${contact.phone}` : '';
-    const lineId = contact.lineId ? `　LINE：${contact.lineId}` : '';
-    return `\n\n想要更完整的分析或安排採訪，歡迎聯絡：${contact.name}${phone}${lineId}`;
-  }
-  return '\n\n想要更完整的分析或安排採訪，建議洽產業趨勢分析窗口（可請同仁到後台「邀訪窗口分工」設定聯絡方式）。';
+  const configured = directory.find(c => c.topic === '產業趨勢分析');
+  const name = configured?.name || FALLBACK_INDUSTRY_TREND_CONTACT.name;
+  const phone = configured?.phone || FALLBACK_INDUSTRY_TREND_CONTACT.phone;
+  return `\n\n僅供參考，正式媒體報導引用請聯繫 公關窗口 ${name}　📞 ${phone}`;
 }
 
 async function answerIndustryTrend(replyToken, targetId, text) {
