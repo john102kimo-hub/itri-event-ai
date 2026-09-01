@@ -340,6 +340,33 @@ out = await sendGroup('媒體邀訪需求', { mentionSelf: false });
 check('點下「只 @」引導附的按鈕（媒體邀訪需求）→ 續問視窗內接得住、不用重新 @，並正確導向全域邀訪窗口清單',
   out.length > 0 && out[0]?.kind === 'text' && /技術領域/.test(out[0].text), JSON.stringify(out));
 
+// 實際回報的答非所問（附截圖）：群組裡 @ 問「妳能幫我什麼」，因為不含「怎麼／
+// 如何」，detectMetaIntent() 舊版的 HELP_ABOUT_BOT_RE 接不住，掉進 routeIntent()
+// 被判成 other，回一句跟問題完全對不上的「不確定您想問哪一場活動」——記者問的
+// 明明是「你能做什麼」。批次 19 加了 HELP_CAPABILITY_RE／HELP_WHOAMI_RE 接住
+// 這類問句，改成回 HELP_TEXT。
+reset(); await freshModule();
+out = await sendGroup('@我 妳能幫我什麼', { mentionSelf: true, mentionText: '@我 ' });
+check('群組 @ 問「妳能幫我什麼」→ 回使用說明，不是答非所問的「不確定您想問哪一場活動」',
+  out[0]?.kind === 'text' && /怎麼使用這個帳號/.test(out[0].text) && !/不確定/.test(out[0].text),
+  JSON.stringify(out));
+
+// 沒有 @ 到、單純打字問「妳能幫我什麼」（1 對 1，每則訊息本來就都算在跟我們講話）
+// 也要走同一條路，不是群組限定的修法。
+reset(); await freshModule();
+out = await send('你是誰');
+check('1 對 1 問「你是誰」→ 回使用說明，不是答非所問的萬用兜底文案',
+  out[0]?.kind === 'text' && /怎麼使用這個帳號/.test(out[0].text), JSON.stringify(out));
+
+// 迴歸：真的問不出所以然的話，兜底文案還在，只是語氣改軟、多附「媒體邀訪需求」
+// 按鈕——不是把安全網拿掉。
+reset(); await freshModule();
+out = await send('隨便問一句跟任何主題都不相關的話');
+check('真的判不出意圖 → 兜底文案仍然出現，且附上三個核心入口按鈕',
+  out[0]?.kind === 'text' && /沒抓到您想問哪一場活動/.test(out[0].text) &&
+  JSON.stringify(out[0]?.quickReply) === JSON.stringify(['最近有哪些活動', '媒體邀訪需求', '使用說明']),
+  JSON.stringify(out));
+
 // 群組軟綁定：@ 問過一次某場之後，同群組其他人 @ 問後續問題不用重打活動名稱
 reset(); await freshModule();
 await sendGroup('@我 半導體先進封裝技術發表會的重點', { mentionSelf: true, mentionText: '@我 ' });
@@ -786,6 +813,78 @@ out = await send('最近有哪些活動', 'U_staff');
   check('職員模式查活動列表不會多出媒體邀訪需求這顆按鈕', !labels.includes('媒體邀訪需求'), JSON.stringify(labels));
   check('職員模式查活動列表的文字裡也不會多出媒體邀訪需求', !/媒體邀訪需求/.test(out[0]?.text || ''), out[0]?.text);
 }
+
+// ── 情境 17：產業趨勢問答（批次 20，資料來源見 lib/industry-trends.js）───────
+// 記者問的不是某一場記者會的內容，是整體產業趨勢／市場現況（例如「半導體最近
+// 有什麼趨勢」）——routeIntent() 判成 industry_trend，答案用 IEK 產業情報網
+// 免費焦點清單（只有標題／日期／約 100 字摘要，不是完整報告），結尾一律附上
+// 「產業趨勢分析」這個既有全域窗口（見 lib/contacts-directory.js），不管有沒有
+// 綁定活動、1 對 1 還是群組都答得到。
+
+reset(); await freshModule();
+out = await send('半導體現在有什麼趨勢');
+check('沒綁定、1 對 1 問產業趨勢 → 走 industry_trend，不是掉進「不確定您想問哪一場活動」',
+  out.length > 0 && !/沒抓到您想問哪一場活動/.test(out.map(o => o.text).join('')), JSON.stringify(out));
+check('system prompt 裡帶了 IEK 清單的標題與摘要，不是空氣',
+  out.some(o => o.sys?.includes('半導體先進封裝供需展望') && o.sys?.includes('先進封裝需求持續攀升')),
+  JSON.stringify(out.map(o => o.sys?.slice(0, 50))));
+check('最終回覆附上警語＋公關窗口聯絡資訊，用使用者要求的措辭（僅供參考，正式媒體報導引用請聯繫 公關窗口）',
+  out.some(o => o.kind === 'text' && /僅供參考，正式媒體報導引用請聯繫 公關窗口 朱則瑋/.test(o.text) && /0934-266-766/.test(o.text)),
+  JSON.stringify(out));
+check('最終回覆附快速回覆按鈕（活動列表／媒體邀訪需求），不是只丟一句話就結束',
+  out.some(o => o.kind === 'text' && JSON.stringify(o.quickReply) === JSON.stringify(['最近有哪些活動', '媒體邀訪需求'])),
+  JSON.stringify(out));
+
+reset(); await freshModule();
+out = await sendGroup('@我 AI晶片產業現況如何', { mentionSelf: true, mentionText: '@我 ' });
+check('群組 @ 問產業趨勢 → 一樣答得到',
+  out.some(o => o.kind === 'text' && /朱則瑋/.test(o.text)), JSON.stringify(out));
+
+// 後台「邀訪窗口分工」還沒填「產業趨勢分析」這個主題的電話（或整個主題都還沒建）
+// 時，要退回使用者確認過的預設號碼，讓功能一上線就能用，不用等同仁先去後台補
+// 資料；一旦後台補上了任一欄，上面的情境已經證明會改用後台那組，這裡只測「完全
+// 沒有」的那條退路。
+reset(); await freshModule();
+state.contactsDirectory = ['生醫｜生醫所｜丁嘉琳｜03-1111111｜lineid_ding｜智慧醫療、醫材相關技術'].join('\n');
+out = await send('半導體現在有什麼趨勢');
+check('後台完全沒設定「產業趨勢分析」窗口時，退回程式內建的預設聯絡人與電話',
+  out.some(o => o.kind === 'text' && /僅供參考，正式媒體報導引用請聯繫 公關窗口 朱則瑋　📞 0934-267-766/.test(o.text)),
+  JSON.stringify(out));
+
+// 已經綁定某場活動時問產業趨勢題——不該被硬塞進當前活動的問答（那場的知識庫
+// 跟半導體產業趨勢無關，AI 只會說「這部分我沒有資料」），也不該打亂原本的
+// 活動綁定：這題答完，下一題沒有新線索的話還是回到原本那場。
+reset(); await freshModule();
+state.bindings.set('U_reporter', { event_id: 'quad', media_name: '', note: '', bound_at: Date.now() });
+out = await send('半導體現在有什麼趨勢');
+check('1 對 1 綁定中問產業趨勢 → 不會被塞進目前綁定活動（quad）的問答',
+  !out.some(o => o.kind === 'answer' && o.event === 'quad'), JSON.stringify(out));
+check('1 對 1 綁定中問產業趨勢 → 正確答上（附聯絡窗口），不是答非所問',
+  out.some(o => o.kind === 'text' && /朱則瑋/.test(o.text)), JSON.stringify(out));
+out = await send('這場的重點是什麼'); // 沒有新線索，應該還在原本那場
+check('答完產業趨勢題，活動綁定沒有被打亂，下一題還是原本那場',
+  out[0]?.kind === 'answer' && out[0].event === 'quad', JSON.stringify(out));
+
+// 群組續問視窗內（沒有再 @）問產業趨勢——這是明確可回答的意圖，不是「猜不出來」，
+// 不該被 silentOnOther 那道安靜門檻擋掉，而且答完要幫續問視窗續命。
+reset(); await freshModule();
+await sendGroup('@我 半導體先進封裝技術發表會的重點', { mentionSelf: true, mentionText: '@我 ' });
+out = await sendGroup('市場現況怎麼樣', { mentionSelf: false });
+check('群組續問視窗內（沒 @）問產業趨勢 → 照樣答得到，不會被安靜擋掉',
+  out.some(o => o.kind === 'text' && /朱則瑋/.test(o.text)), JSON.stringify(out));
+check('答完產業趨勢題續問視窗有續命',
+  state.bindings.get('Cgroup1')?.groupSessionUntil > Date.now(), JSON.stringify(state.bindings.get('Cgroup1')));
+
+// IEK 網站抓不到資料（網路問題／網站改版）——誠實告知，不能整支掛掉或裝死。
+reset(); await freshModule();
+state.iekFetchFail = true;
+out = await send('半導體現在有什麼趨勢');
+check('IEK 抓取失敗時誠實告知抓不到資料，不會噴例外讓記者什麼都收不到',
+  out.length > 0 && out[0]?.kind === 'text' && /暫時抓不到最新的產業趨勢資料/.test(out[0].text), JSON.stringify(out));
+check('抓取失敗時一樣附上聯絡窗口，不是單純說一句抓不到就結束',
+  /朱則瑋/.test(out[0]?.text || ''), out[0]?.text);
+check('抓取失敗時沒有呼叫 Anthropic 硬答（沒有 answer 這個 kind）',
+  !out.some(o => o.kind === 'answer'), JSON.stringify(out));
 
 console.log(`\n${fail === 0 ? '✅' : '❌'} 流程測試通過 ${pass}／失敗 ${fail}`);
 process.exit(fail === 0 ? 0 : 1);
