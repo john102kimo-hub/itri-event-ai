@@ -932,6 +932,20 @@ out = await sendGroup('機器人', { mentionSelf: false });
 check('群組續問視窗內（沒 @）打技術名稱 → 照樣答得到，不會被安靜擋掉',
   out.some(o => o.kind === 'text' && /譚宇哲/.test(o.text)), JSON.stringify(out));
 
+// 實際回報（附截圖）：群組裡 @ 問「媒體邀訪需求」→ 點「邀訪：產業趨勢分析」拿到
+// 窗口聯絡人之後，接著（沒有再 @）打「技術呢」想換個主題繼續問，完全沒有反應，
+// 體感是「卡住了，無法持續聊」——跟批次 19「你能做啥」同一種落空：這句話沒對到
+// 任何規則，掉進 routeIntent() 判成 other，續問視窗內沒被 @ 到時 other 是安靜門檻。
+// 補進 TECH_QUERY_EXACT_RE 之後，「技術呢」會被 detectMetaIntent() 直接認出來，
+// 不會走到 routeIntent() 那一步，也就不會被安靜擋掉。
+reset(); await freshModule();
+await sendGroup('@我 媒體邀訪需求', { mentionSelf: true, mentionText: '@我 ' });
+await sendGroup('邀訪：產業趨勢分析', { mentionSelf: false });
+out = await sendGroup('技術呢', { mentionSelf: false });
+check('群組續問視窗內（沒 @）打「技術呢」→ 先問想了解哪一項技術，不會被安靜擋掉',
+  out.length === 1 && out[0]?.kind === 'text' && /想了解工研院哪一項技術/.test(out[0]?.text || ''),
+  JSON.stringify(out));
+
 // 自然語言直接問（不用先按按鈕）：問句裡明確提到「工研院」，routeIntent() 判成
 // tech_query（見 lib/router.js 的說明），用整句原話當關鍵字去查，不用先問一次。
 reset(); await freshModule();
