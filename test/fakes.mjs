@@ -3,6 +3,29 @@
 // G chips, H images, I greeting, J organizer, K edit_code, L time, M venue, N type,
 // O press_contact, P contacts（邀訪窗口分工）, Q invite_letter（媒體邀請函）,
 // R invite_letter_chips（活動前快速提問）
+
+// 全域技術窗口分工（contacts_directory!A2，見 lib/contacts-directory.js）的預設假
+// 資料，格式：主題｜單位｜聯絡人｜電話｜LINE ID｜簡介，一行一組。獨立成常數（不是
+// 直接寫進 state 物件字面量）是因為 reset() 要能把它還原回這份預設值——見 reset()
+// 開頭的說明。
+const DEFAULT_CONTACTS_DIRECTORY = [
+  '生醫｜生醫所｜丁嘉琳｜03-1111111｜lineid_ding｜智慧醫療、醫材相關技術',
+  '機械｜機械所｜林潔玲｜｜｜機械、自動化系統相關技術',
+  '機器人｜技術傳播組｜譚宇哲｜03-3333333｜｜機器人相關技術議題',
+  '產業趨勢分析｜產科國際所｜朱則瑋｜0934-266-766｜｜產業趨勢分析、國際布局相關議題',
+  '其他｜｜朱則瑋｜03-9999999｜｜找不到對應窗口時的綜合聯絡人'
+].join('\n');
+
+// lib/industry-trends.js 抓的 IEK 免費焦點清單假 HTML（結構節錄自實測的真實網站
+// 原始碼，見 test-industry-trends.mjs 開頭的說明）。同樣獨立成常數，理由跟上面
+// DEFAULT_CONTACTS_DIRECTORY 一樣。
+const DEFAULT_IEK_HTML = `<div class="listItem row no-gutters"><article class="col-md-11 listText"><h2 class="g-font-weight-600"><a href="./rpt_more.aspx?actiontype=rpt&amp;indu_idno=0&amp;domain=2&amp;rpt_idno=997557802" title="IEK精華包：半導體先進封裝供需展望">IEK精華包：半導體先進封裝供需展望</a></h2><small class="date">2026/08/26</small><p> 先進封裝需求持續攀升，帶動測試與載板產能吃緊。 </p></article></div>`;
+
+// lib/itri-news.js 抓的工研院官網新聞中心清單假 HTML（結構節錄自實測的真實網站
+// 原始碼，見 test-itri-news.mjs 開頭的說明）。同樣獨立成常數，理由跟上面
+// DEFAULT_CONTACTS_DIRECTORY 一樣。
+const DEFAULT_ITRI_HTML = `<dl class="Bb_dotted pic_list sline" id="divContent"><dt><img src='x.webp' alt='x'></dt><dd><a href='ListStyle.aspx?DisplayStyle=01_content&SiteID=1&MmmID=1036276263153520257&MGID=115082015023981066' class='title'>&#24037;&#30740;&#38498;&#25884;AMRA&#25171;&#36896;&#36275;&#22411;&#27231;&#22120;&#20154;&#26032;&#27161;&#28310;</a><div class='Lb'><p>日期：2026/08/20</p></div><p>&#27231;&#22120;&#20154;&#25033;&#29992;&#33853;&#22320;&#30340;&#26368;&#22823;&#35506;&#38988;&#65292;&#24050;&#32147;&#24478;&#25171;&#36896;&#29986;&#21697;&#12290;</p></dd></dl>`;
+
 export const state = {
   events: [
     ['quad', '經濟部四足機器人國產研發平台發表記者會', '#0F9E7A', '【新聞稿】四足機器人…', 'ended', '2026-08-08', '重點\n應用', '', '', '工研院', 'code1', '', '', '', '王小明 03-1111111',
@@ -25,29 +48,44 @@ export const state = {
   linkedMenus: new Map(),    // userId → richMenuId（per-user 連結）
   // 全域技術窗口分工（contacts_directory!A2，見 lib/contacts-directory.js）。
   // 格式：主題｜單位｜聯絡人｜電話｜LINE ID｜簡介，一行一組。
-  contactsDirectory: [
-    '生醫｜生醫所｜丁嘉琳｜03-1111111｜lineid_ding｜智慧醫療、醫材相關技術',
-    '機械｜機械所｜林潔玲｜｜｜機械、自動化系統相關技術',
-    '產業趨勢分析｜產科國際所｜朱則瑋｜0934-266-766｜｜產業趨勢分析、國際布局相關議題',
-    '其他｜｜朱則瑋｜03-9999999｜｜找不到對應窗口時的綜合聯絡人'
-  ].join('\n'),
+  contactsDirectory: DEFAULT_CONTACTS_DIRECTORY,
   // lib/industry-trends.js 抓的 IEK 免費焦點清單——api/line.js 的 getIndustryTrendDigest()
   // 呼叫 fetchIndustryTrendDigest()，內部打 https://ieknet.iek.org.tw/...，這裡用
   // installFetchStub() 攔截並回傳這份假 HTML（結構節錄自實測的真實網站原始碼，
   // 見 test-industry-trends.mjs 開頭的說明）。iekFetchFail 設 true 可以模擬抓取失敗。
-  iekHtml: `<div class="listItem row no-gutters"><article class="col-md-11 listText"><h2 class="g-font-weight-600"><a href="./rpt_more.aspx?actiontype=rpt&amp;indu_idno=0&amp;domain=2&amp;rpt_idno=997557802" title="IEK精華包：半導體先進封裝供需展望">IEK精華包：半導體先進封裝供需展望</a></h2><small class="date">2026/08/26</small><p> 先進封裝需求持續攀升，帶動測試與載板產能吃緊。 </p></article></div>`,
-  iekFetchFail: false
+  iekHtml: DEFAULT_IEK_HTML,
+  iekFetchFail: false,
+  // lib/itri-news.js 抓的工研院官網新聞中心清單——api/line.js 的 answerTechQuery()
+  // 呼叫 fetchItriNews()，內部打 https://www.itri.org.tw/ListStyle.aspx?...，這裡用
+  // installFetchStub() 攔截並回傳這份假 HTML（結構節錄自實測的真實網站原始碼，
+  // 見 test-itri-news.mjs 開頭的說明）。itriFetchFail 設 true 模擬抓取失敗；
+  // itriHtml 設空字串模擬「查無資料」（HTTP 200 但清單是空的，兩者是不同情境，
+  // 見 fetchItriNews() 的說明）。
+  itriHtml: DEFAULT_ITRI_HTML,
+  itriFetchFail: false
 };
 export const sent = [];
 
 // 只清假資料。api/line.js 那邊的模組層快取（eventsCache／lineUsersCache）從外面
 // 碰不到，由 test-flow.mjs 的 freshModule() 重新 import 整支模組來清。
+//
+// ⚠️ contactsDirectory／iekHtml／itriHtml 這三個自由格式的假資料也要還原：批次 20
+// 的產業趨勢情境會把 contactsDirectory 整個換成另一份（測「後台完全沒設定窗口」
+// 退回預設值那條路），這支原本沒有把它還原，之後任何情境如果剛好用到
+// getContactsDirectory() 就會讀到殘留的那份精簡版，不是預期的完整清單——這是實際
+// 加「想問什麼技術」測試時踩到的坑：情境 18 比對「機器人」窗口，讀到的卻是被
+// 情境 17 換掉、沒有「機器人」這個主題的精簡版，比對永遠落空。三個都在這裡統一
+// 還原，之後不管哪個情境換了假資料，後面的情境都拿得回原本的預設值。
 export function reset() {
   state.bindings.clear();
   state.staff.length = 0;
   state.richMenus.length = 0;
   state.linkedMenus.clear();
+  state.contactsDirectory = DEFAULT_CONTACTS_DIRECTORY;
+  state.iekHtml = DEFAULT_IEK_HTML;
   state.iekFetchFail = false; // 個別情境會開這個旗標模擬抓取失敗，其餘情境要看到預設值
+  state.itriHtml = DEFAULT_ITRI_HTML;
+  state.itriFetchFail = false;
   sent.length = 0;
 }
 
@@ -186,9 +224,15 @@ function fakeStaffRoute(text) {
 // 關鍵字（quad 場次沒有，但避免以後加了活動撞到）也可能是產業趨勢問題的字，
 // 「趨勢／市場現況／產業現況」這種明確詞優先判成 industry_trend，比較貼近
 // lib/router.js 系統提示裡「跟清單中任何一場都無關」的判斷精神。
+//
+// tech_query 的判斷放在 industry_trend 之前：跟真的系統提示同一個規則（見
+// lib/router.js 的說明），問句裡明確提到「工研院」就判成 tech_query，不管句子
+// 裡是否同時也出現「趨勢」之類的字——這是刻意選的、對 AI 來說夠機械化的判斷依據，
+// 不是猜的。
 function fakeReporterRoute(text, currentEventHint) {
   const ids = matchEventIds(text);
   if (/最近|哪些活動|活動列表/.test(text)) return { intent: 'calendar', event_ids: [], confidence: 'high' };
+  if (/工研院/.test(text)) return { intent: 'tech_query', event_ids: [], confidence: 'high' };
   if (/趨勢|市場現況|產業現況/.test(text)) return { intent: 'industry_trend', event_ids: [], confidence: 'high' };
   if (ids.length) return { intent: 'qa', event_ids: ids, confidence: 'high' };
   if (currentEventHint && !/你覺得/.test(text)) return { intent: 'qa', event_ids: [currentEventHint], confidence: 'high' };
@@ -226,6 +270,13 @@ export function installFetchStub() {
     if (u.includes('ieknet.iek.org.tw')) {
       if (state.iekFetchFail) return { ok: false, status: 500, text: async () => '', json: async () => ({}) };
       return { ok: true, text: async () => state.iekHtml || '' };
+    }
+    // lib/itri-news.js fetchItriNews() 打的工研院官網新聞中心清單頁（含 &keyword=
+    // 搜尋參數，不管有沒有帶關鍵字都回同一份假 HTML——測試要驗證的是「查到結果／
+    // 查無結果／抓取失敗」三種分支，不是真的模擬關鍵字比對）。
+    if (u.includes('itri.org.tw')) {
+      if (state.itriFetchFail) return { ok: false, status: 500, text: async () => '', json: async () => ({}) };
+      return { ok: true, text: async () => state.itriHtml || '' };
     }
     return { ok: false, status: 500, text: async () => '', json: async () => ({}) };
   };

@@ -1327,6 +1327,98 @@ prompt 真的帶了 IEK 清單內容、回覆附上警語與聯絡窗口（使�
 `npm test` 全數重跑通過（新增 `test/test-industry-trends.mjs` 後，`test/` 底下共
 10 個測試檔、合計 460 項全綠燈）。
 
+### 批次 21：「想問什麼技術」問答＋圖文選單改版（工研院官網新聞中心，新功能，2026-09-01）
+
+使用者原話（節錄）：「1對1 圖卡 活動照片改 產業趨勢分析。使用說明 改想問什麼技術？
+幫我抓工研院官網新聞室去抓取相關資料 https://www.itri.org.tw/ListStyle.aspx?
+DisplayStyle=06&SiteID=1&MmmID=1036276263153520257，如果要進一步詢問，導到媒體
+邀訪窗口聯絡。群組對話 也加入產業趨勢分析、想問什麼技術兩個小按鈕 並且如何記者
+問相關問題也能回答」。
+
+**動工前先查證網站**（跟批次 20 同一個紀律，不是憑空猜規格）：
+- 該網址是工研院官網「新聞中心 > 最新新聞」清單頁，伺服器端直接渲染，無 JS、
+  無防爬蟲機制，跟 IEK 那頁同一種傳統 ASP.NET 頁面。
+- ⚠️ 關鍵發現：這頁本身就支援關鍵字搜尋——在 `../js_page/DisplayStyle06.js` 裡
+  找到「搜尋」按鈕的 click handler，組出來的是 `...&Page=1&keyword=<關鍵字>` 這個
+  純 GET query string（不是 AJAX API）。這是這個功能能不能真的答得出東西的關鍵：
+  工研院官網橫跨的技術領域太廣，只抓「最新 10 篇」很難剛好蓋到記者問的那個技術，
+  要能用記者給的技術名稱去查才有意義。
+- 每頁固定 10 篇（`lblPageSize` 標籤實測），v1 只看第一頁，跟批次 20 同一個「先求
+  可用」的取捨。
+
+**資料流**（新模組 `lib/itri-news.js`）：`fetchItriNews(keyword)` → `fetch()` 帶
+關鍵字的搜尋結果頁 → `parseNewsListHtml()` 用 regex 挖出 `{title, date, abstract,
+url}` → 回傳 `{ok, items}`，`ok:false` 是「抓取失敗」（網站連不上），`ok:true` 但
+`items` 空陣列是「查無資料」（正常結果，不是官網每個技術都報導過）——兩者要分開
+處理，見該支開頭的說明。`decodeHtmlEntities()` 抽成新的共用模組
+`lib/html-text.js`，`lib/industry-trends.js` 跟這支共用同一份，不重複維護兩份
+幾乎一樣的 HTML 實體解碼邏輯。
+
+**兩顆按鈕、兩套故事，不硬併成一個**：
+- 「產業趨勢分析」：直接答，跟打字問「最近趨勢」是同一條路（`detectMetaIntent()`
+  新增完全比對規則，見 `lib/menu.js`），資料來源仍是批次 20 的 IEK 免費焦點清單。
+- 「想問什麼技術」：不能直接答——按鈕本身不是技術名稱。先問一次「想了解工研院
+  哪一項技術」，記一個一次性旗標（`TECH_QUERY_PENDING_NOTE`，複用
+  `setContactPending()` 讀寫 `line_users` F 欄，跟批次 9「邀訪：其他」那個一次性
+  旗標同一支、不同字串），下一則不管記者打什麼都當成技術名稱直接去查
+  （`handleTechQueryMessage()`），跟 `handleContactTopicMessage()` 同一個模式、
+  同一個優先順序（1 對 1、群組都要接，且要排在 `binding` 判斷之前）。
+
+**自然語言也要能問**（記者不用先按按鈕）：`lib/router.js` 的 `routeIntent()` 從
+四選一（`calendar/qa/industry_trend/other`）擴成五選一，多一種 `tech_query`。
+判斷依據刻意選「問句裡有沒有明確提到『工研院』」這個機械化訊號，不是憑語意猜
+「這是在問市場還是在問工研院自己」——兩者用詞常常很像（「機器人技術最近有什麼
+進展」既可能是問整體市場、也可能是問工研院自己），硬要 AI 靠語意分辨風險高，
+用「有沒有點名工研院」這個明確訊號分流才可靠。三個呼叫端都要接，跟批次 20 加
+`industry_trend` 時同一套：`handleUnbound()`、`handleEvent()` 綁定中的判斷、
+`handleGroupMessage()` 綁定中的判斷，一律不做軟綁定、不打亂原本活動綁定。
+
+**回答邏輯**（`answerTechQuery()`，`api/line.js`）：跟 `answerIndustryTrend()`
+平行的另一支，不共用——資料源不同、查詢方式不同（這支要帶關鍵字去查，
+`answerIndustryTrend()` 是固定抓最新清單）、結尾窗口導引邏輯也不同。system prompt
+沿用批次 20 加的「來源編號」機制（見批次 20 之後的另一個修正：`extractSourceIndices()`
+／`resolveSourceUrls()`，讓 AI 引用了清單第幾則就換回對應網址附在回覆後面，不用
+另外開一批）。結尾窗口導引**優先用記者的關鍵字比對出對應技術領域的專屬窗口**
+（複用批次 9 `lib/contacts-directory.js` 的 `matchGlobalContactByText()`——記者
+打「機器人」，直接給機器人技術領域那位窗口，不是只回一句「請洽媒體邀訪窗口」讓
+記者自己再點一次按鈕），比對不到才退回一般性的邀訪窗口指引。
+
+**圖文選單改版**（`lib/menu.js` `REPORTER_MENU`）：六格是稀缺資源，把「使用說明」
+換成「想問什麼技術」、「活動照片」換成「產業趨勢分析」——換掉的兩個都沒有真的
+消失，「使用說明」還是打這幾個字就叫得出來，「活動照片」也還是打「給我照片」就
+問得到，只是不再佔固定選單的一格。底圖是 `assets/build-richmenu.mjs` 從
+`REPORTER_MENU` 定義自動生成的截圖，改完定義要重新跑這支腳本重新產生
+`public/richmenu-reporter.png`，**上線後同仁還要在 LINE 用職員模式重打一次
+「設定圖文選單」，正式站才會換成新的圖跟新的按鈕行為**（`handleSetupRichMenu()`
+會去抓部署後的 PNG 網址重新建立／連結圖文選單，不是自動生效）。
+
+**群組快速回覆也加了同樣兩顆**：群組沒有持續顯示的圖文選單，「只 @ 沒接問題」
+那則歡迎訊息附的按鈕是群組唯一一次看得到「還能問什麼」的機會（見批次 18），把
+新按鈕加進那則訊息的快速回覆清單，跟 1 對 1 圖文選單同步。
+
+**這批沒有做的事**：
+- 沒有做技術別的自動分類或篩選——關鍵字搜尋直接把記者的原話（或按鈕之後打的
+  技術名稱）丟給工研院官網自己的全文檢索，不在程式碼這層再做一次篩選判斷。
+- 沒有針對搜尋結果做快取——跟批次 20 的 IEK 清單不同，這裡每個關鍵字理論上都是
+  不同的查詢，快取每個關鍵字的價值有限，v1 先求可用、不做這層優化。
+- 沒有動 `lib/staff.js`／`routeStaffIntent()`——這次一樣是媒體端的需求。
+
+**測試**：新增 `test/test-itri-news.mjs`（16 項），`parseNewsListHtml()` 對照實測
+的真實原始 HTML 節錄驗證解析正確；`decodeHtmlEntities()` 抽成 `lib/html-text.js`
+後 `test/test-industry-trends.mjs` 全數重跑仍然通過，證明搬移沒有改變行為。
+`test/test-menu.mjs` 補上兩顆新按鈕的 `detectMetaIntent()` 判斷（含「絕對不能
+誤觸正常提問」的防呆案例）與圖文選單按鈕清單更新。`test/fakes.mjs` 新增工研院
+官網新聞中心網址的 fetch 攔截、`fakeReporterRoute()` 的 `tech_query` 判斷，並把
+`contactsDirectory`／`iekHtml`／`itriHtml` 這三個原本只在物件字面量裡寫死、
+`reset()` 不會還原的假資料抽成獨立常數——這是**實際加測試時踩到的坑**：批次 20
+「後台完全沒設定產業趨勢分析窗口」那個情境會把 `contactsDirectory` 換成精簡版，
+`reset()` 沒有把它還原，導致跑在它後面的新情境讀到殘留的精簡版、找不到「機器人」
+這個主題，比對永遠落空——三個一併抽成常數、`reset()` 統一還原，之後不管哪個
+情境換了假資料，後面的情境都拿得回原本的預設值。`test/test-flow.mjs` 新增情境 18
+（12 項）：按鈕先問再查、答案帶對關鍵字比對到的專屬窗口、群組續問視窗內接得住、
+自然語言直接問工研院技術也答得到且不打亂原本活動綁定、查無資料誠實告知、抓取
+失敗誠實告知且不呼叫 Anthropic。`npm test` 全數重跑通過。
+
 ---
 
 ## 6. system prompt 要加的規則

@@ -60,7 +60,16 @@ const META = {
   '這個機器人可以做什麼': 'help',
   '你是誰': 'help',
   '妳是什麼': 'help',
-  '你是做什麼的': 'help'
+  '你是做什麼的': 'help',
+  // 回報的意見：1 對 1 圖文選單、群組快速回覆新增的兩顆按鈕——按鈕送出的文字要
+  // 被 detectMetaIntent() 認得出來，不然就是「按了沒反應」，跟其餘按鈕同一條規矩。
+  '產業趨勢分析': 'industry_trend',   // ← 圖文選單／群組按鈕送出的文字
+  '產業趨勢': 'industry_trend',
+  '最近趨勢': 'industry_trend',
+  '最新趨勢': 'industry_trend',
+  '想問什麼技術': 'tech_query',       // ← 圖文選單／群組按鈕送出的文字
+  '工研院技術': 'tech_query',
+  '技術詢問': 'tech_query'
 };
 for (const [text, want] of Object.entries(META)) eq(detectMetaIntent(text), want, `detectMetaIntent("${text}")`);
 
@@ -88,7 +97,11 @@ const NOT_META = [
   '你能不能查一下這場記者會幾點開始',  // 含「你能不能」，但後面接著具體內容，是提問
   '你能提供什麼資料',                  // 含「你能…什麼」，但後面還接著「資料」這個受詞
   '這場活動你能幫我查一下嗎',          // 「你能」不在句首，是在問活動內容
-  '你是不是搞錯活動了'                 // 含「你是」，但不是在問「你是誰／什麼」
+  '你是不是搞錯活動了',                // 含「你是」，但不是在問「你是誰／什麼」
+  '半導體產業趨勢對這場活動有什麼影響',  // 含「產業趨勢」，但整句是在問活動內容，不是整句就是那幾個固定詞
+  '這項技術的產業趨勢分析在哪裡下載',    // 含「產業趨勢分析」，但後面還接著別的內容
+  '想問什麼技術規格',                    // 含「想問什麼技術」，但後面還接著「規格」這個受詞
+  '工研院技術移轉的窗口是誰'             // 含「工研院技術」，但後面還接著別的內容
 ];
 for (const text of NOT_META) eq(detectMetaIntent(text), null, `detectMetaIntent("${text}") 應為 null`);
 
@@ -141,10 +154,11 @@ for (const m of ALL_MENUS) {
 // 按鈕送出的文字必須被對應的路由認得，否則就是「按了沒反應」
 console.log('── 選單按鈕送出的字要被路由認得 ──');
 for (const b of REPORTER_MENU.buttons) {
-  // 前三顆走 detectMetaIntent；後三顆是問該場內容的常見問題，交給既有問答路徑，
-  // 這裡只要確認它們「不會」被 meta 意圖誤攔走（誤攔的話記者永遠問不到內容）
+  // 五顆走 detectMetaIntent（含新增的「想問什麼技術」「產業趨勢分析」）；剩下
+  // 「新聞稿全文」是問該場內容的常見問題，交給既有問答路徑，這裡只要確認它
+  // 「不會」被 meta 意圖誤攔走（誤攔的話記者永遠問不到內容）
   const meta = detectMetaIntent(b.text);
-  const isMetaButton = ['最近有哪些活動', '換一場活動', '使用說明', '媒體邀訪需求'].includes(b.text);
+  const isMetaButton = ['最近有哪些活動', '換一場活動', '想問什麼技術', '產業趨勢分析', '媒體邀訪需求'].includes(b.text);
   eq(meta !== null, isMetaButton, `記者選單「${b.label}」→ meta=${meta}（預期 ${isMetaButton ? '被攔' : '放行給問答'}）`);
 }
 eq(detectMetaIntent('退出職員模式'), null, '「退出職員模式」不能被記者的 meta 意圖攔走（那是職員指令）');
