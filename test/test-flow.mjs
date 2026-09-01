@@ -318,9 +318,27 @@ out = await sendGroup('@我 最近有哪些活動', { mentionSelf: true, mention
 check('群組問活動列表 → 走 calendar，不會被當成活動內容提問',
   out[0]?.kind === 'text' && /近期活動/.test(out[0].text), JSON.stringify(out));
 
+// 獨立開一個乾淨的群組（不沿用上面已經軟綁定 quad 的 Cgroup1），下面第二步驗證
+// 「沒有活動綁定時，按鈕點下去要導向全域邀訪窗口清單」才不會被前面的軟綁定狀態
+// 干擾、誤判成剛好命中 quad 自己的聯絡窗口。
+reset(); await freshModule();
+
 out = await sendGroup('@我', { mentionSelf: true, mentionText: '@我' });
-check('只 @ 沒接問題 → 引導怎麼問，不會噴例外或送空白問題給 AI',
-  out[0]?.kind === 'text' && /請在 @ 我的後面接您的問題/.test(out[0].text), JSON.stringify(out));
+check('只 @ 沒接問題 → 友善自我介紹，同時帶出「最近活動」與「媒體邀訪需求」兩種可以問的方向，不會噴例外或送空白問題給 AI',
+  out[0]?.kind === 'text' && /米亞/.test(out[0].text) && /最近有哪些活動/.test(out[0].text) && /媒體邀訪需求/.test(out[0].text),
+  JSON.stringify(out));
+check('只 @ 沒接問題也附快速回覆按鈕，記者不用自己打字就能點問',
+  JSON.stringify(out[0]?.quickReply) === JSON.stringify(['最近有哪些活動', '媒體邀訪需求', '使用說明']),
+  JSON.stringify(out[0]?.quickReply));
+check('只 @ 沒接問題也算「有回答」，續問視窗要續命——不然按鈕點下去（沒有 @）會被當成沒被 @ 安靜吃掉，按鈕變成按了沒反應',
+  state.bindings.get('Cgroup1')?.groupSessionUntil > Date.now(), JSON.stringify(state.bindings.get('Cgroup1')));
+
+// 只 @ 沒接問題附的按鈕要是真的按得下去——點「媒體邀訪需求」送出的純文字沒有 @，
+// 要靠上面剛續命的視窗才能被接住，不是空談；這個群組還沒綁定任何活動，正確結果
+// 是全域邀訪窗口清單（見 sendGlobalContactMenu()），不是卡在「找不到活動」。
+out = await sendGroup('媒體邀訪需求', { mentionSelf: false });
+check('點下「只 @」引導附的按鈕（媒體邀訪需求）→ 續問視窗內接得住、不用重新 @，並正確導向全域邀訪窗口清單',
+  out.length > 0 && out[0]?.kind === 'text' && /技術領域/.test(out[0].text), JSON.stringify(out));
 
 // 群組軟綁定：@ 問過一次某場之後，同群組其他人 @ 問後續問題不用重打活動名稱
 reset(); await freshModule();
