@@ -340,6 +340,33 @@ out = await sendGroup('媒體邀訪需求', { mentionSelf: false });
 check('點下「只 @」引導附的按鈕（媒體邀訪需求）→ 續問視窗內接得住、不用重新 @，並正確導向全域邀訪窗口清單',
   out.length > 0 && out[0]?.kind === 'text' && /技術領域/.test(out[0].text), JSON.stringify(out));
 
+// 實際回報的答非所問（附截圖）：群組裡 @ 問「妳能幫我什麼」，因為不含「怎麼／
+// 如何」，detectMetaIntent() 舊版的 HELP_ABOUT_BOT_RE 接不住，掉進 routeIntent()
+// 被判成 other，回一句跟問題完全對不上的「不確定您想問哪一場活動」——記者問的
+// 明明是「你能做什麼」。批次 19 加了 HELP_CAPABILITY_RE／HELP_WHOAMI_RE 接住
+// 這類問句，改成回 HELP_TEXT。
+reset(); await freshModule();
+out = await sendGroup('@我 妳能幫我什麼', { mentionSelf: true, mentionText: '@我 ' });
+check('群組 @ 問「妳能幫我什麼」→ 回使用說明，不是答非所問的「不確定您想問哪一場活動」',
+  out[0]?.kind === 'text' && /怎麼使用這個帳號/.test(out[0].text) && !/不確定/.test(out[0].text),
+  JSON.stringify(out));
+
+// 沒有 @ 到、單純打字問「妳能幫我什麼」（1 對 1，每則訊息本來就都算在跟我們講話）
+// 也要走同一條路，不是群組限定的修法。
+reset(); await freshModule();
+out = await send('你是誰');
+check('1 對 1 問「你是誰」→ 回使用說明，不是答非所問的萬用兜底文案',
+  out[0]?.kind === 'text' && /怎麼使用這個帳號/.test(out[0].text), JSON.stringify(out));
+
+// 迴歸：真的問不出所以然的話，兜底文案還在，只是語氣改軟、多附「媒體邀訪需求」
+// 按鈕——不是把安全網拿掉。
+reset(); await freshModule();
+out = await send('隨便問一句跟任何主題都不相關的話');
+check('真的判不出意圖 → 兜底文案仍然出現，且附上三個核心入口按鈕',
+  out[0]?.kind === 'text' && /沒抓到您想問哪一場活動/.test(out[0].text) &&
+  JSON.stringify(out[0]?.quickReply) === JSON.stringify(['最近有哪些活動', '媒體邀訪需求', '使用說明']),
+  JSON.stringify(out));
+
 // 群組軟綁定：@ 問過一次某場之後，同群組其他人 @ 問後續問題不用重打活動名稱
 reset(); await freshModule();
 await sendGroup('@我 半導體先進封裝技術發表會的重點', { mentionSelf: true, mentionText: '@我 ' });
