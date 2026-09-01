@@ -63,13 +63,13 @@ const res = { status() { return this; }, json() { return this; }, end() { return
 async function send(text, userId) {
   sent.length = 0;
   await handler(makeReq(text, userId), res);
-  return sent.map(s => ({ kind: s.kind, text: s.text, event: s.event, quickReply: s.quickReply, sys: s.sys }));
+  return sent.map(s => ({ kind: s.kind, text: s.text, event: s.event, quickReply: s.quickReply, sys: s.sys, question: s.question }));
 }
 
 async function sendGroup(text, opts) {
   sent.length = 0;
   await handler(makeGroupReq(text, opts), res);
-  return sent.map(s => ({ kind: s.kind, text: s.text, event: s.event, quickReply: s.quickReply, sys: s.sys }));
+  return sent.map(s => ({ kind: s.kind, text: s.text, event: s.event, quickReply: s.quickReply, sys: s.sys, question: s.question }));
 }
 
 let pass = 0, fail = 0;
@@ -834,6 +834,21 @@ check('最終回覆附上警語＋公關窗口聯絡資訊，用使用者要求�
 check('最終回覆附快速回覆按鈕（活動列表／媒體邀訪需求），不是只丟一句話就結束',
   out.some(o => o.kind === 'text' && JSON.stringify(o.quickReply) === JSON.stringify(['最近有哪些活動', '媒體邀訪需求'])),
   JSON.stringify(out));
+
+// 實際回報的問題：點「產業趨勢分析」這顆按鈕，AI 沒有直接摘要最新幾則，反而列了
+// 一串範例主題反問「請問您想了解哪個產業或技術領域」——跟打「半導體現在有什麼
+// 趨勢」這種明確請求句拿到的乾淨摘要體驗不一致。根因是 handleMetaIntent() 原本把
+// 按鈕送出的原始文字（例如「產業趨勢分析」這種比較像分類標籤、不像一句請求的
+// 名詞短語）直接當「記者的問題」丟給 AI。修法是四個固定觸發詞一律換成一句明確
+// 的請求句——這裡驗證的就是「呼叫端送給 AI 的是這句固定請求句，不是按鈕原始
+// 文字」，不是驗證真的 LLM 會不會反問（那要看真的跑，這支測試模擬不了）。
+for (const trigger of ['產業趨勢分析', '產業趨勢', '最近趨勢', '最新趨勢']) {
+  reset(); await freshModule();
+  out = await send(trigger);
+  check(`按鈕／固定觸發詞「${trigger}」→ 送給 AI 的是固定的明確請求句，不是按鈕原始文字`,
+    out.some(o => o.kind === 'answer' && o.question === '最近有哪些產業趨勢重點'),
+    JSON.stringify(out.map(o => ({ kind: o.kind, question: o.question }))));
+}
 
 reset(); await freshModule();
 out = await sendGroup('@我 AI晶片產業現況如何', { mentionSelf: true, mentionText: '@我 ' });
