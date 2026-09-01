@@ -54,7 +54,9 @@ import {
   CONTACTS_DIR_RANGE, GLOBAL_CONTACT_TOPICS, ensureContactsDirectorySheet,
   parseContactsDirectory, formatGlobalContact, matchGlobalContactByText
 } from '../lib/contacts-directory.js';
-import { fetchIndustryTrendDigest, formatDigestForPrompt } from '../lib/industry-trends.js';
+import {
+  fetchIndustryTrendDigest, formatDigestForPrompt, extractSourceIndices, resolveSourceUrls
+} from '../lib/industry-trends.js';
 
 const EVENTS_RANGE = 'events!A2:R'; // P 欄是 contacts（邀訪窗口分工），Q 欄是 invite_letter（媒體邀請函），R 欄是 invite_letter_chips（活動前快速提問），見 rowToEvent()
 // line_user_id | event_id | media_name | bound_at | last_active | note | group_session_until
@@ -627,13 +629,21 @@ async function answerIndustryTrend(replyToken, targetId, text) {
     '如果清單裡沒有明顯對應記者問題的項目，就誠實說「目前免費焦點清單裡沒有直接對應的資料」，不要硬答或東拼西湊。',
     '回答控制在 4 行以內，先講最相關的 1-2 則的重點，並標明是哪一篇、什麼時候發布的。不要用 Markdown 語法（LINE 不會渲染）。',
     '明確讓記者知道這是 IEK 的免費摘要，不是完整報告——不要講得像這就是 IEK 的完整分析或工研院的正式研究結論。',
+    '回答最後另起一行，只用這個格式標出這次引用了清單中第幾則（從 1 開始的編號，可能不只一則，用逗號分隔），例如「來源編號：2,5」；這行只給程式判讀連結用，不算進上面「4 行以內」的限制。如果清單裡沒有直接對應的資料，就不要加這一行。',
     '',
     '【IEK 產業情報網 免費焦點清單，由新到舊】',
     formatDigestForPrompt(items)
   ].join('\n');
 
-  const aiReply = await askAnthropic(systemPrompt, text);
-  const reply = `${aiReply}${contactLine}`;
+  const rawReply = await askAnthropic(systemPrompt, text);
+  // 「來源編號」那行是給程式看的，不能讓記者在 LINE 上看到——extractSourceIndices()
+  // 負責切掉它，回報的意見裡記者要的是接下來附的連結，不是這行原始標記。
+  const { text: aiReply, indices } = extractSourceIndices(rawReply);
+  const urls = resolveSourceUrls(indices, items);
+  // 沒解析到可信編號（AI 沒加這行、格式不符、或判成「沒有直接對應的資料」）就不附
+  // 連結——見 lib/industry-trends.js resolveSourceUrls() 的說明，寧可沒有也不要附錯。
+  const linksBlock = urls.length ? `\n\n🔗 原文連結：\n${urls.join('\n')}` : '';
+  const reply = `${aiReply}${linksBlock}${contactLine}`;
   console.log(`[line] industry_trend q="${text.slice(0, 60)}" reply="${reply.slice(0, 200)}"`);
   await replyOrPush(replyToken, targetId, reply, ['最近有哪些活動', CONTACT_MENU_LABEL]);
 }
