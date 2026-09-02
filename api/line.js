@@ -667,9 +667,13 @@ async function answerIndustryTrend(replyToken, targetId, text) {
 //
 // keywordText 兩種來源：①「想問什麼技術」按鈕之後記者自己打的技術名稱（見下面
 // handleTechQueryMessage()）；②記者直接自然語言問「工研院在ＸＸ技術上有什麼
-// 進展」，routeIntent() 判成 tech_query（見 lib/router.js），這種情況把整句原話
-// 當關鍵字去查——工研院官網的關鍵字搜尋是全文檢索，不要求精準比對單一詞彙，整句
-// 拿去查通常比程式自己再猜一次「技術名稱到底是哪幾個字」可靠。
+// 進展」，routeIntent() 判成 tech_query 時會順手抽一個關鍵字（見 lib/router.js），
+// 呼叫端優先用抽出來的關鍵字，沒抽到才退回整句原話。
+// ⚠️ 這兩種來源都可能是一整句話而不是乾淨的技術名稱——工研院官網的關鍵字搜尋是
+// 接近精準比對，不是全文檢索，整句話（含語助詞）常常查不到（這裡曾經誤判成「全文
+// 檢索，整句拿去查更可靠」，實測是錯的，見下方 fetchItriNews() 呼叫）。查無資料時
+// 去語助詞再試一次的保底邏輯統一放在 lib/itri-news.js fetchItriNews() 裡面，這支
+// 不用自己重試——不管 keywordText 乾不乾淨，這支都不用假設它已經是乾淨關鍵字。
 async function answerTechQuery(replyToken, targetId, keywordText) {
   const keyword = sanitize(keywordText, 60);
   const { ok, items } = await fetchItriNews(keyword);
@@ -1127,11 +1131,14 @@ async function handleMetaIntent(replyToken, userId, text, metaIntent, binding) {
   const cards = buildCalendarCards(await getAllEventRows());
 
   if (metaIntent === 'switch') {
-    // 真的解除綁定，不只是回一句提示：記者說「換一場」之後打的下一句多半是新場次
+    // 真的解除綁定，不只是回一句提示：記者說「回首頁」之後打的下一句多半是新場次
     // 的名稱，留著舊綁定的話那句會先被當成對舊場次的提問。
     if (binding) await clearBinding(userId);
+    // 回報的意見：這顆按鈕原本叫「換一場活動」，回覆也只提活動——但這個帳號能問的
+    // 不只活動，也能問產業趨勢、工研院技術。回覆順手點出這兩個入口，不是只列活動
+    // 清單，記者才看得出來「回首頁」是回到全部功能，不是單純換一場活動。
     await replyOrPush(replyToken, userId,
-      `好的，已經離開原本那一場。\n\n請直接輸入想問的活動名稱，或從下面挑一場。\n\n${formatCalendarReply(cards)}${CONTACT_MENU_TEXT_HINT}`,
+      `好的，已經回到首頁。\n\n請直接輸入想問的活動名稱，或從下面挑一場；也可以打「產業趨勢分析」「想問什麼技術」問其他問題。\n\n${formatCalendarReply(cards)}${CONTACT_MENU_TEXT_HINT}`,
       calendarQuickRepliesForReporter(cards));
     return;
   }

@@ -3,7 +3,7 @@
 // 抓回來的真實原始 HTML 節錄（只精簡到 2 則，結構完全比照原文，包含 <dt><img>
 // 縮圖區塊等雜訊，確保 regex 真的是對著「頁面裡混著其他東西」的情況解析，不是對著
 // 手工簡化過的乾淨片段——跟 test-industry-trends.mjs 對 IEK 那邊的做法同一套）。
-import { parseNewsListHtml, formatNewsForPrompt } from '../lib/itri-news.js';
+import { parseNewsListHtml, formatNewsForPrompt, stripTechQueryFiller } from '../lib/itri-news.js';
 
 let pass = 0, fail = 0;
 function check(label, cond, detail) {
@@ -56,6 +56,21 @@ const prompt = formatNewsForPrompt(items);
 check('每則都有編號、日期、標題、摘要', /^1\. \[2026\/09\/01\] 晶鏈高峰論壇/.test(prompt) && prompt.includes('2. [2026/08/27] 科技教育'), prompt);
 check('空陣列不會噴例外，回空字串', formatNewsForPrompt([]) === '');
 check('undefined 不會噴例外', formatNewsForPrompt(undefined) === '');
+
+console.log('── stripTechQueryFiller：查無資料重試用的語助詞清洗 ──');
+// 實際回報（附截圖）：按鈕引導流程「請問您想了解工研院哪一項技術呢？」問完，
+// 記者回「最近的國際合作」——curl 對真的官網驗證過：整句查 0 筆，「國際合作」
+// 查得到 10 筆，見 lib/itri-news.js fetchItriNews() 的說明。
+check('去掉「最近」「的」→ 剩下核心關鍵字（實際回報的落空案例）',
+  stripTechQueryFiller('最近的國際合作') === '國際合作', stripTechQueryFiller('最近的國際合作'));
+check('已經是乾淨關鍵字 → 原封不動',
+  stripTechQueryFiller('機器人') === '機器人', stripTechQueryFiller('機器人'));
+check('去掉工研院／有什麼／新聞／嗎 → 剩下核心關鍵字',
+  stripTechQueryFiller('最近半導體 工研院有什麼新聞嗎') === '半導體', stripTechQueryFiller('最近半導體 工研院有什麼新聞嗎'));
+check('整句都是語助詞 → 清成空字串（呼叫端要能分辨這種情況不值得重試）',
+  stripTechQueryFiller('嗎') === '', JSON.stringify(stripTechQueryFiller('嗎')));
+check('空字串／undefined 不丟例外',
+  stripTechQueryFiller('') === '' && stripTechQueryFiller(undefined) === '');
 
 console.log(`\n${fail === 0 ? '✅' : '❌'} 工研院官網新聞解析測試通過 ${pass}／失敗 ${fail}`);
 process.exit(fail === 0 ? 0 : 1);
