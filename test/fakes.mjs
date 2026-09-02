@@ -62,7 +62,9 @@ export const state = {
   // itriHtml 設空字串模擬「查無資料」（HTTP 200 但清單是空的，兩者是不同情境，
   // 見 fetchItriNews() 的說明）。
   itriHtml: DEFAULT_ITRI_HTML,
-  itriFetchFail: false
+  itriFetchFail: false,
+  // 空字串＝預設關掉，不管 keyword 是什麼都回 itriHtml（見上面 fetch stub 的說明）。
+  itriKeywordMustInclude: ''
 };
 export const sent = [];
 
@@ -86,6 +88,7 @@ export function reset() {
   state.iekFetchFail = false; // 個別情境會開這個旗標模擬抓取失敗，其餘情境要看到預設值
   state.itriHtml = DEFAULT_ITRI_HTML;
   state.itriFetchFail = false;
+  state.itriKeywordMustInclude = '';
   sent.length = 0;
 }
 
@@ -290,10 +293,19 @@ export function installFetchStub() {
       return { ok: true, text: async () => state.iekHtml || '' };
     }
     // lib/itri-news.js fetchItriNews() 打的工研院官網新聞中心清單頁（含 &keyword=
-    // 搜尋參數，不管有沒有帶關鍵字都回同一份假 HTML——測試要驗證的是「查到結果／
-    // 查無結果／抓取失敗」三種分支，不是真的模擬關鍵字比對）。
+    // 搜尋參數）。預設不管有沒有帶關鍵字都回同一份假 HTML——大多數測試要驗證的是
+    // 「查到結果／查無結果／抓取失敗」三種分支，不是真的模擬關鍵字比對。
+    // itriKeywordMustInclude 設了字串時才會真的看 keyword 參數：只有真的包含那個
+    // 字串才回 state.itriHtml，其餘（含沒帶關鍵字）一律回空清單——用來模擬真的
+    // 官網「接近精準比對」搜尋的落差（整句問句查不到、去語助詞剩下的關鍵字才查
+    // 得到），見 fetchItriNews() 查無資料自動重試那段、test-flow.mjs 情境 18 的
+    // 驗證。
     if (u.includes('itri.org.tw')) {
       if (state.itriFetchFail) return { ok: false, status: 500, text: async () => '', json: async () => ({}) };
+      if (state.itriKeywordMustInclude) {
+        const kw = decodeURIComponent((u.match(/[?&]keyword=([^&]*)/) || [])[1] || '');
+        if (!kw.includes(state.itriKeywordMustInclude)) return { ok: true, text: async () => '' };
+      }
       return { ok: true, text: async () => state.itriHtml || '' };
     }
     return { ok: false, status: 500, text: async () => '', json: async () => ({}) };

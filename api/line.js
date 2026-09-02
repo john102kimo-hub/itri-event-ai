@@ -667,9 +667,13 @@ async function answerIndustryTrend(replyToken, targetId, text) {
 //
 // keywordText 兩種來源：①「想問什麼技術」按鈕之後記者自己打的技術名稱（見下面
 // handleTechQueryMessage()）；②記者直接自然語言問「工研院在ＸＸ技術上有什麼
-// 進展」，routeIntent() 判成 tech_query（見 lib/router.js），這種情況把整句原話
-// 當關鍵字去查——工研院官網的關鍵字搜尋是全文檢索，不要求精準比對單一詞彙，整句
-// 拿去查通常比程式自己再猜一次「技術名稱到底是哪幾個字」可靠。
+// 進展」，routeIntent() 判成 tech_query 時會順手抽一個關鍵字（見 lib/router.js），
+// 呼叫端優先用抽出來的關鍵字，沒抽到才退回整句原話。
+// ⚠️ 這兩種來源都可能是一整句話而不是乾淨的技術名稱——工研院官網的關鍵字搜尋是
+// 接近精準比對，不是全文檢索，整句話（含語助詞）常常查不到（這裡曾經誤判成「全文
+// 檢索，整句拿去查更可靠」，實測是錯的，見下方 fetchItriNews() 呼叫）。查無資料時
+// 去語助詞再試一次的保底邏輯統一放在 lib/itri-news.js fetchItriNews() 裡面，這支
+// 不用自己重試——不管 keywordText 乾不乾淨，這支都不用假設它已經是乾淨關鍵字。
 async function answerTechQuery(replyToken, targetId, keywordText) {
   const keyword = sanitize(keywordText, 60);
   const { ok, items } = await fetchItriNews(keyword);

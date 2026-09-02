@@ -924,6 +924,23 @@ check('最終回覆比對到「機器人」這個技術領域的專屬窗口（�
   out.some(o => o.kind === 'text' && /譚宇哲/.test(o.text) && /03-3333333/.test(o.text)),
   JSON.stringify(out));
 
+// 實際回報（附截圖）：按鈕引導流程問「請問您想了解工研院哪一項技術呢？」之後，
+// 記者不是照範例打單一技術名稱，而是打一整句「最近的國際合作」——這條路徑不經過
+// routeIntent()，下面「工研院半導體有什麼新聞嗎」那段（PR #32）的關鍵字抽取只補
+// 了自然語言那條路，按鈕流程當時沒補到。實測過真的官網：「最近的國際合作」查 0
+// 筆，去掉語助詞的「國際合作」查得到——用 itriKeywordMustInclude 模擬這個真實
+// 落差，驗證 fetchItriNews() 查無資料時真的會去語助詞重試一次，不用逼呼叫端自己
+// 保證是乾淨關鍵字，見 lib/itri-news.js fetchItriNews() 的說明。
+reset(); await freshModule();
+state.itriKeywordMustInclude = '國際合作';
+await send('想問什麼技術');
+out = await send('最近的國際合作');
+check('按鈕引導流程回一整句（含語助詞）→ 去語助詞重試後查得到，不會誤報查無資料',
+  !out.some(o => o.kind === 'text' && /沒有找到跟/.test(o.text)), JSON.stringify(out));
+check('重試查到的清單真的餵給 AI，不是空氣',
+  out.some(o => o.sys?.includes('工研院攜AMRA打造足型機器人新標準')),
+  JSON.stringify(out.map(o => o.sys?.slice(0, 60))));
+
 // 群組：按鈕在續問視窗內一樣接得住，不用重新 @——跟「邀訪：其他」自由輸入同一套
 // 一次性旗標機制（見 handleTechQueryMessage() 的說明）。
 reset(); await freshModule();
