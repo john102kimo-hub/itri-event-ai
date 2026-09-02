@@ -947,11 +947,23 @@ check('群組續問視窗內（沒 @）打「技術呢」→ 先問想了解哪�
   JSON.stringify(out));
 
 // 自然語言直接問（不用先按按鈕）：問句裡明確提到「工研院」，routeIntent() 判成
-// tech_query（見 lib/router.js 的說明），用整句原話當關鍵字去查，不用先問一次。
+// tech_query（見 lib/router.js 的說明），不用先問一次要查什麼。
 reset(); await freshModule();
 out = await send('工研院在機器人技術上有什麼進展');
 check('1 對 1 自然語言直接問「工研院在ＸＸ技術上」→ 不用先問一次，直接答',
   out.some(o => o.kind === 'text' && /譚宇哲/.test(o.text)), JSON.stringify(out));
+
+// 實際回報的落空：問「工研院半導體有什麼新聞嗎」，整句原話（含「有什麼」「嗎」
+// 這類語助詞）拿去查工研院官網的關鍵字搜尋查到 0 筆——實測過真的網站，那邊接近
+// 精準比對，只有抽出來的核心關鍵字（例如「半導體」）查得到。修法：routeIntent()
+// 判成 tech_query 時順手抽一個關鍵字，answerTechQuery() 優先用這個關鍵字，不是
+// 整句原話（見 lib/router.js、api/line.js 的說明）。這裡驗證的是「呼叫端真的用了
+// 抽出來的關鍵字」，不是驗證真的 LLM 抽詞抽得多準（那要看真的跑）。
+reset(); await freshModule();
+out = await send('工研院半導體有什麼新聞嗎');
+check('自然語言問句帶語助詞 → 送去查／送給 AI 回答的是抽出來的關鍵字，不是整句原話',
+  out.some(o => o.kind === 'answer' && o.question === '半導體'),
+  JSON.stringify(out.map(o => ({ kind: o.kind, question: o.question }))));
 
 // 已經綁定某場活動時自然語言問技術題——不該被硬塞進當前活動的問答（那場的知識庫
 // 跟機器人技術無關），也不該打亂原本的活動綁定，跟情境 17 產業趨勢那段同一個道理。
