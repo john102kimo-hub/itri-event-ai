@@ -229,10 +229,25 @@ function fakeStaffRoute(text) {
 // lib/router.js 的說明），問句裡明確提到「工研院」就判成 tech_query，不管句子
 // 裡是否同時也出現「趨勢」之類的字——這是刻意選的、對 AI 來說夠機械化的判斷依據，
 // 不是猜的。
+// 實際回報：問「最近半導體 工研院有什麼新聞嗎」，answerTechQuery() 把整句原話
+// 拿去查工研院官網的關鍵字搜尋，查到 0 筆——實測過真的網站，那邊接近精準比對，
+// 整句話（含「最近」「有什麼新聞」「嗎」這類語助詞）幾乎都查不到，只有抽出來的
+// 核心關鍵字（例如「半導體」）查得到 214 筆。修法是 routeIntent() 判成 tech_query
+// 時順手抽一個關鍵字（見 lib/router.js 的說明）。這支不是要精準模擬真的 LLM
+// 抽詞（那要看真的跑），只要「大致抽掉常見語助詞、剩下核心關鍵字」就夠測試用，
+// 抽得不夠乾淨（例如殘留一兩個字）不影響測試要驗證的重點：呼叫端有沒有真的用
+// 這個欄位、而不是繼續傳整句原話下去。
+function extractFakeTechKeyword(text) {
+  return String(text || '')
+    .replace(/工研院|最近|最新|有什麼|有沒有|新聞|進展|技術上|請問|想了解|想問|嗎|呢|[?？！!。]/g, '')
+    .replace(/\s+/g, '')
+    .trim();
+}
+
 function fakeReporterRoute(text, currentEventHint) {
   const ids = matchEventIds(text);
   if (/最近|哪些活動|活動列表/.test(text)) return { intent: 'calendar', event_ids: [], confidence: 'high' };
-  if (/工研院/.test(text)) return { intent: 'tech_query', event_ids: [], confidence: 'high' };
+  if (/工研院/.test(text)) return { intent: 'tech_query', event_ids: [], confidence: 'high', tech_keyword: extractFakeTechKeyword(text) };
   if (/趨勢|市場現況|產業現況/.test(text)) return { intent: 'industry_trend', event_ids: [], confidence: 'high' };
   if (ids.length) return { intent: 'qa', event_ids: ids, confidence: 'high' };
   if (currentEventHint && !/你覺得/.test(text)) return { intent: 'qa', event_ids: [currentEventHint], confidence: 'high' };

@@ -1162,7 +1162,7 @@ async function handleMetaIntent(replyToken, userId, text, metaIntent, binding) {
 async function handleUnbound(replyToken, userId, text, { silentOnOther = false, askMediaName = true } = {}) {
   const rows = await getAllEventRows();
   const cards = buildCalendarCards(rows);
-  const { intent, event_ids, confidence } = await routeIntent(text, cards);
+  const { intent, event_ids, confidence, tech_keyword } = await routeIntent(text, cards);
   console.log(`[line] reporter route q="${text.slice(0, 60)}" → intent=${intent} event_ids=${JSON.stringify(event_ids)} confidence=${confidence}`);
 
   if (intent === 'calendar') {
@@ -1177,9 +1177,13 @@ async function handleUnbound(replyToken, userId, text, { silentOnOther = false, 
   }
 
   if (intent === 'tech_query') {
-    // 記者直接問「工研院在ＸＸ技術上有什麼進展」這種完整句子，不用先問一次
-    // 要查什麼——整句原話就有足夠的關鍵字，見 answerTechQuery() 開頭的說明。
-    await answerTechQuery(replyToken, userId, text);
+    // 記者直接問「工研院在ＸＸ技術上有什麼進展」這種完整句子，不用先問一次要查
+    // 什麼——但不能把整句原話直接丟給工研院官網的關鍵字搜尋：實測那邊接近精準
+    // 比對，整句話（含「最近」「有什麼新聞」「嗎」這類語助詞）常常查不到任何
+    // 結果，只有抽出來的核心關鍵字查得到（見 LINE-PLAN.md 批次 22 的說明）。
+    // routeIntent() 判成 tech_query 時會順手抽一個關鍵字，優先用那個；抽不出來
+    // （空字串）才退回整句原話，總比完全不查好。
+    await answerTechQuery(replyToken, userId, tech_keyword || text);
     return;
   }
 
@@ -1404,8 +1408,10 @@ async function handleGroupMessage(replyToken, groupId, text, { mentioned }) {
   }
 
   // 同上，只是問的是工研院自己的技術，不是整體產業趨勢——一樣不動活動綁定。
+  // 優先用 routeIntent() 抽出來的關鍵字，不要整句原話去查——見上面 handleUnbound()
+  // 那條同樣的說明（LINE-PLAN.md 批次 22）。
   if (routed.intent === 'tech_query') {
-    await answerTechQuery(replyToken, groupId, text);
+    await answerTechQuery(replyToken, groupId, routed.tech_keyword || text);
     await touchGroupSession(groupId);
     return;
   }
@@ -1633,8 +1639,10 @@ async function handleEvent(ev) {
   }
 
   // 同上，只是問的是工研院自己的技術，不是整體產業趨勢——一樣不動活動綁定。
+  // 優先用 routeIntent() 抽出來的關鍵字，不要整句原話去查——見 handleUnbound()
+  // 那條同樣的說明（LINE-PLAN.md 批次 22）。
   if (routed.intent === 'tech_query') {
-    await answerTechQuery(replyToken, userId, text);
+    await answerTechQuery(replyToken, userId, routed.tech_keyword || text);
     return;
   }
 
