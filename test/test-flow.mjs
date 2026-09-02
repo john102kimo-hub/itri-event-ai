@@ -93,9 +93,14 @@ check('活動清單有提醒目前在哪一場', /您目前在問的是/.test(ou
 out = await send('使用說明');
 check('綁定中打「使用說明」→ 給說明', /怎麼使用這個帳號/.test(out[0]?.text || ''), JSON.stringify(out));
 
-out = await send('換一場活動');
-check('「換一場活動」→ 解除綁定並列清單',
-  out[0]?.kind === 'text' && /已經離開原本那一場/.test(out[0].text), JSON.stringify(out));
+// 回報的意見：這顆按鈕原本叫「換一場活動」，但這個帳號能問的不只活動，已經
+// 改名成「回首頁」（見 lib/menu.js REPORTER_MENU 的說明）；「換一場活動」等舊
+// 講法仍然有效，見 test-menu.mjs 的 SWITCH_RE 回歸測試。
+out = await send('回首頁');
+check('「回首頁」→ 解除綁定並列清單',
+  out[0]?.kind === 'text' && /已經回到首頁/.test(out[0].text), JSON.stringify(out));
+check('回覆也點出產業趨勢／技術這兩個入口，不是只提活動（回報的意見：這裡不是只能問活動）',
+  /產業趨勢分析/.test(out[0]?.text || '') && /想問什麼技術/.test(out[0]?.text || ''), out[0]?.text);
 check('綁定真的被清掉', !state.bindings.get('U_reporter')?.bound_at,
   JSON.stringify(state.bindings.get('U_reporter')));
 
@@ -773,12 +778,12 @@ check('群組綁定真的換過去了', state.bindings.get('Cgroup1')?.event_id 
 reset(); await freshModule();
 state.bindings.set('U_reporter', { event_id: 'quad', media_name: '', note: '', bound_at: Date.now() });
 
-out = await send('換一場活動');
+out = await send('回首頁'); // 按鈕已改名，見情境 1 的說明
 {
   const labels = (out[0]?.quickReply || []).map(i => (typeof i === 'object' ? i.label : i));
-  check('「換一場活動」的按鈕列最後一格是媒體邀訪需求', labels[labels.length - 1] === '媒體邀訪需求', JSON.stringify(labels));
+  check('「回首頁」的按鈕列最後一格是媒體邀訪需求', labels[labels.length - 1] === '媒體邀訪需求', JSON.stringify(labels));
   // 回報的意見：按鈕不夠明顯，容易被忽略——文字裡也要有這個入口，不能只靠按鈕。
-  check('「換一場活動」的文字裡也提到媒體邀訪需求（不只靠按鈕）',
+  check('「回首頁」的文字裡也提到媒體邀訪需求（不只靠按鈕）',
     /媒體邀訪需求/.test(out[0]?.text || ''), out[0]?.text);
 }
 

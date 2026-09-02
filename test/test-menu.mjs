@@ -21,6 +21,12 @@ const META = {
   '活動列表': 'calendar',
   '活動清單': 'calendar',
   '還有哪些場次': 'calendar',
+  // 回報的意見：按鈕原本叫「換一場活動」，但這個帳號能問的不只活動——已經改名成
+  // 「回首頁」（見 lib/menu.js REPORTER_MENU 的說明），送出的文字也改成「回首頁」。
+  '回首頁': 'switch',                  // ← 現在按鈕送出的文字
+  '回到首頁': 'switch',
+  '回主選單': 'switch',
+  // 「換一場活動」等舊講法保留在 SWITCH_RE 裡繼續認得，記者手打舊講法不會突然失效。
   '換一場活動': 'switch',
   '換活動': 'switch',
   '換一場': 'switch',
@@ -166,7 +172,7 @@ for (const b of REPORTER_MENU.buttons) {
   // 「新聞稿全文」是問該場內容的常見問題，交給既有問答路徑，這裡只要確認它
   // 「不會」被 meta 意圖誤攔走（誤攔的話記者永遠問不到內容）
   const meta = detectMetaIntent(b.text);
-  const isMetaButton = ['最近有哪些活動', '換一場活動', '想問什麼技術', '產業趨勢分析', '媒體邀訪需求'].includes(b.text);
+  const isMetaButton = ['最近有哪些活動', '回首頁', '想問什麼技術', '產業趨勢分析', '媒體邀訪需求'].includes(b.text);
   eq(meta !== null, isMetaButton, `記者選單「${b.label}」→ meta=${meta}（預期 ${isMetaButton ? '被攔' : '放行給問答'}）`);
 }
 eq(detectMetaIntent('退出職員模式'), null, '「退出職員模式」不能被記者的 meta 意圖攔走（那是職員指令）');
