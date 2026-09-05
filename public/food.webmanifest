@@ -1,0 +1,17 @@
+{
+  "name": "吃什麼地圖",
+  "short_name": "吃什麼",
+  "description": "自己的口袋名單：地圖上看附近有什麼吃的，打字就能新增與決定。",
+  "lang": "zh-TW",
+  "start_url": "/food",
+  "scope": "/food",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f0f7f5",
+  "theme_color": "#0F9E7A",
+  "icons": [
+    { "src": "/food-icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/food-icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/food-icon-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

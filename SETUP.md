@@ -151,6 +151,9 @@ Vercel Hobby（免費）方案規定：**一次部署最多 12 個 Serverless Fu
 | 2 個共用工具檔 | `lib/*.js`（根目錄，**不佔額度**） | 0 |
 | **合計** | | **10 / 12（剩 2 格）** |
 
+> 另外：「吃什麼地圖」(`/food`) 是**純靜態頁面**（`public/food.html` + `public/food-parse.js`），
+> 沒有後端、佔用 **0 支** Function 額度，跟這個平台的資料完全無關。說明見 [FOOD.md](FOOD.md)。
+
 **所以之後：**
 
 - 要加新的 API → 直接在 `api/` 新增 `.js`，還有 2 格可以用。

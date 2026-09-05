@@ -1,0 +1,971 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover">
+<title>吃什麼地圖</title>
+<meta name="description" content="用地圖記錄自己會去吃的店，打字就能新增，打字就能決定今天吃什麼。">
+<meta name="robots" content="noindex, nofollow">
+<link rel="manifest" href="/food.webmanifest">
+<meta name="theme-color" content="#0F9E7A">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="吃什麼">
+<link rel="apple-touch-icon" href="/food-icon-180.png">
+<link rel="icon" href="/food-icon-192.png">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  :root{
+    --primary:#0F9E7A; --primary-dark:#0a7a60;
+    --want:#F59E0B; --ok:#0F9E7A; --nope:#94A3B8;
+    --text:#15221f; --muted:#6b7280; --bg:#f0f7f5; --card:#fff; --border:#e5e7eb;
+    --font:'PingFang TC','Noto Sans TC','Microsoft JhengHei',system-ui,sans-serif;
+    --sheet-max:76vh;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+  html,body{height:100%;overflow:hidden}
+  body{font-family:var(--font);color:var(--text);background:var(--bg);line-height:1.55;font-size:15px}
+  button,input,select,textarea{font-family:inherit;font-size:16px;color:inherit}
+  button{cursor:pointer;border:none;background:none}
+
+  /* ── 地圖 ───────────────────────────────────────────────── */
+  #map{position:fixed;inset:0;background:#dfe8e5}
+  .leaflet-control-attribution{font-size:9px;max-width:52vw;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .leaflet-top.leaflet-left{margin-top:calc(env(safe-area-inset-top,0px) + 56px)}
+
+  /* 店家圖釘：用 divIcon 畫，才能照狀態換色、附店名 */
+  .pin{position:relative;width:26px;height:26px}
+  .pin i{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:18px;height:18px;border-radius:50%;
+    border:3px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4);display:block}
+  .pin.want i{background:var(--want)} .pin.ok i{background:var(--ok)} .pin.nope i{background:var(--nope)}
+  .pin.sel i{width:26px;height:26px;box-shadow:0 0 0 4px rgba(15,158,122,.35),0 2px 6px rgba(0,0,0,.4)}
+  .pin b{position:absolute;left:50%;top:22px;transform:translateX(-50%);font-size:11px;font-weight:700;
+    white-space:nowrap;background:rgba(255,255,255,.92);border-radius:4px;padding:0 4px;box-shadow:0 1px 3px rgba(0,0,0,.2)}
+  .me{width:16px;height:16px;border-radius:50%;background:#2563eb;border:3px solid #fff;box-shadow:0 0 0 2px rgba(37,99,235,.4)}
+
+  /* ── 頂列 ───────────────────────────────────────────────── */
+  #top{position:fixed;top:0;left:0;right:0;z-index:600;padding:calc(env(safe-area-inset-top,0px) + 8px) 10px 8px;
+    display:flex;gap:8px;align-items:center;
+    background:linear-gradient(#f0f7f5 55%,rgba(240,247,245,0))}
+  #top .brand{font-weight:800;font-size:15px;color:var(--primary-dark);white-space:nowrap;padding:0 2px}
+  #top .sp{flex:1}
+  .iconbtn{width:38px;height:38px;border-radius:12px;background:#fff;box-shadow:0 2px 8px rgba(0,0,0,.12);
+    display:flex;align-items:center;justify-content:center;font-size:18px;flex:0 0 auto}
+  .iconbtn.on{background:var(--primary);color:#fff}
+
+  /* ── 下方面板 ───────────────────────────────────────────── */
+  #panel{position:fixed;left:0;right:0;bottom:0;z-index:700;background:var(--card);
+    border-radius:18px 18px 0 0;box-shadow:0 -6px 28px rgba(0,0,0,.16);
+    display:flex;flex-direction:column;max-height:var(--sheet-max);transition:max-height .22s ease}
+  #panel:not(.open){max-height:none}
+  #grip{padding:7px 0 3px;display:flex;justify-content:center;flex:0 0 auto}
+  #grip span{width:38px;height:4px;border-radius:2px;background:#d1d5db}
+  #chips{display:flex;gap:6px;overflow-x:auto;padding:2px 12px 8px;flex:0 0 auto;scrollbar-width:none}
+  #chips::-webkit-scrollbar{display:none}
+  .chip{border:1px solid var(--border);border-radius:999px;padding:5px 11px;font-size:13px;white-space:nowrap;
+    background:#fff;color:var(--muted);font-weight:600;flex:0 0 auto}
+  .chip.on{background:var(--primary);border-color:var(--primary);color:#fff}
+  .chip.w.on{background:var(--want);border-color:var(--want)}
+  .chip.n.on{background:var(--nope);border-color:var(--nope)}
+
+  #scroll{overflow-y:auto;-webkit-overflow-scrolling:touch;flex:1 1 auto;padding:0 12px}
+  #panel:not(.open) #scroll{display:none}
+
+  /* 對話回覆 */
+  #log{padding:2px 0 8px;display:flex;flex-direction:column;gap:7px}
+  .msg{font-size:14px;border-radius:12px;padding:8px 11px;max-width:88%;white-space:pre-wrap;word-break:break-word}
+  .msg.me{align-self:flex-end;background:var(--primary);color:#fff;border-bottom-right-radius:4px}
+  .msg.ai{align-self:flex-start;background:#eef4f2;border-bottom-left-radius:4px}
+  .msg.ai b{color:var(--primary-dark)}
+
+  /* 店家清單 */
+  .item{display:flex;gap:10px;align-items:flex-start;padding:11px 2px;border-bottom:1px solid #f1f3f5}
+  .item:last-child{border-bottom:none}
+  .dot{width:11px;height:11px;border-radius:50%;margin-top:6px;flex:0 0 auto}
+  .item .mid{flex:1;min-width:0}
+  .item .nm{font-weight:700;font-size:15px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+  .item .sub{font-size:12.5px;color:var(--muted);margin-top:2px;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  .item .note{font-size:12.5px;color:#4b5563;margin-top:3px;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+  .tag{background:#eef4f2;color:var(--primary-dark);border-radius:6px;padding:1px 6px;font-size:11.5px;font-weight:600}
+  .warn{color:#b91c1c;font-weight:600}
+  .nav{width:36px;height:36px;border-radius:10px;background:#eef4f2;color:var(--primary-dark);
+    display:flex;align-items:center;justify-content:center;font-size:16px;flex:0 0 auto;margin-top:2px}
+  .empty{text-align:center;color:var(--muted);font-size:13.5px;padding:22px 10px;line-height:1.9}
+
+  /* 輸入列 */
+  #bar{flex:0 0 auto;display:flex;gap:8px;padding:8px 12px calc(env(safe-area-inset-bottom,0px) + 10px);
+    border-top:1px solid var(--border);background:#fff;align-items:center}
+  #q{flex:1;border:1.5px solid var(--border);border-radius:22px;padding:10px 14px;outline:none;min-width:0}
+  #q:focus{border-color:var(--primary)}
+  #send{width:42px;height:42px;border-radius:50%;background:var(--primary);color:#fff;font-size:18px;
+    display:flex;align-items:center;justify-content:center;flex:0 0 auto}
+  #hints{display:flex;gap:6px;overflow-x:auto;padding:0 12px 8px;flex:0 0 auto;scrollbar-width:none}
+  #hints::-webkit-scrollbar{display:none}
+  #hints button{border:1px solid var(--border);border-radius:999px;padding:5px 11px;font-size:13px;
+    white-space:nowrap;color:var(--muted);background:#fff;flex:0 0 auto}
+
+  /* ── 全螢幕彈窗（店家卡片／設定）────────────────────────── */
+  #modal{position:fixed;inset:0;z-index:900;background:rgba(15,34,31,.45);display:none;
+    align-items:flex-end;justify-content:center}
+  #modal.show{display:flex}
+  #box{background:#fff;width:100%;max-width:560px;border-radius:18px 18px 0 0;max-height:92vh;
+    display:flex;flex-direction:column;padding-bottom:env(safe-area-inset-bottom,0px)}
+  #box h2{font-size:17px;padding:16px 16px 10px;display:flex;align-items:center;gap:8px}
+  #box h2 .sp{flex:1}
+  #box h2 button{font-size:14px;color:var(--muted);font-weight:600}
+  #body{overflow-y:auto;padding:0 16px 16px;-webkit-overflow-scrolling:touch}
+  .fld{margin-bottom:13px}
+  .fld label{display:block;font-size:12.5px;font-weight:700;color:var(--muted);margin-bottom:5px}
+  .fld input[type=text],.fld textarea,.fld select{width:100%;border:1.5px solid var(--border);border-radius:10px;
+    padding:9px 11px;outline:none;background:#fff}
+  .fld input:focus,.fld textarea:focus,.fld select:focus{border-color:var(--primary)}
+  .fld textarea{min-height:64px;resize:vertical}
+  .seg{display:flex;gap:6px}
+  .seg button{flex:1;border:1.5px solid var(--border);border-radius:10px;padding:9px 4px;font-size:13.5px;font-weight:700;color:var(--muted);background:#fff}
+  .seg button.on{color:#fff}
+  .seg button.on[data-v=want]{background:var(--want);border-color:var(--want)}
+  .seg button.on[data-v=ok]{background:var(--ok);border-color:var(--ok)}
+  .seg button.on[data-v=nope]{background:var(--nope);border-color:var(--nope)}
+  .days{display:flex;gap:5px}
+  .days button{flex:1;border:1.5px solid var(--border);border-radius:9px;padding:8px 0;font-size:13px;font-weight:700;color:var(--muted);background:#fff}
+  .days button.on{background:#fee2e2;border-color:#fca5a5;color:#b91c1c}
+  .stars button{font-size:23px;color:#d1d5db;padding:0 2px}
+  .stars button.on{color:#f59e0b}
+  .loc{border:1.5px solid var(--border);border-radius:10px;padding:10px;background:#fafafa}
+  .loc .row{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+  .btn{border-radius:10px;padding:9px 13px;font-size:13.5px;font-weight:700}
+  .btn-p{background:var(--primary);color:#fff}
+  .btn-o{background:#fff;border:1.5px solid var(--border);color:var(--text)}
+  .btn-d{background:#fff;border:1.5px solid #fecaca;color:#dc2626}
+  .btn-w{width:100%}
+  .hits{margin-top:8px;display:flex;flex-direction:column;gap:5px}
+  .hits button{text-align:left;border:1px solid var(--border);border-radius:9px;padding:8px 10px;font-size:13px;background:#fff}
+  .hits button b{display:block;font-size:14px}
+  .hits button span{color:var(--muted);font-size:12px}
+  .foot{display:flex;gap:8px;padding:12px 16px calc(env(safe-area-inset-bottom,0px) + 14px);border-top:1px solid var(--border)}
+  .foot .btn{flex:1}
+  .hint{font-size:12px;color:var(--muted);margin-top:6px;line-height:1.7}
+  .sect{font-size:12.5px;font-weight:800;color:var(--primary-dark);margin:18px 0 8px;letter-spacing:.03em}
+  .kv{display:flex;justify-content:space-between;font-size:13.5px;padding:7px 0;border-bottom:1px solid #f1f3f5}
+
+  /* 地圖點選模式 */
+  #picking{position:fixed;inset:0;z-index:800;display:none;pointer-events:none}
+  #picking.show{display:block}
+  #picking .cross{position:absolute;left:50%;top:50%;transform:translate(-50%,-100%);font-size:34px;filter:drop-shadow(0 2px 3px rgba(0,0,0,.4))}
+  #picking .tip{position:absolute;left:12px;right:12px;top:calc(env(safe-area-inset-top,0px) + 56px);
+    background:rgba(21,34,31,.88);color:#fff;border-radius:12px;padding:10px 13px;font-size:13.5px;text-align:center}
+  #picking .act{position:absolute;left:12px;right:12px;bottom:calc(env(safe-area-inset-bottom,0px) + 16px);
+    display:flex;gap:8px;pointer-events:auto}
+  #picking .act .btn{flex:1}
+  #toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(env(safe-area-inset-bottom,0px) + 92px);
+    background:rgba(21,34,31,.92);color:#fff;padding:9px 16px;border-radius:20px;font-size:13.5px;z-index:1000;
+    opacity:0;transition:opacity .2s;pointer-events:none;max-width:88vw;text-align:center}
+  #toast.show{opacity:1}
+  #boot{position:fixed;inset:0;z-index:1100;background:var(--bg);display:flex;align-items:center;
+    justify-content:center;flex-direction:column;gap:10px;color:var(--muted);font-size:14px;text-align:center;padding:24px}
+</style>
+</head>
+<body>
+
+<div id="map"></div>
+
+<div id="top">
+  <div class="brand">吃什麼地圖</div>
+  <div class="sp"></div>
+  <button class="iconbtn" id="btn-dice" title="隨機選一家">🎲</button>
+  <button class="iconbtn" id="btn-loc" title="回到我的位置">◎</button>
+  <button class="iconbtn" id="btn-menu" title="設定與備份">☰</button>
+</div>
+
+<div id="panel" class="open">
+  <div id="grip"><span></span></div>
+  <div id="chips"></div>
+  <div id="scroll">
+    <div id="log"></div>
+    <div id="list"></div>
+  </div>
+  <div id="hints"></div>
+  <form id="bar" autocomplete="off">
+    <input id="q" type="text" placeholder="想吃什麼？或打「加 店名」新增" enterkeyhint="send">
+    <button id="send" type="submit" aria-label="送出">↑</button>
+  </form>
+</div>
+
+<div id="picking">
+  <div class="tip">拖動地圖，把中間的圖釘對準店家位置</div>
+  <div class="cross">📍</div>
+  <div class="act">
+    <button class="btn btn-o" id="pick-cancel">取消</button>
+    <button class="btn btn-p" id="pick-ok">就是這裡</button>
+  </div>
+</div>
+
+<div id="modal"><div id="box">
+  <h2><span id="box-title"></span><span class="sp"></span><button id="box-close">關閉</button></h2>
+  <div id="body"></div>
+  <div class="foot" id="box-foot"></div>
+</div></div>
+
+<div id="toast"></div>
+<div id="boot">地圖載入中…<br><span style="font-size:12px">第一次開啟需要網路</span></div>
+
+<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+<script type="module">
+import {
+  STATUS, parseCommand, guessTags, selectPlaces, findPlace, distance,
+  formatDistance, isClosedOn, mealOfHour, priceLevelOf, MEAL_TAGS
+} from '/food-parse.js';
+
+// ═══════════════════════════════════════════════════════════════════════
+// 資料層：全部存在這支手機的 localStorage，不上傳任何地方。
+// 為什麼不做雲端同步：這個 App 掛在 Vercel 免費方案上，Serverless Function
+// 只剩 1 格額度（見 SETUP.md），而且「自己一個人用的口袋名單」放雲端等於
+// 多一組要維護的密碼與後端。改用「匯出 JSON 備份」解決換手機的需求，
+// 需要跨裝置同步時再照 FOOD.md 的說明加。
+// ═══════════════════════════════════════════════════════════════════════
+const KEY = 'food-map-v1';
+const BAK = 'food-map-v1-prev';   // 上一版快照：萬一某次寫入寫壞了還救得回來
+const DEFAULTS = { v: 1, places: [], settings: { basemap: 'voyager' } };
+
+function load() {
+  for (const k of [KEY, BAK]) {
+    try {
+      const raw = localStorage.getItem(k);
+      if (!raw) continue;
+      const d = JSON.parse(raw);
+      if (d && Array.isArray(d.places)) return { ...DEFAULTS, ...d, settings: { ...DEFAULTS.settings, ...(d.settings || {}) } };
+    } catch { /* 壞掉就換下一個來源，不讓整個 App 開不起來 */ }
+  }
+  return structuredClone(DEFAULTS);
+}
+let db = load();
+
+function save() {
+  try {
+    const cur = localStorage.getItem(KEY);
+    if (cur) localStorage.setItem(BAK, cur);
+    localStorage.setItem(KEY, JSON.stringify(db));
+  } catch (e) {
+    toast('存不進去了，請匯出備份後清一些空間');
+  }
+}
+const uid = () => 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+const today = () => new Date().toISOString().slice(0, 10);
+
+// ═══════════════════════════════════════════════════════════════════════
+// 地圖
+// ═══════════════════════════════════════════════════════════════════════
+const BASEMAPS = {
+  voyager: { name: '簡潔', url: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
+    opt: { maxZoom: 20, subdomains: 'abcd', attribution: '&copy; OpenStreetMap &copy; CARTO' } },
+  osm: { name: '標準', url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+    opt: { maxZoom: 19, attribution: '&copy; OpenStreetMap' } },
+  sat: { name: '衛星', url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+    opt: { maxZoom: 19, attribution: 'Tiles &copy; Esri' } }
+};
+// 開圖預設位置：上次看的地方 → 沒有就台北車站（純備援，定位一好就會被蓋掉）
+const lastView = (() => { try { return JSON.parse(localStorage.getItem(KEY + '-view')); } catch { return null; } })();
+const map = L.map('map', { zoomControl: false, attributionControl: true })
+  .setView(lastView?.c || [25.0478, 121.5170], lastView?.z || 15);
+L.control.zoom({ position: 'topleft' }).addTo(map);
+let tileLayer = null;
+function setBasemap(k) {
+  db.settings.basemap = BASEMAPS[k] ? k : 'voyager';
+  if (tileLayer) map.removeLayer(tileLayer);
+  const b = BASEMAPS[db.settings.basemap];
+  tileLayer = L.tileLayer(b.url, b.opt).addTo(map);
+  save();
+}
+setBasemap(db.settings.basemap);
+map.on('moveend', () => {
+  try { localStorage.setItem(KEY + '-view', JSON.stringify({ c: [map.getCenter().lat, map.getCenter().lng], z: map.getZoom() })); } catch {}
+});
+document.getElementById('boot').remove();
+
+// 我的位置
+let me = null, meMarker = null, meCircle = null, follow = true;
+if (navigator.geolocation) {
+  navigator.geolocation.watchPosition(pos => {
+    const first = !me;
+    me = { lat: pos.coords.latitude, lng: pos.coords.longitude, acc: pos.coords.accuracy };
+    if (!meMarker) {
+      meMarker = L.marker([me.lat, me.lng], { icon: L.divIcon({ className: '', html: '<div class="me"></div>', iconSize: [16, 16] }), interactive: false, zIndexOffset: 500 }).addTo(map);
+      meCircle = L.circle([me.lat, me.lng], { radius: me.acc, color: '#2563eb', weight: 1, fillOpacity: .08 }).addTo(map);
+    } else {
+      meMarker.setLatLng([me.lat, me.lng]); meCircle.setLatLng([me.lat, me.lng]).setRadius(me.acc);
+    }
+    if (first && follow) map.setView([me.lat, me.lng], Math.max(map.getZoom(), 16));
+    if (first) render();
+  }, err => {
+    say('ai', '拿不到定位，距離排序會先關著。要用「附近有什麼」的話，請允許這個網站使用位置。');
+  }, { enableHighAccuracy: true, maximumAge: 20000, timeout: 15000 });
+}
+
+// 店家圖釘
+const markers = new Map();
+let selectedId = null;
+function pinIcon(p, sel) {
+  return L.divIcon({
+    className: '', iconSize: [26, 26], iconAnchor: [13, 13],
+    html: `<div class="pin ${p.status}${sel ? ' sel' : ''}"><i></i><b>${esc(p.name)}</b></div>`
+  });
+}
+function syncMarkers() {
+  const alive = new Set();
+  for (const p of db.places) {
+    if (p.lat == null || p.lng == null) continue;
+    alive.add(p.id);
+    let m = markers.get(p.id);
+    if (!m) {
+      m = L.marker([p.lat, p.lng], { icon: pinIcon(p, false) }).addTo(map);
+      m.on('click', () => openPlace(p.id));
+      markers.set(p.id, m);
+    } else {
+      m.setLatLng([p.lat, p.lng]);
+      m.setIcon(pinIcon(p, p.id === selectedId));
+    }
+  }
+  for (const [id, m] of markers) if (!alive.has(id)) { map.removeLayer(m); markers.delete(id); }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// 畫面
+// ═══════════════════════════════════════════════════════════════════════
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const DAY = ['日', '一', '二', '三', '四', '五', '六'];
+
+// 目前清單的篩選條件。指令查詢會覆寫它，chips 也會改它——兩邊共用同一份狀態，
+// 才不會出現「打字查了火鍋、但畫面上的篩選鈕還顯示全部」這種對不起來的情況。
+let view = { status: ['ok', 'want'], tags: [], meal: null, radius: null, q: '', openToday: false, stale: false };
+let lastResult = null;
+
+function toast(msg) {
+  const t = $('#toast'); t.textContent = msg; t.classList.add('show');
+  clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove('show'), 2200);
+}
+function say(who, text) {
+  const el = document.createElement('div');
+  el.className = 'msg ' + (who === 'me' ? 'me' : 'ai');
+  el.innerHTML = who === 'me' ? esc(text) : text;
+  $('#log').appendChild(el);
+  while ($('#log').children.length > 8) $('#log').firstChild.remove();
+  openPanel();
+  requestAnimationFrame(() => { $('#scroll').scrollTop = $('#scroll').scrollHeight; });
+}
+const openPanel = () => $('#panel').classList.add('open');
+
+function renderChips() {
+  const c = [
+    { k: 'all', t: '全部', on: view.status.length === 3 },
+    { k: 'ok', t: '平常可吃', on: view.status.length === 1 && view.status[0] === 'ok', cls: '' },
+    { k: 'want', t: '想吃還沒吃', on: view.status.length === 1 && view.status[0] === 'want', cls: 'w' },
+    { k: 'nope', t: '踩雷', on: view.status.length === 1 && view.status[0] === 'nope', cls: 'n' },
+    { k: 'open', t: '今天有開', on: view.openToday },
+    { k: 'stale', t: '好久沒去', on: view.stale }
+  ];
+  $('#chips').innerHTML = c.map(x => `<button class="chip ${x.cls || ''} ${x.on ? 'on' : ''}" data-k="${x.k}">${x.t}</button>`).join('')
+    + (view.tags.length ? view.tags.map(t => `<button class="chip on" data-k="tag:${esc(t)}">${esc(t)} ✕</button>`).join('') : '')
+    + (view.q ? `<button class="chip on" data-k="q">「${esc(view.q)}」✕</button>` : '')
+    + (view.radius ? `<button class="chip on" data-k="radius">${formatDistance(view.radius)}內 ✕</button>` : '');
+}
+
+// 「好久沒去」= 平常可吃、但超過 90 天沒去。這是這個 App 真正的長期價值：
+// 口袋名單放久了會固定只吃那三家，剩下的其實是被忘掉、不是不好吃。
+const STALE_DAYS = 90;
+function isStale(p) {
+  if (p.status !== 'ok') return false;
+  if (!p.lastVisit) return true;
+  return (Date.now() - new Date(p.lastVisit + 'T00:00:00').getTime()) / 86400000 > STALE_DAYS;
+}
+
+function currentList() {
+  let out = selectPlaces(db.places, {
+    status: view.status, tags: view.tags, meal: view.meal,
+    radius: view.radius, openToday: view.openToday
+  }, { origin: me, now: new Date() });
+  if (view.stale) out = out.filter(isStale);
+  if (view.q) {
+    const q = view.q.toLowerCase();
+    out = out.filter(p => [p.name, p.note, p.addr, ...(p.tags || [])].join(' ').toLowerCase().includes(q));
+  }
+  return out;
+}
+
+function render() {
+  renderChips();
+  syncMarkers();
+  const list = lastResult || currentList();
+  const box = $('#list');
+  if (!db.places.length) {
+    box.innerHTML = `<div class="empty">還沒有任何店家。<br>
+      在下面打 <b>加 鼎泰豐</b> 就會新增一家，<br>人在店門口時打 <b>加 店名 在這</b> 直接用目前位置。</div>`;
+    return;
+  }
+  if (!list.length) {
+    box.innerHTML = `<div class="empty">這個條件下沒有店。<br>換個條件，或打「全部」看所有店。</div>`;
+    return;
+  }
+  box.innerHTML = list.map(p => {
+    const d = p._dist != null ? formatDistance(p._dist) : (p.lat == null ? '未定位' : '');
+    const closed = isClosedOn(p, new Date());
+    return `<div class="item" data-id="${p.id}">
+      <span class="dot" style="background:${STATUS[p.status].color}"></span>
+      <div class="mid">
+        <div class="nm">${esc(p.name)}${p.rating ? ` <span style="color:#f59e0b;font-size:12.5px">${'★'.repeat(p.rating)}</span>` : ''}</div>
+        <div class="sub">
+          ${d ? `<span>${d}</span>` : ''}
+          ${p.price ? `<span>${'$'.repeat(p.price)}</span>` : ''}
+          ${closed ? '<span class="warn">今天公休</span>' : ''}
+          ${isStale(p) ? '<span style="color:#a16207">好久沒去了</span>' : ''}
+          ${(p.tags || []).slice(0, 3).map(t => `<span class="tag">${esc(t)}</span>`).join('')}
+        </div>
+        ${p.note ? `<div class="note">${esc(p.note)}</div>` : ''}
+      </div>
+      ${p.lat != null ? `<button class="nav" data-nav="${p.id}" title="導航">➤</button>` : ''}
+    </div>`;
+  }).join('');
+}
+
+$('#list').addEventListener('click', e => {
+  const nav = e.target.closest('[data-nav]');
+  if (nav) { const p = db.places.find(x => x.id === nav.dataset.nav); if (p) navTo(p); return; }
+  const it = e.target.closest('.item');
+  if (it) openPlace(it.dataset.id);
+});
+$('#chips').addEventListener('click', e => {
+  const b = e.target.closest('.chip'); if (!b) return;
+  const k = b.dataset.k;
+  lastResult = null;
+  if (k === 'all') view.status = ['ok', 'want', 'nope'];
+  else if (['ok', 'want', 'nope'].includes(k)) view.status = (view.status.length === 1 && view.status[0] === k) ? ['ok', 'want'] : [k];
+  else if (k === 'open') view.openToday = !view.openToday;
+  else if (k === 'stale') { view.stale = !view.stale; if (view.stale) view.status = ['ok']; }
+  else if (k === 'q') view.q = '';
+  else if (k === 'radius') view.radius = null;
+  else if (k.startsWith('tag:')) view.tags = view.tags.filter(t => t !== k.slice(4));
+  render();
+});
+$('#grip').addEventListener('click', () => $('#panel').classList.toggle('open'));
+
+function navTo(p) {
+  // 用 Google Maps 的通用導航網址：手機上會直接跳進 Google 地圖 App。
+  window.open(`https://www.google.com/maps/dir/?api=1&destination=${p.lat},${p.lng}`, '_blank', 'noopener');
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// 指令
+// ═══════════════════════════════════════════════════════════════════════
+const HINTS = ['附近吃什麼', '隨機選一家', '想吃清單', '好久沒去', '說明'];
+$('#hints').innerHTML = HINTS.map(h => `<button type="button">${h}</button>`).join('');
+$('#hints').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  $('#q').value = b.textContent; $('#bar').requestSubmit();
+});
+
+$('#bar').addEventListener('submit', e => {
+  e.preventDefault();
+  const text = $('#q').value.trim();
+  if (!text) return;
+  $('#q').value = '';
+  say('me', text);
+  run(text);
+});
+
+function run(text) {
+  const c = parseCommand(text);
+  if (!c) return;
+  lastResult = null;
+
+  if (c.type === 'help') return showHelp();
+
+  if (c.type === 'add') return startAdd(c);
+
+  if (c.type === 'find') {
+    // 沒指定時段就用現在的時間推：中午問「吃什麼」不該把甜點排在牛肉麵前面
+    const meal = c.filters.meal || mealOfHour(new Date().getHours() + new Date().getMinutes() / 60);
+    view = { status: c.filters.status, tags: c.filters.tags, meal,
+             radius: c.filters.radius, q: '', openToday: true, stale: false };
+    let list = currentList();
+    if (!list.length && view.openToday) {   // 全部都公休就放寬，總比回「沒有」好
+      view.openToday = false; list = currentList();
+    }
+    if (!list.length && view.radius) { view.radius = null; list = currentList(); }
+    if (!list.length) {
+      say('ai', `找不到符合的店。<b>${esc(db.places.length)}</b> 家裡沒有這一類，要不要打「加 店名」先記一家？`);
+      render(); return;
+    }
+    if (c.random) {
+      const pool = list.slice(0, Math.max(3, Math.min(12, list.length)));  // 只從最近的前幾家抽，抽到 20 公里外沒意義
+      const pick = pool[Math.floor(Math.random() * pool.length)];
+      lastResult = [pick];
+      say('ai', `就決定是 <b>${esc(pick.name)}</b>！${pick._dist != null ? ' ' + formatDistance(pick._dist) : ''}${pick.note ? '<br>' + esc(pick.note) : ''}<br><span style="font-size:12px;color:#6b7280">不滿意就再打一次「隨便」</span>`);
+      focusPlace(pick.id);
+      render(); return;
+    }
+    const near = view.radius ? `${formatDistance(view.radius)}內` : (me ? '離你最近的' : '');
+    say('ai', `${near}${meal ? '「' + meal + '」時段' : ''}找到 <b>${list.length}</b> 家：<br>` +
+      list.slice(0, 3).map(p => `• ${esc(p.name)}${p._dist != null ? '（' + formatDistance(p._dist) + '）' : ''}`).join('<br>') +
+      (list.length > 3 ? `<br>…下面清單還有 ${list.length - 3} 家` : ''));
+    render();
+    if (list[0] && list[0].lat != null) map.setView([list[0].lat, list[0].lng], Math.max(map.getZoom(), 15));
+    return;
+  }
+
+  if (c.type === 'search') {
+    view = { status: ['ok', 'want', 'nope'], tags: [], meal: null, radius: null, q: c.q, openToday: false, stale: false };
+    const list = currentList();
+    if (!list.length) {
+      say('ai', `找不到「${esc(c.q)}」。<br>要新增的話打 <b>加 ${esc(c.q)}</b>。`);
+    } else if (list.length === 1) {
+      say('ai', `找到 <b>${esc(list[0].name)}</b>`); focusPlace(list[0].id);
+    } else {
+      say('ai', `找到 <b>${list.length}</b> 家符合「${esc(c.q)}」`);
+    }
+    render(); return;
+  }
+
+  if (c.type === 'visit' || c.type === 'mark' || c.type === 'remove') {
+    const p = findPlace(db.places, c.target);
+    if (!p) { say('ai', `清單裡沒有「${esc(c.target)}」。要新增的話打 <b>加 ${esc(c.target)}</b>。`); return; }
+    if (c.type === 'remove') {
+      openConfirm(`確定刪掉「${p.name}」？`, () => {
+        db.places = db.places.filter(x => x.id !== p.id); save(); render();
+        say('ai', `已刪掉 <b>${esc(p.name)}</b>`);
+      });
+      return;
+    }
+    if (c.type === 'mark') {
+      p.status = c.status; p.updatedAt = today(); save(); render();
+      say('ai', `<b>${esc(p.name)}</b> 標成「${STATUS[c.status].label}」了`);
+      return;
+    }
+    // 打卡：想吃的店吃過一次就自動轉成「平常可吃」，不用再手動改
+    p.visits = (p.visits || 0) + 1; p.lastVisit = today(); p.updatedAt = today();
+    const moved = p.status === 'want';
+    if (moved) p.status = 'ok';
+    save(); render();
+    say('ai', `記錄了 <b>${esc(p.name)}</b>，第 ${p.visits} 次${moved ? '<br>已從「想吃還沒吃」移到「平常可吃」' : ''}`);
+  }
+}
+
+function focusPlace(id) {
+  const p = db.places.find(x => x.id === id);
+  selectedId = id; syncMarkers();
+  if (p && p.lat != null) map.setView([p.lat, p.lng], Math.max(map.getZoom(), 16));
+}
+
+function showHelp() {
+  say('ai', `<b>新增</b>
+加 鼎泰豐　　　　　　→ 記成「想吃還沒吃」
+加 鼎泰豐 常吃　　　　→ 記成「平常可吃」
+加 鼎泰豐 在這　　　　→ 人在店門口，直接用目前位置
+加，阿宗麵線，峨眉街8-1號，要站著吃
+
+<b>決定吃什麼</b>
+附近吃什麼／500公尺內吃什麼／走路5分鐘
+晚上想吃日式／中午吃啥／宵夜
+隨便（或「選擇障礙」）→ 幫你抽一家
+
+<b>整理</b>
+鼎泰豐吃過了　→ 打卡＋自動移到「平常可吃」
+阿宗麵線踩雷　→ 標成踩雷，以後查詢不會再跳出來
+刪掉 鼎泰豐
+
+其他字一律當關鍵字搜尋，不會誤新增。`);
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// 新增流程：解析 → 攤成一張可改的卡片 → 存
+// 刻意不「解析完直接存」：解析一定有猜錯的時候，猜錯又靜靜存進去的話，
+// 清單會慢慢長出一堆名字怪怪的店，而使用者要很久以後才會發現。
+// ═══════════════════════════════════════════════════════════════════════
+let draft = null;
+
+function startAdd(c) {
+  const dup = findPlace(db.places, c.name);
+  if (dup && dup.name === c.name) {
+    say('ai', `<b>${esc(c.name)}</b> 已經在清單裡了，幫你打開。`);
+    openPlace(dup.id); return;
+  }
+  draft = {
+    id: uid(), name: c.name, status: c.status, tags: c.tags || [], addr: c.addr || '',
+    note: c.note || '', price: c.price || 0, rating: c.rating || 0, closed: [], hours: '',
+    lat: null, lng: null, visits: 0, lastVisit: '', createdAt: today(), updatedAt: today()
+  };
+  if (c.useHere && me) { draft.lat = me.lat; draft.lng = me.lng; }
+  openEditor(draft, true);
+  if (!draft.lat) geocode(draft.name + ' ' + (draft.addr || draft.note || ''));
+}
+
+// ── 地址搜尋（OpenStreetMap Nominatim，免金鑰、免費）─────────────────
+// 使用條款要求低流量、不可自動大量查詢，所以只在使用者按下去或新增時查一次，
+// 不做逐字即時搜尋。查不到很正常（台灣小店在 OSM 上很多沒有），
+// 所以一定要保留「在地圖上點選」這條路，那是永遠有效的備援。
+let geoAbort = null;
+async function geocode(q) {
+  q = String(q || '').trim();
+  if (!q) return;
+  const hits = document.getElementById('loc-hits');
+  if (hits) hits.innerHTML = '<div class="hint">搜尋中…</div>';
+  try {
+    geoAbort?.abort(); geoAbort = new AbortController();
+    const url = 'https://nominatim.openstreetmap.org/search?format=jsonv2&limit=5&countrycodes=tw'
+      + '&accept-language=zh-TW&q=' + encodeURIComponent(q);
+    const r = await fetch(url, { signal: geoAbort.signal, headers: { 'Accept': 'application/json' } });
+    const arr = await r.json();
+    if (!hits || !document.getElementById('loc-hits')) return;
+    if (!arr.length) { hits.innerHTML = '<div class="hint">查不到這個地點。可以改用「在地圖上點選」，或貼 Google 地圖網址。</div>'; return; }
+    hits.innerHTML = arr.map(h => `<button type="button" data-lat="${h.lat}" data-lng="${h.lon}" data-name="${esc(h.display_name)}">
+      <b>${esc(String(h.display_name).split(',')[0])}</b><span>${esc(String(h.display_name).split(',').slice(1, 4).join('，').trim())}</span></button>`).join('');
+  } catch (e) {
+    if (e.name === 'AbortError') return;
+    if (hits) hits.innerHTML = '<div class="hint">搜尋失敗（可能沒網路）。可以改用「在地圖上點選」。</div>';
+  }
+}
+
+// 貼上的文字裡有沒有座標。支援：Google 地圖網址、Apple 地圖網址、純「緯度,經度」。
+// maps.app.goo.gl 這種短網址在瀏覽器裡展不開（跨網域擋住），所以會另外提示做法。
+function coordsFrom(text) {
+  const s = String(text || '');
+  const pats = [
+    /@(-?\d+\.\d+),(-?\d+\.\d+)/,
+    /!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/,
+    /[?&](?:q|query|ll|daddr|destination)=(-?\d+\.\d+),\s*(-?\d+\.\d+)/,
+    /^\s*(-?\d{1,2}\.\d{3,}),\s*(-?\d{2,3}\.\d{3,})\s*$/
+  ];
+  for (const re of pats) {
+    const m = s.match(re);
+    if (m) {
+      const lat = parseFloat(m[1]), lng = parseFloat(m[2]);
+      if (Math.abs(lat) <= 90 && Math.abs(lng) <= 180) return { lat, lng };
+    }
+  }
+  return null;
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// 店家卡片
+// ═══════════════════════════════════════════════════════════════════════
+let editing = null, isNew = false;
+
+function openPlace(id) {
+  const p = db.places.find(x => x.id === id);
+  if (!p) return;
+  selectedId = id; syncMarkers();
+  if (p.lat != null) map.panTo([p.lat, p.lng]);
+  openEditor(p, false);
+}
+
+function openEditor(p, creating) {
+  editing = creating ? p : { ...p, tags: [...(p.tags || [])], closed: [...(p.closed || [])] };
+  isNew = creating;
+  $('#box-title').textContent = creating ? '新增店家' : '店家資料';
+  $('#body').innerHTML = editorHTML(editing);
+  $('#box-foot').innerHTML = creating
+    ? `<button class="btn btn-o" id="e-cancel">取消</button><button class="btn btn-p" id="e-save">加入</button>`
+    : `<button class="btn btn-d" id="e-del">刪除</button><button class="btn btn-o" id="e-visit">吃過了</button><button class="btn btn-p" id="e-save">儲存</button>`;
+  $('#modal').classList.add('show');
+  bindEditor();
+}
+
+function editorHTML(p) {
+  const dist = me && p.lat != null ? formatDistance(distance(me, p)) : '';
+  return `
+  <div class="fld"><label>店名</label><input type="text" id="e-name" value="${esc(p.name)}"></div>
+  <div class="fld"><label>分類</label><div class="seg" id="e-status">
+    ${['ok', 'want', 'nope'].map(k => `<button type="button" data-v="${k}" class="${p.status === k ? 'on' : ''}">${STATUS[k].label}</button>`).join('')}
+  </div></div>
+  <div class="fld"><label>位置${dist ? `（距離你 ${dist}）` : ''}</label>
+    <div class="loc">
+      <div id="loc-state" style="font-size:13.5px">${p.lat != null
+        ? `已定位　<span style="color:#6b7280;font-size:12px">${p.lat.toFixed(5)}, ${p.lng.toFixed(5)}</span>`
+        : '<span style="color:#b91c1c">還沒有位置，不會出現在地圖上</span>'}</div>
+      <div class="row">
+        <button type="button" class="btn btn-o" id="loc-here">用我現在的位置</button>
+        <button type="button" class="btn btn-o" id="loc-pick">在地圖上點選</button>
+        <button type="button" class="btn btn-o" id="loc-search">搜尋地址</button>
+      </div>
+      <input type="text" id="e-addr" placeholder="地址或關鍵字，也可以直接貼 Google 地圖網址" value="${esc(p.addr)}" style="margin-top:8px;width:100%;border:1.5px solid var(--border);border-radius:10px;padding:9px 11px;outline:none">
+      <div class="hits" id="loc-hits"></div>
+      <div class="hint">手機 Google 地圖的「分享」短網址（maps.app.goo.gl）展不開，
+        請先在瀏覽器開啟它、再複製網址列的完整網址；或直接用「在地圖上點選」最快。</div>
+    </div>
+  </div>
+  <div class="fld"><label>標籤（用空白或逗號分隔）</label>
+    <input type="text" id="e-tags" value="${esc((p.tags || []).join(' '))}" placeholder="日式 拉麵 不用排隊">
+  </div>
+  <div class="fld"><label>備註（點什麼最好吃、要不要訂位…）</label>
+    <textarea id="e-note" placeholder="牛肉麵大碗，小菜普通。記得說不要香菜">${esc(p.note)}</textarea>
+  </div>
+  <div class="fld"><label>評分</label><div class="stars" id="e-rating">
+    ${[1, 2, 3, 4, 5].map(n => `<button type="button" data-v="${n}" class="${(p.rating || 0) >= n ? 'on' : ''}">★</button>`).join('')}
+    <button type="button" data-v="0" style="font-size:13px;color:#9ca3af">清除</button>
+  </div></div>
+  <div class="fld"><label>價位</label><div class="seg" id="e-price">
+    ${[1, 2, 3, 4].map(n => `<button type="button" data-v="${n}" class="${p.price === n ? 'on' : ''}" style="${p.price === n ? 'background:var(--primary);border-color:var(--primary)' : ''}">${'$'.repeat(n)}</button>`).join('')}
+  </div><div class="hint">$ 100 以下／$$ 150–350／$$$ 350–800／$$$$ 800 以上（人均）</div></div>
+  <div class="fld"><label>公休日</label><div class="days" id="e-closed">
+    ${DAY.map((d, i) => `<button type="button" data-v="${i}" class="${(p.closed || []).includes(i) ? 'on' : ''}">${d}</button>`).join('')}
+  </div></div>
+  <div class="fld"><label>營業時間（自己看得懂就好）</label>
+    <input type="text" id="e-hours" value="${esc(p.hours || '')}" placeholder="11:00-14:00, 17:00-21:00">
+  </div>
+  ${!isNew ? `<div class="sect">紀錄</div>
+    <div class="kv"><span>去過次數</span><b>${p.visits || 0} 次</b></div>
+    <div class="kv"><span>上次去</span><b>${p.lastVisit || '—'}</b></div>
+    <div class="kv"><span>加入日期</span><b>${p.createdAt || '—'}</b></div>
+    ${p.lat != null ? `<button class="btn btn-p btn-w" id="e-nav" style="margin-top:14px">用 Google 地圖導航過去</button>` : ''}` : ''}
+  `;
+}
+
+function bindEditor() {
+  const p = editing;
+  const on = (sel, ev, fn) => { const el = $(sel); if (el) el.addEventListener(ev, fn); };
+
+  $('#e-status').addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b) return;
+    p.status = b.dataset.v;
+    [...$('#e-status').children].forEach(x => x.classList.toggle('on', x === b));
+  });
+  $('#e-rating').addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b) return;
+    p.rating = +b.dataset.v;
+    [...$('#e-rating').children].forEach(x => x.classList.toggle('on', +x.dataset.v && +x.dataset.v <= p.rating));
+  });
+  $('#e-price').addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b) return;
+    p.price = p.price === +b.dataset.v ? 0 : +b.dataset.v;
+    [...$('#e-price').children].forEach(x => {
+      const sel = +x.dataset.v === p.price;
+      x.classList.toggle('on', sel);
+      x.style.cssText = sel ? 'background:var(--primary);border-color:var(--primary);color:#fff' : '';
+    });
+  });
+  $('#e-closed').addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b) return;
+    const v = +b.dataset.v;
+    p.closed = p.closed.includes(v) ? p.closed.filter(x => x !== v) : [...p.closed, v];
+    b.classList.toggle('on', p.closed.includes(v));
+  });
+
+  on('#loc-here', 'click', () => {
+    if (!me) return toast('還沒拿到定位，請確認已允許位置權限');
+    p.lat = me.lat; p.lng = me.lng;
+    $('#loc-state').innerHTML = `已用目前位置　<span style="color:#6b7280;font-size:12px">${p.lat.toFixed(5)}, ${p.lng.toFixed(5)}</span>`;
+  });
+  on('#loc-pick', 'click', () => startPick(p));
+  on('#loc-search', 'click', () => geocode(($('#e-name')?.value || '') + ' ' + ($('#e-addr')?.value || '')));
+  on('#e-addr', 'input', e => {
+    // 貼上網址時自動抽座標，省掉再按一次搜尋
+    const c = coordsFrom(e.target.value);
+    if (c) {
+      p.lat = c.lat; p.lng = c.lng;
+      $('#loc-state').innerHTML = `已從連結取得座標　<span style="color:#6b7280;font-size:12px">${c.lat.toFixed(5)}, ${c.lng.toFixed(5)}</span>`;
+      toast('已從連結取得座標');
+    }
+  });
+  $('#loc-hits').addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b) return;
+    p.lat = parseFloat(b.dataset.lat); p.lng = parseFloat(b.dataset.lng);
+    if (!$('#e-addr').value.trim()) $('#e-addr').value = b.dataset.name.split(',').slice(0, 4).join(',');
+    $('#loc-state').innerHTML = `已定位　<span style="color:#6b7280;font-size:12px">${p.lat.toFixed(5)}, ${p.lng.toFixed(5)}</span>`;
+    $('#loc-hits').innerHTML = '';
+  });
+
+  on('#e-nav', 'click', () => navTo(p));
+  on('#e-cancel', 'click', closeModal);
+  on('#e-save', 'click', saveEditor);
+  on('#e-visit', 'click', () => { collect(); commit(); run(p.name + '吃過了'); closeModal(); });
+  on('#e-del', 'click', () => openConfirm(`確定刪掉「${p.name}」？`, () => {
+    db.places = db.places.filter(x => x.id !== p.id); save(); render(); closeModal();
+    toast('已刪除');
+  }));
+}
+
+function collect() {
+  const p = editing;
+  p.name = ($('#e-name')?.value || '').trim() || p.name;
+  p.addr = ($('#e-addr')?.value || '').trim();
+  p.note = ($('#e-note')?.value || '').trim();
+  p.hours = ($('#e-hours')?.value || '').trim();
+  p.tags = ($('#e-tags')?.value || '').split(/[\s,，、]+/).map(t => t.replace(/^#/, '').trim()).filter(Boolean);
+  p.updatedAt = today();
+}
+function commit() {
+  const i = db.places.findIndex(x => x.id === editing.id);
+  if (i >= 0) db.places[i] = editing; else db.places.push(editing);
+  save(); render();
+}
+function saveEditor() {
+  collect();
+  if (!editing.name) return toast('店名不能空白');
+  const wasNew = isNew;
+  const p = editing;            // closeModal() 會把 editing 清成 null，先抓在手上
+  commit();
+  closeModal();
+  if (wasNew) {
+    say('ai', `已加入 <b>${esc(p.name)}</b>（${STATUS[p.status].label}）` +
+      (p.lat == null ? '<br><span style="color:#b91c1c">還沒有位置，之後點開它補上就會出現在地圖</span>' : ''));
+    if (p.lat != null) focusPlace(p.id);
+  } else toast('已儲存');
+}
+
+function closeModal() { $('#modal').classList.remove('show'); editing = null; }
+$('#box-close').addEventListener('click', closeModal);
+$('#modal').addEventListener('click', e => { if (e.target.id === 'modal') closeModal(); });
+
+function openConfirm(text, onYes) {
+  $('#box-title').textContent = '確認';
+  $('#body').innerHTML = `<div style="padding:8px 0 4px;font-size:15px">${esc(text)}</div>`;
+  $('#box-foot').innerHTML = `<button class="btn btn-o" id="c-no">取消</button><button class="btn btn-d" id="c-yes">確定刪除</button>`;
+  $('#modal').classList.add('show');
+  $('#c-no').addEventListener('click', closeModal);
+  $('#c-yes').addEventListener('click', () => { onYes(); closeModal(); });
+}
+
+// ── 在地圖上點選位置 ─────────────────────────────────────────────────
+let picking = null;
+function startPick(p) {
+  picking = p;
+  $('#modal').classList.remove('show');
+  $('#picking').classList.add('show');
+  $('#panel').classList.remove('open');
+  if (p.lat != null) map.setView([p.lat, p.lng], Math.max(map.getZoom(), 17));
+  else if (me) map.setView([me.lat, me.lng], 17);
+}
+$('#pick-cancel').addEventListener('click', () => { $('#picking').classList.remove('show'); $('#modal').classList.add('show'); picking = null; });
+$('#pick-ok').addEventListener('click', () => {
+  const c = map.getCenter();
+  picking.lat = c.lat; picking.lng = c.lng;
+  $('#picking').classList.remove('show');
+  $('#modal').classList.add('show');
+  const st = $('#loc-state');
+  if (st) st.innerHTML = `已用地圖上的位置　<span style="color:#6b7280;font-size:12px">${c.lat.toFixed(5)}, ${c.lng.toFixed(5)}</span>`;
+  picking = null;
+});
+
+// ── 頂列按鈕 ─────────────────────────────────────────────────────────
+$('#btn-loc').addEventListener('click', () => {
+  if (!me) return toast('還沒拿到定位，請確認已允許位置權限');
+  map.setView([me.lat, me.lng], Math.max(map.getZoom(), 16));
+});
+$('#btn-dice').addEventListener('click', () => { say('me', '隨便'); run('隨便'); });
+$('#btn-menu').addEventListener('click', openMenu);
+
+// ═══════════════════════════════════════════════════════════════════════
+// 設定與備份
+// 資料只存在這支手機，所以「匯出」不是附加功能、是唯一的保命繩：
+// 換手機、清瀏覽器資料、瀏覽器自己清掉網站儲存空間，沒備份就全沒了。
+// ═══════════════════════════════════════════════════════════════════════
+function openMenu() {
+  const n = db.places.length;
+  const byStatus = k => db.places.filter(p => p.status === k).length;
+  $('#box-title').textContent = '設定與備份';
+  $('#body').innerHTML = `
+    <div class="sect">我的店</div>
+    <div class="kv"><span>總數</span><b>${n} 家</b></div>
+    <div class="kv"><span>平常可吃</span><b>${byStatus('ok')} 家</b></div>
+    <div class="kv"><span>想吃還沒吃</span><b>${byStatus('want')} 家</b></div>
+    <div class="kv"><span>踩雷</span><b>${byStatus('nope')} 家</b></div>
+    <div class="kv"><span>還沒定位</span><b>${db.places.filter(p => p.lat == null).length} 家</b></div>
+
+    <div class="sect">備份（很重要）</div>
+    <div class="hint" style="margin:0 0 10px">資料只存在這支手機的瀏覽器裡，沒有上傳任何地方。
+      換手機、清除瀏覽器資料都會消失，所以請定期匯出一份存到雲端硬碟或傳給自己。</div>
+    <button class="btn btn-p btn-w" id="m-export" style="margin-bottom:8px">匯出備份檔（JSON）</button>
+    <button class="btn btn-o btn-w" id="m-copy" style="margin-bottom:8px">複製備份文字到剪貼簿</button>
+    <button class="btn btn-o btn-w" id="m-import">從備份檔還原</button>
+    <input type="file" id="m-file" accept="application/json,.json" hidden>
+
+    <div class="sect">地圖樣式</div>
+    <div class="seg" id="m-base">
+      ${Object.entries(BASEMAPS).map(([k, v]) => `<button type="button" data-v="${k}" class="${db.settings.basemap === k ? 'on' : ''}" style="${db.settings.basemap === k ? 'background:var(--primary);border-color:var(--primary);color:#fff' : ''}">${v.name}</button>`).join('')}
+    </div>
+
+    <div class="sect">其他</div>
+    <button class="btn btn-o btn-w" id="m-help" style="margin-bottom:8px">看指令說明</button>
+    <button class="btn btn-d btn-w" id="m-clear">清空所有資料</button>
+    <div class="hint">加到手機主畫面就能像 App 一樣開：iPhone 用 Safari 開這頁 →
+      分享 → 加入主畫面；Android 用 Chrome → 右上選單 → 加到主畫面。</div>`;
+  $('#box-foot').innerHTML = `<button class="btn btn-p btn-w" id="m-close">完成</button>`;
+  $('#modal').classList.add('show');
+
+  $('#m-close').addEventListener('click', closeModal);
+  $('#m-help').addEventListener('click', () => { closeModal(); showHelp(); });
+  $('#m-export').addEventListener('click', exportJSON);
+  $('#m-copy').addEventListener('click', async () => {
+    try { await navigator.clipboard.writeText(JSON.stringify(db)); toast('已複製，貼到記事本或傳給自己'); }
+    catch { toast('複製失敗，請改用「匯出備份檔」'); }
+  });
+  $('#m-import').addEventListener('click', () => $('#m-file').click());
+  $('#m-file').addEventListener('change', importJSON);
+  $('#m-base').addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b) return;
+    setBasemap(b.dataset.v);
+    [...$('#m-base').children].forEach(x => {
+      const sel = x === b;
+      x.classList.toggle('on', sel);
+      x.style.cssText = sel ? 'background:var(--primary);border-color:var(--primary);color:#fff' : '';
+    });
+  });
+  $('#m-clear').addEventListener('click', () => openConfirm('確定清空全部店家？請先確認已經匯出備份。', () => {
+    db = structuredClone(DEFAULTS); save(); lastResult = null; render(); toast('已清空');
+  }));
+}
+
+function exportJSON() {
+  const blob = new Blob([JSON.stringify(db, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `food-map-backup-${today()}.json`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  toast('已匯出，記得存到雲端硬碟');
+}
+
+async function importJSON(e) {
+  const f = e.target.files?.[0]; if (!f) return;
+  e.target.value = '';
+  try {
+    const d = JSON.parse(await f.text());
+    if (!d || !Array.isArray(d.places)) throw new Error('格式不對');
+    // 合併而不是覆蓋：同 id 以檔案為準，沒有的就新增。
+    // 覆蓋的話，兩支手機各加了幾家之後還原一次就會少掉一邊，而且救不回來。
+    const byId = new Map(db.places.map(p => [p.id, p]));
+    let add = 0, upd = 0;
+    for (const p of d.places) {
+      if (!p || !p.id || !p.name) continue;
+      if (byId.has(p.id)) { Object.assign(byId.get(p.id), p); upd++; }
+      else { db.places.push(p); add++; }
+    }
+    save(); lastResult = null; render(); closeModal();
+    toast(`已還原：新增 ${add} 家、更新 ${upd} 家`);
+  } catch (err) {
+    toast('還原失敗：檔案格式不對');
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// 啟動
+// ═══════════════════════════════════════════════════════════════════════
+render();
+if (!db.places.length) {
+  say('ai', `這是你自己的口袋名單，資料只存在這支手機。<br><br>
+    先試試看：打 <b>加 鼎泰豐</b>，或人在店門口時打 <b>加 店名 在這</b>。<br>
+    要決定吃什麼就打 <b>附近吃什麼</b> 或 <b>隨便</b>。<br>
+    打 <b>說明</b> 看全部指令。`);
+} else {
+  const stale = db.places.filter(isStale).length;
+  const want = db.places.filter(p => p.status === 'want').length;
+  say('ai', `共 <b>${db.places.length}</b> 家：想吃還沒吃 ${want} 家${stale ? `、好久沒去 ${stale} 家` : ''}。<br>要吃什麼就打「附近吃什麼」或按上面的 🎲。`);
+}
+
+// Service Worker：讓加到主畫面後也能離線開啟。
+// 註冊失敗（例如瀏覽器不支援）就安靜跳過，不影響任何功能。
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/food-sw.js').catch(() => {});
+}
+</script>
+</body>
+</html>
