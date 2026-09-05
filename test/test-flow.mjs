@@ -363,13 +363,19 @@ out = await send('你是誰');
 check('1 對 1 問「你是誰」→ 回使用說明，不是答非所問的萬用兜底文案',
   out[0]?.kind === 'text' && /怎麼使用這個帳號/.test(out[0].text), JSON.stringify(out));
 
-// 迴歸：真的問不出所以然的話，兜底文案還在，只是語氣改軟、多附「媒體邀訪需求」
-// 按鈕——不是把安全網拿掉。
+// 迴歸：真的問不出所以然的話，兜底文案還在——不是把安全網拿掉。
+// 批次 24 改寫了這段文案：舊版把「猜不出來」一律講成「我沒抓到您想問哪一場活動」，
+// 但這個帳號有四條路（活動／產業趨勢／工研院技術／邀訪窗口），活動只是其中一條，
+// 記者根本沒在問活動時那句話本身就是答非所問（見情境 19 的回報截圖）。新版不預設
+// 記者一定是在問活動，四條路一次講清楚。
 reset(); await freshModule();
 out = await send('隨便問一句跟任何主題都不相關的話');
-check('真的判不出意圖 → 兜底文案仍然出現，且附上三個核心入口按鈕',
-  out[0]?.kind === 'text' && /沒抓到您想問哪一場活動/.test(out[0].text) &&
-  JSON.stringify(out[0]?.quickReply) === JSON.stringify(['最近有哪些活動', '媒體邀訪需求', '使用說明']),
+check('真的判不出意圖 → 兜底文案仍然出現，四條路都講到，且附上核心入口按鈕',
+  out[0]?.kind === 'text' &&
+  /不太確定該從哪邊幫您找答案/.test(out[0].text) &&
+  !/沒抓到您想問哪一場活動/.test(out[0].text) &&
+  ['活動名稱', '產業趨勢', '工研院', '媒體邀訪需求'].every(s => out[0].text.includes(s)) &&
+  JSON.stringify(out[0]?.quickReply) === JSON.stringify(['最近有哪些活動', '產業趨勢分析', '想問什麼技術', '媒體邀訪需求', '使用說明']),
   JSON.stringify(out));
 
 // 群組軟綁定：@ 問過一次某場之後，同群組其他人 @ 問後續問題不用重打活動名稱
@@ -836,8 +842,13 @@ check('system prompt 裡帶了 IEK 清單的標題與摘要，不是空氣',
 check('最終回覆附上警語＋公關窗口聯絡資訊，用使用者要求的措辭（僅供參考，正式媒體報導引用請聯繫 公關窗口）',
   out.some(o => o.kind === 'text' && /僅供參考，正式媒體報導引用請聯繫 公關窗口 朱則瑋/.test(o.text) && /0934-266-766/.test(o.text)),
   JSON.stringify(out));
-check('最終回覆附快速回覆按鈕（活動列表／媒體邀訪需求），不是只丟一句話就結束',
-  out.some(o => o.kind === 'text' && JSON.stringify(o.quickReply) === JSON.stringify(['最近有哪些活動', '媒體邀訪需求'])),
+// 批次 24：按鈕列最前面多一顆「跨到另一條路」的入口——IEK 免費焦點只有十來則，
+// 覆蓋不到記者問的領域是常態，「這裡沒有，可以改從工研院自己的技術報導找」本來就
+// 該是預設出口，而不是讓記者自己猜下一步要打什麼（見情境 19 的回報截圖）。
+check('最終回覆附快速回覆按鈕（跨路入口／活動列表／媒體邀訪需求），不是只丟一句話就結束',
+  out.some(o => o.kind === 'text' && JSON.stringify(o.quickReply) === JSON.stringify([
+    { label: '工研院的半導體技術', text: '工研院 半導體' }, '最近有哪些活動', '媒體邀訪需求'
+  ])),
   JSON.stringify(out));
 
 // 實際回報的問題：點「產業趨勢分析」這顆按鈕，AI 沒有直接摘要最新幾則，反而列了
@@ -1020,6 +1031,115 @@ check('抓取失敗時誠實告知抓不到資料，不會噴例外讓記者什�
   out.length > 0 && out[0]?.kind === 'text' && /暫時抓不到工研院官網的最新資料/.test(out[0].text), JSON.stringify(out));
 check('抓取失敗時沒有呼叫 Anthropic 硬答',
   !out.some(o => o.kind === 'answer'), JSON.stringify(out));
+
+// ── 情境 19：問完產業趨勢之後的追問（實際回報的截圖，批次 24）─────────────────
+// 記者問產業趨勢 → 拿到 IEK 免費焦點的摘要（回覆結尾還主動寫著「有更具體的技術
+// 領域，如衛星通訊、太空科技等，歡迎再提問」）→ 照著打了「太空」兩個字 → 收到
+// 「嗯～我沒抓到您想問哪一場活動耶 🤔」。他從頭到尾沒有在問活動，這句兜底本身就是
+// 答非所問，而且是我們自己邀請他再問一次的。
+//
+// 修法有兩層，兩層都不依賴對方（見 api/line.js getRecentTopic()／sendFallbackGuide()）：
+//   ① 話題記憶：答完趨勢／技術題把話題記進 line_users H 欄，下一則的 routeIntent()
+//      多拿到一個「上一則剛回答完什麼」的提示，裸名詞才接得回同一個話題
+//   ② 兜底文案：即使話題記憶過期或不存在，也不再假設記者一定是在問活動——看起來
+//      像主題詞的訊息直接複誦回去，給兩條真的走得通的路
+
+reset(); await freshModule();
+await send('半導體現在有什麼趨勢');
+check('答完產業趨勢題 → 話題記進 line_users H 欄（下一則才接得回來）',
+  /^industry_trend@\d+$/.test(state.bindings.get('U_reporter')?.lastTopic || ''),
+  JSON.stringify(state.bindings.get('U_reporter')));
+
+out = await send('太空');
+check('回報的截圖案例：問完趨勢再打一個裸名詞「太空」→ 不會掉進「沒抓到您想問哪一場活動」',
+  !/沒抓到您想問哪一場活動/.test(out.map(o => o.text).join('')), JSON.stringify(out));
+check('「太空」被接回產業趨勢那條路（送給 AI 的就是這個詞，不是被當成活動名稱）',
+  out.some(o => o.kind === 'answer' && o.question === '太空' && o.sys?.includes('IEK 產業情報網')),
+  JSON.stringify(out.map(o => ({ kind: o.kind, question: o.question }))));
+check('接回趨勢話題後，回覆一樣附上跨到「工研院技術」那條路的按鈕',
+  out.some(o => o.kind === 'text' && JSON.stringify(o.quickReply?.[0]) === JSON.stringify({ label: '工研院的太空技術', text: '工研院 太空' })),
+  JSON.stringify(out));
+
+// 技術題那條路對稱：答完之後只打一個技術名詞，一樣要接得回來（不用再打一次
+// 「工研院」三個字，記者不會知道那個字是路由的關鍵）。
+reset(); await freshModule();
+await send('工研院在機器人技術上有什麼進展');
+check('答完工研院技術題 → 話題記進 H 欄',
+  /^tech_query@\d+$/.test(state.bindings.get('U_reporter')?.lastTopic || ''),
+  JSON.stringify(state.bindings.get('U_reporter')));
+out = await send('光通訊');
+check('問完技術題再打一個裸技術名詞 → 接回工研院技術那條路，不用重打「工研院」',
+  out.some(o => o.kind === 'answer' && o.sys?.includes('工研院官網新聞中心 搜尋「光通訊」')),
+  JSON.stringify(out.map(o => ({ kind: o.kind, question: o.question }))));
+
+// 綁定中一樣要接得回來：趨勢題不動活動綁定（情境 17 已經驗過），所以下一則裸名詞
+// 會同時看到「currentEventId=quad」跟「上一則在聊趨勢」兩個提示——不處理的話會被
+// 前者硬拉回那場活動的問答，記者拿到那場的 AI 說「這部分我沒有資料」，只是換一種
+// 形式的答非所問。
+reset(); await freshModule();
+state.bindings.set('U_reporter', { event_id: 'quad', media_name: '', note: '', bound_at: Date.now() });
+await send('半導體現在有什麼趨勢');
+out = await send('太空');
+check('綁定中問完趨勢、再打裸名詞 → 接回趨勢，不會被硬塞進目前綁定活動（quad）的問答',
+  !out.some(o => o.kind === 'answer' && o.event === 'quad') &&
+  out.some(o => o.kind === 'answer' && o.sys?.includes('IEK 產業情報網')),
+  JSON.stringify(out.map(o => ({ kind: o.kind, event: o.event }))));
+
+// 第二層（不依賴話題記憶）：完全沒有前文、一進來就打一個主題詞——複誦回去給兩條
+// 真的走得通的路，不要叫記者自己猜，也不要硬猜一條路答下去（猜錯就是另一種問A答B）。
+reset(); await freshModule();
+out = await send('太空');
+check('沒有任何前文、直接打一個主題詞 → 複誦回去問「趨勢還是工研院技術」，不是丟一句沒抓到',
+  out[0]?.kind === 'text' && /「太空」/.test(out[0].text) && !/沒抓到您想問哪一場活動/.test(out[0].text),
+  JSON.stringify(out));
+check('兩條路各給一顆按鈕，按下去送出的文字真的路由得到（趨勢／工研院技術）',
+  JSON.stringify(out[0]?.quickReply?.slice(0, 2)) === JSON.stringify([
+    { label: '太空的產業趨勢', text: '太空產業趨勢' },
+    { label: '工研院的太空技術', text: '工研院 太空' }
+  ]), JSON.stringify(out[0]?.quickReply));
+check('沒有硬猜一條路直接呼叫 AI 答下去（沒有 answer 這個 kind）',
+  !out.some(o => o.kind === 'answer'), JSON.stringify(out));
+
+// 按鈕真的按得動——複誦那則給的兩顆按鈕送出的文字，要真的分別走到兩條路。
+out = await send('太空產業趨勢');
+check('按「太空的產業趨勢」→ 真的走到產業趨勢那條路',
+  out.some(o => o.kind === 'answer' && o.sys?.includes('IEK 產業情報網')), JSON.stringify(out.map(o => o.kind)));
+reset(); await freshModule();
+out = await send('工研院 太空');
+check('按「工研院的太空技術」→ 真的走到工研院技術那條路，關鍵字是「太空」',
+  out.some(o => o.kind === 'answer' && o.sys?.includes('工研院官網新聞中心 搜尋「太空」')),
+  JSON.stringify(out.map(o => o.kind)));
+
+// 招呼語不能被當成主題詞複誦回去——「『你好』這個題目我可以從兩個方向幫您找」
+// 比不複誦難看得多，見 api/line.js looksLikeBareTopic() 的說明。
+for (const greeting of ['你好', '謝謝', '哈哈', 'ok']) {
+  reset(); await freshModule();
+  out = await send(greeting);
+  check(`招呼語「${greeting}」不會被當成主題詞複誦，走的是四條路都講清楚的泛用兜底`,
+    out[0]?.kind === 'text' && /不太確定該從哪邊幫您找答案/.test(out[0].text) && !out[0].text.includes(`「${greeting}」`),
+    JSON.stringify(out));
+}
+
+// 「回首頁」是記者明確說「這一輪聊完了」——話題記憶要一起清掉，不然回首頁之後
+// 打的第一個詞會被接回舊話題（見 api/line.js clearBinding() 的說明）。
+reset(); await freshModule();
+state.bindings.set('U_reporter', { event_id: 'quad', media_name: '', note: '', bound_at: Date.now() });
+await send('半導體現在有什麼趨勢');
+await send('回首頁');
+check('「回首頁」把話題記憶一起清掉',
+  !state.bindings.get('U_reporter')?.lastTopic, JSON.stringify(state.bindings.get('U_reporter')));
+out = await send('太空');
+check('回首頁之後打主題詞 → 走複誦那條路（話題已清），不是接回舊話題',
+  out[0]?.kind === 'text' && /「太空」/.test(out[0].text), JSON.stringify(out));
+
+// 群組：續問視窗內（沒有再 @）打裸名詞，一樣要接得回上一輪的話題。這是最容易被
+// 誤擋的組合——群組沒被 @ 到時 other 是安靜門檻（silentOnOther），接不回話題的話
+// 記者連一句回覆都收不到，體感是「卡住了」（跟批次 21「技術呢」那次同一種病）。
+reset(); await freshModule();
+await sendGroup('@我 半導體現在有什麼趨勢', { mentionSelf: true, mentionText: '@我 ' });
+out = await sendGroup('太空', { mentionSelf: false });
+check('群組續問視窗內打裸名詞 → 接回趨勢話題，不會被安靜門檻擋掉',
+  out.some(o => o.kind === 'answer' && o.sys?.includes('IEK 產業情報網')), JSON.stringify(out.map(o => o.kind)));
 
 console.log(`\n${fail === 0 ? '✅' : '❌'} 流程測試通過 ${pass}／失敗 ${fail}`);
 process.exit(fail === 0 ? 0 : 1);

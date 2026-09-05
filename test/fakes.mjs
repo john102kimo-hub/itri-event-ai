@@ -92,10 +92,13 @@ export function reset() {
   sent.length = 0;
 }
 
+// H 欄（索引 7）是話題記憶 last_topic，格式 `industry_trend@<時間戳>`，
+// 見 api/line.js getRecentTopic()／setRecentTopic() 的說明。
 function bindingRows() {
   return [...state.bindings.entries()].map(([id, b]) => [
     id, b.event_id || '', b.media_name || '', b.bound_at ? String(b.bound_at) : '', String(Date.now()), b.note || '',
-    b.groupSessionUntil ? String(b.groupSessionUntil) : ''
+    b.groupSessionUntil ? String(b.groupSessionUntil) : '',
+    b.lastTopic || ''
   ]);
 }
 
@@ -112,7 +115,8 @@ export const sheets = {
     if (range.startsWith('line_users!')) {
       for (const r of rows) state.bindings.set(r[0], {
         event_id: r[1], media_name: r[2], bound_at: Number(r[3]), note: r[5],
-        groupSessionUntil: r[6] ? Number(r[6]) : 0
+        groupSessionUntil: r[6] ? Number(r[6]) : 0,
+        lastTopic: r[7] || ''
       });
     }
     if (range.startsWith('line_staff!')) state.staff.push(...rows.map(r => [...r]));
@@ -133,7 +137,7 @@ export const sheets = {
       if (row) values[0].forEach((v, i) => { row[staffM[1].charCodeAt(0) - 65 + i] = v; });
       return;
     }
-    const m = range.match(/^line_users!([A-G])(\d+)(?::([A-G])(\d+))?$/);
+    const m = range.match(/^line_users!([A-H])(\d+)(?::([A-H])(\d+))?$/);
     if (!m) return;
     const rowNum = Number(m[2]);
     const keys = [...state.bindings.keys()];
@@ -142,7 +146,8 @@ export const sheets = {
     const b = state.bindings.get(userId);
     const startCol = m[1].charCodeAt(0) - 65;
     const row = values[0];
-    // 欄位對應：0=id 1=event_id 2=media_name 3=bound_at 4=last_active 5=note 6=group_session_until
+    // 欄位對應：0=id 1=event_id 2=media_name 3=bound_at 4=last_active 5=note
+    //           6=group_session_until 7=last_topic
     row.forEach((v, i) => {
       const col = startCol + i;
       if (col === 1) b.event_id = v;
@@ -150,6 +155,7 @@ export const sheets = {
       if (col === 3) b.bound_at = v === '' ? 0 : Number(v);
       if (col === 5) b.note = v;
       if (col === 6) b.groupSessionUntil = v === '' ? 0 : Number(v);
+      if (col === 7) b.lastTopic = v;
     });
   },
   // 回傳空陣列＝「分頁本來就存在」，不觸發 lib/contacts-directory.js 的
@@ -247,12 +253,30 @@ function extractFakeTechKeyword(text) {
     .trim();
 }
 
-function fakeReporterRoute(text, currentEventHint) {
+// topicHint：模擬 lib/router.js routeIntent() 的 currentTopic 提示——上一則剛回答完
+// 的是產業趨勢題還是工研院技術題。這裡同樣不是要精準模擬真的 LLM（那要看真的跑），
+// 只用一條夠機械化的規則表達那段提示的精神：這則訊息如果只是一個沒有其他線索的
+// 裸名詞（回報截圖裡的「太空」就是這種），就接回上一輪的話題。
+//
+// ⚠️ 順序刻意排在 currentEventHint 之前：兩個提示對同一個裸名詞會給出不同答案，
+// 真的系統提示裡話題那塊排在活動那塊後面（是模型看到的最新一條指示），這裡用
+// 順序表達同一件事——不然綁定中問完趨勢再打個裸名詞，會被硬拉回「延續這場活動」，
+// 記者拿到的是那場的 AI 說「這部分我沒有資料」，一樣答非所問。
+function fakeReporterRoute(text, currentEventHint, topicHint) {
   const ids = matchEventIds(text);
   if (/最近|哪些活動|活動列表/.test(text)) return { intent: 'calendar', event_ids: [], confidence: 'high' };
   if (/工研院/.test(text)) return { intent: 'tech_query', event_ids: [], confidence: 'high', tech_keyword: extractFakeTechKeyword(text) };
   if (/趨勢|市場現況|產業現況/.test(text)) return { intent: 'industry_trend', event_ids: [], confidence: 'high' };
   if (ids.length) return { intent: 'qa', event_ids: ids, confidence: 'high' };
+  // 「裸名詞」在這支要收得比真的模型緊：2～6 個字、而且不含疑問詞或指示詞。
+  // 「這場的重點是什麼」剛好也是 8 個字，只看長度會把它當成裸名詞接回話題——真的
+  // 模型讀得懂那是在問目前這場活動，這裡沒有語意理解可用，只能靠這層額外的字面
+  // 檢查補上，不然測試會在「答完趨勢題、下一題回到原本那場」那個既有情境上炸掉。
+  if (topicHint && /^[^\s?？]{2,6}$/.test(String(text).trim()) && !/(什麼|哪|嗎|呢|怎|多少|是否|重點|這場|那場|你|我)/.test(text)) {
+    return topicHint === 'tech_query'
+      ? { intent: 'tech_query', event_ids: [], confidence: 'high', tech_keyword: extractFakeTechKeyword(text) }
+      : { intent: 'industry_trend', event_ids: [], confidence: 'high' };
+  }
   if (currentEventHint && !/你覺得/.test(text)) return { intent: 'qa', event_ids: [currentEventHint], confidence: 'high' };
   return { intent: 'other', event_ids: [], confidence: 'low' };
 }
@@ -270,12 +294,18 @@ export function installFetchStub() {
       const sysHint = body.system?.[1]?.text || '';
       const hintName = sysHint.match(/目前這個對話正在問的是「(.+?)」/)?.[1];
       const currentEventHint = hintName ? state.events.find(e => e[1] === hintName)?.[0] : null;
+      // 話題提示（currentTopic）可能是第 2 或第 3 個 system 區塊（有沒有活動綁定會
+      // 差一塊），所以整份掃過去找特徵字串，不要硬寫索引。
+      const allSys = (body.system || []).map(s => s?.text || '').join('\n');
+      const topicHint = /上一則我剛回答完的是「產業趨勢」/.test(allSys) ? 'industry_trend'
+        : /上一則我剛回答完的是「工研院自己在某項技術/.test(allSys) ? 'tech_query'
+        : '';
       const userText = body.messages?.[0]?.content || '';
 
       // 路由呼叫跟問答呼叫都打同一個端點，用 system prompt 的特徵分辨
       const json = o => ({ ok: true, json: async () => ({ content: [{ type: 'text', text: JSON.stringify(o) }] }) });
       if (sys.includes('內部職員助理')) return json(fakeStaffRoute(userText));
-      if (sys.includes('意圖判斷器')) return json(fakeReporterRoute(userText, currentEventHint));
+      if (sys.includes('意圖判斷器')) return json(fakeReporterRoute(userText, currentEventHint, topicHint));
 
       // 問答：system prompt 裡會帶該場的知識庫，從中反推是哪一場回答的。
       // sys 一併存起來——媒體邀請函測試要驗證 system prompt 裡到底帶的是正式新聞稿

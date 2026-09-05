@@ -57,13 +57,15 @@ import {
 import {
   fetchIndustryTrendDigest, formatDigestForPrompt, extractSourceIndices, resolveSourceUrls
 } from '../lib/industry-trends.js';
-import { fetchItriNews, formatNewsForPrompt } from '../lib/itri-news.js';
+import { fetchItriNews, formatNewsForPrompt, stripTechQueryFiller } from '../lib/itri-news.js';
 
 const EVENTS_RANGE = 'events!A2:R'; // P 欄是 contacts（邀訪窗口分工），Q 欄是 invite_letter（媒體邀請函），R 欄是 invite_letter_chips（活動前快速提問），見 rowToEvent()
-// line_user_id | event_id | media_name | bound_at | last_active | note | group_session_until
+// line_user_id | event_id | media_name | bound_at | last_active | note | group_session_until | last_topic
 // G 欄只有群組會用到（1 對 1 每則訊息本來就都是對我們講的，不需要這個概念），見
 // getGroupSessionUntil()／touchGroupSession() 的說明。
-const LINE_USERS_RANGE = 'line_users!A2:G';
+// H 欄是「上一則剛回答完的是哪一類非活動題」，1 對 1 與群組都會用到，見
+// getRecentTopic()／setRecentTopic() 的說明。
+const LINE_USERS_RANGE = 'line_users!A2:H';
 const BIND_TTL_MS = 6 * 60 * 60 * 1000; // 6 小時；沒有這個 TTL，記者三個月後問別場會被鎖在當初掃的那一場
 const CACHE_TTL_MS = 60 * 1000; // 跟 api/chat.js 的 eventCache 同一套邏輯
 
@@ -157,7 +159,7 @@ async function ensureLineUsersSheet() {
   if (sheetsEnsuredAt === Infinity) return;
   if (Date.now() - sheetsEnsuredAt < ENSURE_RETRY_MS) return;
   try {
-    await ensureSheets({ line_users: ['line_user_id', 'event_id', 'media_name', 'bound_at', 'last_active', 'note', 'group_session_until'] });
+    await ensureSheets({ line_users: ['line_user_id', 'event_id', 'media_name', 'bound_at', 'last_active', 'note', 'group_session_until', 'last_topic'] });
     sheetsEnsuredAt = Infinity; // 建好了就永遠不用再確認
   } catch (e) {
     console.error('ensureSheets(line_users) 失敗，60 秒後再試:', e.message);
@@ -243,12 +245,16 @@ async function setContactPending(targetId, note) {
 // 解除綁定：把 bound_at（D 欄）清空，getBinding() 讀到 0 就會當作沒綁定。
 // 不刪整列——line_users 的媒體名稱是記者自報的，下次他綁別場時還用得到，
 // 刪掉等於每換一場就要重問一次「請問哪家媒體」。
+// H 欄（話題記憶）一併清掉：「回首頁」是記者明確說「這一輪聊完了」，留著上一輪的
+// 話題只會讓他回首頁之後打的第一個詞被接回舊話題。G 欄（群組續問視窗）要原值寫回、
+// 不能跟著清——這支群組也會走到（handleMetaIntent 的 switch 分支帶的是 groupId），
+// 清掉等於記者按了「回首頁」就把整個群組的免 @ 視窗一起關掉，那是兩件不相干的事。
 async function clearBinding(userId) {
   try {
     const rows = await readRange(LINE_USERS_RANGE);
     const idx = rows.findIndex(r => r[0] === userId);
     if (idx === -1) return;
-    await updateRange(`line_users!D${idx + 2}:F${idx + 2}`, [['', String(Date.now()), '']]);
+    await updateRange(`line_users!D${idx + 2}:H${idx + 2}`, [['', String(Date.now()), '', rows[idx][6] || '', '']]);
   } catch (e) {
     console.error('clearBinding 失敗:', e.message);
   } finally {
@@ -276,14 +282,83 @@ async function clearBinding(userId) {
 //     answerQuestion() 拿到空 event_id 直接找不到活動、整個掛掉。
 const GROUP_SESSION_MS = 5 * 60 * 1000; // 5 分鐘：夠讀完清單、想一下、再打字問下一句
 
+// ⚠️ 這支要吃 60 秒快取（getAllLineUserRows()），不能像原本那樣直接 readRange()：
+// 群組裡「每一則」訊息都會先過這支（handleGroupEvent 開頭就要判斷「沒被 @ 到的話
+// 還算不算在跟我們對話」），包含那些我們最後根本不會回的閒聊。直讀等於群組每有人
+// 講一句話就燒掉一次 Sheets 讀取配額——那個配額是每分鐘 60 次、整個網站（含記者會
+// 現場的問答、qa_log 寫入）共用的，一個熱鬧的群組就足以把現場的額度吃光。
+// 讀快取不會讀到過期資料：touchGroupSession() 寫完一定會 invalidateLineUsersCache()，
+// 其餘會動到這張表的路徑（upsertBinding／setMediaName／setBindingNote…）也都有，
+// 跟 getStoredNote()／getStoredMediaName() 本來就吃快取是同一套規則。
 async function getGroupSessionUntil(groupId) {
   try {
-    const rows = await readRange(LINE_USERS_RANGE);
+    const rows = await getAllLineUserRows();
     const row = rows.find(r => r[0] === groupId);
     return row ? Number(row[6]) || 0 : 0;
   } catch (e) {
     console.error('getGroupSessionUntil 失敗:', e.message);
     return 0; // 查詢失敗就當作沒有活躍中的對話——安全方向是要求重新 @，不是誤觸插話
+  }
+}
+
+// ── 話題記憶：上一則剛回答完的是哪一類「跟活動無關」的問題（H 欄）──────────
+// 實際回報（附截圖）：記者問產業趨勢，拿到 IEK 免費焦點的摘要，答案結尾還主動寫著
+// 「如果您對清單裡的其他產業趨勢感興趣，或有更具體的技術領域（如衛星通訊、太空
+// 科技等），歡迎再提問」——記者照著打了「太空」兩個字，收到的卻是「嗯～我沒抓到
+// 您想問哪一場活動耶 🤔」。他從頭到尾沒有在問活動，這句兜底本身就是答非所問，而且
+// 是我們自己邀請他再問一次的。
+//
+// 根因：answerIndustryTrend()／answerTechQuery() 答完什麼狀態都不留。下一則訊息
+// 進 routeIntent() 時，那支只拿得到「目前綁定哪一場活動」（currentEventId），完全
+// 不知道「上一則剛聊完產業趨勢」——「太空」是個沒有任何活動線索的裸名詞，判成
+// other 完全合理，錯的是沒有人記得上一句在聊什麼（跟 lib/staff.js 那個「追問哪一場」
+// 的坑是同一種病）。
+//
+// ⚠️ 存 Sheets 而不是行程內的 Map：這個記憶要跨「兩則 webhook 請求」才有意義，
+// 而 Vercel 的 Function 執行個體隨時可能因為閒置被回收——記者讀完一段五行的回答再
+// 打字，中間隔個十幾秒到一兩分鐘很正常，剛好撞到冷啟動就整個失憶，那這個修法對
+// 真正會發生的情境等於沒修。多出來的成本只有「答完趨勢／技術題時多寫一格」，這兩條
+// 路本來就不是熱路徑（不像每則活動問答都會走的 answerQuestion()）；讀取則完全免費，
+// 走的是 getBinding() 早就載入好的那份 60 秒快取。
+//
+// 格式 `industry_trend@1730000000000`：值跟時間戳存在同一格，不再多開一欄——H 欄
+// 是這次新增的欄位，舊的 line_users 分頁不會自動長出表頭（ensureSheets 只補「整個
+// 分頁不存在」的情況），能少開一欄就少一欄要解釋的空白表頭。
+const TOPIC_TTL_MS = 10 * 60 * 1000; // 10 分鐘：夠讀完一段回答、想一下、再打一個追問的詞
+const VALID_TOPICS = ['industry_trend', 'tech_query'];
+
+async function getRecentTopic(targetId) {
+  try {
+    const rows = await getAllLineUserRows();
+    const raw = rows.find(r => r[0] === targetId)?.[7] || '';
+    const [topic, ts] = String(raw).split('@');
+    if (!VALID_TOPICS.includes(topic)) return '';
+    return Date.now() - (Number(ts) || 0) > TOPIC_TTL_MS ? '' : topic;
+  } catch (e) {
+    console.error('getRecentTopic 失敗:', e.message);
+    return ''; // 讀不到就當作沒有話題記憶，退回原本的行為，不要讓這個加分功能擋住主流程
+  }
+}
+
+// 沒有 line_users 列時要能新增一列（記者可能從沒綁定過任何活動就直接問產業趨勢），
+// 理由與寫法比照 setContactPending()——只是寫的是 H 欄。整支包在 try 裡：話題記憶
+// 是體驗加分，寫失敗不能連累記者剛剛問的那題（答案在呼叫這支之前就已經送出去了）。
+async function setRecentTopic(targetId, topic) {
+  try {
+    await ensureLineUsersSheet();
+    const value = topic ? `${topic}@${Date.now()}` : '';
+    const rows = await readRange(LINE_USERS_RANGE);
+    const idx = rows.findIndex(r => r[0] === targetId);
+    if (idx === -1) {
+      if (!value) return; // 沒有列可清，本來就沒有話題記憶
+      await appendRows('line_users!A:H', [[targetId, '', '', '', String(Date.now()), '', '', value]]);
+    } else {
+      await updateRange(`line_users!H${idx + 2}`, [[value]]);
+    }
+  } catch (e) {
+    console.error('setRecentTopic 失敗:', e.message);
+  } finally {
+    invalidateLineUsersCache();
   }
 }
 
@@ -358,6 +433,20 @@ function lineExtraRules(event) {
     `你的回覆會出現在掛著主辦單位名義的官方帳號裡，記者可能直接截圖引用。任何不確定的內容，${contactHint}。`
   ];
 }
+
+// 米亞的語氣規則。使用者的要求是「對答更有人味、符合人設」——人設名字「米亞」原本
+// 只出現在歡迎圖卡與使用說明（見 lib/menu.js），真正在對話的產業趨勢／工研院技術
+// 兩支問答反而是「你是負責回答ＸＸ問題的助理」這種公文語氣，兩邊對不起來。
+//
+// ⚠️ 這條只調語氣，不放寬任何一條「只能照資料回答」的規則，而且刻意寫成「親切但
+// 精準」而不是單純「可愛一點」：這個帳號的回答掛著主辦單位名義、記者可能直接截圖
+// 引用（見 lineExtraRules() 同一個顧慮），語氣軟化不能連帶讓「我沒有這項資料」變得
+// 含糊——講不知道的時候要更清楚、更快給出下一步，不是更委婉。
+//
+// 活動問答（answerQuestion → lib/prompt.js buildSystemPrompt）刻意不套這條：那份
+// prompt 的每一條規則都是踩過坑寫出來的，且網頁版共用同一份（見該檔開頭的 ⚠️），
+// 動它等於同時改動網頁版記者看到的語氣，超出這次要處理的範圍。
+const TONE_RULE = '語氣：你是「米亞」，講話像一位熟悉這些題目、講話簡潔的公關同事，不是查詢系統。用「我」自稱，可以用一兩個口語的連接詞（例如「這題」「目前看到的是」），最多一個表情符號，不要每句都加。不要用「根據您的提問」「經查詢」「以下為您說明」這種公文開場，也不要用一長串條列把記者淹沒。查不到、沒有資料的時候，直接、明確地說沒有，再給下一步該怎麼問——不要道歉三次，也不要用模糊的說法混過去。';
 
 async function askAnthropic(systemPrompt, userText) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
@@ -618,25 +707,58 @@ async function industryTrendContactLine() {
   return `\n\n僅供參考，正式媒體報導引用請聯繫 公關窗口 ${name}　📞 ${phone}`;
 }
 
+// 「這題問的是產業趨勢，那同一個題目問工研院自己的技術呢」——兩條路互相導流時要
+// 用的簡短關鍵字。抽不乾淨（抽完太長、太短、或整句都是泛稱被抽成空的）就回空字串，
+// 呼叫端拿到空字串就不放那顆按鈕：這是錦上添花的入口，寧可沒有也不要放一顆
+// 「工研院的哪些產業趨勢重點技術」這種讀起來像亂碼的按鈕。
+//
+// 語助詞的部分直接沿用 lib/itri-news.js 已經在用的那份（stripTechQueryFiller），
+// 不另外維護第二份清單；這裡只多去掉「產業／趨勢／市場／現況…」這類**產業趨勢題
+// 專屬**的泛稱——那些字在 stripTechQueryFiller() 裡不能去掉（那支是給工研院官網
+// 搜尋用的，「產業」本身可能就是要查的詞的一部分），只有在這個「把趨勢題轉成技術
+// 題」的場景才該拿掉。
+function crossTopicKeyword(text) {
+  const kw = stripTechQueryFiller(text)
+    .replace(/產業|趨勢|市場|現況|分析|重點|方面|領域|相關|如何|怎樣|怎麼樣|現在|目前|未來|今年/g, '')
+    .trim();
+  return /^[^\s]{2,8}$/.test(kw) ? kw : '';
+}
+
 async function answerIndustryTrend(replyToken, targetId, text) {
   const items = await getIndustryTrendDigest();
   const contactLine = await industryTrendContactLine();
+  // 導到另一條路（工研院自己的技術）的按鈕——實際回報的截圖裡，AI 老實說了「清單
+  // 裡沒有航太專項的分析」之後就沒有下文了，記者只能自己猜下一步該打什麼，猜出來
+  // 的「太空」又剛好掉進兜底文案。IEK 免費焦點只有十來則、覆蓋不到的領域是常態，
+  // 「這裡沒有，可以改從工研院自己的技術報導找」本來就該是預設出口。
+  const kw = crossTopicKeyword(text);
+  const crossItem = kw ? [{ label: `工研院的${kw}技術`, text: `工研院 ${kw}` }] : [];
 
   if (!items.length) {
     // 抓取失敗（網路問題、IEK 網站改版）——誠實說抓不到，不要硬答或裝死。
     await replyOrPush(replyToken, targetId,
-      `這部分我暫時抓不到最新的產業趨勢資料。${contactLine}`,
-      ['最近有哪些活動', CONTACT_MENU_LABEL]);
+      `這部分我暫時抓不到最新的產業趨勢資料，真不好意思 🙏${contactLine}`,
+      [...crossItem, '最近有哪些活動', CONTACT_MENU_LABEL]);
     return;
   }
 
   const systemPrompt = [
-    '你是工研院 LINE 官方帳號裡負責回答產業趨勢問題的助理。下面是「IEK 產業情報網」免費焦點清單（標題／日期／摘要），這是 IEK 自己公開的免費導讀摘要，不是完整報告。',
+    '你是工研院 LINE 官方帳號的 AI 新聞助理，名字叫「米亞」，正在回答記者的產業趨勢問題。下面是「IEK 產業情報網」免費焦點清單（標題／日期／摘要），這是 IEK 自己公開的免費導讀摘要，不是完整報告。',
     '只能根據下面清單裡的標題與摘要回答，不要延伸、不要用你自己既有的知識補充清單以外的內容、不要臆測完整報告裡才有但摘要沒寫的細節。',
     '如果清單裡沒有明顯對應記者問題的項目，就誠實說「目前免費焦點清單裡沒有直接對應的資料」，不要硬答或東拼西湊。',
+    // 實際回報的截圖：AI 老實說了「但沒有航太專項的分析」，然後就沒有下文——記者
+    // 只能自己猜下一步該打什麼。誠實不夠，還要給得出出口，不然記者就卡在那裡。
+    // ⚠️ 只能建議「換個領域問趨勢」或「改問工研院的技術」這兩條真的存在的路，不要
+    // 自己發明「我幫您轉給某某」「請稍等我查一下」這種這個帳號做不到的事。
+    '清單裡沒有直接對應的資料時，除了老實講，還要順帶給記者一條明確的下一步：可以換個領域再問我產業趨勢，或是直接問我工研院自己在這個領域的技術（打「工研院＋技術名稱」就可以）。不要只丟一句「沒有資料」就結束，也不要承諾任何你做不到的事（例如幫忙轉接、稍後回覆、代為查詢）。',
     '記者的問題如果很籠統、沒有指定特定技術或產業領域（例如只是問「產業趨勢」「最近有什麼趨勢」這種泛稱，不是問特定的半導體、AI 之類），不要反問記者想了解哪個領域——直接摘要清單裡最新的 1-2 則重點回答即可，這正是這份清單存在的目的（讓記者一次掃到最新的幾則重點）；只有記者的問題明確指定了某個領域、清單裡卻完全沒有相關項目時，才適用上一條「沒有直接對應資料」的規則。',
     '回答控制在 4 行以內，先講最相關的 1-2 則的重點，並標明是哪一篇、什麼時候發布的。不要用 Markdown 語法（LINE 不會渲染）。',
     '明確讓記者知道這是 IEK 的免費摘要，不是完整報告——不要講得像這就是 IEK 的完整分析或工研院的正式研究結論。',
+    // 人設：使用者要求「對答更有人味、符合米亞的人設」。米亞原本只活在歡迎圖卡與
+    // 使用說明裡（見 lib/menu.js buildWelcomeFlex／HELP_TEXT），真正在對話的這幾支
+    // 反而是公文語氣。這條只調語氣、不放寬任何一條「只能照資料回答」的規則——記者
+    // 會直接截圖引用，親切不能換成含糊，講不知道的時候要更清楚，不是更委婉。
+    TONE_RULE,
     '回答最後另起一行，只用這個格式標出這次引用了清單中第幾則（從 1 開始的編號，可能不只一則，用逗號分隔），例如「來源編號：2,5」；這行只給程式判讀連結用，不算進上面「4 行以內」的限制。如果清單裡沒有直接對應的資料，就不要加這一行。',
     '',
     '【IEK 產業情報網 免費焦點清單，由新到舊】',
@@ -653,7 +775,12 @@ async function answerIndustryTrend(replyToken, targetId, text) {
   const linksBlock = urls.length ? `\n\n🔗 原文連結：\n${urls.join('\n')}` : '';
   const reply = `${aiReply}${linksBlock}${contactLine}`;
   console.log(`[line] industry_trend q="${text.slice(0, 60)}" reply="${reply.slice(0, 200)}"`);
-  await replyOrPush(replyToken, targetId, reply, ['最近有哪些活動', CONTACT_MENU_LABEL]);
+  await replyOrPush(replyToken, targetId, reply, [...crossItem, '最近有哪些活動', CONTACT_MENU_LABEL]);
+  // 記住這一輪聊的是產業趨勢——下一則如果只是個裸名詞（截圖裡的「太空」），
+  // routeIntent() 才接得回這個話題，不會掉進「我沒抓到您想問哪一場活動」。
+  // 放在送出回覆之後：這是加分功能，寫失敗（setRecentTopic 自己吞例外）也絕對不能
+  // 讓記者收不到剛剛那則答案。
+  await setRecentTopic(targetId, 'industry_trend');
 }
 
 // ── 「想問什麼技術」問答（回報的意見，跟產業趨勢問答平行的另一套）──────────
@@ -677,13 +804,19 @@ async function answerIndustryTrend(replyToken, targetId, text) {
 async function answerTechQuery(replyToken, targetId, keywordText) {
   const keyword = sanitize(keywordText, 60);
   const { ok, items } = await fetchItriNews(keyword);
+  // 導到另一條路（整體產業趨勢）的按鈕，跟 answerIndustryTrend() 的 crossItem 對稱：
+  // 工研院官網沒報導過某個題目是常態（尤其比較新的領域），但那不代表「這個題目在
+  // 這個帳號問不到東西」——IEK 免費焦點可能剛好有。查不到就只丟一句「請洽窗口」，
+  // 等於把還走得通的另一條路藏起來。
+  const kw = crossTopicKeyword(keyword);
+  const crossItem = kw ? [{ label: `${kw}的產業趨勢`, text: `${kw}產業趨勢` }] : [];
 
   if (!ok) {
     // 抓取失敗（網路問題、官網改版）——誠實說抓不到，不要硬答或裝死，跟
     // answerIndustryTrend() 抓取失敗那條路同一個原則。
     await replyOrPush(replyToken, targetId,
-      '這部分我暫時抓不到工研院官網的最新資料，建議直接洽媒體邀訪窗口。',
-      [CONTACT_MENU_LABEL, '最近有哪些活動']);
+      '這部分我暫時抓不到工研院官網的最新資料，真不好意思 🙏 建議直接洽媒體邀訪窗口。',
+      [...crossItem, CONTACT_MENU_LABEL, '最近有哪些活動']);
     return;
   }
   if (!items.length) {
@@ -691,16 +824,17 @@ async function answerTechQuery(replyToken, targetId, keywordText) {
     // 冷門）——不是網站掛了，見 fetchItriNews() 的說明。老實說查不到，直接給邀訪
     // 窗口讓記者換個管道問，不要硬答或東拼西湊。
     await replyOrPush(replyToken, targetId,
-      `工研院官網新聞中心目前沒有找到跟「${keyword}」直接相關的報導，建議直接洽媒體邀訪窗口，會有專人協助確認。`,
-      [CONTACT_MENU_LABEL, '最近有哪些活動']);
+      `工研院官網新聞中心目前沒有找到跟「${keyword}」直接相關的報導。想從產業面切入的話我這邊還有 IEK 的產業趨勢摘要可以查；要找人談，直接洽媒體邀訪窗口會有專人協助確認。`,
+      [...crossItem, CONTACT_MENU_LABEL, '最近有哪些活動']);
     return;
   }
 
   const systemPrompt = [
-    '你是工研院 LINE 官方帳號裡負責回答技術相關問題的助理。下面是用記者提供的關鍵字，在「工研院官網新聞中心」查到的相關報導（標題／日期／摘要），這是工研院自己發布的新聞稿摘要，不是完整報告全文。',
+    '你是工研院 LINE 官方帳號的 AI 新聞助理，名字叫「米亞」，正在回答記者關於工研院自己技術的問題。下面是用記者提供的關鍵字，在「工研院官網新聞中心」查到的相關報導（標題／日期／摘要），這是工研院自己發布的新聞稿摘要，不是完整報告全文。',
     '只能根據下面清單裡的標題與摘要回答，不要延伸、不要用你自己既有的知識補充清單以外的內容、不要臆測完整報導裡才有但摘要沒寫的細節。',
-    '如果清單裡的項目其實跟記者問的技術關聯不大，就誠實說「目前工研院官網新聞中心沒有找到直接對應的報導」，不要硬答或東拼西湊。',
+    '如果清單裡的項目其實跟記者問的技術關聯不大，就誠實說「目前工研院官網新聞中心沒有找到直接對應的報導」，並順帶給記者一條明確的下一步：可以改問我這個題目的整體產業趨勢，或換個技術名稱再問一次。不要硬答或東拼西湊，也不要承諾任何你做不到的事（例如幫忙轉接、稍後回覆、代為查詢）。',
     '回答控制在 4 行以內，先講最相關的 1-2 則的重點，並標明是哪一篇、什麼時候發布的。不要用 Markdown 語法（LINE 不會渲染）。',
+    TONE_RULE, // 見上面 TONE_RULE 的說明：只調語氣，不放寬「只能照資料回答」的規則
     '回答最後另起一行，只用這個格式標出這次引用了清單中第幾則（從 1 開始的編號，可能不只一則，用逗號分隔），例如「來源編號：2,5」；這行只給程式判讀連結用，不算進上面「4 行以內」的限制。如果清單裡沒有直接對應的報導，就不要加這一行。',
     '',
     `【工研院官網新聞中心 搜尋「${keyword}」的結果，由新到舊】`,
@@ -724,7 +858,10 @@ async function answerTechQuery(replyToken, targetId, keywordText) {
 
   const reply = `${aiReply}${linksBlock}${contactLine}`;
   console.log(`[line] tech_query kw="${keyword}" reply="${reply.slice(0, 200)}"`);
-  await replyOrPush(replyToken, targetId, reply, [CONTACT_MENU_LABEL, '最近有哪些活動']);
+  await replyOrPush(replyToken, targetId, reply, [...crossItem, CONTACT_MENU_LABEL, '最近有哪些活動']);
+  // 跟 answerIndustryTrend() 同一個道理：記住這一輪聊的是工研院技術，下一則只打一個
+  // 技術名詞（「那光通訊呢」的省略講法）才接得回來，見 getRecentTopic() 的說明。
+  await setRecentTopic(targetId, 'tech_query');
 }
 
 // 「想問什麼技術」按鈕之後記者自己打的技術名稱——跟 handleContactTopicMessage()
@@ -1059,15 +1196,18 @@ async function handleMetaIntent(replyToken, userId, text, metaIntent, binding) {
   // 不清掉的話，等他選完活動再回來打的第一句真正的問題，會被 looksLikeNameOrSkip()
   // 誤判成媒體名稱吃掉（就是上面 handleEvent 註解裡已經修過一次的那個坑）。
   if (binding?.note === 'ask_name') await setBindingNote(userId, '');
-  // await_contact_topic 是「按了『其他』，等記者自己打技術主題」的一次性旗標——
-  // 記者這時候改按了別的選單按鈕（不管是不是邀訪相關），代表他放棄了那個自由輸入，
-  // 旗標要當場作廢，不然他接下來打的第一句真正的問題會被誤判成在找邀訪窗口
-  // （這裡沒辦法只看 binding?.note，因為這個旗標常常是在完全沒有活動綁定時設的）。
-  if ((await getStoredNote(userId)) === CONTACT_PENDING_NOTE) await setContactPending(userId, '');
-  // await_tech_query 是「按了『想問什麼技術』，等記者自己打技術名稱」的一次性
-  // 旗標——同一個道理，記者這時候改按了別的選單按鈕，代表他放棄了那次自由輸入，
-  // 旗標要當場作廢，見 handleTechQueryMessage() 的說明。
-  if ((await getStoredNote(userId)) === TECH_QUERY_PENDING_NOTE) await setContactPending(userId, '');
+  // await_contact_topic（按了「其他」，等記者自己打技術主題）與 await_tech_query
+  // （按了「想問什麼技術」，等記者自己打技術名稱）這兩個一次性旗標，記者這時候改按
+  // 了別的選單按鈕就代表他放棄了那次自由輸入，旗標要當場作廢——不清掉的話，他接下來
+  // 打的第一句真正的問題會被誤判成在找邀訪窗口／在報技術名稱。
+  // （這裡沒辦法只看 binding?.note，因為這兩個旗標常常是在完全沒有活動綁定時設的。）
+  // ⚠️ 兩個旗標存在同一欄、用同一支讀寫，所以只讀一次就夠：原本寫成連續兩個
+  // `await getStoredNote()`，第一個若命中會 setContactPending() → 快取失效 →
+  // 第二個必定真的再打一次 Sheets 讀取，白花一次全站共用的配額。
+  const pendingNote = await getStoredNote(userId);
+  if (pendingNote === CONTACT_PENDING_NOTE || pendingNote === TECH_QUERY_PENDING_NOTE) {
+    await setContactPending(userId, '');
+  }
 
   if (metaIntent === 'help') {
     await replyOrPush(replyToken, userId, HELP_TEXT, ['最近有哪些活動']);
@@ -1169,8 +1309,13 @@ async function handleMetaIntent(replyToken, userId, text, metaIntent, binding) {
 async function handleUnbound(replyToken, userId, text, { silentOnOther = false, askMediaName = true } = {}) {
   const rows = await getAllEventRows();
   const cards = buildCalendarCards(rows);
-  const { intent, event_ids, confidence, tech_keyword } = await routeIntent(text, cards);
-  console.log(`[line] reporter route q="${text.slice(0, 60)}" → intent=${intent} event_ids=${JSON.stringify(event_ids)} confidence=${confidence}`);
+  // 上一則剛回答完的是不是產業趨勢／工研院技術題——沒有這個提示，記者接著打的
+  // 追問（尤其是「太空」這種裸名詞）在 routeIntent() 眼裡跟純聊天沒兩樣，見
+  // getRecentTopic() 開頭那段回報的截圖。讀的是 getBinding() 早就載入的那份 60 秒
+  // 快取，不會多打一次 Sheets。
+  const recentTopic = await getRecentTopic(userId);
+  const { intent, event_ids, confidence, tech_keyword } = await routeIntent(text, cards, { currentTopic: recentTopic });
+  console.log(`[line] reporter route q="${text.slice(0, 60)}" → intent=${intent} event_ids=${JSON.stringify(event_ids)} confidence=${confidence} topic=${recentTopic || '-'}`);
 
   if (intent === 'calendar') {
     await replyOrPush(replyToken, userId, formatCalendarReply(cards) + CONTACT_MENU_TEXT_HINT, calendarQuickRepliesForReporter(cards));
@@ -1227,14 +1372,57 @@ async function handleUnbound(replyToken, userId, text, { silentOnOther = false, 
   // intent === 'other'，或 qa 但完全比對不到、或路由本身失敗。
   if (silentOnOther) return; // 群組裡沒被直接 @、又猜不到問題在問什麼 → 安靜，不要沒事跳出來說「不確定」
 
-  // 統一導引，跟批次 2 原本沒綁定時的文案一致，只是多給「或直接打活動名稱」這條路。
-  // 回報的意見：舊文案「不確定您想問哪一場活動」讀起來像制式錯誤訊息，語氣冷、
-  // 也不符合米亞的人設；語氣改軟一點，並補上「媒體邀訪需求」這個入口——這句其實
-  // 是萬用的兜底文案，不只在「真的問到別場」時出現，任何 routeIntent() 判不出來
-  // 的話都會走到這裡，讓記者順手看到三個核心入口比較好。
-  await replyOrPush(replyToken, userId,
-    '嗯～我沒抓到您想問哪一場活動耶 🤔\n可以直接輸入活動名稱、問我「最近有哪些活動」看清單，或掃描現場 QR code 綁定；想找邀訪窗口就打「媒體邀訪需求」。',
-    ['最近有哪些活動', CONTACT_MENU_LABEL, '使用說明']);
+  await sendFallbackGuide(replyToken, userId, text);
+}
+
+// 記者剛剛打的是不是「一個光禿禿的主題詞」（截圖裡的「太空」）——是的話，兜底時
+// 不要泛泛地列四條路，直接把那個詞複誦回去，讓他一鍵選要走哪一條。
+//
+// ⚠️ 判斷刻意收得很緊，寧可漏判、退回下面那份泛用文案：把「你好」「謝謝」「哈哈」
+// 這種招呼語當成主題詞複誦回去（「『你好』這個題目我可以從兩個方向幫您找」）比不
+// 複誦難看得多。所以要求：不含空白與標點、2～8 個字、而且不是常見的招呼／應答語。
+// 走到這裡時 routeIntent() 已經判成 other，代表這個詞跟清單裡任何一場活動都對不上，
+// 不需要再擔心它其實是某場活動名稱的一部分（活動名稱的比對還有
+// matchEventByName() 那道「正規化後至少 6 個字」的門檻擋著）。
+const GREETING_RE = /^(你好|妳好|您好|哈囉|哈嘍|嗨|hi|hello|hey|早安|午安|晚安|謝謝|感謝|thanks|thx|ok|okay|好的|好喔|收到|嗯|嗯嗯|喔|哦|哈哈|呵呵|再見|掰掰|bye|測試|test)$/i;
+function looksLikeBareTopic(text) {
+  const s = String(text || '').trim();
+  return /^[^\s]{2,8}$/.test(s) && !/[?？!！。，,、：:；;~～]/.test(s) && !GREETING_RE.test(s);
+}
+
+// 任何 routeIntent() 判不出來的訊息最後都會走到這裡（1 對 1 的 handleUnbound()、
+// 以及綁定中但連目前這場都接不上的情況）。
+//
+// ⚠️ 回報的截圖就是這句話造成的：記者問完產業趨勢、照著我們自己回覆裡的邀請打了
+// 「太空」，收到的是「嗯～我沒抓到您想問哪一場活動耶」——他從頭到尾沒有在問活動。
+// 舊文案把「猜不出來」一律講成「猜不出是哪一場活動」，等於每次猜錯都額外多答非所問
+// 一次。這裡改成兩件事：
+//   ① 措辭不再假設記者一定是在問活動（這個帳號有四條路，活動只是其中一條）
+//   ② 看起來像主題詞的訊息，直接複誦回去給兩條真的走得通的路，不要叫記者自己猜
+// 話題記憶（getRecentTopic）是第一道防線，但它有 10 分鐘 TTL、也可能是記者一進來
+// 就直接打一個詞——這支是那道防線之外的第二層，兩層都不依賴對方。
+async function sendFallbackGuide(replyToken, targetId, text) {
+  if (looksLikeBareTopic(text)) {
+    const kw = String(text).trim();
+    await replyOrPush(replyToken, targetId,
+      `「${kw}」我可以從兩個方向幫您找 🙂\n・整體產業趨勢（IEK 產業情報網的免費焦點）\n・工研院自己在這方面的技術與發表\n想看哪一種？點下面的按鈕就可以。`,
+      [
+        { label: `${kw}的產業趨勢`, text: `${kw}產業趨勢` },
+        { label: `工研院的${kw}技術`, text: `工研院 ${kw}` },
+        '最近有哪些活動', CONTACT_MENU_LABEL
+      ]);
+    return;
+  }
+
+  await replyOrPush(replyToken, targetId,
+    [
+      '嗯～這句我不太確定該從哪邊幫您找答案 🤔 這幾件事我都能查：',
+      '・某一場記者會的內容 → 直接打活動名稱，或問我「最近有哪些活動」',
+      '・產業趨勢 → 打「產業趨勢分析」，或直接問我某個領域的趨勢',
+      '・工研院的技術 → 打「工研院」加技術名稱，例如「工研院 太空」',
+      '・想找採訪窗口 → 打「媒體邀訪需求」'
+    ].join('\n'),
+    ['最近有哪些活動', '產業趨勢分析', '想問什麼技術', CONTACT_MENU_LABEL, '使用說明']);
 }
 
 // ── 群組／多人聊天（批次 5/6，仿美玉姨：被 @ 到才開口，短暫續問視窗）──────
@@ -1392,7 +1580,9 @@ async function handleGroupMessage(replyToken, groupId, text, { mentioned }) {
   // 接下來的預設場次——跟現有「打整句活動名稱換台」本來就是同一種風險，不是
   // 這裡新增的。currentEventId 帶目前這場給 routeIntent()，讓它分得出「延續這場
   // 的討論」跟「真的無關」（見 lib/router.js 的說明），下面的安靜門檻才靠得住。
-  const routed = await routeIntent(text, buildCalendarCards(await getAllEventRows()), { currentEventId: event.id });
+  // currentTopic 的理由跟 1 對 1 那段完全一樣（見 handleEvent() 同一行的說明）。
+  const routed = await routeIntent(text, buildCalendarCards(await getAllEventRows()),
+    { currentEventId: event.id, currentTopic: await getRecentTopic(groupId) });
 
   // 回報的意見：批次 14 只擋得住「明確 @ 別人」這種訊號很強的情況，續問視窗內
   // 純聊天、答非所問的訊息（例如「友信你覺得呢」）當時沒有安全的判斷依據——
@@ -1635,7 +1825,12 @@ async function handleEvent(ev) {
   // （同一種風險見 LINE-PLAN.md 坑 6）。currentEventId 帶目前這場給 routeIntent()，
   // 讓它分得出「延續這場的討論」跟「真的指向別場」（見 lib/router.js 的說明），
   // 減少沒有明確線索時被誤判成 other、進而誤觸換場判斷的機會。
-  const routed = await routeIntent(text, buildCalendarCards(await getAllEventRows()), { currentEventId: event.id });
+  // currentTopic 一併帶上：綁定中一樣可能剛問完產業趨勢（那條路不動活動綁定，見
+  // 下面 industry_trend 分支），接著打一個裸名詞追問——沒有這個提示，那句話會被
+  // currentEventId 的提示硬拉回「延續這場活動」，記者拿到的是那場的 AI 說「這部分
+  // 我沒有資料」，一樣是答非所問，只是換了一種形式。見 getRecentTopic() 的說明。
+  const routed = await routeIntent(text, buildCalendarCards(await getAllEventRows()),
+    { currentEventId: event.id, currentTopic: await getRecentTopic(userId) });
 
   // 綁定中，但這題其實在問整體產業趨勢、不是這場活動的內容——不動原本的活動綁定
   // （跟「延續這場討論」是兩件事，換場判斷只在下面才做），記者下一題還是繼續問
