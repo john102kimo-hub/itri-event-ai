@@ -1141,5 +1141,47 @@ out = await sendGroup('太空', { mentionSelf: false });
 check('群組續問視窗內打裸名詞 → 接回趨勢話題，不會被安靜門檻擋掉',
   out.some(o => o.kind === 'answer' && o.sys?.includes('IEK 產業情報網')), JSON.stringify(out.map(o => o.kind)));
 
+// ── 情境 20：閒聊短問句被當成主題詞複誦（實際回報的截圖，批次 27）─────────────
+// 記者打「天氣如何」→ 收到「『天氣如何』我可以從兩個方向幫您找 🙂」，底下還掛著
+// 「天氣如何的產業趨勢」「工研院的天氣如何技術」兩顆按鈕。情境 19 的複誦本身是對的
+// （記者打「太空」時很有用），漏的是守門：原本只有一份寫死的招呼語名單，擋得住
+// 「你好」，擋不住任何一句**沒有標點的短問句**。而且那兩顆按鈕不只是文案難看，
+// 按下去真的會把「天氣如何產業趨勢」送出去查。
+// 見 api/line.js looksLikeBareTopic()／SENTENCE_RE 的說明。
+for (const chat of ['天氣如何', '吃飽沒', '現在幾點', '怎麼辦', '要不要', '股票怎樣', '午餐吃什麼', '你在幹嘛']) {
+  reset(); await freshModule();
+  out = await send(chat);
+  check(`閒聊短問句「${chat}」不會被當成主題詞複誦，走的是四條路都講清楚的泛用兜底`,
+    out[0]?.kind === 'text' && /不太確定該從哪邊幫您找答案/.test(out[0].text) && !out[0].text.includes(`「${chat}」`),
+    JSON.stringify(out));
+  check(`閒聊短問句「${chat}」不會生出「${chat}的產業趨勢」這種按了只會查到亂碼的按鈕`,
+    !JSON.stringify(out[0]?.quickReply || []).includes(chat), JSON.stringify(out[0]?.quickReply));
+}
+
+// 守門收緊之後，真的主題詞還是要複誦得到——那才是情境 19 那條路存在的理由。
+// 「能源」「太陽能」這種**含有疑問句常用字**（能）的題目刻意放進來：SENTENCE_RE
+// 只收多字組合（能不能／幾點），不收單字的「能」「幾」，就是為了不誤傷這些真的
+// 會被問到的題目。
+for (const topic of ['太空', '光通訊', '能源', '太陽能', '量子電腦']) {
+  reset(); await freshModule();
+  out = await send(topic);
+  check(`主題詞「${topic}」照舊複誦回去，兩顆按鈕也照舊`,
+    out[0]?.kind === 'text' && out[0].text.includes(`「${topic}」`) &&
+    JSON.stringify(out[0]?.quickReply?.slice(0, 2)) === JSON.stringify([
+      { label: `${topic}的產業趨勢`, text: `${topic}產業趨勢` },
+      { label: `工研院的${topic}技術`, text: `工研院 ${topic}` }
+    ]), JSON.stringify(out));
+}
+
+// 純表情／顏文字也不該被複誦。第一道門檻改成「只由中文字與英數組成」的白名單之後
+// 這種輸入連進都進不來（原本的 `[^\s]{2,8}` 會放行，只擋了幾個列舉的標點）。
+for (const junk of ['😀😀', '^_^', 'ＸＤ']) {
+  reset(); await freshModule();
+  out = await send(junk);
+  check(`表情／符號「${junk}」不會被當成主題詞複誦`,
+    out[0]?.kind === 'text' && /不太確定該從哪邊幫您找答案/.test(out[0].text) && !out[0].text.includes(`「${junk}」`),
+    JSON.stringify(out));
+}
+
 console.log(`\n${fail === 0 ? '✅' : '❌'} 流程測試通過 ${pass}／失敗 ${fail}`);
 process.exit(fail === 0 ? 0 : 1);
