@@ -58,12 +58,28 @@ function makeGroupReq(text, { groupId = 'Cgroup1', mentionSelf = true, mentionTe
   return req;
 }
 
+// 任意 webhook 事件（join、非文字訊息…）——makeReq／makeGroupReq 都只組得出文字訊息。
+function makeRawReq(events) {
+  const body = JSON.stringify({ events });
+  const req = new EventEmitter();
+  req.method = 'POST';
+  req.headers = { 'x-line-signature': createHmac('sha256', 'testsecret').update(Buffer.from(body)).digest('base64') };
+  setImmediate(() => { req.emit('data', Buffer.from(body)); req.emit('end'); });
+  return req;
+}
+
 const res = { status() { return this; }, json() { return this; }, end() { return this; }, setHeader() { return this; }, send() { return this; } };
 
 async function send(text, userId) {
   sent.length = 0;
   await handler(makeReq(text, userId), res);
   return sent.map(s => ({ kind: s.kind, text: s.text, event: s.event, quickReply: s.quickReply, sys: s.sys, question: s.question }));
+}
+
+async function sendRaw(events) {
+  sent.length = 0;
+  await handler(makeRawReq(events), res);
+  return sent.map(x => ({ kind: x.kind, text: x.text, event: x.event, quickReply: x.quickReply, sys: x.sys, question: x.question }));
 }
 
 async function sendGroup(text, opts) {
@@ -368,15 +384,42 @@ check('1 對 1 問「你是誰」→ 回使用說明，不是答非所問的萬�
 // 但這個帳號有四條路（活動／產業趨勢／工研院技術／邀訪窗口），活動只是其中一條，
 // 記者根本沒在問活動時那句話本身就是答非所問（見情境 19 的回報截圖）。新版不預設
 // 記者一定是在問活動，四條路一次講清楚。
+//
+// 批次 28 又改了一次：那份固定清單本身就是「答非所問」的另一種形式——記者問的是
+// 一句具體的話，收到的卻是把說明書再念一次。現在先讓米亞針對「這一句」講一段貼題
+// 的話（composeFallbackReply()），組不出來才退回固定清單。入口按鈕兩條路都照舊。
 reset(); await freshModule();
 out = await send('隨便問一句跟任何主題都不相關的話');
-check('真的判不出意圖 → 兜底文案仍然出現，四條路都講到，且附上核心入口按鈕',
-  out[0]?.kind === 'text' &&
-  /不太確定該從哪邊幫您找答案/.test(out[0].text) &&
-  !/沒抓到您想問哪一場活動/.test(out[0].text) &&
-  ['活動名稱', '產業趨勢', '工研院', '媒體邀訪需求'].every(s => out[0].text.includes(s)) &&
-  JSON.stringify(out[0]?.quickReply) === JSON.stringify(['最近有哪些活動', '產業趨勢分析', '想問什麼技術', '媒體邀訪需求', '使用說明']),
-  JSON.stringify(out));
+check('真的判不出意圖 → 走智慧兜底，針對記者那一句回話，不是把功能選單再貼一次',
+  out.some(o => o.kind === 'fallback') &&
+  out.at(-1)?.kind === 'text' && /這題我這邊查不到/.test(out.at(-1).text) &&
+  !/沒抓到您想問哪一場活動/.test(out.at(-1).text), JSON.stringify(out));
+check('智慧兜底拿到的是記者的原話，不是按鈕文字或空字串',
+  out.find(o => o.kind === 'fallback')?.question === '隨便問一句跟任何主題都不相關的話',
+  JSON.stringify(out.find(o => o.kind === 'fallback')?.question));
+check('智慧兜底的 system prompt 明確禁止生成事實內容（這條是它敢上線的前提）',
+  /不要提供任何事實內容/.test(out.find(o => o.kind === 'fallback')?.sys || ''),
+  (out.find(o => o.kind === 'fallback')?.sys || '').slice(0, 120));
+check('智慧兜底照樣附上四條路的入口按鈕，記者不用自己打字',
+  JSON.stringify(out.at(-1)?.quickReply) === JSON.stringify(['最近有哪些活動', '產業趨勢分析', '想問什麼技術', '媒體邀訪需求', '使用說明']),
+  JSON.stringify(out.at(-1)?.quickReply));
+
+// 輸出守門：模型講太多、或吐回來的其實是 askAnthropic() 自己的失敗訊息時，一律退回
+// 固定文案——那份永遠不會講錯話，是這條路徑的安全底線（見 composeFallbackReply()）。
+for (const [label, bad] of [
+  ['太長', '很長的回答'.repeat(80)],
+  ['其實是 API 失敗訊息', '抱歉，目前無法取得回應，請稍後再試。'],
+  ['混進 Markdown', '**這題**我查不到']
+]) {
+  reset(); await freshModule();
+  state.fallbackReply = bad;
+  out = await send('隨便問一句跟任何主題都不相關的話');
+  check(`智慧兜底輸出${label} → 退回固定兜底文案，四條路都講到，不會把壞輸出丟給記者`,
+    out.at(-1)?.kind === 'text' && /不太確定該從哪邊幫您找答案/.test(out.at(-1).text) &&
+    ['活動名稱', '產業趨勢', '工研院', '媒體邀訪需求'].every(x => out.at(-1).text.includes(x)),
+    JSON.stringify(out.at(-1)));
+}
+state.fallbackReply = null;
 
 // 群組軟綁定：@ 問過一次某場之後，同群組其他人 @ 問後續問題不用重打活動名稱
 reset(); await freshModule();
@@ -1115,8 +1158,10 @@ check('按「工研院的太空技術」→ 真的走到工研院技術那條路
 for (const greeting of ['你好', '謝謝', '哈哈', 'ok']) {
   reset(); await freshModule();
   out = await send(greeting);
-  check(`招呼語「${greeting}」不會被當成主題詞複誦，走的是四條路都講清楚的泛用兜底`,
-    out[0]?.kind === 'text' && /不太確定該從哪邊幫您找答案/.test(out[0].text) && !out[0].text.includes(`「${greeting}」`),
+  // 批次 28 起兜底那一則可能是智慧兜底生成的（見情境 8），驗的是「沒被複誦成主題詞」
+  // 這個不變量，不是某一段固定文案。
+  check(`招呼語「${greeting}」不會被當成主題詞複誦`,
+    out.at(-1)?.kind === 'text' && !out.at(-1).text.includes(`「${greeting}」我可以從兩個方向`),
     JSON.stringify(out));
 }
 
@@ -1151,11 +1196,13 @@ check('群組續問視窗內打裸名詞 → 接回趨勢話題，不會被安�
 for (const chat of ['天氣如何', '吃飽沒', '現在幾點', '怎麼辦', '要不要', '股票怎樣', '午餐吃什麼', '你在幹嘛']) {
   reset(); await freshModule();
   out = await send(chat);
-  check(`閒聊短問句「${chat}」不會被當成主題詞複誦，走的是四條路都講清楚的泛用兜底`,
-    out[0]?.kind === 'text' && /不太確定該從哪邊幫您找答案/.test(out[0].text) && !out[0].text.includes(`「${chat}」`),
+  // 批次 28 起這條路先走智慧兜底（見情境 8），所以驗的是「沒有被複誦成主題詞」這個
+  // 不變量，不是某一段固定文案——複誦那條路的兩顆按鈕才是當初真正難看的地方。
+  check(`閒聊短問句「${chat}」不會被當成主題詞複誦`,
+    out.at(-1)?.kind === 'text' && !out.at(-1).text.includes(`「${chat}」我可以從兩個方向`),
     JSON.stringify(out));
   check(`閒聊短問句「${chat}」不會生出「${chat}的產業趨勢」這種按了只會查到亂碼的按鈕`,
-    !JSON.stringify(out[0]?.quickReply || []).includes(chat), JSON.stringify(out[0]?.quickReply));
+    !JSON.stringify(out.at(-1)?.quickReply || []).includes(chat), JSON.stringify(out.at(-1)?.quickReply));
 }
 
 // 守門收緊之後，真的主題詞還是要複誦得到——那才是情境 19 那條路存在的理由。
@@ -1179,7 +1226,201 @@ for (const junk of ['😀😀', '^_^', 'ＸＤ']) {
   reset(); await freshModule();
   out = await send(junk);
   check(`表情／符號「${junk}」不會被當成主題詞複誦`,
-    out[0]?.kind === 'text' && /不太確定該從哪邊幫您找答案/.test(out[0].text) && !out[0].text.includes(`「${junk}」`),
+    out.at(-1)?.kind === 'text' && !out.at(-1).text.includes(`「${junk}」我可以從兩個方向`),
+    JSON.stringify(out));
+}
+
+// ── 情境 21：被拉進群組（join 事件）＋ 群組續問視窗的守門（批次 28）─────────────
+// 回報的意見：「被拉進群組時也能回答，回答時不要答非所問，而且不會亂回」。
+// 這個情境分三段驗：被拉進去那一刻要講話、視窗內不該接的別接、該接的不能被誤擋。
+
+console.log('── join：被拉進群組時要自我介紹，並先把「只有被 @ 才說話」的規矩講清楚 ──');
+reset(); await freshModule();
+out = await sendRaw([{ type: 'join', replyToken: 'rt_join', source: { type: 'group', groupId: 'Cgroup1' } }]);
+check('被拉進群組 → 有自我介紹（批次 28 之前完全不出聲，被拉進去像個壞掉的帳號）',
+  out[0]?.kind === 'text' && /米亞/.test(out[0].text), JSON.stringify(out));
+check('自我介紹第一件事就是講規矩：只有被 @ 才會說話，不會插話也不會推播',
+  /只有被 @ 到的時候才會說話/.test(out[0]?.text || '') && /不會插話/.test(out[0]?.text || ''), out[0]?.text);
+check('同時把四條路都講出來，群組成員不用自己猜能問什麼',
+  ['活動', '產業趨勢', '工研院', '邀訪'].every(x => (out[0]?.text || '').includes(x)), out[0]?.text);
+check('附上快速回覆按鈕，第一個想試的人不用先學會怎麼 @',
+  JSON.stringify(out[0]?.quickReply) === JSON.stringify(['最近有哪些活動', '產業趨勢分析', '想問什麼技術', '媒體邀訪需求', '使用說明']),
+  JSON.stringify(out[0]?.quickReply));
+check('join 之後續問視窗有開——不然上面那排按鈕（送出的是沒有 @ 的純文字）按了會沒反應',
+  state.bindings.get('Cgroup1')?.groupSessionUntil > Date.now(), JSON.stringify(state.bindings.get('Cgroup1')));
+
+// room（多人聊天室）走同一條路
+reset(); await freshModule();
+out = await sendRaw([{ type: 'join', replyToken: 'rt_join', source: { type: 'room', roomId: 'Rroom1' } }]);
+check('被拉進 room（多人聊天室）也一樣自我介紹', out[0]?.kind === 'text' && /米亞/.test(out[0].text), JSON.stringify(out));
+
+// memberJoined（有「別人」進群）刻意不理——每次有人進群就自我介紹一次是洗版
+reset(); await freshModule();
+out = await sendRaw([{ type: 'memberJoined', replyToken: 'rt_mj', source: { type: 'group', groupId: 'Cgroup1' }, joined: { members: [{ type: 'user', userId: 'Uxx' }] } }]);
+check('有「別人」加入群組（memberJoined）→ 完全安靜，不會每進一個人就自我介紹一次',
+  out.length === 0, JSON.stringify(out));
+
+console.log('── 續問視窗守門：不是在跟我們講話的訊息，一律安靜 ──');
+// 這幾句在批次 28 之前全部會被硬答：前三句命中 detectMetaIntent()／路由，而那幾條路
+// 根本不看「有沒有被 @」，最後一句則是路由判成 industry_trend 就直接開講。
+for (const [label, chat] of [
+  ['命中活動清單關鍵字的閒聊', '那個案子後面還有活動要辦'],
+  ['命中「換一場」的閒聊', '這邊先換一場再說'],
+  ['聊到某個產業的陳述句', '台積電最近在擴廠'],
+  ['純粹的工作對話', '我等等把資料寄給你']
+]) {
+  reset(); await freshModule();
+  state.bindings.set('Cgroup1', { event_id: 'quad', media_name: '', note: '', bound_at: Date.now(), groupSessionUntil: Date.now() + 60000 });
+  out = await sendGroup(chat, { mentionSelf: false });
+  check(`續問視窗內、${label}（「${chat}」）→ 安靜，不會插話`, out.length === 0, JSON.stringify(out));
+}
+
+console.log('── 續問視窗守門：真的在跟我們講話的，一句都不能被誤擋 ──');
+// 守門收得緊，代價是可能誤擋真的在問我們的人。這幾種是「不放行就會壞掉」的路徑，
+// 每一種都對應 looksAddressedToBot() 裡的一類，見該處說明。
+reset(); await freshModule();
+await sendGroup('@我 最近有哪些活動', { mentionSelf: true, mentionText: '@我 ' });
+out = await sendGroup('半導體先進封裝技術發表會', { mentionSelf: false });
+check('活動清單按鈕送出的活動全名（沒有問號、沒有疑問詞）→ 照樣接得住，按鈕不會變成按了沒反應',
+  out[0]?.kind === 'answer' && out[0].event === 'semi', JSON.stringify(out));
+
+reset(); await freshModule();
+await sendGroup('@我 最近有哪些活動', { mentionSelf: true, mentionText: '@我 ' });
+out = await sendGroup('媒體邀訪需求', { mentionSelf: false });
+check('固定選單按鈕（媒體邀訪需求）→ 照樣接得住', out.length > 0, JSON.stringify(out));
+
+reset(); await freshModule();
+await sendGroup('@我 半導體先進封裝技術發表會的重點', { mentionSelf: true, mentionText: '@我 ' });
+out = await sendGroup('那合作廠商有哪些', { mentionSelf: false });
+check('一句真的提問（有疑問詞）→ 照樣接得住，合法續問沒有被守門連帶擋掉',
+  out[0]?.kind === 'answer' && out[0].event === 'semi', JSON.stringify(out));
+
+reset(); await freshModule();
+await sendGroup('@我 產業趨勢分析', { mentionSelf: true, mentionText: '@我 ' });
+out = await sendGroup('太空', { mentionSelf: false });
+check('剛回答完趨勢題、接著打一個裸名詞追問 → 接得回同一個話題（那是我們自己邀請他打的）',
+  out.some(o => o.kind === 'answer' || o.kind === 'text'), JSON.stringify(out.map(o => o.kind)));
+
+// 同一個裸名詞，在沒有話題記憶時就不放行——群組裡一個沒頭沒尾的名詞多半是別人在
+// 聊自己的事，不是在問我們。這是「③ 要有話題記憶才放行」那條的反面驗證。
+reset(); await freshModule();
+state.bindings.set('Cgroup1', { event_id: 'quad', media_name: '', note: '', bound_at: Date.now(), groupSessionUntil: Date.now() + 60000 });
+out = await sendGroup('半導體', { mentionSelf: false });
+check('沒有話題記憶時、群組裡冒出一個裸名詞 → 安靜，不會自作主張開始講產業趨勢',
+  out.length === 0, JSON.stringify(out));
+
+// 被 @ 到時整道守門跳過——明確叫了機器人就不能不理人（跟批次 14／16 同一個原則）
+reset(); await freshModule();
+out = await sendGroup('@我 我等等把資料寄給你', { mentionSelf: true, mentionText: '@我 ' });
+check('真的被 @ 到時守門完全不生效，一定會有回應（明確叫了機器人就不能不理人）',
+  out.length > 0, JSON.stringify(out));
+
+console.log('── 群組的一次性旗標要綁「是誰按的」，別人的話不會被吃掉 ──');
+// 這是「亂回」最尖銳的一種：旗標存在 line_users 的 F 欄，群組用 groupId 當 key，
+// 也就是整個群組共用一格。A 按了「想問什麼技術」之後，B 隨口講的下一句就會被當成
+// 技術名稱送去查工研院官網，B 根本沒在跟機器人講話。見 pendingNoteFor() 的說明。
+reset(); await freshModule();
+await sendRaw([{
+  type: 'message', replyToken: 'rt1', source: { type: 'group', groupId: 'Cgroup1', userId: 'U_alice' },
+  message: { type: 'text', text: '@我 想問什麼技術', mention: { mentionees: [{ index: 0, length: 3, type: 'user', userId: 'Ubot', isSelf: true }] } }
+}]);
+check('A 按了「想問什麼技術」→ 機器人反問想了解哪一項技術',
+  state.bindings.get('Cgroup1')?.note?.startsWith('await_tech_query'), JSON.stringify(state.bindings.get('Cgroup1')?.note));
+check('旗標有記下是誰按的（群組才加這個後綴）',
+  state.bindings.get('Cgroup1')?.note === 'await_tech_query#U_alice', state.bindings.get('Cgroup1')?.note);
+
+out = await sendRaw([{
+  type: 'message', replyToken: 'rt2', source: { type: 'group', groupId: 'Cgroup1', userId: 'U_bob' },
+  message: { type: 'text', text: '機器人' }
+}]);
+check('換 B 講話（沒有 @）→ 不會被當成 A 要查的技術名稱，這是最典型的「亂回」',
+  !out.some(o => o.sys?.includes('工研院官網新聞中心 搜尋')), JSON.stringify(out.map(o => o.kind)));
+check('B 那句話也沒有用掉 A 的旗標，A 回來還接得住',
+  state.bindings.get('Cgroup1')?.note === 'await_tech_query#U_alice', state.bindings.get('Cgroup1')?.note);
+
+out = await sendRaw([{
+  type: 'message', replyToken: 'rt3', source: { type: 'group', groupId: 'Cgroup1', userId: 'U_alice' },
+  message: { type: 'text', text: '機器人' }
+}]);
+check('A 自己回來打技術名稱 → 照樣查得到，守門沒有把正主也擋掉',
+  out.some(o => o.sys?.includes('工研院官網新聞中心 搜尋「機器人」')), JSON.stringify(out.map(o => o.kind)));
+
+// 1 對 1 不加後綴，舊行為完全不變
+reset(); await freshModule();
+await send('想問什麼技術');
+check('1 對 1 的旗標不加「是誰按的」後綴（targetId 就是本人，多存一份只是雜訊）',
+  state.bindings.get('U_reporter')?.note === 'await_tech_query', state.bindings.get('U_reporter')?.note);
+
+// ── 情境 22：1 對 1 的上一輪對話記憶（批次 28）───────────────────────────────
+// 回報的意見：「對答要更如真人般」。最不像人的地方不是語氣，是完全沒有對話記憶——
+// 記者問「這項技術何時商業化」，答完再問「那成本呢」，模型連上一句是什麼都看不到。
+console.log('── 1 對 1：上一輪對話要帶進下一題，「那成本呢」才接得住 ──');
+reset(); await freshModule();
+state.bindings.set('U_reporter', { event_id: 'quad', media_name: '中央社', note: '', bound_at: Date.now() });
+await send('這項技術預計何時商業化？');
+check('答完第一題後，上一輪被記下來（line_users I 欄）',
+  !!state.bindings.get('U_reporter')?.lastTurn, state.bindings.get('U_reporter')?.lastTurn);
+{
+  const turn = JSON.parse(state.bindings.get('U_reporter').lastTurn);
+  check('記下來的是這一輪的問題與答案，而且標明是哪一場（換場後不能誤用）',
+    turn.q === '這項技術預計何時商業化？' && turn.e === 'quad' && !!turn.a, JSON.stringify(turn));
+}
+
+out = await send('那成本呢');
+check('下一題把上一輪當成對話脈絡送上去，模型看得到「那」指的是什麼',
+  out.some(o => o.kind === 'answer' && o.event === 'quad'), JSON.stringify(out.map(o => o.kind)));
+
+// 換場之後不能回放上一場的問答——那等於把另一場的內容當成這一場的脈絡餵給模型，
+// 跟「換錯場」是同一種風險（記者不會發現答案其實混到別場）。
+reset(); await freshModule();
+state.bindings.set('U_reporter', {
+  event_id: 'semi', media_name: '', note: '', bound_at: Date.now(),
+  lastTurn: JSON.stringify({ t: Date.now(), e: 'quad', q: '四足機器人的重點是什麼', a: '（上一場的答案）' })
+});
+out = await send('那合作廠商有哪些');
+check('上一輪是別場的問答 → 不回放，這一場的答案不會混到別場的脈絡',
+  out.some(o => o.kind === 'answer' && o.event === 'semi'), JSON.stringify(out.map(o => o.kind)));
+
+// 過期的記憶不回放——記者隔了半小時再回來打「那成本呢」，那個「那」早就不成立了
+reset(); await freshModule();
+state.bindings.set('U_reporter', {
+  event_id: 'quad', media_name: '', note: '', bound_at: Date.now(),
+  lastTurn: JSON.stringify({ t: Date.now() - 30 * 60 * 1000, e: 'quad', q: '舊問題', a: '舊答案' })
+});
+out = await send('這場的重點是什麼');
+check('超過 TTL 的對話記憶不回放，退回單則問答的行為',
+  out.some(o => o.kind === 'answer' && o.event === 'quad'), JSON.stringify(out.map(o => o.kind)));
+
+// 壞掉的記憶（手動改過的儲存格、舊格式）不能讓記者問不到東西
+reset(); await freshModule();
+state.bindings.set('U_reporter', { event_id: 'quad', media_name: '', note: '', bound_at: Date.now(), lastTurn: '{壞掉的 JSON' });
+out = await send('這場的重點是什麼');
+check('對話記憶那一格是壞資料 → 當作沒有記憶照常回答，不會整支掛掉',
+  out.some(o => o.kind === 'answer' && o.event === 'quad'), JSON.stringify(out.map(o => o.kind)));
+
+// 群組刻意不開對話記憶——多人交錯提問，「上一輪」很可能是別人的問題
+reset(); await freshModule();
+await sendGroup('@我 半導體先進封裝技術發表會的重點', { mentionSelf: true, mentionText: '@我 ' });
+check('群組不記對話記憶（多人交錯提問，回放上一輪只會製造答非所問）',
+  !state.bindings.get('Cgroup1')?.lastTurn, state.bindings.get('Cgroup1')?.lastTurn);
+
+// 「回首頁」要把對話記憶一起清掉——記者明確說這一輪聊完了
+reset(); await freshModule();
+state.bindings.set('U_reporter', {
+  event_id: 'quad', media_name: '', note: '', bound_at: Date.now(),
+  lastTurn: JSON.stringify({ t: Date.now(), e: 'quad', q: '舊問題', a: '舊答案' })
+});
+await send('回首頁');
+check('「回首頁」把上一輪對話記憶一起清掉，下一句不會被接回舊脈絡',
+  !state.bindings.get('U_reporter')?.lastTurn, state.bindings.get('U_reporter')?.lastTurn);
+
+// ── 情境 23：非文字訊息的回覆要有人味（批次 28）───────────────────────────────
+console.log('── 非文字訊息：貼圖、照片各有各的講法，不是同一句系統公告 ──');
+for (const [type, must] of [['sticker', '貼圖'], ['image', '圖'], ['audio', '語音'], ['location', '位置']]) {
+  reset(); await freshModule();
+  out = await sendRaw([{ type: 'message', replyToken: 'rt_' + type, source: { type: 'user', userId: 'U_reporter' }, message: { type } }]);
+  check(`1 對 1 收到 ${type} → 回覆針對這個型別講話，不是同一句「目前僅支援文字訊息提問」`,
+    out[0]?.kind === 'text' && out[0].text.includes(must) && !/目前僅支援文字訊息提問/.test(out[0].text),
     JSON.stringify(out));
 }
 

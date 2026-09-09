@@ -65,7 +65,7 @@ const EVENTS_RANGE = 'events!A2:R'; // P 欄是 contacts（邀訪窗口分工）
 // getGroupSessionUntil()／touchGroupSession() 的說明。
 // H 欄是「上一則剛回答完的是哪一類非活動題」，1 對 1 與群組都會用到，見
 // getRecentTopic()／setRecentTopic() 的說明。
-const LINE_USERS_RANGE = 'line_users!A2:H';
+const LINE_USERS_RANGE = 'line_users!A2:I'; // I 欄是 last_turn（上一輪對話記憶），見 getRecentTurn()
 const BIND_TTL_MS = 6 * 60 * 60 * 1000; // 6 小時；沒有這個 TTL，記者三個月後問別場會被鎖在當初掃的那一場
 const CACHE_TTL_MS = 60 * 1000; // 跟 api/chat.js 的 eventCache 同一套邏輯
 
@@ -159,7 +159,7 @@ async function ensureLineUsersSheet() {
   if (sheetsEnsuredAt === Infinity) return;
   if (Date.now() - sheetsEnsuredAt < ENSURE_RETRY_MS) return;
   try {
-    await ensureSheets({ line_users: ['line_user_id', 'event_id', 'media_name', 'bound_at', 'last_active', 'note', 'group_session_until', 'last_topic'] });
+    await ensureSheets({ line_users: ['line_user_id', 'event_id', 'media_name', 'bound_at', 'last_active', 'note', 'group_session_until', 'last_topic', 'last_turn'] });
     sheetsEnsuredAt = Infinity; // 建好了就永遠不用再確認
   } catch (e) {
     console.error('ensureSheets(line_users) 失敗，60 秒後再試:', e.message);
@@ -245,8 +245,9 @@ async function setContactPending(targetId, note) {
 // 解除綁定：把 bound_at（D 欄）清空，getBinding() 讀到 0 就會當作沒綁定。
 // 不刪整列——line_users 的媒體名稱是記者自報的，下次他綁別場時還用得到，
 // 刪掉等於每換一場就要重問一次「請問哪家媒體」。
-// H 欄（話題記憶）一併清掉：「回首頁」是記者明確說「這一輪聊完了」，留著上一輪的
-// 話題只會讓他回首頁之後打的第一個詞被接回舊話題。G 欄（群組續問視窗）要原值寫回、
+// H 欄（話題記憶）與 I 欄（上一輪對話記憶）一併清掉：「回首頁」是記者明確說「這一輪
+// 聊完了」，留著上一輪的話題／對話只會讓他回首頁之後打的第一句被接回舊脈絡。
+// G 欄（群組續問視窗）要原值寫回、
 // 不能跟著清——這支群組也會走到（handleMetaIntent 的 switch 分支帶的是 groupId），
 // 清掉等於記者按了「回首頁」就把整個群組的免 @ 視窗一起關掉，那是兩件不相干的事。
 async function clearBinding(userId) {
@@ -254,7 +255,7 @@ async function clearBinding(userId) {
     const rows = await readRange(LINE_USERS_RANGE);
     const idx = rows.findIndex(r => r[0] === userId);
     if (idx === -1) return;
-    await updateRange(`line_users!D${idx + 2}:H${idx + 2}`, [['', String(Date.now()), '', rows[idx][6] || '', '']]);
+    await updateRange(`line_users!D${idx + 2}:I${idx + 2}`, [['', String(Date.now()), '', rows[idx][6] || '', '', '']]);
   } catch (e) {
     console.error('clearBinding 失敗:', e.message);
   } finally {
@@ -362,6 +363,77 @@ async function setRecentTopic(targetId, topic) {
   }
 }
 
+// ── 上一輪對話記憶（I 欄，批次 28）────────────────────────────────────────
+// 回報的意見：「對答要更如真人般」。人味最大的缺口不是語氣，是**這個帳號完全沒有
+// 對話記憶**——askAnthropic() 每次只送一則 user message，前面問過什麼、我們答過
+// 什麼，模型一個字都看不到。實際後果就是最不像人的那種對話：
+//   記者：這項技術預計何時商業化？   → 米亞：預計 2027 年進入試量產⋯⋯
+//   記者：那成本呢？                 → 米亞：（完全不知道「那」是指什麼）
+// 批次 26 的話題記憶（H 欄）只記「上一則是哪一類問題」，解決的是「路由判不判得出
+// 意圖」；這一欄記的是「上一輪實際講了什麼」，解決的是「答得出不出續問」，兩件事。
+//
+// ⚠️ 只記「一輪」（上一問＋上一答），不是完整對話串。理由是這個帳號的答案會被記者
+// 直接截圖引用：對話帶得越長，模型把好幾輪前的內容混進這一題答案的機會就越大，而
+// 那種錯誤在官方帳號上是最貴的（LINE-PLAN.md 坑 6 是同一種顧慮）。一輪就足以接住
+// 「那ＸＸ呢」這種真正常見的省略式續問。
+//
+// ⚠️ 一併記下這一輪是「哪一場活動」的答案（e 欄位），只有下一題還在問同一場時才
+// 回放。換場之後回放上一場的問答，等於把另一場的內容當成這一場的脈絡餵給模型，
+// 那正是換錯場那種「記者不會發現答案來自別場」的風險。
+//
+// ⚠️ 群組刻意不開這個記憶（呼叫端傳 memory:false）——群組裡多個人交錯提問，
+// 「上一輪」很可能是別人的問題，把它當成這個人的脈絡回放進去，製造出來的正是這次
+// 要修的「答非所問」。1 對 1 才有「上一輪就是同一個人講的」這個前提。
+//
+// 存 Sheets 而不是行程內的 Map，理由跟 getRecentTopic() 完全一樣（Vercel 執行個體
+// 隨時可能被回收，記者讀完答案再打字中間隔幾十秒很正常）。格式用 JSON 存一格：
+// 內容是記者的原話與 AI 的回答，任何自訂分隔符都可能剛好出現在裡面。
+const TURN_TTL_MS = 10 * 60 * 1000; // 跟話題記憶同一個尺度：夠讀完一段回答再打一句追問
+const TURN_Q_MAX = 200;   // 記者的問題通常很短，200 字綽綽有餘
+const TURN_A_MAX = 700;   // 答案只留開頭：續問要的是「剛剛在講什麼」，不是完整重述
+
+async function getRecentTurn(targetId) {
+  try {
+    const rows = await getAllLineUserRows();
+    const raw = rows.find(r => r[0] === targetId)?.[8] || '';
+    if (!raw) return null;
+    const t = JSON.parse(raw);
+    if (!t || !t.q || !t.a) return null;
+    if (Date.now() - (Number(t.t) || 0) > TURN_TTL_MS) return null;
+    return { q: String(t.q), a: String(t.a), event_id: String(t.e || '') };
+  } catch (e) {
+    // 解析失敗（舊資料、手動改過的儲存格）就當作沒有記憶，退回單則問答的舊行為——
+    // 這是體驗加分，不能因為一格壞資料就讓記者問不到東西。
+    return null;
+  }
+}
+
+async function setRecentTurn(targetId, eventId, question, answer) {
+  try {
+    await ensureLineUsersSheet();
+    const value = JSON.stringify({
+      t: Date.now(), e: String(eventId || ''),
+      q: sanitize(question, TURN_Q_MAX), a: sanitize(answer, TURN_A_MAX)
+    });
+    const rows = await readRange(LINE_USERS_RANGE);
+    const idx = rows.findIndex(r => r[0] === targetId);
+    if (idx === -1) return; // 沒有列就算了：走到這裡一定已經有綁定，理論上列一定在
+    await updateRange(`line_users!I${idx + 2}`, [[value]]);
+  } catch (e) {
+    console.error('setRecentTurn 失敗:', e.message);
+  } finally {
+    invalidateLineUsersCache();
+  }
+}
+
+// 把上一輪組成 Anthropic messages 陣列的前兩則（user／assistant）。只在「上一輪答的
+// 就是這一場」時才回放，理由見上面第三個 ⚠️。
+async function buildTurnHistory(targetId, eventId) {
+  const turn = await getRecentTurn(targetId);
+  if (!turn || turn.event_id !== String(eventId || '')) return [];
+  return [{ role: 'user', content: turn.q }, { role: 'assistant', content: turn.a }];
+}
+
 // 每次我們真的在群組裡回答了什麼，就呼叫這支幫時間窗續命。跟 upsertBinding() 分開
 // 寫，是因為呼叫時機不一樣：這支要在「所有」有回答的路徑後面都呼叫一次（活動列表、
 // 換場提示、真正的問答…），upsertBinding() 只在換場／軟綁定那幾個特定時機才呼叫。
@@ -423,6 +495,22 @@ function looksLikePhotoRequest(text) {
   return /(照片|圖片|相片|圖檔|新聞照|相關圖|image|photo)/i.test(text);
 }
 
+// 收到非文字訊息時要講的話（批次 28）。原本兩邊都是同一句「目前僅支援文字訊息提問，
+// 請直接輸入您的問題。」——意思沒錯，但那是系統公告的口氣，不是米亞會講的話，而且
+// 對貼圖、對照片講同一句也顯得沒在看對方傳了什麼。回報的意見是「對答要更如真人般」，
+// 這種一眼就看得出是罐頭訊息的地方最傷。
+//
+// ⚠️ 只換語氣，能力沒有變：我們仍然讀不到圖片與貼圖的內容，這幾句話都沒有暗示
+// 讀得到，也沒有承諾之後會處理——講清楚「我看不到」再給下一步，比含糊帶過誠實。
+function nonTextReply(messageType) {
+  if (messageType === 'sticker') return '收到您的貼圖了 🙂 不過我只看得懂文字，想問什麼直接打給我就可以～';
+  if (messageType === 'image') return '這張圖我這邊看不到內容耶 🙂 如果是想問某一場活動或某項技術，直接把問題打成文字給我，我再幫您查。';
+  if (messageType === 'audio' || messageType === 'video') return '語音跟影片我這邊聽不到、也看不了，麻煩直接打成文字給我，我馬上幫您查 🙂';
+  if (messageType === 'file') return '檔案我這邊打不開耶 🙂 想問的內容直接打成文字給我就可以。';
+  if (messageType === 'location') return '收到您傳的位置了，不過我這邊只處理文字提問 🙂 想找某一場活動或採訪窗口，直接打字問我就可以。';
+  return '我這邊只看得懂文字訊息 🙂 想問什麼直接打給我就可以。';
+}
+
 function lineExtraRules(event) {
   const contactHint = event.press_contact
     ? `寧可說「這部分我沒有資料，建議洽新聞聯絡人 ${event.press_contact}」`
@@ -430,7 +518,14 @@ function lineExtraRules(event) {
   return [
     '這是 LINE 對話，請控制在 5 行以內；記者要求完整新聞稿時才給全文，並提醒可到活動網頁下載。',
     '需要附連結時直接給網址純文字，不要用 Markdown 語法（LINE 不會渲染，記者會看到一堆星號與方括號）。',
-    `你的回覆會出現在掛著主辦單位名義的官方帳號裡，記者可能直接截圖引用。任何不確定的內容，${contactHint}。`
+    `你的回覆會出現在掛著主辦單位名義的官方帳號裡，記者可能直接截圖引用。任何不確定的內容，${contactHint}。`,
+    // 米亞人設（批次 28）。回報的意見：「對答要更如真人般、符合人設」。
+    // ⚠️ 這條走的是 extraRules 這個「頻道專屬規則」的管道，只有 LINE 會拿到——
+    // 網頁版 api/chat.js 呼叫的是不帶 extraRules 的 buildSystemPrompt(event)，
+    // 輸出逐 byte 不變（見 lib/prompt.js 開頭的 ⚠️），語氣不受影響。
+    // 之前這條只套在產業趨勢／工研院技術兩支，偏偏「活動問答」才是記者用最多的
+    // 那一條路，等於人設只活在比較少人走到的支線上，兩邊語氣對不起來。
+    TONE_RULE
   ];
 }
 
@@ -443,12 +538,17 @@ function lineExtraRules(event) {
 // 引用（見 lineExtraRules() 同一個顧慮），語氣軟化不能連帶讓「我沒有這項資料」變得
 // 含糊——講不知道的時候要更清楚、更快給出下一步，不是更委婉。
 //
-// 活動問答（answerQuestion → lib/prompt.js buildSystemPrompt）刻意不套這條：那份
-// prompt 的每一條規則都是踩過坑寫出來的，且網頁版共用同一份（見該檔開頭的 ⚠️），
-// 動它等於同時改動網頁版記者看到的語氣，超出這次要處理的範圍。
+// 活動問答（answerQuestion → lib/prompt.js buildSystemPrompt）批次 28 起也套這條，
+// 但是走 lineExtraRules() 那個「頻道專屬規則」的管道，不是去改 buildSystemPrompt()
+// 本身——網頁版呼叫的是不帶 extraRules 的版本，輸出逐 byte 不變（見 lib/prompt.js
+// 開頭的 ⚠️），網頁版記者看到的語氣完全不受影響。
+// 曾經因為「動不了那份共用 prompt」而整條跳過，結果是人設只活在產業趨勢／工研院
+// 技術兩支支線上，記者用最多的活動問答反而還是公文語氣。
 const TONE_RULE = '語氣：你是「米亞」，講話像一位熟悉這些題目、講話簡潔的公關同事，不是查詢系統。用「我」自稱，可以用一兩個口語的連接詞（例如「這題」「目前看到的是」），最多一個表情符號，不要每句都加。不要用「根據您的提問」「經查詢」「以下為您說明」這種公文開場，也不要用一長串條列把記者淹沒。查不到、沒有資料的時候，直接、明確地說沒有，再給下一步該怎麼問——不要道歉三次，也不要用模糊的說法混過去。';
 
-async function askAnthropic(systemPrompt, userText) {
+// history：選填的上一輪對話（[{role:'user'},{role:'assistant'}]，見 buildTurnHistory()）。
+// 沒帶就是原本「每次只送一則」的行為，所有既有呼叫端都不受影響。
+async function askAnthropic(systemPrompt, userText, history = []) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return '系統目前無法回答，請稍後再試或洽現場工作人員。';
   try {
@@ -459,7 +559,7 @@ async function askAnthropic(systemPrompt, userText) {
         model: 'claude-haiku-4-5-20251001',
         max_tokens: 4096,
         system: [{ type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }],
-        messages: [{ role: 'user', content: String(userText).slice(0, 8000) }]
+        messages: [...history, { role: 'user', content: String(userText).slice(0, 8000) }]
       })
     });
     const data = await response.json();
@@ -589,6 +689,45 @@ const CONTACT_PENDING_NOTE = 'await_contact_topic'; // 按了「其他」，等�
 // handleTechQueryMessage() 的說明。
 const TECH_QUERY_PENDING_NOTE = 'await_tech_query';
 
+// ── 一次性旗標的「這是誰按的」後綴（批次 28）─────────────────────────────
+// 回報的意見：群組裡「答非所問、亂回」。其中最尖銳的一種是這兩個一次性旗標——
+// 它們存在 line_users 的 F 欄，而群組是用 groupId 當 key，也就是整個群組共用一格：
+// A 按了「想問什麼技術」之後，群組裡「任何人」講的「任何一句話」都會被當成技術
+// 名稱直接送去查工研院官網，那個人根本沒在跟機器人講話，卻收到一段莫名其妙的
+// 技術報導摘要。「邀訪：其他」的自由輸入視窗有一模一樣的問題。
+//
+// 修法是把「是誰按的」一起寫進旗標（`await_tech_query#U123...`），只有同一個人的
+// 下一則才算數。別人插話不會被吃掉，按按鈕的人自己回來打字仍然接得住。
+//
+// 1 對 1 刻意不加後綴：targetId 本來就是發話者本人，多存一份只是雜訊，而且舊資料
+// （沒有後綴的旗標）在 1 對 1 要照舊生效，不能因為這次改動就失效。
+// ⚠️ 分隔符用 '#'——LINE 的 userId 是 `U` 開頭的 32 位十六進位字串，不會含 '#'，
+// 旗標本身的值（await_xxx）也不會，切一刀就能還原，不需要 JSON。
+const PENDING_SPEAKER_SEP = '#';
+
+// speakerId 沒帶（1 對 1）或跟 targetId 相同時不加後綴，維持舊格式。
+function pendingNoteFor(note, targetId, speakerId) {
+  if (!note || !speakerId || speakerId === targetId) return note;
+  return `${note}${PENDING_SPEAKER_SEP}${speakerId}`;
+}
+
+// 回傳 { note, speakerId }；沒有後綴時 speakerId 是空字串（＝「誰都算數」，舊行為）。
+function parsePendingNote(raw) {
+  const s = String(raw || '');
+  const i = s.indexOf(PENDING_SPEAKER_SEP);
+  return i === -1 ? { note: s, speakerId: '' } : { note: s.slice(0, i), speakerId: s.slice(i + 1) };
+}
+
+// 這則訊息的發話者，有沒有資格用掉這個等待中的旗標。
+// 旗標沒記發話者（1 對 1、或舊資料）→ 誰都算數；記了就只認同一個人。
+// ⚠️ speakerId 讀不到時（LINE 群組事件在使用者沒同意提供 userId 時可能缺這個欄位）
+// 一律當作「不是同一個人」→ 旗標不生效，退回一般路由。安全方向是「不要亂接」，
+// 不是「寧可錯接也要接住」——這正是這次要修的問題本身。
+function pendingBelongsTo(rawNote, speakerId) {
+  const { speakerId: owner } = parsePendingNote(rawNote);
+  return !owner || owner === speakerId;
+}
+
 let contactsDirCache = { list: null, expiry: 0 };
 async function getContactsDirectory() {
   if (contactsDirCache.list && Date.now() < contactsDirCache.expiry) return contactsDirCache.list;
@@ -639,12 +778,15 @@ async function sendGlobalContactMenu(replyToken, userId) {
 // 活動綁定、綁定的是哪一場，這兩種情況都要優先攔下來，不能被送進當前那場活動的問答
 // （記者按「邀訪：生醫」不是在問「生醫」這兩個字，是要查聯絡窗口）。命中就處理完並
 // 回傳 true，呼叫端據此判斷要不要繼續往下走原本的流程；沒命中回傳 false。
-async function handleContactTopicMessage(replyToken, targetId, text) {
+//
+// speakerId（批次 28）：群組裡是「誰」在講這句話。等待中的旗標會記下按按鈕的人，
+// 只有同一個人的下一則才用得掉——見 pendingNoteFor() 的完整說明。
+async function handleContactTopicMessage(replyToken, targetId, text, { speakerId = '' } = {}) {
   const m = String(text || '').match(CONTACT_TOPIC_RE);
   if (m) {
     const topic = m[1].trim();
     if (topic === '其他') {
-      await setContactPending(targetId, CONTACT_PENDING_NOTE);
+      await setContactPending(targetId, pendingNoteFor(CONTACT_PENDING_NOTE, targetId, speakerId));
       await replyOrPush(replyToken, targetId, '請直接輸入想了解的技術主題，或想邀訪的議題，我幫您媒合對應窗口。');
       return true;
     }
@@ -658,8 +800,8 @@ async function handleContactTopicMessage(replyToken, targetId, text) {
     return true;
   }
 
-  const pendingNote = await getStoredNote(targetId);
-  if (pendingNote === CONTACT_PENDING_NOTE) {
+  const rawPending = await getStoredNote(targetId);
+  if (parsePendingNote(rawPending).note === CONTACT_PENDING_NOTE && pendingBelongsTo(rawPending, speakerId)) {
     await setContactPending(targetId, ''); // 一次性：不管這則有沒有比對到，用掉就清掉
     const directory = await getContactsDirectory();
     const hit = matchGlobalContactByText(text, directory);
@@ -868,9 +1010,12 @@ async function answerTechQuery(replyToken, targetId, keywordText) {
 // 「其他」自由輸入同一個模式：先記一個一次性旗標，下一則不管長什麼樣都當成技術
 // 名稱直接去查，不逼記者用特定句型（「我想問」「請問」之類），也不用 AI 再判斷
 // 一次「這是不是技術名稱」——反正查不到 answerTechQuery() 自己會老實說查不到。
-async function handleTechQueryMessage(replyToken, targetId, text) {
-  const pendingNote = await getStoredNote(targetId);
-  if (pendingNote !== TECH_QUERY_PENDING_NOTE) return false;
+//
+// speakerId（批次 28）：理由同 handleContactTopicMessage()，見 pendingNoteFor()。
+async function handleTechQueryMessage(replyToken, targetId, text, { speakerId = '' } = {}) {
+  const rawPending = await getStoredNote(targetId);
+  if (parsePendingNote(rawPending).note !== TECH_QUERY_PENDING_NOTE) return false;
+  if (!pendingBelongsTo(rawPending, speakerId)) return false; // 群組裡別人插的話，不是他要查的技術名稱
   await setContactPending(targetId, ''); // 一次性：不管查不查得到，用掉這一次就清掉
   await answerTechQuery(replyToken, targetId, text);
   return true;
@@ -879,7 +1024,11 @@ async function handleTechQueryMessage(replyToken, targetId, text) {
 // 正式問答：開輸入中動畫 → 呼叫 Anthropic → reply（失敗 fallback push）→ 寫 qa_log。
 // 綁定路徑（#代碼）跟路由命中路徑（自然語言直接命中某一場）最後都走這支，避免兩邊各自
 // 維護一份幾乎一樣的邏輯、之後改一邊忘了改另一邊。
-async function answerQuestion(replyToken, userId, rawEvent, mediaName, text, { loading = true, allowPreEventSubstitution = true, switchNotice = '' } = {}) {
+//
+// memory（批次 28）：要不要帶上「上一輪對話」給模型，並在答完之後記下這一輪。
+// 只有 1 對 1 的記者問答會傳 true——群組多人交錯提問、職員模式問的是後台資料，
+// 兩者回放上一輪只會製造答非所問，見 getRecentTurn() 的說明。
+async function answerQuestion(replyToken, userId, rawEvent, mediaName, text, { loading = true, allowPreEventSubstitution = true, switchNotice = '', memory = false } = {}) {
   // 活動前只給媒體邀請函、不給正式新聞稿與照片（見 lib/prompt.js resolveEventContent()
   // 的說明）。放在這裡而不是呼叫端各自判斷，理由跟下面的邀訪窗口比對一樣：1 對 1、
   // 群組最後都走這支，寫一次兩邊都受惠。
@@ -913,7 +1062,10 @@ async function answerQuestion(replyToken, userId, rawEvent, mediaName, text, { l
   }
 
   const systemPrompt = buildSystemPrompt(event, lineExtraRules(event));
-  const aiReply = await askAnthropic(systemPrompt, text);
+  // 上一輪對話（只在 1 對 1、且上一輪答的就是這一場時才有東西）——「那成本呢」這種
+  // 省略式續問要接得住，靠的就是這兩則；見 buildTurnHistory() 的說明。
+  const history = memory ? await buildTurnHistory(userId, event.id) : [];
+  const aiReply = await askAnthropic(systemPrompt, text, history);
   const reply = switchNotice + aiReply;
   // 診斷用途，不是必要邏輯：路由判斷得準不準、AI 答得順不順，靠這行在 Vercel Logs
   // 裡直接看得到，不用另外接工具。刻意截斷長度，避免整份新聞稿灌爆單行 log。
@@ -934,6 +1086,11 @@ async function answerQuestion(replyToken, userId, rawEvent, mediaName, text, { l
     }
   }
   await logQa(event, mediaName, text, reply);
+  // 記下這一輪，讓下一則的省略式續問接得回來。放在最後（答案早就送出去了）而且
+  // setRecentTurn() 自己吞例外——這是體驗加分，寫失敗絕對不能連累剛剛那則答案。
+  // 記的是 aiReply 而不是 reply：switchNotice（「已切換到《X》：」）是講給人看的
+  // 系統提示，不是對話內容，回放給模型只會變成雜訊。
+  if (memory) await setRecentTurn(userId, event.id, text, aiReply);
 }
 
 // ── 安裝圖文選單（職員指令）─────────────────────────────────────────
@@ -1190,7 +1347,7 @@ async function handleStaffMessage(replyToken, userId, text) {
 //
 // 放在綁定判斷「之前」是刻意的：沒綁定的記者問「使用說明」一樣要拿到說明，而不是
 // 掉進 routeIntent() 被判成 other、只拿到「不確定您想問哪一場」。
-async function handleMetaIntent(replyToken, userId, text, metaIntent, binding) {
+async function handleMetaIntent(replyToken, userId, text, metaIntent, binding, { speakerId = '' } = {}) {
   // ask_name 是「#代碼綁定後問了媒體名稱，下一則要試著擷取」的一次性旗標。
   // 記者在那個視窗裡改按了選單按鈕，代表他跳過了報名字這件事，旗標要當場作廢——
   // 不清掉的話，等他選完活動再回來打的第一句真正的問題，會被 looksLikeNameOrSkip()
@@ -1204,7 +1361,10 @@ async function handleMetaIntent(replyToken, userId, text, metaIntent, binding) {
   // ⚠️ 兩個旗標存在同一欄、用同一支讀寫，所以只讀一次就夠：原本寫成連續兩個
   // `await getStoredNote()`，第一個若命中會 setContactPending() → 快取失效 →
   // 第二個必定真的再打一次 Sheets 讀取，白花一次全站共用的配額。
-  const pendingNote = await getStoredNote(userId);
+  // ⚠️ 旗標可能帶著「這是誰按的」後綴（群組，見 pendingNoteFor()），比對前要先切掉；
+  // 這裡刻意「不」檢查是不是同一個人——按了別的選單按鈕就是放棄那次自由輸入，不管
+  // 是誰按的，那個等待中的視窗都該當場作廢，留著只會讓下一句真正的問題被誤判。
+  const { note: pendingNote } = parsePendingNote(await getStoredNote(userId));
   if (pendingNote === CONTACT_PENDING_NOTE || pendingNote === TECH_QUERY_PENDING_NOTE) {
     await setContactPending(userId, '');
   }
@@ -1237,7 +1397,7 @@ async function handleMetaIntent(replyToken, userId, text, metaIntent, binding) {
     // 跟「產業趨勢分析」不同，這裡不能直接答——「想問什麼技術」本身不是一個技術
     // 名稱，answerTechQuery() 需要記者給關鍵字才查得到東西。先問一次、記一個
     // 一次性旗標，下一則不管記者打什麼都當成技術名稱去查，見 handleTechQueryMessage()。
-    await setContactPending(userId, TECH_QUERY_PENDING_NOTE);
+    await setContactPending(userId, pendingNoteFor(TECH_QUERY_PENDING_NOTE, userId, speakerId));
     await replyOrPush(replyToken, userId,
       '請問您想了解工研院哪一項技術呢？直接輸入技術名稱即可，例如：機器人、半導體封裝、AI 晶片。');
     return;
@@ -1306,7 +1466,10 @@ async function handleMetaIntent(replyToken, userId, text, metaIntent, binding) {
 // 媒體名稱，跟 #代碼 QR 掃碼綁定（有 ask_name 一次性擷取視窗）不一樣，後台的問答
 // 分析永遠看到「（未填寫）」，沒辦法統計哪些媒體來過。群組不能問——一個群組裡有
 // 多個不同媒體的人，「貴媒體名稱」這句話對群組沒有意義，group 呼叫端傳 false。
-async function handleUnbound(replyToken, userId, text, { silentOnOther = false, askMediaName = true } = {}) {
+//
+// remember（批次 28）：軟綁定命中、直接答一題時要不要開對話記憶。1 對 1 開、群組
+// 不開，理由見 getRecentTurn() 的說明（群組多人交錯，上一輪多半是別人的問題）。
+async function handleUnbound(replyToken, userId, text, { silentOnOther = false, askMediaName = true, remember = true } = {}) {
   const rows = await getAllEventRows();
   const cards = buildCalendarCards(rows);
   // 上一則剛回答完的是不是產業趨勢／工研院技術題——沒有這個提示，記者接著打的
@@ -1348,7 +1511,7 @@ async function handleUnbound(replyToken, userId, text, { silentOnOther = false, 
       // 媒體名稱是跟著這個人走的（見 getStoredMediaName 的說明），不是這場才有——
       // 之前來問過別場、報過名字或按過略過的人，這裡沿用，不用再問一次。
       const existingName = askMediaName ? await getStoredMediaName(userId) : '';
-      await answerQuestion(replyToken, userId, event, existingName, text);
+      await answerQuestion(replyToken, userId, event, existingName, text, { memory: remember });
       // 只在「這個人從沒被問過」時才順手問一次，而且不擋住剛剛的答案——用 push
       // 補問，記者不用先回答完媒體名稱才拿得到他真正想要的內容。
       if (askMediaName && !existingName) {
@@ -1432,6 +1595,69 @@ function looksLikeBareTopic(text) {
 //   ② 看起來像主題詞的訊息，直接複誦回去給兩條真的走得通的路，不要叫記者自己猜
 // 話題記憶（getRecentTopic）是第一道防線，但它有 10 分鐘 TTL、也可能是記者一進來
 // 就直接打一個詞——這支是那道防線之外的第二層，兩層都不依賴對方。
+// 固定兜底文案——智慧兜底（composeFallbackReply）組不出來時的保底。這份永遠不會
+// 出錯、也永遠不會講錯話，是這條路徑的安全底線，不要因為有了智慧兜底就拿掉。
+const FALLBACK_GUIDE_TEXT = [
+  '嗯～這句我不太確定該從哪邊幫您找答案 🤔 這幾件事我都能查：',
+  '・某一場記者會的內容 → 直接打活動名稱，或問我「最近有哪些活動」',
+  '・產業趨勢 → 打「產業趨勢分析」，或直接問我某個領域的趨勢',
+  '・工研院的技術 → 打「工研院」加技術名稱，例如「工研院 太空」',
+  '・想找採訪窗口 → 打「媒體邀訪需求」'
+].join('\n');
+
+// ── 智慧兜底（批次 28）───────────────────────────────────────────────────
+// 回報的意見：「回答不要答非所問」「希望能回答各種問題」。批次 26／27 兩次回報其實
+// 都指向同一件事——記者問了一句我們四條資料來源都對不上的話，收到的是一份**跟他
+// 那句話完全無關的功能選單**。選單本身沒寫錯，但對「請問可以申請採訪證嗎」「你們
+// 上次那個發表會在哪裡辦」這種問句來說，貼一份四條路的清單就是答非所問：它沒有
+// 表現出「我聽懂你在問什麼」，只是把說明書再念一次。
+//
+// 這支用一次 Haiku 呼叫，讓米亞針對「記者這一句」講一段真的貼題的話：先讓他知道
+// 我聽懂了、老實說這個我這邊查不到，再指到真的走得通的那一條路。
+//
+// ⚠️ 這支**不回答問題本身**，這是它跟「讓 AI 自由發揮」的根本差別，也是它敢上線的
+// 唯一理由：這個帳號掛著主辦單位名義、記者可能直接截圖引用，沒有資料來源就生成
+// 事實內容是這整份規格從第一天就禁止的事（LINE-PLAN.md 第 3 節）。system prompt
+// 把「不要提供任何事實內容」寫成最硬的一條，輸出再過一次長度／格式守門，出任何
+// 差錯都退回上面那份固定文案。
+//
+// 成本只發生在兜底這條路（四條路都對不上才會走到），不是每則提問都多一次呼叫。
+const FALLBACK_MAX_LEN = 300;
+
+async function composeFallbackReply(text) {
+  const question = sanitize(text, 300);
+  if (!question) return '';
+  const systemPrompt = [
+    '你是工研院 LINE 官方帳號的 AI 新聞助理，名字叫「米亞」，現在的角色是「兜底引導員」。',
+    '記者剛剛傳來一句話，我們四種資料來源（某一場記者會的內容、IEK 產業情報網的產業趨勢、工研院官網新聞中心的技術報導、媒體邀訪窗口名單）都比對不到可以回答它的資料。',
+    '',
+    '你這次的任務**不是回答那個問題**，而是：',
+    '① 用一句話讓記者知道你聽懂了他想問什麼（用他自己的話複述，不要照抄整句）。',
+    '② 老實說這個我這邊查不到，或這不是這個帳號查得到的東西。',
+    '③ 從上面四條路裡挑出**最接近**他這個問題的一到兩條，具體告訴他該打什麼字。真的一條都不沾邊（例如問天氣、閒聊、數學題），就直接說這裡只服務工研院的活動與技術採訪需求，並簡短點出這四條路，不要硬拗成某一條。',
+    '',
+    '絕對禁止（這幾條比上面的任務更優先）：',
+    '- 不要提供任何事實內容：不要講數字、日期、人名、地點、技術細節、活動內容、聯絡方式，一個字都不要。你手上沒有任何資料，講出來的都是編的。',
+    '- 不要假裝查過、不要說「根據我查到的」。',
+    '- 不要承諾你做不到的事：不能說幫忙轉接、稍後回覆、代為查詢、幫他問同事。',
+    '- 不要重複貼整份功能選單當作回答（那正是這次要修掉的答非所問）。',
+    '- 不要用 Markdown 語法（LINE 不會渲染）。',
+    '',
+    '格式：3 行以內，總長度不超過 120 個字。不要加結尾警語（這則沒有引用任何資料，不需要）。',
+    TONE_RULE
+  ].join('\n');
+
+  const reply = String(await askAnthropic(systemPrompt, question) || '').trim();
+  // 守門：askAnthropic() 失敗時回的是它自己那幾句「抱歉，目前無法取得回應」，那句話
+  // 拿來當兜底比固定文案還糟（記者會以為系統壞了，其實只是沒對上資料）；太長、或
+  // 混進 Markdown 的輸出也一律不要，退回固定文案。
+  if (!reply) return '';
+  if (reply.length > FALLBACK_MAX_LEN) return '';
+  if (/抱歉，目前無法取得回應|系統目前無法回答|無法取得回應/.test(reply)) return '';
+  if (/\*\*|^#{1,6}\s/m.test(reply)) return '';
+  return reply;
+}
+
 async function sendFallbackGuide(replyToken, targetId, text) {
   if (looksLikeBareTopic(text)) {
     const kw = String(text).trim();
@@ -1445,15 +1671,105 @@ async function sendFallbackGuide(replyToken, targetId, text) {
     return;
   }
 
-  await replyOrPush(replyToken, targetId,
-    [
-      '嗯～這句我不太確定該從哪邊幫您找答案 🤔 這幾件事我都能查：',
-      '・某一場記者會的內容 → 直接打活動名稱，或問我「最近有哪些活動」',
-      '・產業趨勢 → 打「產業趨勢分析」，或直接問我某個領域的趨勢',
-      '・工研院的技術 → 打「工研院」加技術名稱，例如「工研院 太空」',
-      '・想找採訪窗口 → 打「媒體邀訪需求」'
-    ].join('\n'),
+  // 先試著用米亞的口吻，針對記者「這一句」講一段真的貼題的話（見
+  // composeFallbackReply()）；組不出來就退回下面這份固定文案。
+  const smart = await composeFallbackReply(text);
+  await replyOrPush(replyToken, targetId, smart || FALLBACK_GUIDE_TEXT,
     ['最近有哪些活動', '產業趨勢分析', '想問什麼技術', CONTACT_MENU_LABEL, '使用說明']);
+}
+
+// ── 群組續問視窗的「這句話是在跟我講嗎」守門（批次 28）─────────────────────
+// 回報的意見：「被拉進群組時，回答不要答非所問，而且不會亂回」。
+//
+// 現況的破口不是「被 @ 到之後答錯」，是**免 @ 續問視窗那 5 分鐘之內**：只要視窗還
+// 開著，群組裡任何人講的任何一句話都會被送進整條處理鏈，而鏈上前面幾段（固定選單
+// 意圖 detectMetaIntent、邀訪主題旗標、技術名稱旗標）根本不看「有沒有被 @」，後面
+// 的路由也只有 intent==='other' 這一道安靜門檻。實際後果：
+//   - 群組在聊「那個案子還有什麼活動要辦」→ 命中 CALENDAR_RE → 機器人跳出來貼一份
+//     活動清單，沒有人在問它
+//   - 群組在聊「台積電最近怎樣」→ 路由判成 industry_trend → 機器人開始講 IEK 趨勢
+//   - 有人講「換一場」（在講別的事）→ 命中 SWITCH_RE → 機器人把整個群組的綁定清掉
+// 這幾種都不是 other，現有的安靜門檻完全擋不住。
+//
+// 這支是視窗內「先問一句：這像是在跟我講話嗎」的統一守門，放在所有分支之前，
+// 只在**沒有被 @** 時生效（真的 @ 到就一定要理人，跟批次 14／16 同一個原則）。
+// 判準刻意全部是字面特徵、不呼叫 AI：群組裡「每一則」訊息都會過這支（包含我們最後
+// 根本不會回的閒聊），花錢或多打一次 API 都不划算，理由跟 getGroupSessionUntil()
+// 那段「不能直讀 Sheets」完全一樣。
+//
+// 放行的幾類，每一類都對應一個「不放行就會壞掉」的真實路徑：
+//   ⓪ 我們剛問完一句、正在等這個人回答（一次性旗標還開著）——那則答案本身多半是
+//      一個沒有問號的名詞，擋掉等於自己問了又不聽
+//   ① 我們自己送出的按鈕文字（固定選單詞、邀訪主題、活動名稱、「工研院 ＸＸ」）——
+//      群組裡按鈕送出的是不帶 @ 的純文字，擋掉就等於按鈕按了沒反應
+//   ② 看起來就是一句提問（問號、疑問詞、句尾語助詞）——記者真的在問我們
+//   ③ 剛回答完趨勢／技術題（話題記憶還在）時的裸名詞追問——那是我們自己邀請他打的
+//   ④ 其餘一律安靜。陳述句、閒聊、跟別人的對話都落在這裡
+//
+// ⚠️ 這道守門是「加」在既有門檻之前，不是取代：放行之後，原本的「@ 到別人」否決、
+// routeIntent() 判成 other 就安靜，全部照舊生效。寧可漏放（記者多打一個問號或重新
+// @ 一次）也不要誤放——誤放一次就是在別人的群組裡插一段沒人要的話。
+const GROUP_QUESTION_RE = /[?？]|如何|怎麼|怎麽|怎么|怎樣|什麼|甚麼|什么|為何|為什麼|哪些|哪一|哪裡|哪邊|誰|嗎|多少|幾點|幾號|有沒有|請問|想問|想知道|想了解|介紹一下|說明一下|給我|請給|麻煩|幫我|提供|可以嗎|(呢|吧)[?？!！～~。]?$/;
+
+// 我們自己在群組裡送出過的固定按鈕文字，這裡沒辦法用 detectMetaIntent() 涵蓋的那幾顆。
+// 「工研院 ＸＸ」是 sendFallbackGuide()／answerIndustryTrend() 的導流按鈕送出的格式。
+const GROUP_OWN_BUTTON_RE = /^工研院[\s　]|^邀訪[:：]/;
+
+// ⚠️ 這裡刻意**不**用 detectMetaIntent() 當放行條件，即使它就是「這是不是固定選單
+// 意圖」的權威判斷：那支裡面的 CALENDAR_RE／SWITCH_RE 是寬鬆的**片語**比對（不是
+// 整句完全相同），本來就設計成「記者怎麼講都接得住」——在 1 對 1 那是體貼，在群組
+// 就是誤判來源。實測會中的日常對話：
+//   「那個案子後面還有活動要辦」→ 命中 CALENDAR_RE → 機器人貼一份活動清單
+//   「這邊先換一場再說」        → 命中 SWITCH_RE   → 機器人把整個群組的綁定清掉
+// 兩句都沒有人在跟機器人講話。所以這裡只認**整句完全等於**我們自己送出過的按鈕
+// 文字；記者真的想問活動清單時講的「最近有哪些活動」「有什麼活動嗎」本來就帶疑問詞，
+// 會走下面 GROUP_QUESTION_RE 那條，不需要靠這一條放行。
+const GROUP_FIXED_BUTTONS = new Set([
+  '最近有哪些活動', '產業趨勢分析', '想問什麼技術', CONTACT_MENU_LABEL, '使用說明', '回首頁'
+]);
+
+async function looksAddressedToBot(groupId, text, speakerId) {
+  const s = String(text || '').trim();
+  if (!s) return false;
+
+  // ⓪ 我們自己剛問完一句、正在等這個人回答（「請問您想了解工研院哪一項技術呢？」
+  // 「請直接輸入想了解的技術主題」）——這則就是答案本身，長什麼樣都要接住，不能
+  // 因為它剛好是個沒有問號的名詞就被下面的守門擋掉。只認旗標的主人（群組裡別人
+  // 插的話仍然擋著，見 pendingNoteFor()）。
+  const rawPending = await getStoredNote(groupId);
+  const { note: pendingNote } = parsePendingNote(rawPending);
+  if ((pendingNote === TECH_QUERY_PENDING_NOTE || pendingNote === CONTACT_PENDING_NOTE) &&
+      pendingBelongsTo(rawPending, speakerId)) return true;
+
+  // ① 我們自己的按鈕／固定入口
+  if (GROUP_FIXED_BUTTONS.has(s)) return true;
+  if (GROUP_OWN_BUTTON_RE.test(s)) return true;
+
+  // ② 一句提問
+  if (GROUP_QUESTION_RE.test(s)) return true;
+
+  // ①（續）整句就是某一場活動的名稱——活動清單按鈕送出的就是這個。放在問句判斷
+  // 之後才做，是因為這支要讀行事曆（吃 60 秒快取，實務上不會真的每則都打 Sheets），
+  // 上面兩道純正則能先擋掉的就不要走到這裡。
+  if (matchEventByName(s, buildCalendarCards(await getAllEventRows()))) return true;
+
+  // ①（再續）同仁在後台為「目前這場」設定的快速提問 chips 與邀訪窗口關鍵字——
+  // 那些字串也是我們自己送出去的按鈕，但內容是同仁自由填的，沒辦法寫死在上面那個
+  // 集合裡。多數 chips 本身就是問句（會被 ② 接走），這一條補的是「新聞稿」「議程」
+  // 這種不帶疑問詞的短按鈕，不補的話那些按鈕在群組裡按了會沒反應。
+  const binding = await getBinding(groupId);
+  const current = binding?.event_id ? await getEventById(binding.event_id) : null;
+  if (current) {
+    if (eventQuickChips(current).some(c => (typeof c === 'string' ? c : c.text) === s)) return true;
+    if (parseEventContacts(current).some(c => c.keyword === s)) return true;
+  }
+
+  // ③ 剛回答完趨勢／技術題時的裸名詞追問（「太空」）——那是我們自己在上一則答案
+  // 結尾邀請他打的。沒有話題記憶時**不**放行：一個沒頭沒尾的名詞在群組裡多半是
+  // 別人在聊自己的事（「半導體」），不是在問我們。
+  if (looksLikeBareTopic(s) && await getRecentTopic(groupId)) return true;
+
+  return false;
 }
 
 // ── 群組／多人聊天（批次 5/6，仿美玉姨：被 @ 到才開口，短暫續問視窗）──────
@@ -1500,7 +1816,7 @@ async function handleGroupEvent(replyToken, ev) {
     // 這種訊息續命，視窗才有機會真的到期。
     if ((ev.message.mention?.mentionees || []).some(m => m?.isSelf !== true)) return;
   } else if (ev.message?.type !== 'text') {
-    await replyOrPush(replyToken, groupId, '目前群組內僅支援文字訊息提問，請直接輸入您的問題。');
+    await replyOrPush(replyToken, groupId, nonTextReply(ev.message?.type));
     return;
   }
 
@@ -1543,7 +1859,54 @@ async function handleGroupEvent(replyToken, ev) {
   // ⚠️ 群組裡刻意不接職員模式：密語比對／#代碼綁定完全跳過，一律走記者端的自然
   // 語言路由。同一群組裡可能同時有記者、公關同仁、甚至長官，密語一旦在群組裡打
   // 出來，所有在場的人都看得到——職員身分只能在私訊裡取得，這裡沒有例外。
-  await handleGroupMessage(replyToken, groupId, text, { mentioned });
+  // speakerId：群組裡「這句話是誰講的」。一次性旗標要記住是誰按的按鈕（見
+  // pendingNoteFor()），不然 A 按了「想問什麼技術」，B 隨口講的下一句就會被當成
+  // 技術名稱拿去查。LINE 在使用者沒同意提供 userId 時可能沒有這個欄位——拿不到就
+  // 傳空字串，設旗標時不寫主人（退回舊的「誰都算數」行為，不會因此壞掉），讀旗標時
+  // 對不上已經寫好的主人則一律不生效（安全方向是不亂接）。
+  await handleGroupMessage(replyToken, groupId, text, { mentioned, speakerId: ev.source?.userId || '' });
+}
+
+// 被拉進群組的那一刻（批次 28）。LINE 會送一個 `join` 事件、附 replyToken——
+// 在這之前這支完全沒處理，效果是被拉進群組後**什麼都不說**，然後從此只在被 @ 到時
+// 才開口。對群組裡的人來說，那是一個突然出現、不講話也不知道能幹嘛的帳號，第一次
+// 有人想用它時只能亂猜（回報的意見就是從這裡開始的：「被拉進群組時也要能回答，
+// 不要答非所問、不會亂回」——期待要先講清楚，才不會被當成壞掉或亂回）。
+//
+// 這則自我介紹刻意做三件事，順序就是重要性：
+//   ① 先講規矩：「我只有被 @ 到才會說話」。這是「不會亂回」最有效的一句話——
+//      它同時是承諾（我不會洗版）跟操作說明（要問我就 @ 我），而且講在最前面，
+//      群組成員第一眼看到的就是這個，不是功能列表。
+//   ② 再講能問什麼：四條路一次講完，不要讓人自己猜（跟 sendFallbackGuide()、
+//      群組「只 @ 沒接問題」那則自我介紹同一份口徑）。
+//   ③ 附快速回覆按鈕，讓第一個想試的人不用先學會怎麼 @。
+//
+// ⚠️ 這裡呼叫 touchGroupSession()：按鈕送出的是不帶 @ 的純文字，沒有續問視窗就會被
+// 「沒被 @ 又不在視窗內 → 安靜」擋掉，按鈕變成按了沒反應（跟批次 18「只 @ 沒接問題」
+// 那則踩過的坑一模一樣）。開這 5 分鐘的視窗在批次 28 之前是有風險的（視窗內什麼話
+// 都會被硬答），但 looksAddressedToBot() 這道守門補上之後，視窗內也只接「看起來
+// 真的在跟我們講話」的訊息，開窗讓按鈕能用的代價已經降到可以接受。
+async function handleGroupJoin(replyToken, ev) {
+  const groupId = ev.source?.groupId || ev.source?.roomId || null;
+  if (!groupId || !replyToken) return;
+  console.log(`[line] 被加入群組 group=${groupId}`);
+  await replyOrPush(replyToken, groupId,
+    [
+      '大家好，我是工研院的 AI 新聞助理米亞 🙂',
+      '',
+      '先說一下我的規矩：我只有被 @ 到的時候才會說話，平常的聊天我不會插話，也不會主動推播。',
+      '',
+      '想問我事情，@ 我一下再接著打問題就可以，這幾件事我都查得到：',
+      '・某一場記者會的內容（直接打活動名稱，或問我「最近有哪些活動」）',
+      '・整體產業趨勢（IEK 產業情報網的免費焦點）',
+      '・工研院自己的技術與發表（打「工研院」加技術名稱）',
+      '・想找採訪窗口（打「媒體邀訪需求」）',
+      '',
+      '要不要先看看目前有哪些活動？點下面的按鈕就可以。'
+    ].join('\n'),
+    ['最近有哪些活動', '產業趨勢分析', '想問什麼技術', CONTACT_MENU_LABEL, '使用說明']);
+  // 上面那排按鈕送出的是沒有 @ 的純文字，要靠續問視窗才接得住——見這支開頭的 ⚠️。
+  await touchGroupSession(groupId);
 }
 
 // 跟 1 對 1（handleUnbound／handleMetaIntent／答題）共用整套邏輯，差異只有：
@@ -1555,32 +1918,41 @@ async function handleGroupEvent(replyToken, ev) {
 // 其餘（跳出本場意圖、換場、軟綁定）完全沿用 1 對 1 那一套，用 groupId 當
 // line_users 表的 key——等於「這個群組」自己有一份軟綁定狀態，直接複用整套 TTL／
 // 換場機制，不必為群組另外維護一份幾乎一樣的邏輯。
-async function handleGroupMessage(replyToken, groupId, text, { mentioned }) {
+async function handleGroupMessage(replyToken, groupId, text, { mentioned, speakerId = '' }) {
+  // 免 @ 續問視窗內的統一守門（批次 28）——這句話看起來不是在跟我們講，就完全安靜。
+  // ⚠️ 一定要放在最前面，比 detectMetaIntent()／旗標／路由都早：那幾條路本來就不看
+  // 「有沒有被 @」，是這次「群組亂回」回報的真正破口，見 looksAddressedToBot() 的
+  // 完整說明。真的被 @ 到時整支跳過，明確叫了機器人就不能不理人。
+  //
+  // 這裡不呼叫 touchGroupSession()——理由跟批次 14「@ 到別人時安靜」那段一樣：
+  // 不幫這種訊息續命，視窗才有機會真的到期，不會因為群組一直有人講話就永遠不關。
+  if (!mentioned && !(await looksAddressedToBot(groupId, text, speakerId))) return;
+
   const binding = await getBinding(groupId);
 
   const metaIntent = detectMetaIntent(text);
   if (metaIntent) {
-    await handleMetaIntent(replyToken, groupId, text, metaIntent, binding);
+    await handleMetaIntent(replyToken, groupId, text, metaIntent, binding, { speakerId });
     await touchGroupSession(groupId); // 這一輪有回答 → 續問視窗重新計時
     return;
   }
 
   // 全域邀訪窗口的主題按鈕／自由輸入（見 handleContactTopicMessage() 的說明）——
   // 跟 metaIntent 同一優先順序，命中就直接處理，不會被送進當前綁定活動的問答。
-  if (await handleContactTopicMessage(replyToken, groupId, text)) {
+  if (await handleContactTopicMessage(replyToken, groupId, text, { speakerId })) {
     await touchGroupSession(groupId);
     return;
   }
 
   // 「想問什麼技術」按鈕之後記者打的技術名稱（見 handleTechQueryMessage() 的說明）——
   // 同一優先順序，命中就直接查、不會被送進當前綁定活動的問答。
-  if (await handleTechQueryMessage(replyToken, groupId, text)) {
+  if (await handleTechQueryMessage(replyToken, groupId, text, { speakerId })) {
     await touchGroupSession(groupId);
     return;
   }
 
   if (!binding) {
-    await handleUnbound(replyToken, groupId, text, { silentOnOther: !mentioned, askMediaName: false });
+    await handleUnbound(replyToken, groupId, text, { silentOnOther: !mentioned, askMediaName: false, remember: false });
     await touchGroupSession(groupId); // 不管有沒有真的答上，只要走到這裡就算還在互動，續命
     return;
   }
@@ -1695,7 +2067,18 @@ async function handleEvent(ev) {
     return;
   }
 
-  if (ev.type !== 'message') return; // unfollow／join／postback 等批次 2 不處理，也沒有可用的 replyToken
+  // 被拉進群組／多人聊天：自我介紹一次並講清楚「只有被 @ 才會說話」，見
+  // handleGroupJoin() 的完整說明。這是唯一一次可以不請自來講話的時機，錯過就沒有了。
+  if (ev.type === 'join') {
+    await handleGroupJoin(ev.replyToken, ev);
+    return;
+  }
+
+  // ⚠️ memberJoined（有「別人」加入我們所在的群組）刻意不處理：那不是在跟我們打招呼，
+  // 每次有人進群就跳出來自我介紹一次，正是這個帳號最該避免的洗版行為（LINE-PLAN.md
+  // 第 8 節「不要做推播行銷」）。leave／unfollow 也沒有可用的 replyToken，沒有事情
+  // 可做——真的要清資料的話那是另一件事，不在這支的責任範圍。
+  if (ev.type !== 'message') return; // unfollow／leave／memberJoined／postback 都不處理
 
   const replyToken = ev.replyToken;
   if (!replyToken) return;
@@ -1711,7 +2094,7 @@ async function handleEvent(ev) {
   if (!userId) return;
 
   if (ev.message?.type !== 'text') {
-    await replyOrPush(replyToken, userId, '目前僅支援文字訊息提問，請直接輸入您的問題。');
+    await replyOrPush(replyToken, userId, nonTextReply(ev.message?.type));
     return;
   }
 
@@ -1892,7 +2275,7 @@ async function handleEvent(ev) {
     }
   }
 
-  await answerQuestion(replyToken, userId, answerEvent, binding.media_name, text, { switchNotice });
+  await answerQuestion(replyToken, userId, answerEvent, binding.media_name, text, { switchNotice, memory: true });
 }
 
 export default async function handler(req, res) {

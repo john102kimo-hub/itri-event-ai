@@ -89,16 +89,20 @@ export function reset() {
   state.itriHtml = DEFAULT_ITRI_HTML;
   state.itriFetchFail = false;
   state.itriKeywordMustInclude = '';
+  state.fallbackReply = null; // null＝用上面的預設假回覆，見 installFetchStub() 的兜底分支
   sent.length = 0;
 }
 
 // H 欄（索引 7）是話題記憶 last_topic，格式 `industry_trend@<時間戳>`，
 // 見 api/line.js getRecentTopic()／setRecentTopic() 的說明。
+// I 欄（索引 8）是上一輪對話記憶 last_turn，格式是一段 JSON（{t,e,q,a}），
+// 見 api/line.js getRecentTurn()／setRecentTurn() 的說明。
 function bindingRows() {
   return [...state.bindings.entries()].map(([id, b]) => [
     id, b.event_id || '', b.media_name || '', b.bound_at ? String(b.bound_at) : '', String(Date.now()), b.note || '',
     b.groupSessionUntil ? String(b.groupSessionUntil) : '',
-    b.lastTopic || ''
+    b.lastTopic || '',
+    b.lastTurn || ''
   ]);
 }
 
@@ -116,7 +120,8 @@ export const sheets = {
       for (const r of rows) state.bindings.set(r[0], {
         event_id: r[1], media_name: r[2], bound_at: Number(r[3]), note: r[5],
         groupSessionUntil: r[6] ? Number(r[6]) : 0,
-        lastTopic: r[7] || ''
+        lastTopic: r[7] || '',
+        lastTurn: r[8] || ''
       });
     }
     if (range.startsWith('line_staff!')) state.staff.push(...rows.map(r => [...r]));
@@ -137,7 +142,7 @@ export const sheets = {
       if (row) values[0].forEach((v, i) => { row[staffM[1].charCodeAt(0) - 65 + i] = v; });
       return;
     }
-    const m = range.match(/^line_users!([A-H])(\d+)(?::([A-H])(\d+))?$/);
+    const m = range.match(/^line_users!([A-I])(\d+)(?::([A-I])(\d+))?$/);
     if (!m) return;
     const rowNum = Number(m[2]);
     const keys = [...state.bindings.keys()];
@@ -147,7 +152,7 @@ export const sheets = {
     const startCol = m[1].charCodeAt(0) - 65;
     const row = values[0];
     // 欄位對應：0=id 1=event_id 2=media_name 3=bound_at 4=last_active 5=note
-    //           6=group_session_until 7=last_topic
+    //           6=group_session_until 7=last_topic 8=last_turn
     row.forEach((v, i) => {
       const col = startCol + i;
       if (col === 1) b.event_id = v;
@@ -156,6 +161,7 @@ export const sheets = {
       if (col === 5) b.note = v;
       if (col === 6) b.groupSessionUntil = v === '' ? 0 : Number(v);
       if (col === 7) b.lastTopic = v;
+      if (col === 8) b.lastTurn = v;
     });
   },
   // 回傳空陣列＝「分頁本來就存在」，不觸發 lib/contacts-directory.js 的
@@ -306,6 +312,17 @@ export function installFetchStub() {
       const json = o => ({ ok: true, json: async () => ({ content: [{ type: 'text', text: JSON.stringify(o) }] }) });
       if (sys.includes('內部職員助理')) return json(fakeStaffRoute(userText));
       if (sys.includes('意圖判斷器')) return json(fakeReporterRoute(userText, currentEventHint, topicHint));
+
+      // 智慧兜底（api/line.js composeFallbackReply()）——四條路都對不上時，用米亞的
+      // 口吻針對記者這一句講一段貼題的話。這裡回一段固定的假回覆，並把記者原話一起
+      // 記下來，測試才驗得到「送上去的是記者那句話」而不是別的東西。
+      // state.fallbackReply 可以覆寫回覆內容，用來測輸出守門（太長／像是 API 失敗
+      // 的訊息 → 退回固定文案），見 composeFallbackReply() 的說明。
+      if (sys.includes('兜底引導員')) {
+        const text = state.fallbackReply ?? '這題我這邊查不到耶 🙂 我手上有的是工研院的活動、產業趨勢跟技術報導，要不要從這幾個方向找找看？';
+        sent.push({ kind: 'fallback', text, sys, question: userText });
+        return { ok: true, json: async () => ({ content: [{ type: 'text', text }] }) };
+      }
 
       // 問答：system prompt 裡會帶該場的知識庫，從中反推是哪一場回答的。
       // sys 一併存起來——媒體邀請函測試要驗證 system prompt 裡到底帶的是正式新聞稿
