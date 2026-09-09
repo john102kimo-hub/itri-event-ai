@@ -1615,6 +1615,61 @@ for (const chat of ['那合作廠商有哪些', '大家中午吃什麼', '我等
   check(`視窗過期後、非按鈕的一般訊息「${chat}」→ 維持安靜`, out.length === 0, JSON.stringify(out));
 }
 
+// ── 情境 21.97：群組守門要接得住英文，導流按鈕也要按得動（批次 34）──────────────
+console.log('── 群組：英文提問不能被中文守門擋掉 ──');
+// 回報的截圖：群組裡打「Please reply in English.」完全沒反應——句號結尾、沒問號、
+// 沒有任何中文疑問詞，守門三道規則全部落空。這個帳號本來就支援英文提問
+// （lib/prompt.js 有很強的語言跟隨規則），外籍記者在群組裡卻等於完全問不到東西。
+for (const en of [
+  'Please reply in English.',
+  'What are the highlights of this event',
+  'Can you send me the press release',
+  'Is there an English version'
+]) {
+  reset(); await freshModule();
+  state.bindings.set('Cgroup1', { event_id: 'quad', media_name: '', note: '', bound_at: Date.now(), groupSessionUntil: Date.now() + 60000 });
+  out = await sendGroup(en, { mentionSelf: false });
+  check(`續問視窗內的英文提問「${en}」→ 接得住，不會被中文守門擋掉`, out.length > 0, JSON.stringify(out));
+}
+
+// 英文那條同樣是「第一層」，不是放行一切：純陳述的閒聊照樣要安靜（守門放行之後，
+// routeIntent 判成 other 仍然會擋下來，兩層一起才是完整的門檻）。
+reset(); await freshModule();
+state.bindings.set('Cgroup1', { event_id: 'quad', media_name: '', note: '', bound_at: Date.now(), groupSessionUntil: Date.now() + 60000 });
+out = await sendGroup('ok got it thanks', { mentionSelf: false });
+check('群組英文閒聊「ok got it thanks」→ 仍然安靜', out.length === 0, JSON.stringify(out));
+
+console.log('── 兩顆導流按鈕在視窗外也要按得動（批次 32 破例，批次 34 補回來）──');
+for (const [label, text] of [['工研院＋技術名稱', '工研院 太空'], ['技術名稱＋產業趨勢', '太空產業趨勢']]) {
+  reset(); await freshModule();
+  state.bindings.set('Cgroup1', { event_id: 'quad', media_name: '', note: '', bound_at: Date.now(), groupSessionUntil: Date.now() - 60000 });
+  out = await sendGroup(text, { mentionSelf: false });
+  check(`視窗過期後按導流按鈕「${text}」（${label}）→ 接得住`, out.length > 0, JSON.stringify(out.map(o => o.kind)));
+}
+
+// 精確形狀比對：自然書寫的「工研院那邊怎麼說」（沒有空白）不該被當成按鈕
+reset(); await freshModule();
+state.bindings.set('Cgroup1', { event_id: 'quad', media_name: '', note: '', bound_at: Date.now(), groupSessionUntil: Date.now() - 60000 });
+out = await sendGroup('工研院那邊怎麼說', { mentionSelf: false });
+check('視窗過期後、自然書寫的「工研院那邊怎麼說」（沒有空白）→ 不算按鈕，維持安靜',
+  out.length === 0, JSON.stringify(out));
+
+console.log('── 補查的引言要跟著答案的語言走 ──');
+// 我們自己接上去的那句引言不受 lib/prompt.js 語言規則管轄，得自己判斷；不然英文記者
+// 會拿到英文答案、下面突然接一句中文。
+reset(); await freshModule();
+state.bindings.set('U_reporter', { event_id: 'quad', media_name: '', note: '', bound_at: Date.now() });
+state.noDataKeyword = '院士';
+state.answerText = "I don't have that information in this event's material.\n[[NO_DATA:院士]]";
+out = await send('Who are this year fellows');
+{
+  const sentText = out.filter(o => o.kind === 'text').map(o => o.text).join('\n');
+  check('答案是英文時，補查的引言也用英文，不會中英夾雜',
+    /ITRI's official newsroom/.test(sentText) && !/這題本場的新聞資料裡沒有/.test(sentText), sentText.slice(0, 300));
+}
+state.answerText = '';
+state.noDataKeyword = '';
+
 // ── 情境 22：1 對 1 的上一輪對話記憶（批次 28）───────────────────────────────
 // 回報的意見：「對答要更如真人般」。最不像人的地方不是語氣，是完全沒有對話記憶——
 // 記者問「這項技術何時商業化」，答完再問「那成本呢」，模型連上一句是什麼都看不到。
