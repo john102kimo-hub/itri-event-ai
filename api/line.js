@@ -1159,7 +1159,18 @@ export function extractNoDataKeyword(raw) {
 // 不會因為補查失敗而讓記者收不到答案。
 const NO_DATA_MAX_LINKS = 2;
 
-async function itriNewsHintBlock(keyword) {
+// 這段引言是「我們自己加的」，不是模型寫的——所以 lib/prompt.js 那條「跟著記者的
+// 提問語言回答」的規則管不到它，得自己判斷。不然英文記者會拿到一段英文答案、下面
+// 突然接一句中文，看起來像壞掉（批次 34 補：那條語言規則存在就是為了服務英文提問，
+// 我們自己接的字卻破功，等於白做）。
+//
+// 判斷只看「模型剛剛那段答案裡有沒有中文字」——這比重新猜記者用什麼語言可靠：答案
+// 的語言已經是模型跟著提問語言決定好的結果，跟著它走就一定一致。
+function hasChinese(text) {
+  return /[一-鿿]/.test(String(text || ''));
+}
+
+async function itriNewsHintBlock(keyword, { chinese = true } = {}) {
   const kw = sanitize(keyword, 20);
   if (!kw) return '';
   try {
@@ -1167,7 +1178,10 @@ async function itriNewsHintBlock(keyword) {
     if (!ok || !items.length) return '';
     const lines = items.slice(0, NO_DATA_MAX_LINKS)
       .map(it => `・${it.title}${it.date ? `（${it.date}）` : ''}\n${it.url}`);
-    return `\n\n———\n這題本場的新聞資料裡沒有，不過工研院官網新聞中心有相關報導，您可以直接看原文：\n${lines.join('\n')}`;
+    const lead = chinese
+      ? '這題本場的新聞資料裡沒有，不過工研院官網新聞中心有相關報導，您可以直接看原文：'
+      : "This isn't in the material for this event, but ITRI's official newsroom has related coverage — here are the originals:";
+    return `\n\n———\n${lead}\n${lines.join('\n')}`;
   } catch (e) {
     console.error('itriNewsHintBlock 失敗:', e.message);
     return '';
@@ -1216,7 +1230,9 @@ async function answerQuestion(replyToken, userId, rawEvent, mediaName, text, { l
   const { text: aiReply, keyword: noDataKeyword } = extractNoDataKeyword(rawReply);
   // 這場答不出來時，補查一次工研院官網新聞中心——回報的截圖就是這個洞（見
   // lineExtraRules() 那條規則的說明）。查不到就是空字串，原本的答案照舊。
-  const newsHint = noDataKeyword ? await itriNewsHintBlock(noDataKeyword) : '';
+  const newsHint = noDataKeyword
+    ? await itriNewsHintBlock(noDataKeyword, { chinese: hasChinese(aiReply) })
+    : '';
   const reply = switchNotice + aiReply + newsHint;
   // 診斷用途，不是必要邏輯：路由判斷得準不準、AI 答得順不順，靠這行在 Vercel Logs
   // 裡直接看得到，不用另外接工具。刻意截斷長度，避免整份新聞稿灌爆單行 log。
@@ -1865,8 +1881,31 @@ async function sendFallbackGuide(replyToken, targetId, text) {
 // @ 一次）也不要誤放——誤放一次就是在別人的群組裡插一段沒人要的話。
 const GROUP_QUESTION_RE = /[?？]|如何|怎麼|怎麽|怎么|怎樣|什麼|甚麼|什么|為何|為什麼|哪些|哪一|哪裡|哪邊|誰|嗎|多少|幾點|幾號|有沒有|請問|想問|想知道|想了解|介紹一下|說明一下|給我|請給|麻煩|幫我|提供|可以嗎|(呢|吧)[?？!！～~。]?$/;
 
+// ⚠️ 上面那條**整條都是中文**——這個帳號本來就支援英文提問（lib/prompt.js 有一條很強
+// 的「跟著記者這一則提問的語言回答」規則），但群組守門完全沒有英文的判斷，結果是
+// 英文訊息只要沒有 @ 就一律被安靜擋掉。實測回報：群組裡打
+// 「Please reply in English.」完全沒反應——句號結尾、沒有問號、沒有任何中文疑問詞，
+// 三道規則全部落空。外籍記者在群組裡等於完全問不到東西。
+//
+// 收的範圍跟中文那條對齊（同樣偏寬鬆）：疑問詞／助動詞開頭，或句子裡有 please。
+// 過寬不是問題——守門只是第一層，後面 routeIntent() 判成 other 一樣會安靜。
+const GROUP_QUESTION_EN_RE = /^\s*(what|when|where|who|whom|whose|why|how|which|can|could|would|will|shall|should|do|does|did|is|are|was|were|any|tell|show|give|send|need|want|may|might|let|help|hi|hello|hey)\b|\bplease\b/i;
+
 // 我們自己在群組裡送出過的固定按鈕文字，這裡沒辦法用 detectMetaIntent() 涵蓋的那幾顆。
 // 「工研院 ＸＸ」是 sendFallbackGuide()／answerIndustryTrend() 的導流按鈕送出的格式。
+// 兩顆「導流按鈕」的精確形狀。批次 32 把它們排除在視窗外的放行之外，理由是「只能靠
+// 前綴比對、日常對話會誤中」——但那等於我自己違反了同一批訂下的規則（**只要是我們
+// 自己放到按鈕上的字，就一定按得動**），而回報又來了一次「點下面小按鈕沒有反應」。
+//
+// 改成比對**完整形狀**而不是前綴，就不必再破例：
+//   `工研院 ＸＸ`   → 產生處見 answerIndustryTrend()／sendFallbackGuide() 的 crossItem
+//   `ＸＸ產業趨勢`  → 產生處見 answerTechQuery()／sendFallbackGuide() 的 crossItem
+// ⚠️ 那個**空白**是關鍵的辨別點：中文使用者自然書寫時不會在「工研院」後面空一格
+// （會寫「工研院那邊怎麼說」），而我們的按鈕一定有。加上「後面只能是 2-8 個乾淨的
+// 字、而且到此為止」，誤中的機會很低；真的誤中，結果也只是查一次官網回「沒找到」，
+// 不是什麼危險的事。
+const CROSS_TOPIC_TECH_RE = /^工研院[ 　][一-鿿A-Za-z0-9]{2,8}$/;
+const CROSS_TOPIC_TREND_RE = /^[一-鿿A-Za-z0-9]{2,8}產業趨勢$/;
 const GROUP_OWN_BUTTON_RE = /^工研院[\s　]|^邀訪[:：]/;
 
 // ⚠️ 這裡刻意**不**用 detectMetaIntent() 當放行條件，即使它就是「這是不是固定選單
@@ -1926,6 +1965,8 @@ async function isOwnButtonText(groupId, text, speakerId) {
 
   if (GROUP_FIXED_BUTTONS.has(s)) return true;      // 固定選單詞
   if (/^邀訪[:：]/.test(s)) return true;             // 全域邀訪主題（機器產生的格式）
+  // 兩顆導流按鈕——見 CROSS_TOPIC_*_RE 的說明。批次 34 補上，不再破例。
+  if (CROSS_TOPIC_TECH_RE.test(s) || CROSS_TOPIC_TREND_RE.test(s)) return true;
 
   // 活動清單按鈕送出的是活動全名（matchEventByName 自己有「正規化後至少 6 個字、
   // 要唯一命中」的門檻，見 lib/menu.js，不會被一個短詞誤中）。
@@ -1958,8 +1999,8 @@ async function looksAddressedToBot(groupId, text, speakerId) {
   // isOwnButtonText() 最後一段。
   if (GROUP_OWN_BUTTON_RE.test(s)) return true;
 
-  // ② 一句提問
-  if (GROUP_QUESTION_RE.test(s)) return true;
+  // ② 一句提問（中文或英文，見 GROUP_QUESTION_EN_RE 的說明）
+  if (GROUP_QUESTION_RE.test(s) || GROUP_QUESTION_EN_RE.test(s)) return true;
 
   // ③ 剛回答完趨勢／技術題時的裸名詞追問（「太空」）——那是我們自己在上一則答案
   // 結尾邀請他打的。沒有話題記憶時**不**放行：一個沒頭沒尾的名詞在群組裡多半是
