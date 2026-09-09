@@ -1491,6 +1491,10 @@ out = await send('今年院士有誰');
     JSON.stringify(sentText.slice(0, 300)));
   check('⚠️ 機器可讀標記一定要切掉，不能讓記者看到 [[NO_DATA:…]]',
     !/NO_DATA/.test(sentText), sentText);
+  // 批次 33：實際回報就是這個位置漏掉的——警語規則佔住最後一行，標記被擠到它前面，
+  // 而第一版正則錨定在字串結尾。驗一下警語本身還在（切標記沒有連累它）。
+  check('切掉標記不會連累後面的警語',
+    /內容僅供參考/.test(sentText), sentText);
 }
 state.noDataKeyword = '';
 
@@ -1542,6 +1546,23 @@ out = await sendGroup('@我 今年院士有誰', { mentionSelf: true, mentionTex
     /工研院官網新聞中心有相關報導/.test(sentText) && !/NO_DATA/.test(sentText), sentText.slice(0, 300));
 }
 state.noDataKeyword = '';
+
+// 標記出現在任何位置、任何寫法都要抓乾淨——位置本來就不該由我們決定（批次 33）。
+{
+  const { extractNoDataKeyword } = await import(new URL(`../api/line.js?v=${modSeq}`, import.meta.url).href);
+  for (const [label, raw, expectKw] of [
+    ['標記在警語前面（實際回報的形狀）', '沒有資料。\n\n[[NO_DATA:院士]]\n\n內容僅供參考。', '院士'],
+    ['標記在整段最後', '沒有資料。\n[[NO_DATA:得獎名單]]', '得獎名單'],
+    ['標記在最前面', '[[NO_DATA:太空]]\n沒有資料。', '太空'],
+    ['全形冒號', '沒有資料。\n[[NO_DATA：光通訊]]\n警語。', '光通訊'],
+    ['括號打壞、少一邊', '沒有資料。\n[[NO_DATA:院士\n警語。', ''],
+    ['完全沒有標記（答得出來）', '這場的重點是三項技術發表。\n內容僅供參考。', '']
+  ]) {
+    const r = extractNoDataKeyword(raw);
+    check(`標記抽取：${label} → 不留任何殘留`, !/NO_DATA/.test(r.text), JSON.stringify(r.text));
+    check(`標記抽取：${label} → 關鍵詞是「${expectKw}」`, r.keyword === expectKw, JSON.stringify(r.keyword));
+  }
+}
 
 // ── 情境 21.9：LINE 不渲染 Markdown（回報的截圖，批次 32）─────────────────────
 // 回報：記者收到的聯絡人那行長這樣——「**徐喬涵** | 03-5915128」，星號原封不動印在

@@ -342,7 +342,10 @@ export function installFetchStub() {
       const answerText = state.answerText
         ? state.answerText
         : state.noDataKeyword
-          ? `這部分我沒有資料，建議洽現場新聞聯絡人。\n[[NO_DATA:${state.noDataKeyword}]]`
+          // ⚠️ 標記刻意放在**警語前面**，不是整段最後——那是實際回報的形狀（批次 33）：
+          // lib/prompt.js 的警語規則佔住最後一行，標記被擠到它前面。第一版的正則錨定
+          // 在字串結尾，就是在這個形狀上漏掉的。
+          ? `這部分我沒有資料，建議洽現場新聞聯絡人。\n[[NO_DATA:${state.noDataKeyword}]]\n\n內容僅供參考，以工研院官網新聞稿或發言為準。`
           : '（假回答）';
       sent.push({ kind: 'answer', event: ev, text: answerText, sys, question: userText, msgs: body.messages });
       return { ok: true, json: async () => ({ content: [{ type: 'text', text: answerText }] }) };
