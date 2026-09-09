@@ -406,10 +406,11 @@ check('智慧兜底照樣附上四條路的入口按鈕，記者不用自己打�
 
 // 輸出守門：模型講太多、或吐回來的其實是 askAnthropic() 自己的失敗訊息時，一律退回
 // 固定文案——那份永遠不會講錯話，是這條路徑的安全底線（見 composeFallbackReply()）。
+// 批次 32 起「混進 Markdown」不再需要退回固定文案——askAnthropic() 的出口會統一把
+// Markdown 清乾淨（見 stripMarkdownForLine()），清完的內容本身是好的，沒有理由丟掉。
 for (const [label, bad] of [
   ['太長', '很長的回答'.repeat(80)],
-  ['其實是 API 失敗訊息', '抱歉，目前無法取得回應，請稍後再試。'],
-  ['混進 Markdown', '**這題**我查不到']
+  ['其實是 API 失敗訊息', '抱歉，目前無法取得回應，請稍後再試。']
 ]) {
   reset(); await freshModule();
   state.fallbackReply = bad;
@@ -545,8 +546,10 @@ console.log('── 續問視窗：超過時間就失效，退回一定要 @ ─
 reset(); await freshModule();
 await sendGroup('@我 最近有哪些活動', { mentionSelf: true, mentionText: '@我 ' });
 state.bindings.get('Cgroup1').groupSessionUntil = Date.now() - 1000; // 模擬視窗已過期
-out = await sendGroup('半導體先進封裝技術發表會', { mentionSelf: false });
-check('視窗過期後，沒 @ 的訊息又變回完全不回應', out.length === 0, JSON.stringify(out));
+// 批次 32 起「活動全名」是我們自己送出的按鈕文字，視窗外也接得住（見
+// isOwnButtonText()），所以這裡改用一句真的不是按鈕的訊息來驗「視窗過期＝不回應」。
+out = await sendGroup('我等等把資料寄給你', { mentionSelf: false });
+check('視窗過期後，沒 @ 的一般訊息又變回完全不回應', out.length === 0, JSON.stringify(out));
 
 console.log('── 續問視窗：只有真的 @ 到／回答成功才續命，不是每個事件都續 ──');
 reset(); await freshModule();
@@ -1421,7 +1424,10 @@ check('續問視窗過期後按「媒體邀訪需求」按鈕 → 照樣接得�
 
 // 但「視窗外也接」只放行幾乎不可能在閒聊裡打出來的那幾種，其餘維持安靜——
 // 不然這個放寬就變成新的亂回來源。
-for (const chat of ['那合作廠商有哪些', '半導體先進封裝技術發表會', '大家中午吃什麼']) {
+// ⚠️ 批次 30 這裡原本也列了「半導體先進封裝技術發表會」，批次 32 刻意推翻：活動全名
+// 是活動清單按鈕送出的文字，它按了沒反應就是回報的那個 bug 本身。規則收斂成「只要是
+// 我們自己放到按鈕上的字就一定按得動」，見 isOwnButtonText()。
+for (const chat of ['那合作廠商有哪些', '大家中午吃什麼']) {
   reset(); await freshModule();
   state.bindings.set('Cgroup1', { event_id: 'quad', media_name: '', note: '', bound_at: Date.now(), groupSessionUntil: Date.now() - 60000 });
   out = await sendGroup(chat, { mentionSelf: false });
@@ -1462,6 +1468,126 @@ state.bindings.set('U_reporter', { event_id: 'quad', media_name: '', note: '', b
 out = await send('米亞 這場的重點是什麼');
 check('1 對 1 打「米亞 這場的重點是什麼」→ 照常回答（喚醒詞只影響群組的判斷）',
   out.some(o => o.kind === 'answer' && o.event === 'quad'), JSON.stringify(out.map(o => o.kind)));
+
+// ── 情境 21.8：這場答不出來時，自動補查工研院官網（回報的截圖，批次 31）─────────
+// 回報：記者在群組問「今年院士有誰」，機器人照實說「我這邊目前沒有得獎名單的資料」
+// ——答得沒錯，但工研院官網新聞中心搜「院士」第一筆就是那篇授證新聞（實測過真的
+// 官網）。根因是路由：tech_query 要求問句裡明確出現「工研院」，這句沒有，加上當時
+// 綁著一場活動就被判成 qa，我們手上另一個有答案的來源從頭到尾沒被問過。
+
+console.log('── 這場沒有資料 → 補查官網、把原文連結接在答案後面 ──');
+reset(); await freshModule();
+state.bindings.set('U_reporter', { event_id: 'quad', media_name: '', note: '', bound_at: Date.now() });
+state.noDataKeyword = '院士'; // 模擬 AI 判斷「背景資料答不出這題」
+out = await send('今年院士有誰');
+{
+  // ⚠️ 只看 kind==='text'（真的送出去給記者的訊息）。kind==='answer' 是 fakes 記下的
+  // **模型原始輸出**，標記本來就還在裡面，拿它來驗「有沒有切乾淨」會驗錯東西。
+  const sentText = out.filter(o => o.kind === 'text').map(o => o.text).join('\n');
+  check('原本那句誠實的「我沒有資料」還在，沒有被補查蓋掉',
+    /沒有資料/.test(sentText), JSON.stringify(out.map(o => o.text?.slice(0, 40))));
+  check('後面接上工研院官網的相關報導與原文連結',
+    /工研院官網新聞中心有相關報導/.test(sentText) && /itri\.org\.tw/.test(sentText),
+    JSON.stringify(sentText.slice(0, 300)));
+  check('⚠️ 機器可讀標記一定要切掉，不能讓記者看到 [[NO_DATA:…]]',
+    !/NO_DATA/.test(sentText), sentText);
+}
+state.noDataKeyword = '';
+
+// 補查是「查得到才附」——官網查不到時不能硬掰，也不能因此連原本的答案都不見
+reset(); await freshModule();
+state.bindings.set('U_reporter', { event_id: 'quad', media_name: '', note: '', bound_at: Date.now() });
+state.noDataKeyword = '院士';
+state.itriKeywordMustInclude = '絕對查不到的字';
+out = await send('今年院士有誰');
+{
+  const sentText = out.filter(o => o.kind === 'text').map(o => o.text).join('\n');
+  check('官網也查不到 → 只給原本那句誠實的答案，不附空的連結區塊',
+    /沒有資料/.test(sentText) && !/工研院官網新聞中心有相關報導/.test(sentText) && !/NO_DATA/.test(sentText),
+    sentText);
+}
+state.itriKeywordMustInclude = '';
+state.noDataKeyword = '';
+
+// 官網整個抓不到（網路問題、改版）也不能連累原本的答案
+reset(); await freshModule();
+state.bindings.set('U_reporter', { event_id: 'quad', media_name: '', note: '', bound_at: Date.now() });
+state.noDataKeyword = '院士';
+state.itriFetchFail = true;
+out = await send('今年院士有誰');
+{
+  const sentText = out.filter(o => o.kind === 'text').map(o => o.text).join('\n');
+  check('官網抓取失敗 → 原本的答案照樣送得出去，不會整題掛掉',
+    /沒有資料/.test(sentText) && !/NO_DATA/.test(sentText), sentText);
+}
+state.itriFetchFail = false;
+state.noDataKeyword = '';
+
+// 答得出來的正常提問完全不受影響——不多打一次官網、回覆裡也沒有多餘的區塊
+reset(); await freshModule();
+state.bindings.set('U_reporter', { event_id: 'quad', media_name: '', note: '', bound_at: Date.now() });
+out = await send('這場的重點是什麼');
+check('這場答得出來的正常提問 → 不補查、回覆裡沒有多餘的連結區塊（一個字節都沒變慢）',
+  !/工研院官網新聞中心有相關報導/.test(out.filter(o => o.kind === 'text').map(o => o.text).join('')),
+  JSON.stringify(out.map(o => o.text?.slice(0, 40))));
+
+// 群組（回報的實際情境）也要有同一條後備
+reset(); await freshModule();
+state.bindings.set('Cgroup1', { event_id: 'quad', media_name: '', note: '', bound_at: Date.now() });
+state.noDataKeyword = '院士';
+out = await sendGroup('@我 今年院士有誰', { mentionSelf: true, mentionText: '@我 ' });
+{
+  const sentText = out.filter(o => o.kind === 'text').map(o => o.text).join('\n');
+  check('群組裡同一題（回報的實際情境）也接得上官網補查',
+    /工研院官網新聞中心有相關報導/.test(sentText) && !/NO_DATA/.test(sentText), sentText.slice(0, 300));
+}
+state.noDataKeyword = '';
+
+// ── 情境 21.9：LINE 不渲染 Markdown（回報的截圖，批次 32）─────────────────────
+// 回報：記者收到的聯絡人那行長這樣——「**徐喬涵** | 03-5915128」，星號原封不動印在
+// 畫面上；分隔線也是三個裸露的 ---。既有規則寫成「需要附連結時⋯⋯不要用 Markdown」，
+// 範圍只有連結，模型拿它去加粗人名時完全不覺得違規。
+console.log('── 模型吐出的 Markdown 不能原樣印給記者 ──');
+reset(); await freshModule();
+state.bindings.set('U_reporter', { event_id: 'quad', media_name: '', note: '', bound_at: Date.now() });
+state.answerText = '建議您直接洽新聞聯絡人：\n\n**徐喬涵** | 03-5915128\n\n- 第一點\n- 第二點\n\n## 小標\n參考 [活動網頁](https://example.com/a?id=1)\n\n---\n內容僅供參考。';
+out = await send('給我新聞稿');
+{
+  const sentText = out.filter(o => o.kind === 'text').map(o => o.text).join('\n');
+  check('粗體的星號被拿掉，人名本身完整保留', /徐喬涵/.test(sentText) && !/\*\*/.test(sentText), sentText);
+  check('電話號碼一個字都沒被動到', /03-5915128/.test(sentText), sentText);
+  check('項目符號換成 LINE 上讀得順的「・」，不是留著 -', /・第一點/.test(sentText) && !/^- 第一點/m.test(sentText), sentText);
+  check('# 標題的井號被拿掉，標題文字留著', /小標/.test(sentText) && !/#\s*小標/.test(sentText), sentText);
+  check('[文字](網址) 攤平成「文字 網址」，網址一定要留著（記者要點）',
+    /活動網頁/.test(sentText) && /https:\/\/example\.com\/a\?id=1/.test(sentText) && !/\]\(/.test(sentText), sentText);
+  check('--- 水平線不會裸露在畫面上', !/^-{3,}$/m.test(sentText), sentText);
+}
+state.answerText = '';
+
+// ── 情境 21.95：所有「我們自己送出的按鈕」都要按得動（回報的截圖，批次 32）────────
+// 回報：同事按「半導體相關乾淨帶畫面提供」完全沒反應，只好自己補一句「按鈕 按了
+// 因為沒寫米亞 會沒反應」。那是**邀訪窗口關鍵字**按鈕，送出的是原始關鍵字（沒有
+// 「邀訪：」前綴，見 handleMetaIntent() 的 contacts 分支），批次 30 的視窗外放行
+// 只認固定選單詞與「邀訪：ＸＸ」，沒涵蓋到——「按鈕按了沒反應」換顆按鈕又發生一次。
+console.log('── 視窗過期後，同仁自訂的按鈕（chips／邀訪窗口關鍵字）也要按得動 ──');
+for (const [label, text] of [
+  ['邀訪窗口關鍵字', '技術規格'],
+  ['自訂快速提問 chip', '新聞稿'],
+  ['活動清單的活動全名', '半導體先進封裝技術發表會']
+]) {
+  reset(); await freshModule();
+  state.bindings.set('Cgroup1', { event_id: 'quad', media_name: '', note: '', bound_at: Date.now(), groupSessionUntil: Date.now() - 60000 });
+  out = await sendGroup(text, { mentionSelf: false });
+  check(`視窗過期後按「${text}」（${label}）→ 接得住，不用先寫「米亞」`, out.length > 0, JSON.stringify(out));
+}
+
+// 放寬之後，一般閒聊仍然要安靜——不然這就變成新的亂回來源
+for (const chat of ['那合作廠商有哪些', '大家中午吃什麼', '我等等把資料寄給你']) {
+  reset(); await freshModule();
+  state.bindings.set('Cgroup1', { event_id: 'quad', media_name: '', note: '', bound_at: Date.now(), groupSessionUntil: Date.now() - 60000 });
+  out = await sendGroup(chat, { mentionSelf: false });
+  check(`視窗過期後、非按鈕的一般訊息「${chat}」→ 維持安靜`, out.length === 0, JSON.stringify(out));
+}
 
 // ── 情境 22：1 對 1 的上一輪對話記憶（批次 28）───────────────────────────────
 // 回報的意見：「對答要更如真人般」。最不像人的地方不是語氣，是完全沒有對話記憶——

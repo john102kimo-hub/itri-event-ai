@@ -522,8 +522,26 @@ function lineExtraRules(event) {
     : '寧可說「這部分我沒有資料，建議洽現場新聞聯絡人」';
   return [
     '這是 LINE 對話，請控制在 5 行以內；記者要求完整新聞稿時才給全文，並提醒可到活動網頁下載。',
-    '需要附連結時直接給網址純文字，不要用 Markdown 語法（LINE 不會渲染，記者會看到一堆星號與方括號）。',
+    // ⚠️ 這條原本寫成「需要附連結時⋯⋯不要用 Markdown」，範圍只有連結——實際回報的
+    // 截圖裡模型拿它去加粗人名（`**徐喬涵**`），星號原封不動印在記者畫面上。範圍要
+    // 涵蓋整則回覆，而且把最常見的幾種語法直接點名，不要只講「Markdown」這個詞。
+    '整則回覆都不要使用任何 Markdown 語法——LINE 不會渲染，記者會直接看到符號本身。不要用 **粗體**、*斜體*、`程式碼`、# 標題、- 項目符號、[文字](網址) 這種連結寫法，也不要用 --- 當分隔線。需要強調就直接寫出來，需要附連結就把網址原樣貼上，需要條列就用「・」開頭。',
     `你的回覆會出現在掛著主辦單位名義的官方帳號裡，記者可能直接截圖引用。任何不確定的內容，${contactHint}。`,
+    // ── 查無資料時的機器可讀標記（批次 31）─────────────────────────────
+    // 實際回報（附截圖）：記者在群組問「今年院士有誰」，機器人照實說「我這邊目前沒有
+    // 得獎名單的資料」——答得沒錯，但**工研院官網新聞中心第一筆就是那篇授證新聞**。
+    // 根因是路由：routeIntent() 判 tech_query 要求問句裡明確出現「工研院」（批次 21
+    // 為了避免誤觸刻意訂的），「今年院士有誰」沒提到，加上當時綁著一場活動，就被判成
+    // qa、只拿那場的知識庫回答。我們手上另一個有答案的來源從頭到尾沒被問過。
+    //
+    // 與其放寬路由（那會讓「這場的重點是什麼」這種正常提問也被送去官網，換來更糟的
+    // 誤判），不如在「已經確定這場答不出來」之後才去補查一次——只在真的失敗時才多花
+    // 一次查詢，正常提問一個字節都沒變慢。
+    //
+    // 用標記而不是事後用正則去猜「這句話是不是在說沒有資料」：模型每次的措辭都不一樣
+    // （這次是「我這邊目前沒有得獎名單的資料」，不是規則裡寫的那句），猜錯的兩個方向
+    // 都很糟。這招跟產業趨勢／技術問答的「來源編號：」是同一個既有作法。
+    '如果上面的背景資料裡完全沒有可以回答這一題的內容（也就是你這則回覆的重點是「這部分我沒有資料」），請在整則回覆的最後另起一行，只加上這個格式的標記：[[NO_DATA:關鍵詞]]，關鍵詞是記者這題真正想問的主題，2-6 個字的名詞（例如問「今年院士有誰」就填「院士」，問「得獎名單」就填「得獎名單」），不要填整句問句、不要填「沒有資料」這種描述。這行是給程式判讀用的，不是給記者看的，不算進上面的行數限制；如果背景資料答得出這題，就完全不要加這一行。',
     // 米亞人設（批次 28）。回報的意見：「對答要更如真人般、符合人設」。
     // ⚠️ 這條走的是 extraRules 這個「頻道專屬規則」的管道，只有 LINE 會拿到——
     // 網頁版 api/chat.js 呼叫的是不帶 extraRules 的 buildSystemPrompt(event)，
@@ -553,6 +571,40 @@ const TONE_RULE = '語氣：你是「米亞」，講話像一位熟悉這些題�
 
 // history：選填的上一輪對話（[{role:'user'},{role:'assistant'}]，見 buildTurnHistory()）。
 // 沒帶就是原本「每次只送一則」的行為，所有既有呼叫端都不受影響。
+// ── LINE 不會渲染 Markdown（批次 32）──────────────────────────────────────
+// 實際回報（附截圖）：記者收到的聯絡人那行長這樣——「**徐喬涵** | 03-5915128」，
+// 星號原封不動印在畫面上；分隔線也是三個裸露的 `---`。
+//
+// lineExtraRules() 早就有一條「不要用 Markdown」，但它寫成「需要附連結時⋯⋯」，
+// 範圍只涵蓋連結，模型拿它去加粗人名時完全不覺得違規。規則本身要放寬到整則回覆
+// （見那條規則），但**規則是請求、不是保證**：同一個模型下一次還是可能加粗。
+//
+// 這支是程式面的最後一道防線，放在 askAnthropic() 的出口——四條問答路線（活動、
+// 產業趨勢、工研院技術、智慧兜底）全部經過這裡，寫一次四邊都受惠，不必每個呼叫端
+// 各自記得清一次。
+//
+// ⚠️ 只拆掉「LINE 顯示不出來的語法符號」，不改動任何文字內容：粗體只拿掉星號、
+// 連結攤成「文字 網址」（網址要留著，記者要點）、項目符號換成 LINE 上讀得順的「・」。
+// 這是格式清理，不是重寫答案——答案的內容一個字都不能動（同 lineExtraRules() 的
+// 顧慮：這則回覆掛的是主辦單位名義）。
+// ⚠️ 我們自己接在答案後面的區塊用的是全形破折號「———」（U+2014），不在下面水平線
+// 規則的 [-*_] 裡，不會被誤刪。
+export function stripMarkdownForLine(input) {
+  return String(input || '')
+    .replace(/```[a-zA-Z0-9]*\n?([\s\S]*?)```/g, '$1')                 // 圍欄程式碼區塊
+    .replace(/`([^`\n]+)`/g, '$1')                                      // 行內程式碼
+    .replace(/!?\[([^\]]*)\]\(\s*([^)\s]+)[^)]*\)/g,                  // [文字](網址)／圖片
+             (_m, label, url) => (label ? `${label} ${url}` : url))
+    .replace(/(\*\*|__)(?=\S)([\s\S]*?\S)\1/g, '$2')                   // **粗體** __粗體__
+    .replace(/(^|[\s(（「【])[*_](?=\S)([^*_\n]*?\S)[*_](?=$|[\s)）」】,，.。、!！?？:：;；])/g, '$1$2') // *斜體*
+    .replace(/^\s{0,3}#{1,6}\s+/gm, '')                                // # 標題
+    .replace(/^\s{0,3}>\s?/gm, '')                                     // > 引用
+    .replace(/^\s{0,3}([-*_])[ \t]*(?:\1[ \t]*){2,}$/gm, '')            // --- *** ___ 水平線
+    .replace(/^([ \t]*)[-*+][ \t]+/gm, '$1・')                          // - 項目符號
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
 async function askAnthropic(systemPrompt, userText, history = []) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return '系統目前無法回答，請稍後再試或洽現場工作人員。';
@@ -572,7 +624,8 @@ async function askAnthropic(systemPrompt, userText, history = []) {
       console.error('Anthropic API 錯誤:', data.error?.message);
       return '抱歉，目前無法取得回應，請稍後再試或洽現場工作人員。';
     }
-    return data.content?.[0]?.text || '抱歉，無法取得回應。';
+    // LINE 不渲染 Markdown，統一在這個出口清一次——見 stripMarkdownForLine() 的說明。
+    return stripMarkdownForLine(data.content?.[0]?.text) || '抱歉，無法取得回應。';
   } catch (e) {
     console.error('Anthropic 呼叫失敗:', e.message);
     return '抱歉，目前無法取得回應，請稍後再試。';
@@ -1052,6 +1105,45 @@ async function handleTechQueryMessage(replyToken, targetId, text, { speakerId = 
 // memory（批次 28）：要不要帶上「上一輪對話」給模型，並在答完之後記下這一輪。
 // 只有 1 對 1 的記者問答會傳 true——群組多人交錯提問、職員模式問的是後台資料，
 // 兩者回放上一輪只會製造答非所問，見 getRecentTurn() 的說明。
+// ── 「這場答不出來」→ 自動補查工研院官網（批次 31）─────────────────────────
+// 把 AI 加在結尾的 [[NO_DATA:關鍵詞]] 標記切下來（見 lineExtraRules() 的完整說明）。
+// ⚠️ 不管有沒有要用這個關鍵詞，標記一定要切掉——那行是給程式看的，漏在回覆裡讓記者
+// 看到一串 [[NO_DATA:院士]] 比什麼都沒做還糟。回傳 { text, keyword }。
+const NO_DATA_RE = /\n*\s*\[\[NO_DATA[:：]\s*([^\]]*?)\s*\]\]\s*$/;
+
+export function extractNoDataKeyword(raw) {
+  const s = String(raw || '');
+  const m = s.match(NO_DATA_RE);
+  if (!m) return { text: s.trim(), keyword: '' };
+  return { text: s.replace(NO_DATA_RE, '').trim(), keyword: String(m[1] || '').trim().slice(0, 20) };
+}
+
+// 這場的知識庫答不出來時，拿記者真正在問的關鍵詞去工研院官網新聞中心補查一次，
+// 查到就把標題與連結接在答案後面。
+//
+// ⚠️ 只給「線索」，不重寫內容：這裡刻意不再叫一次 AI 去摘要那幾則報導。記者要的是
+// 「哪裡找得到」，直接給標題＋日期＋原文連結最準也最快；多叫一次 AI 除了慢，還多一次
+// 把官網原文講走鐘的機會——而這則回覆掛的是主辦單位名義（同 lineExtraRules() 的顧慮）。
+//
+// 查不到（或抓取失敗）就回空字串，原本那句誠實的「我沒有這項資料」照舊送出去，
+// 不會因為補查失敗而讓記者收不到答案。
+const NO_DATA_MAX_LINKS = 2;
+
+async function itriNewsHintBlock(keyword) {
+  const kw = sanitize(keyword, 20);
+  if (!kw) return '';
+  try {
+    const { ok, items } = await fetchItriNews(kw);
+    if (!ok || !items.length) return '';
+    const lines = items.slice(0, NO_DATA_MAX_LINKS)
+      .map(it => `・${it.title}${it.date ? `（${it.date}）` : ''}\n${it.url}`);
+    return `\n\n———\n這題本場的新聞資料裡沒有，不過工研院官網新聞中心有相關報導，您可以直接看原文：\n${lines.join('\n')}`;
+  } catch (e) {
+    console.error('itriNewsHintBlock 失敗:', e.message);
+    return '';
+  }
+}
+
 async function answerQuestion(replyToken, userId, rawEvent, mediaName, text, { loading = true, allowPreEventSubstitution = true, switchNotice = '', memory = false } = {}) {
   // 活動前只給媒體邀請函、不給正式新聞稿與照片（見 lib/prompt.js resolveEventContent()
   // 的說明）。放在這裡而不是呼叫端各自判斷，理由跟下面的邀訪窗口比對一樣：1 對 1、
@@ -1089,8 +1181,13 @@ async function answerQuestion(replyToken, userId, rawEvent, mediaName, text, { l
   // 上一輪對話（只在 1 對 1、且上一輪答的就是這一場時才有東西）——「那成本呢」這種
   // 省略式續問要接得住，靠的就是這兩則；見 buildTurnHistory() 的說明。
   const history = memory ? await buildTurnHistory(userId, event.id) : [];
-  const aiReply = await askAnthropic(systemPrompt, text, history);
-  const reply = switchNotice + aiReply;
+  const rawReply = await askAnthropic(systemPrompt, text, history);
+  // 標記一定要切掉（不管後面用不用得到那個關鍵詞），見 extractNoDataKeyword() 的 ⚠️。
+  const { text: aiReply, keyword: noDataKeyword } = extractNoDataKeyword(rawReply);
+  // 這場答不出來時，補查一次工研院官網新聞中心——回報的截圖就是這個洞（見
+  // lineExtraRules() 那條規則的說明）。查不到就是空字串，原本的答案照舊。
+  const newsHint = noDataKeyword ? await itriNewsHintBlock(noDataKeyword) : '';
+  const reply = switchNotice + aiReply + newsHint;
   // 診斷用途，不是必要邏輯：路由判斷得準不準、AI 答得順不順，靠這行在 Vercel Logs
   // 裡直接看得到，不用另外接工具。刻意截斷長度，避免整份新聞稿灌爆單行 log。
   console.log(`[line] answer event=${event.id} status=${event.status} q="${text.slice(0, 60)}" reply="${reply.slice(0, 200)}"`);
@@ -1114,6 +1211,8 @@ async function answerQuestion(replyToken, userId, rawEvent, mediaName, text, { l
   // setRecentTurn() 自己吞例外——這是體驗加分，寫失敗絕對不能連累剛剛那則答案。
   // 記的是 aiReply 而不是 reply：switchNotice（「已切換到《X》：」）是講給人看的
   // 系統提示，不是對話內容，回放給模型只會變成雜訊。
+  // 存 aiReply（已切掉標記、不含補查來的連結區塊）——那些連結是給人點的線索，
+  // 回放給模型當對話脈絡只會變成雜訊。
   if (memory) await setRecentTurn(userId, event.id, text, aiReply);
 }
 
@@ -1678,7 +1777,8 @@ async function composeFallbackReply(text) {
   if (!reply) return '';
   if (reply.length > FALLBACK_MAX_LEN) return '';
   if (/抱歉，目前無法取得回應|系統目前無法回答|無法取得回應/.test(reply)) return '';
-  if (/\*\*|^#{1,6}\s/m.test(reply)) return '';
+  // 批次 32 起不用在這裡擋 Markdown：askAnthropic() 的出口已經統一清過一次
+  // （見 stripMarkdownForLine()），四條問答路線都受惠，不需要兜底自己再擋一次。
   return reply;
 }
 
@@ -1769,16 +1869,47 @@ function stripWakeWord(text) {
   return String(text || '').replace(WAKE_WORD_RE, '').trim();
 }
 
-// 整句話是不是「我們自己送出去的那顆按鈕」。用於視窗外仍要接住的判斷，所以刻意
-// 收得比 looksAddressedToBot() 的 ① 更窄——只認**幾乎不可能在閒聊裡打出來**的：
-//   - 固定選單詞（媒體邀訪需求、產業趨勢分析…）：整句完全相同才算
-//   - 「邀訪：ＸＸ」：這是機器產生的格式，人不會這樣打字
-// 活動全名、「工研院 ＸＸ」這兩種**不**放進來：它們在群組聊天裡是講得出來的句子
-// （「工研院 那邊怎麼說」），視窗外就接會變成新的亂回來源。那兩種按鈕在視窗內
-// （剛回答完的 15 分鐘）照樣按得動，隔太久才按就要 @ 或用喚醒詞。
-function isOwnButtonText(text) {
+// 整句話是不是「我們自己送出去的那顆按鈕」——或者我們正在等這個人回答。
+//
+// ⚠️ 批次 30 第一版只認固定選單詞與「邀訪：ＸＸ」，實測回報又踩到同一個坑：同事按了
+// 「半導體相關乾淨帶畫面提供」完全沒反應——那是**邀訪窗口關鍵字**按鈕，而那種按鈕送出
+// 的是**原始關鍵字**（見 handleMetaIntent() 的 contacts 分支：`contacts.map(c => c.keyword)`，
+// 沒有「邀訪：」前綴），同仁在後台自訂的快速提問 chips 也一樣是原始文字。兩種都沒被
+// 涵蓋到，於是「按鈕按了沒反應」換個按鈕又發生一次。
+//
+// 規則收斂成一句話：**只要是我們自己放到按鈕上的字，就一定按得動**，不分視窗內外。
+// 這比「哪幾種按鈕算數」的清單好記，也不會再有下一顆漏掉的按鈕。
+//
+// 唯二不放進來的是 `工研院 ＸＸ` 與 `ＸＸ產業趨勢` 這兩顆導流按鈕：它們是用關鍵字
+// 拼出來的，比對只能靠前綴／後綴而不是完全相同，「工研院 那邊怎麼說」這種日常對話會
+// 誤中。它們永遠出現在一則剛送出的答案底下，視窗本來就是開的，不需要靠這條放行。
+async function isOwnButtonText(groupId, text, speakerId) {
   const s = String(text || '').trim();
-  return GROUP_FIXED_BUTTONS.has(s) || /^邀訪[:：]/.test(s);
+  if (!s) return false;
+
+  // 我們剛問完一句、正在等這個人回答（「請問您想了解工研院哪一項技術呢？」）——
+  // 那則答案本身多半是個沒有問號的名詞，跟按鈕同一種性質：問了就要聽。
+  const rawPending = await getStoredNote(groupId);
+  const { note: pendingNote } = parsePendingNote(rawPending);
+  if ((pendingNote === TECH_QUERY_PENDING_NOTE || pendingNote === CONTACT_PENDING_NOTE) &&
+      pendingBelongsTo(rawPending, speakerId)) return true;
+
+  if (GROUP_FIXED_BUTTONS.has(s)) return true;      // 固定選單詞
+  if (/^邀訪[:：]/.test(s)) return true;             // 全域邀訪主題（機器產生的格式）
+
+  // 活動清單按鈕送出的是活動全名（matchEventByName 自己有「正規化後至少 6 個字、
+  // 要唯一命中」的門檻，見 lib/menu.js，不會被一個短詞誤中）。
+  if (matchEventByName(s, buildCalendarCards(await getAllEventRows()))) return true;
+
+  // 同仁在後台為「目前這場」設定的快速提問 chips 與邀訪窗口關鍵字——內容是同仁自由
+  // 填的，沒辦法寫死在上面那個集合裡，但它們確確實實是我們送出去的按鈕。
+  const binding = await getBinding(groupId);
+  const current = binding?.event_id ? await getEventById(binding.event_id) : null;
+  if (current) {
+    if (eventQuickChips(current).some(c => (typeof c === 'string' ? c : c.text) === s)) return true;
+    if (parseEventContacts(current).some(c => c.keyword === s)) return true;
+  }
+  return false;
 }
 
 const GROUP_FIXED_BUTTONS = new Set([
@@ -1789,37 +1920,16 @@ async function looksAddressedToBot(groupId, text, speakerId) {
   const s = String(text || '').trim();
   if (!s) return false;
 
-  // ⓪ 我們自己剛問完一句、正在等這個人回答（「請問您想了解工研院哪一項技術呢？」
-  // 「請直接輸入想了解的技術主題」）——這則就是答案本身，長什麼樣都要接住，不能
-  // 因為它剛好是個沒有問號的名詞就被下面的守門擋掉。只認旗標的主人（群組裡別人
-  // 插的話仍然擋著，見 pendingNoteFor()）。
-  const rawPending = await getStoredNote(groupId);
-  const { note: pendingNote } = parsePendingNote(rawPending);
-  if ((pendingNote === TECH_QUERY_PENDING_NOTE || pendingNote === CONTACT_PENDING_NOTE) &&
-      pendingBelongsTo(rawPending, speakerId)) return true;
+  // ⓪① 我們自己送出去的按鈕，或我們正在等這個人回答——跟視窗外用的是同一支，
+  // 兩邊共用一份清單才不會像批次 30 那樣「補了一種按鈕、漏掉另一種」。
+  if (await isOwnButtonText(groupId, s, speakerId)) return true;
 
-  // ① 我們自己的按鈕／固定入口
-  if (GROUP_FIXED_BUTTONS.has(s)) return true;
+  // ①（續）導流按鈕「工研院 ＸＸ」「ＸＸ產業趨勢」——只在視窗內放行，理由見
+  // isOwnButtonText() 最後一段。
   if (GROUP_OWN_BUTTON_RE.test(s)) return true;
 
   // ② 一句提問
   if (GROUP_QUESTION_RE.test(s)) return true;
-
-  // ①（續）整句就是某一場活動的名稱——活動清單按鈕送出的就是這個。放在問句判斷
-  // 之後才做，是因為這支要讀行事曆（吃 60 秒快取，實務上不會真的每則都打 Sheets），
-  // 上面兩道純正則能先擋掉的就不要走到這裡。
-  if (matchEventByName(s, buildCalendarCards(await getAllEventRows()))) return true;
-
-  // ①（再續）同仁在後台為「目前這場」設定的快速提問 chips 與邀訪窗口關鍵字——
-  // 那些字串也是我們自己送出去的按鈕，但內容是同仁自由填的，沒辦法寫死在上面那個
-  // 集合裡。多數 chips 本身就是問句（會被 ② 接走），這一條補的是「新聞稿」「議程」
-  // 這種不帶疑問詞的短按鈕，不補的話那些按鈕在群組裡按了會沒反應。
-  const binding = await getBinding(groupId);
-  const current = binding?.event_id ? await getEventById(binding.event_id) : null;
-  if (current) {
-    if (eventQuickChips(current).some(c => (typeof c === 'string' ? c : c.text) === s)) return true;
-    if (parseEventContacts(current).some(c => c.keyword === s)) return true;
-  }
 
   // ③ 剛回答完趨勢／技術題時的裸名詞追問（「太空」）——那是我們自己在上一則答案
   // 結尾邀請他打的。沒有話題記憶時**不**放行：一個沒頭沒尾的名詞在群組裡多半是
@@ -1854,6 +1964,12 @@ async function handleGroupEvent(replyToken, ev) {
 
   const rawText = ev.message?.type === 'text' ? String(ev.message.text || '') : '';
 
+  // speakerId：群組裡「這句話是誰講的」。一次性旗標要記住是誰按的按鈕（見
+  // pendingNoteFor()），守門也要靠它判斷「正在等回答的那個人是不是他」。LINE 在
+  // 使用者沒同意提供 userId 時可能沒有這個欄位，拿不到就傳空字串。
+  const speakerId = ev.source?.userId || '';
+
+
   // 被 @ 到，或用喚醒詞「米亞」叫我們——兩種都算「明確在叫機器人」，一律要理人。
   // 喚醒詞的理由見 WAKE_WORD_RE 的說明（實測回報：有人的 LINE @ 選單裡根本找不到
   // 這個官方帳號，對他來說「只有被 @ 才說話」等於完全叫不動）。
@@ -1869,7 +1985,7 @@ async function handleGroupEvent(replyToken, ev) {
     // 這種訊息其實是最不可能誤判的一種：整句話「完全等於」我們自己送出去的按鈕文字
     // （見 isOwnButtonText()），沒有人會在群組閒聊裡剛好打出「媒體邀訪需求」這五個字。
     // 所以視窗外也接這一種，其餘維持安靜。
-    if (!inWindow && !isOwnButtonText(rawText)) return;
+    if (!inWindow && !(await isOwnButtonText(groupId, rawText, speakerId))) return;
 
     // 回報的意見：續問視窗內只要有人講話就會回，即使明顯是在跟另一個人講話
     // （例如「我再跟＠小明說話」）——機器人還是煞有其事答一段內容，感覺像亂回。
@@ -1917,11 +2033,6 @@ async function handleGroupEvent(replyToken, ev) {
     }
     return;
   }
-
-  // speakerId：群組裡「這句話是誰講的」。一次性旗標要記住是誰按的按鈕（見
-  // pendingNoteFor()），守門也要靠它判斷「正在等回答的那個人是不是他」。LINE 在
-  // 使用者沒同意提供 userId 時可能沒有這個欄位，拿不到就傳空字串。
-  const speakerId = ev.source?.userId || '';
 
   // 免 @ 續問視窗內的統一守門（批次 28）——這句話看起來不是在跟我們講，就完全安靜。
   //
