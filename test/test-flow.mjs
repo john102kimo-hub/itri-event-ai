@@ -73,19 +73,19 @@ const res = { status() { return this; }, json() { return this; }, end() { return
 async function send(text, userId) {
   sent.length = 0;
   await handler(makeReq(text, userId), res);
-  return sent.map(s => ({ kind: s.kind, text: s.text, event: s.event, quickReply: s.quickReply, sys: s.sys, question: s.question, msgs: s.msgs }));
+  return sent.map(s => ({ kind: s.kind, text: s.text, event: s.event, quickReply: s.quickReply, sys: s.sys, sysAll: s.sysAll, question: s.question, msgs: s.msgs }));
 }
 
 async function sendRaw(events) {
   sent.length = 0;
   await handler(makeRawReq(events), res);
-  return sent.map(x => ({ kind: x.kind, text: x.text, event: x.event, quickReply: x.quickReply, sys: x.sys, question: x.question, msgs: x.msgs }));
+  return sent.map(x => ({ kind: x.kind, text: x.text, event: x.event, quickReply: x.quickReply, sys: x.sys, sysAll: x.sysAll, question: x.question, msgs: x.msgs }));
 }
 
 async function sendGroup(text, opts) {
   sent.length = 0;
   await handler(makeGroupReq(text, opts), res);
-  return sent.map(s => ({ kind: s.kind, text: s.text, event: s.event, quickReply: s.quickReply, sys: s.sys, question: s.question, msgs: s.msgs }));
+  return sent.map(s => ({ kind: s.kind, text: s.text, event: s.event, quickReply: s.quickReply, sys: s.sys, sysAll: s.sysAll, question: s.question, msgs: s.msgs }));
 }
 
 let pass = 0, fail = 0;
@@ -1669,6 +1669,51 @@ out = await send('Who are this year fellows');
 }
 state.answerText = '';
 state.noDataKeyword = '';
+
+// ── 情境 21.99：跨場次——答案在別場的新聞稿裡也要答得出來（批次 36）─────────────
+// 回報的意見：「這一定要切來切去特定活動專屬回答系統嗎？不能一體適用？」
+// 記者問「今年院士有誰」，答案就寫在《工研院院士授證典禮》那場的新聞稿裡，但問答只讀
+// 「目前綁定的這一場」，於是不是答不出來、就是要先切過去。
+console.log('── 主場次答不出來、但別場的新聞稿裡有 → 自動把那場帶進來 ──');
+{
+  // 這個情境需要一場「內容裡真的有院士名單」的活動。加進 fixture 之後一定要還原——
+  // reset() 不會重建 state.events，留著會污染後面所有情境。
+  state.events.push(['fellow', '工研院院士授證典禮', '#0F9E7A',
+    '【新聞稿】本屆新任院士包括張三、李四、王五三位，由總統親自授證。', 'active', '2026-09-07',
+    '', '', '', '工研院', 'code9', '', '', '', '', '', '', '']);
+  try {
+    reset(); await freshModule();
+    state.bindings.set('U_reporter', { event_id: 'quad', media_name: '', note: '', bound_at: Date.now() });
+    out = await send('今年院士有誰');
+    const a = out.find(o => o.kind === 'answer');
+    check('主場次仍然是綁定的那一場（沒有偷偷換場）', a?.event === 'quad', a?.event);
+    check('第一個（吃快取的）system 區塊還是主場次的內容', /四足機器人/.test(a?.sys || ''), (a?.sys || '').slice(0, 60));
+    check('答案寫在別場新聞稿裡 → 那一場被自動帶進來（回報的案例）',
+      /其他場次：工研院院士授證典禮/.test(a?.sysAll || ''), (a?.sysAll || '').slice(-300));
+    check('帶進來的是那場的新聞稿內容，不是只有名字',
+      /本屆新任院士包括張三/.test(a?.sysAll || ''), '');
+    check('⚠️ 同時一定要有「必須講出是哪一場」的規則（張冠李戴比答不出來嚴重）',
+      /必須在回答裡明確講出是哪一場/.test(a?.sysAll || ''), '');
+    check('跨場次資料不進第一個區塊（不然每題都會打散 ephemeral 快取）',
+      !/其他場次：/.test(a?.sys || ''), '');
+
+    // 問的就是本場的內容時，不該把不相干的場次拖進來（只是拖慢、變貴）
+    reset(); await freshModule();
+    state.bindings.set('U_reporter', { event_id: 'quad', media_name: '', note: '', bound_at: Date.now() });
+    out = await send('四足機器人的應用場域為何');
+    check('問的就是本場內容 → 不會把院士那場拖進來',
+      !/其他場次：工研院院士授證典禮/.test(out.find(o => o.kind === 'answer')?.sysAll || ''), '');
+
+    // 群組走同一支 answerQuestion，一樣要有
+    reset(); await freshModule();
+    state.bindings.set('Cgroup1', { event_id: 'quad', media_name: '', note: '', bound_at: Date.now() });
+    out = await sendGroup('@我 今年院士有誰', { mentionSelf: true, mentionText: '@我 ' });
+    check('群組裡同一題也會帶入那一場',
+      /其他場次：工研院院士授證典禮/.test(out.find(o => o.kind === 'answer')?.sysAll || ''), '');
+  } finally {
+    state.events.pop(); // 還原 fixture，不然後面的情境會多出一場活動
+  }
+}
 
 // ── 情境 22：1 對 1 的上一輪對話記憶（批次 28）───────────────────────────────
 // 回報的意見：「對答要更如真人般」。最不像人的地方不是語氣，是完全沒有對話記憶——

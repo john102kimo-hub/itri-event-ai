@@ -58,6 +58,7 @@ import {
   fetchIndustryTrendDigest, formatDigestForPrompt, extractSourceIndices, resolveSourceUrls
 } from '../lib/industry-trends.js';
 import { fetchItriNews, formatNewsForPrompt, stripTechQueryFiller } from '../lib/itri-news.js';
+import { selectRelatedEvents, formatRelatedEventsBlock } from '../lib/related-events.js';
 
 const EVENTS_RANGE = 'events!A2:R'; // P 欄是 contacts（邀訪窗口分工），Q 欄是 invite_letter（媒體邀請函），R 欄是 invite_letter_chips（活動前快速提問），見 rowToEvent()
 // line_user_id | event_id | media_name | bound_at | last_active | note | group_session_until | last_topic
@@ -613,7 +614,30 @@ export function stripMarkdownForLine(input) {
     .trim();
 }
 
-async function askAnthropic(systemPrompt, userText, history = []) {
+// ── 答題模型（批次 36）─────────────────────────────────────────────────────
+// 回報的意見：「不是給新聞稿，而是會讀懂消化」——記者問「今年院士有誰」，答案就寫在
+// 那場的新聞稿裡，它卻說沒有。
+//
+// 這裡原本用 Haiku 4.5。當初選它是為了成本，而它拿來做「這句話要路由到哪一條路」
+// 很稱職——但要它讀完一整篇新聞稿、把埋在段落中間的名單抓出來就明顯吃力，那正是
+// 回報的症狀。答題這條路換成 Sonnet 5：閱讀理解好很多，上下文 200K 變成 1M（跨場次
+// 資料要塞得下也靠這個），成本約兩倍，但既有的 ephemeral 快取讓重複提問便宜十倍，
+// 以記者會的問答量絕對划算。
+//
+// ⚠️ 路由（lib/router.js routeIntent）刻意不跟著換：那是分類題、每則訊息都要跑，
+// Haiku 又快又便宜又夠準，換上去只是白花錢。貴的模型要花在真正需要理解力的地方。
+//
+// ⚠️ thinking 明確關掉：Sonnet 5 省略這個參數會預設開啟 adaptive thinking，那會讓
+// 每則回覆多等好幾秒——LINE 的 reply token 只有 60 秒，記者在等的是聊天速度的回應。
+// 讀新聞稿找名單是閱讀題不是推理題，Sonnet 5 不開 thinking 就綽綽有餘。之後若發現
+// 答案深度不足，這裡是第一個該調的旋鈕（改成 { type: 'adaptive' }）。
+const ANSWER_MODEL = 'claude-sonnet-5';
+
+// extraSystem（批次 36）：選填的第二個 system 區塊，放跨場次的相關資料。
+// ⚠️ 刻意不併進第一個區塊：那一塊逐 byte 穩定才吃得到 ephemeral cache，而這一塊
+// 因「這一題問了什麼」而異，混進去只會讓每題都重新建快取（跟 lib/router.js
+// currentEventId 那段拆成兩塊是完全一樣的理由）。
+async function askAnthropic(systemPrompt, userText, history = [], { extraSystem = '' } = {}) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return '系統目前無法回答，請稍後再試或洽現場工作人員。';
   try {
@@ -621,9 +645,13 @@ async function askAnthropic(systemPrompt, userText, history = []) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
       body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
+        model: ANSWER_MODEL,
+        thinking: { type: 'disabled' }, // 見 ANSWER_MODEL 的 ⚠️
         max_tokens: 4096,
-        system: [{ type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }],
+        system: [
+          { type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } },
+          ...(extraSystem ? [{ type: 'text', text: extraSystem }] : [])
+        ],
         messages: [...history, { role: 'user', content: String(userText).slice(0, 8000) }]
       })
     });
@@ -633,7 +661,14 @@ async function askAnthropic(systemPrompt, userText, history = []) {
       return '抱歉，目前無法取得回應，請稍後再試或洽現場工作人員。';
     }
     // LINE 不渲染 Markdown，統一在這個出口清一次——見 stripMarkdownForLine() 的說明。
-    return stripMarkdownForLine(data.content?.[0]?.text) || '抱歉，無法取得回應。';
+    // ⚠️ 不能寫死 content[0]：回應是一個 content block 陣列，第一塊不保證是文字
+    // （thinking 一旦開啟，第一塊就是 thinking block，.text 會是 undefined，整支
+    // 靜靜退化成「抱歉，無法取得回應」）。挑出所有 text 區塊接起來才穩，以後要開
+    // thinking 也不必回來改這裡。
+    const text = (data.content || [])
+      .filter(b => b?.type === 'text' && typeof b.text === 'string')
+      .map(b => b.text).join('\n').trim();
+    return stripMarkdownForLine(text) || '抱歉，無法取得回應。';
   } catch (e) {
     console.error('Anthropic 呼叫失敗:', e.message);
     return '抱歉，目前無法取得回應，請稍後再試。';
@@ -1225,7 +1260,37 @@ async function answerQuestion(replyToken, userId, rawEvent, mediaName, text, { l
   // 上一輪對話（只在 1 對 1、且上一輪答的就是這一場時才有東西）——「那成本呢」這種
   // 省略式續問要接得住，靠的就是這兩則；見 buildTurnHistory() 的說明。
   const history = memory ? await buildTurnHistory(userId, event.id) : [];
-  const rawReply = await askAnthropic(systemPrompt, text, history);
+
+  // ── 跨場次（批次 36）──────────────────────────────────────────────────
+  // 回報的意見：「這一定要切來切去特定活動專屬回答系統嗎？不能一體適用？」
+  // 記者問「今年院士有誰」，答案就寫在《工研院院士授證典禮》那場的新聞稿裡——但問答
+  // 只讀「目前綁定的這一場」，於是不是答不出來、就是要先切過去。記者根本不該需要知道
+  // 「這個問題屬於哪一場」。
+  //
+  // 主場次照舊完整帶進第一個（吃快取的）system 區塊，另外自動挑幾場真的跟這題有關的
+  // 接在第二個區塊——挑選是純字面比對、不呼叫 AI（見 lib/related-events.js 的說明）。
+  // 挑不到就是空字串，行為跟改動前完全一樣。
+  //
+  // ⚠️ 用 allEvents 而不是 buildCalendarCards()：卡片只有 id／名稱／日期，沒有知識庫
+  // 全文，比不出「哪一場的內容跟這題有關」。這裡要的就是全文。
+  // ⚠️ 一樣過 resolveEventContent()：活動前的場次只能拿邀請函出來，不能因為它是「別
+  // 場」就繞過那道限制（見 lib/prompt.js 的說明）。
+  let relatedBlock = '';
+  try {
+    const others = (await getAllEventRows()).map(rowToEvent)
+      .filter(isUsable)
+      .map(e => resolveEventContent(e));
+    const related = selectRelatedEvents(text, others, { exclude: event.id });
+    relatedBlock = formatRelatedEventsBlock(related, event.name);
+    if (related.length) {
+      console.log(`[line] 跨場次帶入 ${related.map(e => e.id).join(',')} q="${text.slice(0, 40)}"`);
+    }
+  } catch (e) {
+    // 跨場次是加分功能，挑選出錯絕對不能讓記者連本場的答案都拿不到。
+    console.error('selectRelatedEvents 失敗:', e.message);
+  }
+
+  const rawReply = await askAnthropic(systemPrompt, text, history, { extraSystem: relatedBlock });
   // 標記一定要切掉（不管後面用不用得到那個關鍵詞），見 extractNoDataKeyword() 的 ⚠️。
   const { text: aiReply, keyword: noDataKeyword } = extractNoDataKeyword(rawReply);
   // 這場答不出來時，補查一次工研院官網新聞中心——回報的截圖就是這個洞（見

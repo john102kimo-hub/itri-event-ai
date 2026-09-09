@@ -296,6 +296,10 @@ export function installFetchStub() {
     if (u.includes('api.anthropic.com')) {
       const body = JSON.parse(opts.body);
       const sys = body.system?.[0]?.text || '';
+      // 批次 36 起 system 可能有第二個區塊（跨場次相關資料，見 api/line.js
+      // askAnthropic 的 extraSystem）。sys 維持只看第一塊（既有測試都靠它辨識是
+      // 哪一場），要驗跨場次就看 sysAll。
+      const sysAll = (body.system || []).map(b => b?.text || '').join('\n');
       // routeIntent() 的 currentEventId 提示是獨立的第二個 system 區塊（見
       // lib/router.js 的說明，刻意不塞進第一塊以免打散 ephemeral cache）——
       // 從那段話裡把活動名稱抓出來，反查回 id 給 fakeReporterRoute() 用。
@@ -347,7 +351,7 @@ export function installFetchStub() {
           // 在字串結尾，就是在這個形狀上漏掉的。
           ? `這部分我沒有資料。我手上的資訊主要是本次論壇的活動相關內容。\n\n如果你是想詢問出席的國際專家，現場包括美國、日本等 38 國代表。\n\n若需更詳細的出席名單，建議洽新聞聯絡人 徐喬涵 03-5915128。\n[[NO_DATA:${state.noDataKeyword}]]\n\n內容僅供參考，以工研院官網新聞稿或發言為準。`
           : '（假回答）';
-      sent.push({ kind: 'answer', event: ev, text: answerText, sys, question: userText, msgs: body.messages });
+      sent.push({ kind: 'answer', event: ev, text: answerText, sys, sysAll, question: userText, msgs: body.messages });
       return { ok: true, json: async () => ({ content: [{ type: 'text', text: answerText }] }) };
     }
     // lib/industry-trends.js fetchIndustryTrendDigest() 打的 IEK 免費焦點清單頁。
