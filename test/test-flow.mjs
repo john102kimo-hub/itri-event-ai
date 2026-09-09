@@ -597,10 +597,13 @@ out = await send('四足機器人的重點', 'U_staff');
 check('職員模式問活動內容一樣附 chips（走同一支 answerQuestion）',
   JSON.stringify(out[1]?.quickReply) === JSON.stringify(['重點', '應用', '媒體邀訪需求']), JSON.stringify(out));
 
-// 群組問答也要附 chips，跟 1 對 1 一致
+// 群組問答也要附 chips——但群組沒有圖文選單，同一排還要背負「導覽」的責任（批次 40）
 reset(); await freshModule();
 out = await sendGroup('@我 四足機器人記者會的重點', { mentionSelf: true, mentionText: '@我 ' });
-check('群組問答也附 chips', JSON.stringify(out[1]?.quickReply) === JSON.stringify(['重點', '應用', '媒體邀訪需求']), JSON.stringify(out));
+{
+  const texts = (out[1]?.quickReply || []).map(i => (typeof i === 'object' ? i.text : i));
+  check('群組問答一樣附得到同仁自訂的 chips', texts.includes('重點') && texts.includes('應用'), JSON.stringify(out[1]?.quickReply));
+}
 
 // ── 情境 11：自然語言綁定時順手問媒體名稱（回報的分析缺口）────────────
 // 回報的問題：用打活動名稱軟綁定（handleUnbound 的 qa 高信心分支）的記者從頭到尾
@@ -1790,6 +1793,73 @@ state.answerText = ''; // 讓活動問答那支照舊帶標記
     /有相關報導/.test(sentText) && /itri\.org\.tw/.test(sentText), sentText.slice(-260));
 }
 state.noDataKeyword = '';
+
+// ── 情境 21.995：群組裡切到某一場之後，要有路走得回來（回報的截圖，批次 40）────────
+// 回報：「群組對話 如果切到特定活動 比較難切回來 因為圖示不會像 1 對 1 出現」。
+// 圖文選單是 LINE 的 1 對 1 專屬功能，群組聊天室不顯示——1 對 1 的記者隨時有 🏠
+// 可以按，群組裡的記者答完一題之後，按鈕列整排都是「這場活動的快速提問」，一條
+// 往外的路都沒有。功能其實一直都在（打「回首頁」就會動），是**看不到**。
+console.log('── 群組：答完一題之後，按鈕列要有往外的路 ──');
+reset(); await freshModule();
+state.bindings.set('Cgroup1', { event_id: 'quad', media_name: '', note: '', bound_at: Date.now() });
+out = await sendGroup('@我 這場的重點是什麼', { mentionSelf: true, mentionText: '@我 ' });
+{
+  const chips = out.at(-1)?.quickReply || [];
+  const texts = chips.map(i => (typeof i === 'object' ? i.text : i));
+  const labels = chips.map(i => (typeof i === 'object' ? i.label : i));
+  check('群組答案的按鈕列有「回首頁」（就是回報說找不到的那條路）', texts.includes('回首頁'), JSON.stringify(chips));
+  check('也有「最近有哪些活動」，可以不解除綁定直接看清單換場', texts.includes('最近有哪些活動'), JSON.stringify(chips));
+  check('另外兩條路（產業趨勢／問技術）也在，跟 1 對 1 圖文選單同一組', 
+    texts.includes('產業趨勢分析') && texts.includes('想問什麼技術'), JSON.stringify(chips));
+  check('邀訪窗口沒有被擠掉', texts.includes('媒體邀訪需求'), JSON.stringify(chips));
+  check('⚠️ 往外的兩顆排在最前面（藏在自訂提問後面等於沒有，手機一次只看得到兩三顆）',
+    texts[0] === '回首頁' && texts[1] === '最近有哪些活動', JSON.stringify(texts));
+  check('顯示用的標籤帶 icon、跟圖文選單同一組視覺', /🏠/.test(labels[0]) && /📅/.test(labels[1]), JSON.stringify(labels));
+  check('⚠️ 不超過 LINE 的 13 顆硬上限（超過會從尾巴被截掉，截掉的正好是導覽）', chips.length <= 13, `${chips.length} 顆`);
+}
+
+// 1 對 1 不動：那邊圖文選單一直顯示在畫面下方，同一組入口再塞進按鈕列只會排擠掉
+// 同仁自訂的提問
+reset(); await freshModule();
+state.bindings.set('U_reporter', { event_id: 'quad', media_name: '中央社', note: '', bound_at: Date.now() });
+out = await send('這場的重點是什麼');
+check('1 對 1 的按鈕列維持原樣（有圖文選單頂著，不重複塞導覽）',
+  JSON.stringify(out[1]?.quickReply) === JSON.stringify(['重點', '應用', '媒體邀訪需求']), JSON.stringify(out[1]?.quickReply));
+
+// 按下去要真的會動——而且是在「續問視窗已經過期」的情況下（按鈕會留在對話紀錄裡，
+// 記者往上滑才按是常態，這正是批次 30/32 踩過兩次的坑）
+for (const [label, text] of [['回首頁', '回首頁'], ['其他活動', '最近有哪些活動']]) {
+  reset(); await freshModule();
+  state.bindings.set('Cgroup1', { event_id: 'quad', media_name: '', note: '', bound_at: Date.now(), groupSessionUntil: Date.now() - 60000 });
+  out = await sendGroup(text, { mentionSelf: false });
+  check(`視窗過期後按「${label}」→ 接得住，不用先 @ 也不用寫「米亞」`, out.length > 0, JSON.stringify(out));
+}
+
+// 「回首頁」要真的解除綁定，不是只回一句話——不解除的話記者接著打的新場次名稱
+// 會先被當成對舊場次的提問
+reset(); await freshModule();
+state.bindings.set('Cgroup1', { event_id: 'quad', media_name: '', note: '', bound_at: Date.now() });
+out = await sendGroup('@我 回首頁', { mentionSelf: true, mentionText: '@我 ' });
+// 綁定是靠 bound_at 判定有沒有效（見 getBinding() 的 TTL），clearBinding() 清的
+// 就是那一格——不是把 event_id 抹掉
+check('群組按「回首頁」→ 真的解除這個群組的活動綁定', !state.bindings.get('Cgroup1')?.bound_at,
+  JSON.stringify(state.bindings.get('Cgroup1')));
+check('並且列出活動清單，讓人當場挑下一場', /活動|場次/.test(out.at(-1)?.text || ''), JSON.stringify(out));
+// 行為上的驗證：解除之後再問一句沒指名場次的話，不會再被當成對舊那場（quad）的提問
+out = await sendGroup('@我 這場的重點是什麼', { mentionSelf: true, mentionText: '@我 ' });
+check('解除後的下一句不再自動算在舊場次頭上', !out.some(o => o.kind === 'answer' && o.event === 'quad'),
+  JSON.stringify(out));
+
+// 群組換場的確認訊息，原本完全沒有按鈕——換完場正是最需要導覽的一刻
+reset(); await freshModule();
+state.bindings.set('Cgroup1', { event_id: 'quad', media_name: '', note: '', bound_at: Date.now() });
+out = await sendGroup('@我 半導體先進封裝技術發表會', { mentionSelf: true, mentionText: '@我 ' });
+{
+  const last = out.at(-1);
+  const texts = (last?.quickReply || []).map(i => (typeof i === 'object' ? i.text : i));
+  check('群組換場確認訊息也附按鈕（換錯了要能馬上換回去）',
+    /已為您換到/.test(last?.text || '') && texts.includes('回首頁'), JSON.stringify(out));
+}
 
 // ── 情境 21.99：跨場次——答案在別場的新聞稿裡也要答得出來（批次 36）─────────────
 // 回報的意見：「這一定要切來切去特定活動專屬回答系統嗎？不能一體適用？」

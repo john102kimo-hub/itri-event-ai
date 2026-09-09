@@ -702,6 +702,41 @@ const DEFAULT_CHIPS = [
 // 要打這句話才找得到這個功能——跟內容 chips 放在一起才會被看到。
 const CONTACT_MENU_LABEL = '媒體邀訪需求';
 
+// 群組專用的導覽按鈕（批次 40）。
+//
+// 回報的問題：群組裡切到某一場活動之後「比較難切回來」——原因不是功能不見了
+// （「回首頁」「最近有哪些活動」一直都認得，打字就會動），而是**群組看不到圖文
+// 選單**。圖文選單是 LINE 的 1 對 1 專屬功能，群組聊天室不會顯示，所以 1 對 1 的
+// 記者隨時有 🏠 可以按，群組裡的記者答完一題之後看到的按鈕列只剩「這場活動的
+// 快速提問」，整排都是往裡面走的路，一條往外的路都沒有。
+//
+// 這件事在批次 18／28 其實已經認過一次（「群組裡沒有持續顯示的圖文選單，這則歡迎
+// 訊息附的按鈕就是群組唯一一次看得到『還能問什麼』的機會」），但當時只補在**入群
+// 自我介紹**跟**只 @ 沒接問題**這兩則上——那是記者「還沒開始問」的時候。真正會卡住
+// 的時機是「已經問了幾題、想換個方向」，而那個時機的按鈕列正好是唯一沒補到的一排。
+//
+// 解法就是把圖文選單搬到群組的快速回覆列上：連 icon 都沿用 REPORTER_MENU 的同一組
+// （📅🏠🔬📊📞），群組裡的記者看到的東西跟 1 對 1 的人一致，不用重新學。
+//
+// ⚠️ label 跟 text 刻意分開：顯示用短標＋icon（按鈕列寬度有限，「媒體邀訪需求」
+// 五個字擠掉的是隔壁按鈕的能見度），送出的 text 維持原本那幾個字，這樣
+// detectMetaIntent()／GROUP_FIXED_BUTTONS／isOwnButtonText() 三邊完全不用改——
+// 改 text 才是會出事的那一種改動（按鈕送出的字沒人認得＝按了沒反應，批次 30 踩過）。
+//
+// ⚠️ 往外的兩顆（回首頁、其他活動）放在**最前面**，不是照舊接在最後：批次 29 已經
+// 學過一次「按鈕列最後一格的『媒體邀訪需求』不夠明顯，滑一排按鈕容易漏看」，那次
+// 的補救是把入口寫進文字裡。這排在群組裡是唯一的出口，藏在 8 顆自訂提問後面等於
+// 沒有——手機一次只看得到兩三顆。
+const GROUP_NAV_HEAD = [
+  { label: '🏠 回首頁', text: '回首頁' },            // 解除綁定＋列出全部活動與其他功能
+  { label: '📅 其他活動', text: '最近有哪些活動' }    // 只列清單、不解除綁定，點活動名稱直接換過去
+];
+const GROUP_NAV_TAIL = [
+  { label: '📊 產業趨勢', text: '產業趨勢分析' },
+  { label: '🔬 問技術', text: '想問什麼技術' },
+  { label: '📞 邀訪窗口', text: CONTACT_MENU_LABEL }
+];
+
 // LINE quick reply 上限 13 顆，扣掉固定的「媒體邀訪需求」那一格，內容 chips 最多留
 // 12 格——同仁在後台放了 13 題以上的自訂問題不是常態，但真的放了也不能讓陣列超過
 // LINE 的硬限制，寧可截斷內容 chips 也不能把邀訪窗口的入口擠掉。
@@ -711,11 +746,16 @@ const CONTACT_MENU_LABEL = '媒體邀訪需求';
 // 不是壞掉，但沒有用。呼叫端不用先自己判斷是不是活動前、也不用先手動 resolve 一次，
 // 這裡永遠拿到「當下該用哪組 chips」的正確答案；resolveEventContent() 對已經 resolve
 // 過的 event 再呼叫一次是安全的（同一批欄位只會算出同樣的結果，不會疊加）。
-function eventQuickChips(rawEvent) {
+function eventQuickChips(rawEvent, { group = false } = {}) {
   const event = resolveEventContent(rawEvent || {});
   const custom = String(event?.chips || '').split('\n').map(s => s.trim()).filter(Boolean);
-  const contentChips = (custom.length ? custom : DEFAULT_CHIPS).slice(0, 12);
-  return [...contentChips, CONTACT_MENU_LABEL];
+  // ⚠️ LINE quick reply 硬上限 13 顆，超過的會被 buildQuickReply() 從尾巴截掉。
+  // 群組多了 5 顆固定導覽，內容 chips 只能留 8 顆；1 對 1 有圖文選單撐著，維持原本
+  // 12 顆內容 ＋「媒體邀訪需求」不動（這裡不是「群組比較重要」，是 1 對 1 的那五條
+  // 路本來就一直顯示在畫面下方，重複放進按鈕列只會排擠掉同仁自訂的提問）。
+  const contentChips = (custom.length ? custom : DEFAULT_CHIPS).slice(0, group ? 8 : 12);
+  if (!group) return [...contentChips, CONTACT_MENU_LABEL];
+  return [...GROUP_NAV_HEAD, ...contentChips, ...GROUP_NAV_TAIL];
 }
 
 // 回報的意見：記者被引導「請直接輸入想問的活動名稱，或從下面挑一場」（換場、或
@@ -1329,7 +1369,7 @@ async function answerFromItriNews(keyword, items, question, chinese) {
   }
 }
 
-async function answerQuestion(replyToken, userId, rawEvent, mediaName, text, { loading = true, allowPreEventSubstitution = true, switchNotice = '', memory = false } = {}) {
+async function answerQuestion(replyToken, userId, rawEvent, mediaName, text, { loading = true, allowPreEventSubstitution = true, switchNotice = '', memory = false, group = false } = {}) {
   // 活動前只給媒體邀請函、不給正式新聞稿與照片（見 lib/prompt.js resolveEventContent()
   // 的說明）。放在這裡而不是呼叫端各自判斷，理由跟下面的邀訪窗口比對一樣：1 對 1、
   // 群組最後都走這支，寫一次兩邊都受惠。
@@ -1357,7 +1397,7 @@ async function answerQuestion(replyToken, userId, rawEvent, mediaName, text, { l
   if (contact) {
     const reply = switchNotice + formatContactReply(contact);
     console.log(`[line] contact match event=${event.id} keyword="${contact.keyword}"`);
-    await replyOrPush(replyToken, userId, reply, eventQuickChips(event));
+    await replyOrPush(replyToken, userId, reply, eventQuickChips(event, { group }));
     await logQa(event, mediaName, text, reply);
     return;
   }
@@ -1422,7 +1462,7 @@ async function answerQuestion(replyToken, userId, rawEvent, mediaName, text, { l
   // 每則答案都附上這場的快速提問按鈕（同仁自訂的 chips，或沒設定時的預設問題）——
   // 跟網頁版一樣，chips 不是「選過一次就收起來」的一次性選單，而是隨時都在，記者
   // 問完一題還想繼續問別的方向，點一下就好，不用自己想下一句要打什麼。
-  await replyOrPush(replyToken, userId, reply, eventQuickChips(event));
+  await replyOrPush(replyToken, userId, reply, eventQuickChips(event, { group }));
   if (event.images && looksLikePhotoRequest(text)) {
     // 附圖是錦上添花、獨立一次 push：reply token 已經被上面那則文字答案用掉了，
     // 這裡本來就只能用 push；就算某張照片網址被 LINE 拒絕，也只記 log，不能讓
@@ -1698,7 +1738,7 @@ async function handleStaffMessage(replyToken, userId, text) {
 //
 // 放在綁定判斷「之前」是刻意的：沒綁定的記者問「使用說明」一樣要拿到說明，而不是
 // 掉進 routeIntent() 被判成 other、只拿到「不確定您想問哪一場」。
-async function handleMetaIntent(replyToken, userId, text, metaIntent, binding, { speakerId = '' } = {}) {
+async function handleMetaIntent(replyToken, userId, text, metaIntent, binding, { speakerId = '', group = false } = {}) {
   // ask_name 是「#代碼綁定後問了媒體名稱，下一則要試著擷取」的一次性旗標。
   // 記者在那個視窗裡改按了選單按鈕，代表他跳過了報名字這件事，旗標要當場作廢——
   // 不清掉的話，等他選完活動再回來打的第一句真正的問題，會被 looksLikeNameOrSkip()
@@ -1770,7 +1810,7 @@ async function handleMetaIntent(replyToken, userId, text, metaIntent, binding, {
       }
       if (current.press_contact) {
         await replyOrPush(replyToken, userId,
-          `《${current.name}》的新聞聯絡人：\n${current.press_contact}`, eventQuickChips(current));
+          `《${current.name}》的新聞聯絡人：\n${current.press_contact}`, eventQuickChips(current, { group }));
         return;
       }
       // 這場活動兩個都沒設定 → 往下退到全域技術窗口清單，比什麼都拿不到好。
@@ -2159,7 +2199,7 @@ async function isOwnButtonText(groupId, text, speakerId) {
   const binding = await getBinding(groupId);
   const current = binding?.event_id ? await getEventById(binding.event_id) : null;
   if (current) {
-    if (eventQuickChips(current).some(c => (typeof c === 'string' ? c : c.text) === s)) return true;
+    if (eventQuickChips(current, { group: true }).some(c => (typeof c === 'string' ? c : c.text) === s)) return true;
     if (parseEventContacts(current).some(c => c.keyword === s)) return true;
   }
   return false;
@@ -2382,7 +2422,7 @@ async function handleGroupMessage(replyToken, groupId, text, { mentioned, speake
 
   const metaIntent = detectMetaIntent(text);
   if (metaIntent) {
-    await handleMetaIntent(replyToken, groupId, text, metaIntent, binding, { speakerId });
+    await handleMetaIntent(replyToken, groupId, text, metaIntent, binding, { speakerId, group: true });
     await touchGroupSession(groupId); // 這一輪有回答 → 續問視窗重新計時
     return;
   }
@@ -2414,7 +2454,10 @@ async function handleGroupMessage(replyToken, groupId, text, { mentioned, speake
       await upsertBinding(groupId, target.id, '');
       // 純粹選台，不是問題——理由跟 1:1 那段同一套（見上方那段的完整說明），
       // 不呼叫 AI、不寫 qa_log，避免灌水「累積回答題數」。
-      await replyOrPush(replyToken, groupId, `已為您換到《${target.name}》✅ 請直接問問題即可。`);
+      // ⚠️ 這則原本完全沒附按鈕（1 對 1 有圖文選單頂著，看不出問題）。群組裡剛換完
+      // 場正是最需要導覽的一刻：換錯了要能馬上換回去，換對了要能看到這場能問什麼。
+      await replyOrPush(replyToken, groupId, `已為您換到《${target.name}》✅ 請直接問問題即可。`,
+        eventQuickChips(target, { group: true }));
       await touchGroupSession(groupId);
       return;
     }
@@ -2424,7 +2467,11 @@ async function handleGroupMessage(replyToken, groupId, text, { mentioned, speake
   if (!isUsable(event)) {
     // 綁定指向的活動變成不可問答（例如被下架）——這種邊界情況比照 silentOnOther
     // 的邏輯：真的被 @ 到才值得說明，續問視窗內安靜跳過就好。
-    if (mentioned) await replyOrPush(replyToken, groupId, '這場活動目前無法問答，請洽現場工作人員。');
+    if (mentioned) {
+      // 一樣附上導覽：這場問不了，記者需要的是「那還能問什麼」，不是一句句點。
+      await replyOrPush(replyToken, groupId, '這場活動目前無法問答，請洽現場工作人員。',
+        [...GROUP_NAV_HEAD, ...GROUP_NAV_TAIL]);
+    }
     return;
   }
 
@@ -2478,7 +2525,7 @@ async function handleGroupMessage(replyToken, groupId, text, { mentioned, speake
     }
   }
 
-  await answerQuestion(replyToken, groupId, answerEvent, '（群組提問）', text, { loading: false, switchNotice });
+  await answerQuestion(replyToken, groupId, answerEvent, '（群組提問）', text, { loading: false, switchNotice, group: true });
   await touchGroupSession(groupId);
 }
 
