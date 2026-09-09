@@ -626,8 +626,27 @@ function eventQuickChips(rawEvent) {
 // 只給記者端的活動清單用（handleMetaIntent／handleUnbound）——handleStaffMessage()
 // 自己的 'calendar' 分支刻意不套用，同仁已經有整套 STAFF_QUICK_REPLIES，「媒體
 // 邀訪需求」是講給記者聽的措辭，職員這裡看到只會多一顆用不到的按鈕。
+//
+// 回報的截圖（批次 29）：正式站問「最近有哪些活動」，按鈕列只有孤零零兩顆
+// 「工研院創新日」「媒體邀訪需求」，看起來很空。原因不是壞掉——這排刻意只列
+// **有資料的活動**（calendarQuickReplyItems() 會濾掉沒有 kb 的場次，點了也問不出
+// 東西），而正式站當下只有一場符合。但真正的問題是：這個帳號有四條路，這排卻只
+// 放了「活動」跟「邀訪窗口」兩條，另外兩條（產業趨勢、工研院技術）從來沒出現在
+// 這裡，記者要嘛自己打字、要嘛得先去點圖文選單才知道有這些功能。
+//
+// 活動少的時候按鈕列空蕩蕩，活動多的時候另外兩條路又被埋掉——兩種情況都該把四條路
+// 一起放上來，跟群組自我介紹、兜底文案、join 歡迎詞同一份口徑（那三處早就是四條路
+// 一次列完）。
+//
+// ⚠️ LINE quick reply 硬上限 13 顆。活動最多 8 顆（calendarQuickReplyItems 的預設
+// limit）＋ 下面 4 顆固定 ＝ 12，永遠塞得下；就算哪天把活動上限調大，也要先確認
+// 加起來不超過 13，不然會被 buildQuickReply() 從尾巴截掉——被截掉的正好是這四顆
+// 固定入口，等於白加。
 function calendarQuickRepliesForReporter(cards) {
-  return [...calendarQuickReplyItems(cards), CONTACT_MENU_LABEL];
+  return [
+    ...calendarQuickReplyItems(cards),
+    '產業趨勢分析', '想問什麼技術', CONTACT_MENU_LABEL, '使用說明'
+  ];
 }
 
 // 回報的意見：按鈕列最後一格的「媒體邀訪需求」不夠明顯，滑一排按鈕容易漏看——
