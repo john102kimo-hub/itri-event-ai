@@ -33,7 +33,7 @@
 import { readRange, appendRows, updateRange, ensureSheets } from '../lib/sheets.js';
 import { buildSystemPrompt, resolveEventContent } from '../lib/prompt.js';
 import {
-  readRawBody, verifySignature, replyOrPush, replyOrPushMessages, startLoading, pushImages,
+  readRawBody, verifySignature, replyOrPush as replyOrPushRaw, replyOrPushMessages, startLoading, pushImages,
   createRichMenu, uploadRichMenuImage, setDefaultRichMenu, listRichMenus, deleteRichMenu,
   linkRichMenuToUser, unlinkRichMenuFromUser,
   isBotMentioned, stripMentionText, pushMessage
@@ -745,6 +745,32 @@ const GROUP_NAV_TAIL = [
   { label: '🔬 問技術', text: '想問什麼技術' },
   { label: '📞 邀訪窗口', text: CONTACT_MENU_LABEL }
 ];
+const GROUP_NAV = [...GROUP_NAV_HEAD, ...GROUP_NAV_TAIL];
+
+// LINE 的 id 前綴：使用者 U、群組 C、聊天室 R（官方文件的慣例，很穩定）。判斷錯的
+// 代價也只是「群組少一排導覽」或「1 對 1 多一排」，不會壞掉。
+const isGroupTarget = id => /^[CR]/.test(String(id || ''));
+
+// ⚠️ 這一層是「群組導覽不會漏掉」的結構性保證（批次 43），不是方便而已。
+//
+// 回報：在群組按「媒體邀訪需求」→「邀訪：綠能」，拿到窗口聯絡人之後**整則訊息一顆
+// 按鈕都沒有**，問完就斷在那裡。使用者問的是「建議改成常駐嗎」——LINE 的快速回覆
+// 本來就是綁在單一則訊息上的，沒有「常駐」這種選項；真正常駐的是圖文選單，而群組
+// 不顯示圖文選單（批次 40）。所以群組裡「常駐」唯一的實作方式，就是**每一則回覆都
+// 自己帶著那排導覽**。
+//
+// 為什麼包一層、而不是去每個呼叫點補第四個參數：api/line.js 有五十幾處 replyOrPush，
+// 群組走得到的至少十幾處。手動補一輪就是又一次「漏掉的那一顆」——這條路上已經連續
+// 四次（批次 30、32、40、41）敗在同一種錯。包起來之後，新增的回覆自動有導覽，不用
+// 記得，也不會忘記。
+//
+// 只在「呼叫端沒有自己給按鈕」時才補：給了就代表那則訊息有更貼切的選項（活動清單、
+// 邀訪主題、這場的快速提問…），不要覆蓋掉。
+async function replyOrPush(replyToken, targetId, text, quickReplyItems) {
+  const items = (quickReplyItems && quickReplyItems.length) ? quickReplyItems
+    : (isGroupTarget(targetId) ? GROUP_NAV : quickReplyItems);
+  return replyOrPushRaw(replyToken, targetId, text, items);
+}
 
 // LINE quick reply 上限 13 顆，扣掉固定的「媒體邀訪需求」那一格，內容 chips 最多留
 // 12 格——同仁在後台放了 13 題以上的自訂問題不是常態，但真的放了也不能讓陣列超過
