@@ -1670,6 +1670,52 @@ out = await send('Who are this year fellows');
 state.answerText = '';
 state.noDataKeyword = '';
 
+// ── 情境 21.98：補查不能只靠模型自己標記（實測回報，批次 37）─────────────────────
+// 連續三批（31→33→34）都在修「標記為什麼沒出現」，最後一次實測仍然沒跑：回覆明明就是
+// 「這題目前我手上沒有具體的名單資料」，補查那條路照樣沒動。請模型在回答裡順手加一個
+// 機器讀的標記，本來就不是可靠的機制——標記留著（語意最準），但不能再是唯一觸發條件。
+{
+  const { guessNoDataKeyword } = await import(new URL(`../api/line.js?v=${modSeq}`, import.meta.url).href);
+  console.log('── 從問句猜關鍵詞（標記沒出現時的退路）──');
+  for (const [q, expect] of [
+    ['今年院士', '院士'],                       // 回報截圖裡的原話
+    ['今年院士有誰', '院士'],
+    ['得獎名單', '得獎名單'],
+    ['今年的得獎名單是什麼', '得獎名單'],       // 尾巴的「是」要切掉
+    ['這次活動的合作廠商有哪些', '合作廠商'],
+    ['有機材料的應用', '有機材料應用'],         // 詞中間的「有」不能動
+    ['好', ''],                                  // 太短 → 放棄（不補查，不會更糟）
+    ['？？', '']
+  ]) {
+    check(`猜關鍵詞：「${q}」→「${expect}」`, guessNoDataKeyword(q) === expect, JSON.stringify(guessNoDataKeyword(q)));
+  }
+}
+
+console.log('── 模型沒加標記，但回覆就是在說「我沒有這項資料」→ 照樣補查 ──');
+reset(); await freshModule();
+state.bindings.set('U_reporter', { event_id: 'quad', media_name: '', note: '', bound_at: Date.now() });
+// 刻意不設 noDataKeyword：模擬「模型沒有照規則加標記」——那正是實測發生的事
+state.answerText = '這題目前我手上沒有具體的名單資料，得洽現場新聞聯絡人確認喔。';
+out = await send('今年院士');
+{
+  const sentText = out.filter(o => o.kind === 'text').map(o => o.text).join('\n');
+  check('沒有標記也要補查官網並附上原文連結（不再只靠模型自己標記）',
+    /工研院官網新聞中心有相關報導/.test(sentText) && /itri\.org\.tw/.test(sentText), sentText.slice(0, 300));
+  check('原本那句誠實的回答還在，沒有被補查蓋掉',
+    /沒有具體的名單資料/.test(sentText), sentText.slice(0, 120));
+}
+state.answerText = '';
+
+// 反面：答得出來的回覆不能被誤判成「沒有資料」而多查一次官網
+reset(); await freshModule();
+state.bindings.set('U_reporter', { event_id: 'quad', media_name: '', note: '', bound_at: Date.now() });
+state.answerText = '這場的重點是四足機器人平台的三項技術突破，分別是感測、運動控制與 AI 決策。';
+out = await send('這場的重點是什麼');
+check('正常答得出來的回覆 → 不會被誤判成沒有資料、不會多附官網連結',
+  !/工研院官網新聞中心有相關報導/.test(out.filter(o => o.kind === 'text').map(o => o.text).join('')),
+  JSON.stringify(out.filter(o => o.kind === 'text').map(o => o.text?.slice(0, 60))));
+state.answerText = '';
+
 // ── 情境 21.99：跨場次——答案在別場的新聞稿裡也要答得出來（批次 36）─────────────
 // 回報的意見：「這一定要切來切去特定活動專屬回答系統嗎？不能一體適用？」
 // 記者問「今年院士有誰」，答案就寫在《工研院院士授證典禮》那場的新聞稿裡，但問答只讀

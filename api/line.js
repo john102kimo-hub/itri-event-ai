@@ -1194,6 +1194,37 @@ export function extractNoDataKeyword(raw) {
 // 不會因為補查失敗而讓記者收不到答案。
 const NO_DATA_MAX_LINKS = 2;
 
+// ── 不再只靠模型自己標記（批次 37）─────────────────────────────────────────
+// 連續三批（31→33→34）都在修「標記為什麼沒出現」，最後一次實測仍然沒跑：回覆明明
+// 就是「這題目前我手上沒有具體的名單資料」，補查那條路照樣沒動。
+//
+// 到這裡結論很清楚：**請模型在回答裡順手加一個機器讀的標記，本來就不是可靠的機制**。
+// 它每次都要在「照規則加標記」跟「把回答寫好」之間分心，而規則再怎麼寫都只是請求。
+// 標記留著（它抓到的關鍵詞語意最準，有加就用），但不能再是唯一的觸發條件——補上
+// 一道純程式的判斷：回覆的內容看起來就是在說「我沒有這項資料」時，一樣去補查。
+//
+// ⚠️ 誤判的代價很小：多查一次官網，查到就多附兩個連結、查不到就什麼都不加。
+// 漏判的代價才大（記者本來拿得到答案卻沒拿到），所以這裡刻意放寬。
+const NO_DATA_PHRASE_RE = /(沒有|未|查不到|找不到).{0,10}(資料|內容|資訊|名單|說明)|沒有提到|未提及|沒有這方面|手上沒有|不在.{0,6}資料/;
+
+// 標記沒出現時，退而求其次從記者的問句猜一個關鍵詞。
+// 「今年院士」→「院士」、「今年院士有誰」→「院士」、「得獎名單」→「得獎名單」。
+// ⚠️ 刻意不共用 lib/itri-news.js 的 stripTechQueryFiller()：那支是給「想問什麼技術」
+// 那條路用的，多拿掉「今年」「有誰」這些詞會影響到那邊的既有行為。這裡是不同的場景，
+// 各自維護一份短清單比硬共用安全。
+const NO_DATA_FILLER_RE = /今年|去年|明年|今天|昨天|明天|最近|最新|目前|現在|本屆|這次|本次|有誰|是誰|哪些|哪位|什麼|甚麼|請問|想問|想知道|一下|我們|你們|活動|的|嗎|呢|吧|了|喔|耶|[\s?？！!。，,、：:]/g;
+// 拿掉語助詞之後常會在尾巴留下一個孤零零的動詞／繫詞（「得獎名單是」「合作廠商有」）。
+// 只切尾巴、不全域切——「有機材料」「是非題」這種詞中間的字不能動。
+const NO_DATA_TAIL_RE = /[是有為會在要能與和及]+$/;
+
+export function guessNoDataKeyword(question) {
+  const kw = String(question || '').replace(NO_DATA_FILLER_RE, '').replace(NO_DATA_TAIL_RE, '').trim();
+  // 太短（剩一個字）沒有查詢價值，太長多半是沒抽乾淨的整句話，兩種都放棄——
+  // 放棄就是不補查，回到原本那句誠實的回答，不會更糟。
+  return /^[^\s]{2,20}$/.test(kw) ? kw : '';
+}
+
+
 // 這段引言是「我們自己加的」，不是模型寫的——所以 lib/prompt.js 那條「跟著記者的
 // 提問語言回答」的規則管不到它，得自己判斷。不然英文記者會拿到一段英文答案、下面
 // 突然接一句中文，看起來像壞掉（批次 34 補：那條語言規則存在就是為了服務英文提問，
@@ -1295,8 +1326,16 @@ async function answerQuestion(replyToken, userId, rawEvent, mediaName, text, { l
   const { text: aiReply, keyword: noDataKeyword } = extractNoDataKeyword(rawReply);
   // 這場答不出來時，補查一次工研院官網新聞中心——回報的截圖就是這個洞（見
   // lineExtraRules() 那條規則的說明）。查不到就是空字串，原本的答案照舊。
-  const newsHint = noDataKeyword
-    ? await itriNewsHintBlock(noDataKeyword, { chinese: hasChinese(aiReply) })
+  // 標記優先（模型抓的關鍵詞語意最準），沒有標記就看回覆內容像不像「我沒有這項資料」，
+  // 像的話從問句猜一個關鍵詞——見 NO_DATA_PHRASE_RE 的說明（批次 37）。
+  const fallbackKeyword = (!noDataKeyword && NO_DATA_PHRASE_RE.test(aiReply))
+    ? guessNoDataKeyword(text) : '';
+  const lookupKeyword = noDataKeyword || fallbackKeyword;
+  if (lookupKeyword) {
+    console.log(`[line] 補查官網 kw="${lookupKeyword}" 來源=${noDataKeyword ? '標記' : '句型判斷'}`);
+  }
+  const newsHint = lookupKeyword
+    ? await itriNewsHintBlock(lookupKeyword, { chinese: hasChinese(aiReply) })
     : '';
   const reply = switchNotice + aiReply + newsHint;
   // 診斷用途，不是必要邏輯：路由判斷得準不準、AI 答得順不順，靠這行在 Vercel Logs
