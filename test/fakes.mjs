@@ -331,7 +331,10 @@ export function installFetchStub() {
       // 記者跟按鈕不是同一種輸入，要能驗證呼叫端到底送了什麼字串上去，不能只看
       // system prompt。
       const ev = state.events.find(e => sys.includes(e[1]))?.[0] || 'unknown';
-      sent.push({ kind: 'answer', event: ev, text: '（假回答）', sys, question: userText });
+      // msgs：整個 messages 陣列。批次 28 的對話記憶會在使用者這一則「前面」補上一輪
+      // user／assistant（見 api/line.js buildTurnHistory()），只看 question（＝
+      // messages[0]）分不出有沒有回放，要驗回放就得看整串。
+      sent.push({ kind: 'answer', event: ev, text: '（假回答）', sys, question: userText, msgs: body.messages });
       return { ok: true, json: async () => ({ content: [{ type: 'text', text: '（假回答）' }] }) };
     }
     // lib/industry-trends.js fetchIndustryTrendDigest() 打的 IEK 免費焦點清單頁。

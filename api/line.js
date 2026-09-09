@@ -1848,9 +1848,28 @@ async function handleGroupEvent(replyToken, ev) {
     return;
   }
 
+  // speakerId：群組裡「這句話是誰講的」。一次性旗標要記住是誰按的按鈕（見
+  // pendingNoteFor()），守門也要靠它判斷「正在等回答的那個人是不是他」。LINE 在
+  // 使用者沒同意提供 userId 時可能沒有這個欄位，拿不到就傳空字串。
+  const speakerId = ev.source?.userId || '';
+
+  // 免 @ 續問視窗內的統一守門（批次 28）——這句話看起來不是在跟我們講，就完全安靜。
+  //
+  // ⚠️ 一定要放在下面那道限流「之前」。上線後實測到的兩個症狀都是這個順序造成的：
+  //   ① 群組裡連續聊了十幾句自己的事（我們全程安靜、一句都沒回），第 16 句時機器人
+  //      突然冒出一句「提問太頻繁，請稍候片刻再試。」——沒有人在跟它講話，這正是
+  //      「亂回」本身，而且比答錯內容更莫名其妙
+  //   ② 那些我們根本不會回的閒聊照樣吃掉配額，等到真的有人 @ 我們問問題時，額度
+  //      早就被閒聊燒光，真正的提問反而被擋下來
+  // 限流保護的是 Anthropic／Sheets 的呼叫額度，而被守門擋掉的訊息從頭到尾不會走到
+  // 那些呼叫，本來就不該計入。守門在前面，計數才對得上「我們真的做了幾次事」。
+  if (!mentioned && !(await looksAddressedToBot(groupId, text, speakerId))) return;
+
   // 用 groupId 當限流 key，跟 1 對 1 用 line_user_id 同一個理由：LINE webhook
   // 全部來自 LINE 自己的伺服器，用單一額度保護的是「這個群組」，不會因為某個人
   // 連環發問就把同一群組其他人也一起鎖住（額度本來就是共用的，這是刻意的）。
+  // 走到這裡的訊息都已經通過守門（或本來就被 @ 到），也就是真的在跟我們講話——
+  // 這時候回一句「提問太頻繁」是對的，不是插話。
   if (rateLimited(groupId)) {
     await replyOrPush(replyToken, groupId, '提問太頻繁，請稍候片刻再試。');
     return;
@@ -1859,12 +1878,7 @@ async function handleGroupEvent(replyToken, ev) {
   // ⚠️ 群組裡刻意不接職員模式：密語比對／#代碼綁定完全跳過，一律走記者端的自然
   // 語言路由。同一群組裡可能同時有記者、公關同仁、甚至長官，密語一旦在群組裡打
   // 出來，所有在場的人都看得到——職員身分只能在私訊裡取得，這裡沒有例外。
-  // speakerId：群組裡「這句話是誰講的」。一次性旗標要記住是誰按的按鈕（見
-  // pendingNoteFor()），不然 A 按了「想問什麼技術」，B 隨口講的下一句就會被當成
-  // 技術名稱拿去查。LINE 在使用者沒同意提供 userId 時可能沒有這個欄位——拿不到就
-  // 傳空字串，設旗標時不寫主人（退回舊的「誰都算數」行為，不會因此壞掉），讀旗標時
-  // 對不上已經寫好的主人則一律不生效（安全方向是不亂接）。
-  await handleGroupMessage(replyToken, groupId, text, { mentioned, speakerId: ev.source?.userId || '' });
+  await handleGroupMessage(replyToken, groupId, text, { mentioned, speakerId });
 }
 
 // 被拉進群組的那一刻（批次 28）。LINE 會送一個 `join` 事件、附 replyToken——
@@ -1919,15 +1933,11 @@ async function handleGroupJoin(replyToken, ev) {
 // line_users 表的 key——等於「這個群組」自己有一份軟綁定狀態，直接複用整套 TTL／
 // 換場機制，不必為群組另外維護一份幾乎一樣的邏輯。
 async function handleGroupMessage(replyToken, groupId, text, { mentioned, speakerId = '' }) {
-  // 免 @ 續問視窗內的統一守門（批次 28）——這句話看起來不是在跟我們講，就完全安靜。
-  // ⚠️ 一定要放在最前面，比 detectMetaIntent()／旗標／路由都早：那幾條路本來就不看
-  // 「有沒有被 @」，是這次「群組亂回」回報的真正破口，見 looksAddressedToBot() 的
-  // 完整說明。真的被 @ 到時整支跳過，明確叫了機器人就不能不理人。
-  //
-  // 這裡不呼叫 touchGroupSession()——理由跟批次 14「@ 到別人時安靜」那段一樣：
-  // 不幫這種訊息續命，視窗才有機會真的到期，不會因為群組一直有人講話就永遠不關。
-  if (!mentioned && !(await looksAddressedToBot(groupId, text, speakerId))) return;
-
+  // ⚠️ 免 @ 續問視窗的守門（looksAddressedToBot）不在這支，在呼叫端 handleGroupEvent()
+  // 裡、而且刻意排在限流「之前」——走到這支的訊息都已經確定是在跟我們講話。理由見
+  // 那裡的說明（被守門擋掉的訊息不該吃掉限流額度，更不該讓機器人冒出一句
+  // 「提問太頻繁」插話）。守門擋掉時也不會呼叫 touchGroupSession()，理由跟批次 14
+  // 「@ 到別人時安靜」一樣：不幫這種訊息續命，視窗才有機會真的到期。
   const binding = await getBinding(groupId);
 
   const metaIntent = detectMetaIntent(text);

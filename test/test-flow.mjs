@@ -73,19 +73,19 @@ const res = { status() { return this; }, json() { return this; }, end() { return
 async function send(text, userId) {
   sent.length = 0;
   await handler(makeReq(text, userId), res);
-  return sent.map(s => ({ kind: s.kind, text: s.text, event: s.event, quickReply: s.quickReply, sys: s.sys, question: s.question }));
+  return sent.map(s => ({ kind: s.kind, text: s.text, event: s.event, quickReply: s.quickReply, sys: s.sys, question: s.question, msgs: s.msgs }));
 }
 
 async function sendRaw(events) {
   sent.length = 0;
   await handler(makeRawReq(events), res);
-  return sent.map(x => ({ kind: x.kind, text: x.text, event: x.event, quickReply: x.quickReply, sys: x.sys, question: x.question }));
+  return sent.map(x => ({ kind: x.kind, text: x.text, event: x.event, quickReply: x.quickReply, sys: x.sys, question: x.question, msgs: x.msgs }));
 }
 
 async function sendGroup(text, opts) {
   sent.length = 0;
   await handler(makeGroupReq(text, opts), res);
-  return sent.map(s => ({ kind: s.kind, text: s.text, event: s.event, quickReply: s.quickReply, sys: s.sys, question: s.question }));
+  return sent.map(s => ({ kind: s.kind, text: s.text, event: s.event, quickReply: s.quickReply, sys: s.sys, question: s.question, msgs: s.msgs }));
 }
 
 let pass = 0, fail = 0;
@@ -1351,6 +1351,35 @@ await send('想問什麼技術');
 check('1 對 1 的旗標不加「是誰按的」後綴（targetId 就是本人，多存一份只是雜訊）',
   state.bindings.get('U_reporter')?.note === 'await_tech_query', state.bindings.get('U_reporter')?.note);
 
+console.log('── 被守門擋掉的訊息不能吃掉限流額度，更不能讓機器人冒出「提問太頻繁」插話 ──');
+// 上線後走查實測到的：守門原本排在 rateLimited() 後面，於是群組連續聊了十幾句自己的
+// 事（我們全程安靜、一句都沒回），第 16 句時機器人突然冒出一句「提問太頻繁，請稍候
+// 片刻再試。」——沒有人在跟它講話，這正是「亂回」本身；而且那些閒聊燒光了額度，接著
+// 真的 @ 我們問問題的人反而被擋下來。限流保護的是 Anthropic／Sheets 的呼叫額度，被
+// 守門擋掉的訊息根本走不到那些呼叫，本來就不該計入。
+reset(); await freshModule();
+state.bindings.set('Cgroup1', { event_id: 'quad', media_name: '', note: '', bound_at: Date.now(), groupSessionUntil: Date.now() + 60000 });
+{
+  let spoke = 0;
+  for (let i = 0; i < 16; i++) {
+    const o = await sendGroup(`我等等把第 ${i} 份資料寄給你`, { mentionSelf: false }); // 純陳述句，守門一定擋掉
+    if (o.length) spoke++;
+  }
+  check('群組連續 16 句閒聊 → 全程一句都沒開口，不會冒出「提問太頻繁」插話', spoke === 0, `開口 ${spoke} 次`);
+  out = await sendGroup('@我 這場的重點是什麼', { mentionSelf: true, mentionText: '@我 ' });
+  check('閒聊沒有燒掉限流額度 → 接著真的 @ 我們問問題，照樣答得到',
+    out[0]?.kind === 'answer' && out[0].event === 'quad', JSON.stringify(out));
+}
+
+// 限流本身沒有被拿掉——真的連續發問（每句都通過守門）還是要擋得住。
+reset(); await freshModule();
+{
+  let last;
+  for (let i = 0; i < 16; i++) last = await sendGroup(`@我 問題${i}是什麼`, { mentionSelf: true, mentionText: '@我 ' });
+  check('真的連續發問超過額度 → 限流照舊生效，不是被這次改動關掉了',
+    /提問太頻繁/.test(last[0]?.text || ''), JSON.stringify(last));
+}
+
 // ── 情境 22：1 對 1 的上一輪對話記憶（批次 28）───────────────────────────────
 // 回報的意見：「對答要更如真人般」。最不像人的地方不是語氣，是完全沒有對話記憶——
 // 記者問「這項技術何時商業化」，答完再問「那成本呢」，模型連上一句是什麼都看不到。
@@ -1368,7 +1397,11 @@ check('答完第一題後，上一輪被記下來（line_users I 欄）',
 
 out = await send('那成本呢');
 check('下一題把上一輪當成對話脈絡送上去，模型看得到「那」指的是什麼',
-  out.some(o => o.kind === 'answer' && o.event === 'quad'), JSON.stringify(out.map(o => o.kind)));
+  JSON.stringify(out.find(o => o.kind === 'answer')?.msgs) === JSON.stringify([
+    { role: 'user', content: '這項技術預計何時商業化？' },
+    { role: 'assistant', content: '（假回答）' },
+    { role: 'user', content: '那成本呢' }
+  ]), JSON.stringify(out.find(o => o.kind === 'answer')?.msgs));
 
 // 換場之後不能回放上一場的問答——那等於把另一場的內容當成這一場的脈絡餵給模型，
 // 跟「換錯場」是同一種風險（記者不會發現答案其實混到別場）。
@@ -1379,7 +1412,9 @@ state.bindings.set('U_reporter', {
 });
 out = await send('那合作廠商有哪些');
 check('上一輪是別場的問答 → 不回放，這一場的答案不會混到別場的脈絡',
-  out.some(o => o.kind === 'answer' && o.event === 'semi'), JSON.stringify(out.map(o => o.kind)));
+  out.find(o => o.kind === 'answer')?.event === 'semi' &&
+  out.find(o => o.kind === 'answer')?.msgs?.length === 1,
+  JSON.stringify(out.find(o => o.kind === 'answer')?.msgs));
 
 // 過期的記憶不回放——記者隔了半小時再回來打「那成本呢」，那個「那」早就不成立了
 reset(); await freshModule();
@@ -1389,14 +1424,17 @@ state.bindings.set('U_reporter', {
 });
 out = await send('這場的重點是什麼');
 check('超過 TTL 的對話記憶不回放，退回單則問答的行為',
-  out.some(o => o.kind === 'answer' && o.event === 'quad'), JSON.stringify(out.map(o => o.kind)));
+  out.find(o => o.kind === 'answer')?.msgs?.length === 1,
+  JSON.stringify(out.find(o => o.kind === 'answer')?.msgs));
 
 // 壞掉的記憶（手動改過的儲存格、舊格式）不能讓記者問不到東西
 reset(); await freshModule();
 state.bindings.set('U_reporter', { event_id: 'quad', media_name: '', note: '', bound_at: Date.now(), lastTurn: '{壞掉的 JSON' });
 out = await send('這場的重點是什麼');
 check('對話記憶那一格是壞資料 → 當作沒有記憶照常回答，不會整支掛掉',
-  out.some(o => o.kind === 'answer' && o.event === 'quad'), JSON.stringify(out.map(o => o.kind)));
+  out.find(o => o.kind === 'answer')?.event === 'quad' &&
+  out.find(o => o.kind === 'answer')?.msgs?.length === 1,
+  JSON.stringify(out.find(o => o.kind === 'answer')?.msgs));
 
 // 群組刻意不開對話記憶——多人交錯提問，「上一輪」很可能是別人的問題
 reset(); await freshModule();
