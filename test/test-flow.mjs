@@ -1487,7 +1487,7 @@ out = await send('今年院士有誰');
   check('原本那句誠實的「我沒有資料」還在，沒有被補查蓋掉',
     /沒有資料/.test(sentText), JSON.stringify(out.map(o => o.text?.slice(0, 40))));
   check('後面接上工研院官網的相關報導與原文連結',
-    /工研院官網新聞中心有相關報導/.test(sentText) && /itri\.org\.tw/.test(sentText),
+    /工研院官網新聞中心/.test(sentText) && /itri\.org\.tw/.test(sentText),
     JSON.stringify(sentText.slice(0, 300)));
   check('⚠️ 機器可讀標記一定要切掉，不能讓記者看到 [[NO_DATA:…]]',
     !/NO_DATA/.test(sentText), sentText);
@@ -1499,7 +1499,7 @@ out = await send('今年院士有誰');
   // 那一項仍然沒答出來——這種「部分答到」也必須觸發補查，不然記者拿到一堆旁邊的
   // 資訊、就是拿不到他問的那個。
   check('回覆同時提供了鄰近資訊與聯絡人時，補查照樣要跑（不是只有「完全沒東西」才跑）',
-    /38 國代表/.test(sentText) && /工研院官網新聞中心有相關報導/.test(sentText), sentText.slice(0, 400));
+    /38 國代表/.test(sentText) && /工研院官網新聞中心/.test(sentText), sentText.slice(0, 400));
 }
 state.noDataKeyword = '';
 
@@ -1512,7 +1512,7 @@ out = await send('今年院士有誰');
 {
   const sentText = out.filter(o => o.kind === 'text').map(o => o.text).join('\n');
   check('官網也查不到 → 只給原本那句誠實的答案，不附空的連結區塊',
-    /沒有資料/.test(sentText) && !/工研院官網新聞中心有相關報導/.test(sentText) && !/NO_DATA/.test(sentText),
+    /沒有資料/.test(sentText) && !/工研院官網新聞中心/.test(sentText) && !/NO_DATA/.test(sentText),
     sentText);
 }
 state.itriKeywordMustInclude = '';
@@ -1537,7 +1537,7 @@ reset(); await freshModule();
 state.bindings.set('U_reporter', { event_id: 'quad', media_name: '', note: '', bound_at: Date.now() });
 out = await send('這場的重點是什麼');
 check('這場答得出來的正常提問 → 不補查、回覆裡沒有多餘的連結區塊（一個字節都沒變慢）',
-  !/工研院官網新聞中心有相關報導/.test(out.filter(o => o.kind === 'text').map(o => o.text).join('')),
+  !/工研院官網新聞中心/.test(out.filter(o => o.kind === 'text').map(o => o.text).join('')),
   JSON.stringify(out.map(o => o.text?.slice(0, 40))));
 
 // 群組（回報的實際情境）也要有同一條後備
@@ -1548,7 +1548,7 @@ out = await sendGroup('@我 今年院士有誰', { mentionSelf: true, mentionTex
 {
   const sentText = out.filter(o => o.kind === 'text').map(o => o.text).join('\n');
   check('群組裡同一題（回報的實際情境）也接得上官網補查',
-    /工研院官網新聞中心有相關報導/.test(sentText) && !/NO_DATA/.test(sentText), sentText.slice(0, 300));
+    /工研院官網新聞中心/.test(sentText) && !/NO_DATA/.test(sentText), sentText.slice(0, 300));
 }
 state.noDataKeyword = '';
 
@@ -1668,6 +1668,98 @@ out = await send('Who are this year fellows');
     /ITRI's official newsroom/.test(sentText) && !/這題本場的新聞資料裡沒有/.test(sentText), sentText.slice(0, 300));
 }
 state.answerText = '';
+state.noDataKeyword = '';
+
+// ── 情境 21.98：補查不能只靠模型自己標記（實測回報，批次 37）─────────────────────
+// 連續三批（31→33→34）都在修「標記為什麼沒出現」，最後一次實測仍然沒跑：回覆明明就是
+// 「這題目前我手上沒有具體的名單資料」，補查那條路照樣沒動。請模型在回答裡順手加一個
+// 機器讀的標記，本來就不是可靠的機制——標記留著（語意最準），但不能再是唯一觸發條件。
+{
+  const { guessNoDataKeyword } = await import(new URL(`../api/line.js?v=${modSeq}`, import.meta.url).href);
+  console.log('── 從問句猜關鍵詞（標記沒出現時的退路）──');
+  for (const [q, expect] of [
+    ['今年院士', '院士'],                       // 回報截圖裡的原話
+    ['今年院士有誰', '院士'],
+    ['得獎名單', '得獎名單'],
+    ['今年的得獎名單是什麼', '得獎名單'],       // 尾巴的「是」要切掉
+    ['這次活動的合作廠商有哪些', '合作廠商'],
+    ['有機材料的應用', '有機材料應用'],         // 詞中間的「有」不能動
+    ['好', ''],                                  // 太短 → 放棄（不補查，不會更糟）
+    ['？？', '']
+  ]) {
+    check(`猜關鍵詞：「${q}」→「${expect}」`, guessNoDataKeyword(q) === expect, JSON.stringify(guessNoDataKeyword(q)));
+  }
+}
+
+console.log('── 模型沒加標記，但回覆就是在說「我沒有這項資料」→ 照樣補查 ──');
+reset(); await freshModule();
+state.bindings.set('U_reporter', { event_id: 'quad', media_name: '', note: '', bound_at: Date.now() });
+// 刻意不設 noDataKeyword：模擬「模型沒有照規則加標記」——那正是實測發生的事
+state.answerText = '這題目前我手上沒有具體的名單資料，得洽現場新聞聯絡人確認喔。';
+out = await send('今年院士');
+{
+  const sentText = out.filter(o => o.kind === 'text').map(o => o.text).join('\n');
+  check('沒有標記也要補查官網並附上原文連結（不再只靠模型自己標記）',
+    /工研院官網新聞中心/.test(sentText) && /itri\.org\.tw/.test(sentText), sentText.slice(0, 300));
+  check('原本那句誠實的回答還在，沒有被補查蓋掉',
+    /沒有具體的名單資料/.test(sentText), sentText.slice(0, 120));
+}
+state.answerText = '';
+
+// 反面：答得出來的回覆不能被誤判成「沒有資料」而多查一次官網
+reset(); await freshModule();
+state.bindings.set('U_reporter', { event_id: 'quad', media_name: '', note: '', bound_at: Date.now() });
+state.answerText = '這場的重點是四足機器人平台的三項技術突破，分別是感測、運動控制與 AI 決策。';
+out = await send('這場的重點是什麼');
+check('正常答得出來的回覆 → 不會被誤判成沒有資料、不會多附官網連結',
+  !/工研院官網新聞中心/.test(out.filter(o => o.kind === 'text').map(o => o.text).join('')),
+  JSON.stringify(out.filter(o => o.kind === 'text').map(o => o.text?.slice(0, 60))));
+state.answerText = '';
+
+console.log('── 官網找到了就「讀懂它」，不是只丟連結（批次 38）──');
+// 使用者確認：院士授證那場的知識庫是空的，內容只存在工研院官網新聞室——也就是說
+// 這條補查是這題唯一答得出來的路，那就不能只給連結叫記者自己點進去看。
+reset(); await freshModule();
+state.bindings.set('U_reporter', { event_id: 'quad', media_name: '', note: '', bound_at: Date.now() });
+state.noDataKeyword = '院士';
+out = await send('今年院士有誰');
+{
+  const sentText = out.filter(o => o.kind === 'text').map(o => o.text).join('\n');
+  const answers = out.filter(o => o.kind === 'answer');
+  check('本場答不出來時，官網那幾篇真的被讀過一次（多一次模型呼叫，只在這條路上）',
+    answers.length === 2, `模型呼叫 ${answers.length} 次`);
+  check('第二次呼叫餵的是官網搜到的報導，不是活動知識庫',
+    /工研院官網新聞中心 搜尋「院士」/.test(answers[1]?.sys || ''), (answers[1]?.sys || '').slice(0, 120));
+  check('引言改成「我在工研院官網新聞中心找到了」，不是「有相關報導請自己看」',
+    /我在工研院官網新聞中心找到了/.test(sentText), sentText.slice(0, 300));
+  check('原文連結照樣附上（讀懂了還是要能查證）', /itri\.org\.tw/.test(sentText), '');
+  check('⚠️ 第二段也不能漏出機器可讀標記', !/NO_DATA/.test(sentText), sentText);
+}
+state.noDataKeyword = '';
+
+// 官網那幾篇其實答不出記者的問題時（模型照規則回空字串）→ 退回只給連結，不硬掰
+reset(); await freshModule();
+state.bindings.set('U_reporter', { event_id: 'quad', media_name: '', note: '', bound_at: Date.now() });
+state.noDataKeyword = '院士';
+state.answerText = ''; // 讓活動問答那支照舊帶標記
+{
+  // 只讓「官網補查」那一支回空字串：用一個只有空白的假回覆模擬模型判斷「摘要裡沒有」
+  const origFetch = globalThis.fetch;
+  globalThis.fetch = async (u, o) => {
+    if (String(u).includes('api.anthropic.com')) {
+      const b = JSON.parse(o.body);
+      if ((b.system?.[0]?.text || '').includes('工研院官網新聞中心 搜尋')) {
+        return { ok: true, json: async () => ({ content: [{ type: 'text', text: '   ' }] }) };
+      }
+    }
+    return origFetch(u, o);
+  };
+  out = await send('今年院士有誰');
+  globalThis.fetch = origFetch;
+  const sentText = out.filter(o => o.kind === 'text').map(o => o.text).join('\n');
+  check('官網摘要答不出來 → 退回只給連結，不硬掰一段答案',
+    /有相關報導/.test(sentText) && /itri\.org\.tw/.test(sentText), sentText.slice(-260));
+}
 state.noDataKeyword = '';
 
 // ── 情境 21.99：跨場次——答案在別場的新聞稿裡也要答得出來（批次 36）─────────────

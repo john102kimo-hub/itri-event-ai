@@ -1194,6 +1194,37 @@ export function extractNoDataKeyword(raw) {
 // 不會因為補查失敗而讓記者收不到答案。
 const NO_DATA_MAX_LINKS = 2;
 
+// ── 不再只靠模型自己標記（批次 37）─────────────────────────────────────────
+// 連續三批（31→33→34）都在修「標記為什麼沒出現」，最後一次實測仍然沒跑：回覆明明
+// 就是「這題目前我手上沒有具體的名單資料」，補查那條路照樣沒動。
+//
+// 到這裡結論很清楚：**請模型在回答裡順手加一個機器讀的標記，本來就不是可靠的機制**。
+// 它每次都要在「照規則加標記」跟「把回答寫好」之間分心，而規則再怎麼寫都只是請求。
+// 標記留著（它抓到的關鍵詞語意最準，有加就用），但不能再是唯一的觸發條件——補上
+// 一道純程式的判斷：回覆的內容看起來就是在說「我沒有這項資料」時，一樣去補查。
+//
+// ⚠️ 誤判的代價很小：多查一次官網，查到就多附兩個連結、查不到就什麼都不加。
+// 漏判的代價才大（記者本來拿得到答案卻沒拿到），所以這裡刻意放寬。
+const NO_DATA_PHRASE_RE = /(沒有|未|查不到|找不到).{0,10}(資料|內容|資訊|名單|說明)|沒有提到|未提及|沒有這方面|手上沒有|不在.{0,6}資料/;
+
+// 標記沒出現時，退而求其次從記者的問句猜一個關鍵詞。
+// 「今年院士」→「院士」、「今年院士有誰」→「院士」、「得獎名單」→「得獎名單」。
+// ⚠️ 刻意不共用 lib/itri-news.js 的 stripTechQueryFiller()：那支是給「想問什麼技術」
+// 那條路用的，多拿掉「今年」「有誰」這些詞會影響到那邊的既有行為。這裡是不同的場景，
+// 各自維護一份短清單比硬共用安全。
+const NO_DATA_FILLER_RE = /今年|去年|明年|今天|昨天|明天|最近|最新|目前|現在|本屆|這次|本次|有誰|是誰|哪些|哪位|什麼|甚麼|請問|想問|想知道|一下|我們|你們|活動|的|嗎|呢|吧|了|喔|耶|[\s?？！!。，,、：:]/g;
+// 拿掉語助詞之後常會在尾巴留下一個孤零零的動詞／繫詞（「得獎名單是」「合作廠商有」）。
+// 只切尾巴、不全域切——「有機材料」「是非題」這種詞中間的字不能動。
+const NO_DATA_TAIL_RE = /[是有為會在要能與和及]+$/;
+
+export function guessNoDataKeyword(question) {
+  const kw = String(question || '').replace(NO_DATA_FILLER_RE, '').replace(NO_DATA_TAIL_RE, '').trim();
+  // 太短（剩一個字）沒有查詢價值，太長多半是沒抽乾淨的整句話，兩種都放棄——
+  // 放棄就是不補查，回到原本那句誠實的回答，不會更糟。
+  return /^[^\s]{2,20}$/.test(kw) ? kw : '';
+}
+
+
 // 這段引言是「我們自己加的」，不是模型寫的——所以 lib/prompt.js 那條「跟著記者的
 // 提問語言回答」的規則管不到它，得自己判斷。不然英文記者會拿到一段英文答案、下面
 // 突然接一句中文，看起來像壞掉（批次 34 補：那條語言規則存在就是為了服務英文提問，
@@ -1205,20 +1236,80 @@ function hasChinese(text) {
   return /[一-鿿]/.test(String(text || ''));
 }
 
-async function itriNewsHintBlock(keyword, { chinese = true } = {}) {
+async function itriNewsHintBlock(keyword, { chinese = true, question = '' } = {}) {
   const kw = sanitize(keyword, 20);
   if (!kw) return '';
   try {
     const { ok, items } = await fetchItriNews(kw);
     if (!ok || !items.length) return '';
-    const lines = items.slice(0, NO_DATA_MAX_LINKS)
-      .map(it => `・${it.title}${it.date ? `（${it.date}）` : ''}\n${it.url}`);
-    const lead = chinese
-      ? '這題本場的新聞資料裡沒有，不過工研院官網新聞中心有相關報導，您可以直接看原文：'
-      : "This isn't in the material for this event, but ITRI's official newsroom has related coverage — here are the originals:";
-    return `\n\n———\n${lead}\n${lines.join('\n')}`;
+
+    const links = items.slice(0, NO_DATA_MAX_LINKS)
+      .map(it => `・${it.title}${it.date ? `（${it.date}）` : ''}\n${it.url}`)
+      .join('\n');
+
+    // ── 找到了就「讀懂它」，不是只丟連結（批次 38）─────────────────────────
+    // 使用者確認：那場活動的知識庫是空的，內容只存在工研院官網新聞室。也就是說
+    // 這條補查是這題**唯一**答得出來的路——那就不能只給連結。使用者兩輪前的原話
+    // 是「不是給新聞稿，而是會讀懂消化」，丟兩個連結叫記者自己點進去看，正是那句
+    // 話在講的問題。
+    //
+    // 搜尋結果本來就帶著標題／日期／摘要，再叫一次模型把它讀成答案即可。
+    // ⚠️ 這是這條路上的第二次模型呼叫，但它**只發生在「本場答不出來」這條路**——
+    // 正常答得出來的提問一次都不會多花。用這個代價換「記者真的拿到答案」很划算。
+    // ⚠️ 摘要不是全文：規則明講只能根據摘要回答、不足的部分要請記者看原文，
+    // 不可以把摘要沒寫的細節補完（跟活動問答同一條底線）。
+    const digest = await answerFromItriNews(kw, items, question, chinese);
+    const lead = digest
+      ? (chinese ? '這題本場的新聞資料裡沒有，不過我在工研院官網新聞中心找到了：'
+                 : "This isn't in this event's material, but I found it in ITRI's official newsroom:")
+      : (chinese ? '這題本場的新聞資料裡沒有，不過工研院官網新聞中心有相關報導，您可以直接看原文：'
+                 : "This isn't in this event's material, but ITRI's official newsroom has related coverage — here are the originals:");
+    const body = digest ? `${digest}\n\n${chinese ? '🔗 原文：' : '🔗 Sources:'}\n${links}` : links;
+    return `\n\n———\n${lead}\n${body}`;
   } catch (e) {
     console.error('itriNewsHintBlock 失敗:', e.message);
+    return '';
+  }
+}
+
+// 把官網搜到的報導讀成一段答案。組不出來（沒 API key、呼叫失敗、模型說看不出來）
+// 就回空字串，呼叫端自動退回「只給連結」——那是原本就有的行為，不會更糟。
+async function answerFromItriNews(keyword, items, question, chinese) {
+  const q = sanitize(question, 300) || keyword;
+  const systemPrompt = [
+    '你是工研院 LINE 官方帳號的 AI 新聞助理，名字叫「米亞」。',
+    `記者問了一個問題，但這場活動的新聞資料裡沒有答案；下面是用「${keyword}」在工研院官網新聞中心查到的報導（標題／日期／摘要）。請根據這些報導直接回答記者的問題。`,
+    '',
+    '規則：',
+    '- 只能根據下面的標題與摘要回答。這些是摘要不是全文，摘要沒寫的細節（完整名單、具體數字、人物職稱）一律不要補完、不要推測——那種內容請記者點原文連結看。',
+    '- 摘要裡如果根本沒有記者要的答案，就直接回一個空字串，什麼都不要寫（呼叫端會改成只附連結）。不要寫「查不到」之類的句子，那句話呼叫端已經講過了。',
+    '- 回答控制在 3 行以內，並且明確講出這是工研院官網新聞中心的報導、哪一天發布的。',
+    '- 不要用 Markdown 語法。不要加結尾警語（呼叫端的回覆裡已經有了）。',
+    '- 不要重複「這題本場資料裡沒有」這件事，呼叫端已經講過，直接講你找到什麼。',
+    chinese
+      ? '- 用繁體中文回答。'
+      : '- Answer in English (the reporter asked in English).',
+    TONE_RULE,
+    '',
+    `【工研院官網新聞中心 搜尋「${keyword}」的結果，由新到舊】`,
+    formatNewsForPrompt(items)
+  ].join('\n');
+
+  try {
+    // ⚠️ 這一段也要過一次標記清理：這支的規則沒叫模型加 [[NO_DATA:…]]，但同一個
+    // 帳號的其他 prompt 有，模型偶爾會把習慣帶過來。漏出去給記者看到的代價太大
+    // （批次 33 已經踩過一次），統一清掉比賭它不會發生便宜。
+    const raw = String(await askAnthropic(systemPrompt, q) || '');
+    const reply = extractNoDataKeyword(raw).text.trim();
+    // 模型照規則回空字串（摘要裡真的沒有答案），或吐回 askAnthropic 自己的失敗訊息，
+    // 兩種都當作「組不出答案」，退回只給連結。
+    // 只認「空的」＝模型照規則說摘要裡沒有答案。刻意不設長度門檻——一個「幾個字
+    // 以下就丟掉」的魔術數字，會把真的很短但正確的答案（「三位，分別是⋯」）誤殺。
+    if (!reply) return '';
+    if (/抱歉，目前無法取得回應|系統目前無法回答|無法取得回應/.test(reply)) return '';
+    return reply;
+  } catch (e) {
+    console.error('answerFromItriNews 失敗:', e.message);
     return '';
   }
 }
@@ -1295,8 +1386,16 @@ async function answerQuestion(replyToken, userId, rawEvent, mediaName, text, { l
   const { text: aiReply, keyword: noDataKeyword } = extractNoDataKeyword(rawReply);
   // 這場答不出來時，補查一次工研院官網新聞中心——回報的截圖就是這個洞（見
   // lineExtraRules() 那條規則的說明）。查不到就是空字串，原本的答案照舊。
-  const newsHint = noDataKeyword
-    ? await itriNewsHintBlock(noDataKeyword, { chinese: hasChinese(aiReply) })
+  // 標記優先（模型抓的關鍵詞語意最準），沒有標記就看回覆內容像不像「我沒有這項資料」，
+  // 像的話從問句猜一個關鍵詞——見 NO_DATA_PHRASE_RE 的說明（批次 37）。
+  const fallbackKeyword = (!noDataKeyword && NO_DATA_PHRASE_RE.test(aiReply))
+    ? guessNoDataKeyword(text) : '';
+  const lookupKeyword = noDataKeyword || fallbackKeyword;
+  if (lookupKeyword) {
+    console.log(`[line] 補查官網 kw="${lookupKeyword}" 來源=${noDataKeyword ? '標記' : '句型判斷'}`);
+  }
+  const newsHint = lookupKeyword
+    ? await itriNewsHintBlock(lookupKeyword, { chinese: hasChinese(aiReply), question: text })
     : '';
   const reply = switchNotice + aiReply + newsHint;
   // 診斷用途，不是必要邏輯：路由判斷得準不準、AI 答得順不順，靠這行在 Vercel Logs

@@ -343,9 +343,12 @@ export function installFetchStub() {
       // state.noDataKeyword 設了字串時，模擬 AI 判斷「背景資料答不出這題」而在結尾加上
       // 機器可讀標記（見 api/line.js lineExtraRules() 那條規則與 extractNoDataKeyword()）。
       // state.answerText 設了字串時，模擬模型吐出那段原始文字（用來測 Markdown 清理）。
+      // 標記只該出現在「活動問答」那份 prompt 的回覆裡——官網補查那支（批次 38 的
+      // answerFromItriNews）是另一份 prompt、沒有要求標記，模擬時也不該吐標記出來。
+      const isEventQa = sys.includes('【本次活動背景資料】');
       const answerText = state.answerText
         ? state.answerText
-        : state.noDataKeyword
+        : (state.noDataKeyword && isEventQa)
           // ⚠️ 標記刻意放在**警語前面**，不是整段最後——那是實際回報的形狀（批次 33）：
           // lib/prompt.js 的警語規則佔住最後一行，標記被擠到它前面。第一版的正則錨定
           // 在字串結尾，就是在這個形狀上漏掉的。
