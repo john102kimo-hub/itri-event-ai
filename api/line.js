@@ -281,7 +281,12 @@ async function clearBinding(userId) {
 //     都重新 @——沒有活動綁定時 getBinding() 會回傳 { event_id: '' }，把兩者混在
 //     同一欄會讓「還沒問過任何一場」的群組被誤判成「綁定了一個空字串的活動」，
 //     answerQuestion() 拿到空 event_id 直接找不到活動、整個掛掉。
-const GROUP_SESSION_MS = 5 * 60 * 1000; // 5 分鐘：夠讀完清單、想一下、再打字問下一句
+// 批次 30 從 5 分鐘拉長到 15 分鐘。5 分鐘是「視窗內任何訊息都會被硬答」那個年代訂的
+// ——窗開越久越危險，所以只敢開一下下。批次 28 的 looksAddressedToBot() 守門補上之後，
+// 視窗內也只接「看起來真的在跟我們講話」的訊息，窗本身不再是風險來源，就可以放長到
+// 真實對話的節奏。實測回報：同事在群組裡按按鈕，距離上一則回覆約 9 分鐘，視窗早就
+// 過期，按鈕按了完全沒反應——5 分鐘對「開會中偶爾看一下手機」這種真實使用情境太短。
+const GROUP_SESSION_MS = 15 * 60 * 1000;
 
 // ⚠️ 這支要吃 60 秒快取（getAllLineUserRows()），不能像原本那樣直接 readRange()：
 // 群組裡「每一則」訊息都會先過這支（handleGroupEvent 開頭就要判斷「沒被 @ 到的話
@@ -1743,6 +1748,39 @@ const GROUP_OWN_BUTTON_RE = /^工研院[\s　]|^邀訪[:：]/;
 // 兩句都沒有人在跟機器人講話。所以這裡只認**整句完全等於**我們自己送出過的按鈕
 // 文字；記者真的想問活動清單時講的「最近有哪些活動」「有什麼活動嗎」本來就帶疑問詞，
 // 會走下面 GROUP_QUESTION_RE 那條，不需要靠這一條放行。
+// ── 喚醒詞：叫得動機器人的第二種方式（批次 30）────────────────────────────
+// 實測回報（附截圖）：同事在群組裡想 @ 這個帳號，**LINE 的 @ 選單裡根本找不到它**
+// ——選單只列出真人成員。對他來說「只有被 @ 到才會說話」這條規矩不是有點麻煩，
+// 是完全叫不動：他沒有任何辦法把訊息送到機器人面前。
+//
+// 官方帳號會不會出現在 @ 選單，是 LINE 那邊決定的（跟 app 版本、帳號設定有關），
+// 我們的程式改不了。與其賭它會不會出現，不如**多給一條不依賴 @ 的呼叫方式**：
+// 訊息開頭打「米亞」就等同 @ 到我們。
+//
+// ⚠️ 只認**開頭**，不是整句話裡出現「米亞」就算。群組裡談論這個帳號（「米亞剛剛
+// 說的那個」「等等問米亞」）跟呼叫它是兩回事，中間出現不該觸發——這條界線就是
+// 「亂回」與「叫得動」之間的平衡點。
+// 後面允許接標點或空白（「米亞，最近有哪些活動」「米亞 你好」），也允許有人手打
+// 一個 @（打了 @ 但選單裡選不到，最後送出的是純文字，正是回報的那個情境）。
+const WAKE_WORD_RE = /^\s*[@＠]?\s*米亞\s*[，,、。：:！!？?～~\-—]*\s*/;
+
+// 把開頭的喚醒詞切掉，只留真正的問題。沒有喚醒詞就原樣回傳。
+function stripWakeWord(text) {
+  return String(text || '').replace(WAKE_WORD_RE, '').trim();
+}
+
+// 整句話是不是「我們自己送出去的那顆按鈕」。用於視窗外仍要接住的判斷，所以刻意
+// 收得比 looksAddressedToBot() 的 ① 更窄——只認**幾乎不可能在閒聊裡打出來**的：
+//   - 固定選單詞（媒體邀訪需求、產業趨勢分析…）：整句完全相同才算
+//   - 「邀訪：ＸＸ」：這是機器產生的格式，人不會這樣打字
+// 活動全名、「工研院 ＸＸ」這兩種**不**放進來：它們在群組聊天裡是講得出來的句子
+// （「工研院 那邊怎麼說」），視窗外就接會變成新的亂回來源。那兩種按鈕在視窗內
+// （剛回答完的 15 分鐘）照樣按得動，隔太久才按就要 @ 或用喚醒詞。
+function isOwnButtonText(text) {
+  const s = String(text || '').trim();
+  return GROUP_FIXED_BUTTONS.has(s) || /^邀訪[:：]/.test(s);
+}
+
 const GROUP_FIXED_BUTTONS = new Set([
   '最近有哪些活動', '產業趨勢分析', '想問什麼技術', CONTACT_MENU_LABEL, '使用說明', '回首頁'
 ]);
@@ -1814,11 +1852,24 @@ async function handleGroupEvent(replyToken, ev) {
   const groupId = ev.source?.groupId || ev.source?.roomId || null;
   if (!groupId) return; // 不明來源，安全起見不回覆
 
-  const mentioned = isBotMentioned(ev.message?.mention);
+  const rawText = ev.message?.type === 'text' ? String(ev.message.text || '') : '';
+
+  // 被 @ 到，或用喚醒詞「米亞」叫我們——兩種都算「明確在叫機器人」，一律要理人。
+  // 喚醒詞的理由見 WAKE_WORD_RE 的說明（實測回報：有人的 LINE @ 選單裡根本找不到
+  // 這個官方帳號，對他來說「只有被 @ 才說話」等於完全叫不動）。
+  const mentioned = isBotMentioned(ev.message?.mention) || WAKE_WORD_RE.test(rawText);
   if (!mentioned) {
+    if (ev.message?.type !== 'text') return; // 非文字訊息（貼圖…）沒被 @ 就安靜略過，不用來亂回
+
     const sessionUntil = await getGroupSessionUntil(groupId);
-    if (!sessionUntil || Date.now() > sessionUntil) return; // 沒被 @、也不在續問視窗內 → 安靜
-    if (ev.message?.type !== 'text') return; // 續問視窗內的非文字訊息（貼圖…）安靜略過，不用來亂回
+    const inWindow = !!sessionUntil && Date.now() <= sessionUntil;
+    // 視窗外原本一律安靜，實測回報這會讓「按鈕按了沒反應」：LINE 的快速回覆按鈕會
+    // 一直留在對話紀錄裡，同事往上滑、或隔了十幾分鐘才按，送出的是不帶 @ 的純文字，
+    // 視窗早就過期 → 完全沒反應，體感就是壞掉。
+    // 這種訊息其實是最不可能誤判的一種：整句話「完全等於」我們自己送出去的按鈕文字
+    // （見 isOwnButtonText()），沒有人會在群組閒聊裡剛好打出「媒體邀訪需求」這五個字。
+    // 所以視窗外也接這一種，其餘維持安靜。
+    if (!inWindow && !isOwnButtonText(rawText)) return;
 
     // 回報的意見：續問視窗內只要有人講話就會回，即使明顯是在跟另一個人講話
     // （例如「我再跟＠小明說話」）——機器人還是煞有其事答一段內容，感覺像亂回。
@@ -1841,7 +1892,7 @@ async function handleGroupEvent(replyToken, ev) {
 
   // 把 @ 的那段文字拿掉，只留真正的問題；沒被 @ 到（續問視窗內）時 mention 是
   // undefined，stripMentionText 會原樣回傳（trim 過）。
-  const text = stripMentionText(ev.message?.text, ev.message?.mention);
+  const text = stripWakeWord(stripMentionText(ev.message?.text, ev.message?.mention));
   if (!text) {
     // 只 @ 沒接問題——這句提示只在「真的被 @ 到」時才有意義；續問視窗內若剛好
     // 出現空文字（理論上不會發生，防呆而已）不用多嘴。
@@ -1857,7 +1908,7 @@ async function handleGroupEvent(replyToken, ev) {
     // 放進來的話，群組裡的記者根本不會知道可以這樣問。
     if (mentioned) {
       await replyOrPush(replyToken, groupId,
-        '你好，我是工研院 AI 助手米亞 🙂\n想了解最近有哪些活動、產業趨勢、工研院技術，或是媒體邀訪需求，都歡迎直接問我！\n請在 @ 我的後面接著打問題，或點下面的按鈕：',
+        '你好，我是工研院 AI 助手米亞 🙂\n想了解最近有哪些活動、產業趨勢、工研院技術，或是媒體邀訪需求，都歡迎直接問我！\n請在 @ 我的後面接著打問題（或用「米亞」開頭，例如「米亞 最近有哪些活動」），也可以點下面的按鈕：',
         ['最近有哪些活動', '產業趨勢分析', '想問什麼技術', CONTACT_MENU_LABEL, '使用說明']);
       // 這則回覆本身也附了按鈕，記者點下去送出的是沒有 @ 的純文字——續問視窗沒開
       // 的話會被 handleGroupEvent() 開頭那段「沒被 @ 又不在視窗內 → 安靜」擋掉，
@@ -1927,9 +1978,15 @@ async function handleGroupJoin(replyToken, ev) {
     [
       '大家好，我是工研院的 AI 新聞助理米亞 🙂',
       '',
-      '先說一下我的規矩：我只有被 @ 到的時候才會說話，平常的聊天我不會插話，也不會主動推播。',
+      '先說一下我的規矩：我只有被叫到的時候才會說話，平常的聊天我不會插話，也不會主動推播。',
       '',
-      '想問我事情，@ 我一下再接著打問題就可以，這幾件事我都查得到：',
+      '要問我事情，兩種都可以：',
+      '・@ 我一下，後面接著打問題',
+      '・或直接用「米亞」開頭，例如「米亞 最近有哪些活動」',
+      '',
+      '（有些人的 @ 選單裡找不到我，那就用「米亞」開頭叫我就好。）',
+      '',
+      '這幾件事我都查得到：',
       '・某一場記者會的內容（直接打活動名稱，或問我「最近有哪些活動」）',
       '・整體產業趨勢（IEK 產業情報網的免費焦點）',
       '・工研院自己的技術與發表（打「工研院」加技術名稱）',

@@ -1258,8 +1258,14 @@ reset(); await freshModule();
 out = await sendRaw([{ type: 'join', replyToken: 'rt_join', source: { type: 'group', groupId: 'Cgroup1' } }]);
 check('被拉進群組 → 有自我介紹（批次 28 之前完全不出聲，被拉進去像個壞掉的帳號）',
   out[0]?.kind === 'text' && /米亞/.test(out[0].text), JSON.stringify(out));
-check('自我介紹第一件事就是講規矩：只有被 @ 才會說話，不會插話也不會推播',
-  /只有被 @ 到的時候才會說話/.test(out[0]?.text || '') && /不會插話/.test(out[0]?.text || ''), out[0]?.text);
+check('自我介紹第一件事就是講規矩：只有被叫到才會說話，不會插話也不會推播',
+  /只有被叫到的時候才會說話/.test(out[0]?.text || '') && /不會插話/.test(out[0]?.text || ''), out[0]?.text);
+// 批次 30：兩種呼叫方式都要講出來——實測回報有人的 LINE @ 選單裡找不到這個帳號，
+// 只講 @ 等於對那些人什麼都沒講（見 WAKE_WORD_RE 的說明）。
+check('自我介紹同時講出兩種叫得動它的方式（@ 與「米亞」開頭），不是只講 @',
+  /@ 我一下/.test(out[0]?.text || '') && /「米亞」開頭/.test(out[0]?.text || ''), out[0]?.text);
+check('並且點名「@ 選單裡找不到我」這個實際會遇到的狀況，給出替代做法',
+  /@ 選單裡找不到我/.test(out[0]?.text || ''), out[0]?.text);
 check('同時把四條路都講出來，群組成員不用自己猜能問什麼',
   ['活動', '產業趨勢', '工研院', '邀訪'].every(x => (out[0]?.text || '').includes(x)), out[0]?.text);
 check('附上快速回覆按鈕，第一個想試的人不用先學會怎麼 @',
@@ -1398,6 +1404,64 @@ reset(); await freshModule();
   check('真的連續發問超過額度 → 限流照舊生效，不是被這次改動關掉了',
     /提問太頻繁/.test(last[0]?.text || ''), JSON.stringify(last));
 }
+
+// ── 情境 21.5：群組裡叫得動它嗎（實測回報的兩個問題，批次 30）───────────────
+// 回報的截圖（真的拉同事進群組測）：
+//   ① 同事按了快速回覆按鈕「媒體邀訪需求」，完全沒反應——按鈕會一直留在對話紀錄
+//      裡，他隔了約 9 分鐘才按，續問視窗（當時 5 分鐘）早就過期
+//   ② 同事想改用 @ 叫它，「我的 @ 找不到他 哈哈」——LINE 的 @ 選單裡只有真人成員，
+//      對他來說「只有被 @ 才說話」等於完全叫不動
+
+console.log('── 視窗過期後，自家按鈕還是要按得動 ──');
+reset(); await freshModule();
+state.bindings.set('Cgroup1', { event_id: '', media_name: '', note: '', bound_at: 0, groupSessionUntil: Date.now() - 60000 }); // 視窗已過期
+out = await sendGroup('媒體邀訪需求', { mentionSelf: false });
+check('續問視窗過期後按「媒體邀訪需求」按鈕 → 照樣接得住，不是按了沒反應',
+  out.length > 0 && /技術領域/.test(out[0]?.text || ''), JSON.stringify(out));
+
+// 但「視窗外也接」只放行幾乎不可能在閒聊裡打出來的那幾種，其餘維持安靜——
+// 不然這個放寬就變成新的亂回來源。
+for (const chat of ['那合作廠商有哪些', '半導體先進封裝技術發表會', '大家中午吃什麼']) {
+  reset(); await freshModule();
+  state.bindings.set('Cgroup1', { event_id: 'quad', media_name: '', note: '', bound_at: Date.now(), groupSessionUntil: Date.now() - 60000 });
+  out = await sendGroup(chat, { mentionSelf: false });
+  check(`視窗過期後、非按鈕文字「${chat}」→ 維持安靜，放寬沒有變成新的亂回來源`,
+    out.length === 0, JSON.stringify(out));
+}
+
+console.log('── 喚醒詞「米亞」等同被 @，不必依賴 LINE 的 @ 選單 ──');
+for (const [label, text, expect] of [
+  ['開頭喚醒詞＋問題', '米亞 最近有哪些活動', /近期活動/],
+  ['喚醒詞後接全形逗號', '米亞，最近有哪些活動', /近期活動/],
+  ['手打的 @（選單選不到、送出的是純文字）', '@米亞 最近有哪些活動', /近期活動/]
+]) {
+  reset(); await freshModule(); // 全新群組：沒有續問視窗，證明真的是喚醒詞在起作用
+  out = await sendGroup(text, { mentionSelf: false });
+  check(`${label}「${text}」→ 沒有 @、沒有視窗也答得到`,
+    expect.test(out[0]?.text || ''), JSON.stringify(out));
+}
+
+reset(); await freshModule();
+out = await sendGroup('米亞', { mentionSelf: false });
+check('只打喚醒詞沒接問題 → 跟只 @ 一樣給自我介紹，不是把「米亞」當問題送去查',
+  /米亞/.test(out[0]?.text || '') && /最近有哪些活動/.test(out[0]?.text || ''), JSON.stringify(out));
+check('只打喚醒詞也會開續問視窗，後面的按鈕才按得動',
+  state.bindings.get('Cgroup1')?.groupSessionUntil > Date.now(), JSON.stringify(state.bindings.get('Cgroup1')));
+
+// ⚠️ 界線：談論這個帳號 ≠ 呼叫它。只認開頭，中間出現不算。
+for (const chat of ['等等問米亞好了', '剛剛米亞說的那個活動', '你去問米亞']) {
+  reset(); await freshModule();
+  out = await sendGroup(chat, { mentionSelf: false });
+  check(`句中提到「米亞」但不是開頭（「${chat}」）→ 安靜，那是在談論它不是在叫它`,
+    out.length === 0, JSON.stringify(out));
+}
+
+// 喚醒詞在 1 對 1 不該有副作用——那邊每則訊息本來就都算在跟我們講話
+reset(); await freshModule();
+state.bindings.set('U_reporter', { event_id: 'quad', media_name: '', note: '', bound_at: Date.now() });
+out = await send('米亞 這場的重點是什麼');
+check('1 對 1 打「米亞 這場的重點是什麼」→ 照常回答（喚醒詞只影響群組的判斷）',
+  out.some(o => o.kind === 'answer' && o.event === 'quad'), JSON.stringify(out.map(o => o.kind)));
 
 // ── 情境 22：1 對 1 的上一輪對話記憶（批次 28）───────────────────────────────
 // 回報的意見：「對答要更如真人般」。最不像人的地方不是語氣，是完全沒有對話記憶——
