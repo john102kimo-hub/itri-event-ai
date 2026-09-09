@@ -830,7 +830,11 @@ state.bindings.set('U_reporter', { event_id: 'quad', media_name: '', note: '', b
 out = await send('回首頁'); // 按鈕已改名，見情境 1 的說明
 {
   const labels = (out[0]?.quickReply || []).map(i => (typeof i === 'object' ? i.label : i));
-  check('「回首頁」的按鈕列最後一格是媒體邀訪需求', labels[labels.length - 1] === '媒體邀訪需求', JSON.stringify(labels));
+  // 批次 29 起這排不再只有「活動＋媒體邀訪需求」，而是活動之後固定接上四條路的入口
+  // （回報的截圖：正式站只有一場有資料的活動時，整排只剩兩顆，看起來很空，而且另外
+  // 兩條路從來沒出現在這裡）。驗的是「四條路都在、順序固定」，不是「某一顆在最後」。
+  check('「回首頁」的按鈕列在活動之後固定接上四條路的入口',
+    JSON.stringify(labels.slice(-4)) === JSON.stringify(['產業趨勢分析', '想問什麼技術', '媒體邀訪需求', '使用說明']), JSON.stringify(labels));
   // 回報的意見：按鈕不夠明顯，容易被忽略——文字裡也要有這個入口，不能只靠按鈕。
   check('「回首頁」的文字裡也提到媒體邀訪需求（不只靠按鈕）',
     /媒體邀訪需求/.test(out[0]?.text || ''), out[0]?.text);
@@ -839,7 +843,8 @@ out = await send('回首頁'); // 按鈕已改名，見情境 1 的說明
 out = await send('最近有哪些活動');
 {
   const labels = (out[0]?.quickReply || []).map(i => (typeof i === 'object' ? i.label : i));
-  check('綁定中查「最近有哪些活動」的按鈕列最後一格也是媒體邀訪需求', labels[labels.length - 1] === '媒體邀訪需求', JSON.stringify(labels));
+  check('綁定中查「最近有哪些活動」的按鈕列也一樣固定接上四條路的入口',
+    JSON.stringify(labels.slice(-4)) === JSON.stringify(['產業趨勢分析', '想問什麼技術', '媒體邀訪需求', '使用說明']), JSON.stringify(labels));
   check('綁定中查活動列表的文字裡也提到媒體邀訪需求', /媒體邀訪需求/.test(out[0]?.text || ''), out[0]?.text);
 }
 
@@ -850,7 +855,8 @@ reset(); await freshModule();
 out = await send('最近如何');
 {
   const labels = (out[0]?.quickReply || []).map(i => (typeof i === 'object' ? i.label : i));
-  check('沒綁定時查活動列表的按鈕列最後一格也是媒體邀訪需求', labels[labels.length - 1] === '媒體邀訪需求', JSON.stringify(labels));
+  check('沒綁定時查活動列表的按鈕列也一樣固定接上四條路的入口',
+    JSON.stringify(labels.slice(-4)) === JSON.stringify(['產業趨勢分析', '想問什麼技術', '媒體邀訪需求', '使用說明']), JSON.stringify(labels));
   check('沒綁定時查活動列表的文字裡也提到媒體邀訪需求', /媒體邀訪需求/.test(out[0]?.text || ''), out[0]?.text);
 }
 out = await send('媒體邀訪需求');
@@ -1228,6 +1234,19 @@ for (const junk of ['😀😀', '^_^', 'ＸＤ']) {
   check(`表情／符號「${junk}」不會被當成主題詞複誦`,
     out.at(-1)?.kind === 'text' && !out.at(-1).text.includes(`「${junk}」我可以從兩個方向`),
     JSON.stringify(out));
+}
+
+// 回報的截圖（批次 29）：按鈕列只有孤零零兩顆，看起來很空——原因是這排只列「有資料
+// 的活動」，正式站當下只有一場符合，而另外兩條路（產業趨勢、工研院技術）從來沒被放
+// 進這排。加上四條路的入口之後，要確認沒有撞到 LINE quick reply 的 13 顆硬上限：
+// 撞到的話 buildQuickReply() 會從尾巴截掉，被截掉的正好是新加的固定入口，等於白加。
+reset(); await freshModule();
+out = await send('最近有哪些活動');
+{
+  const labels = (out[0]?.quickReply || []).map(i => (typeof i === 'object' ? i.label : i));
+  check('活動清單的按鈕總數沒有超過 LINE 的 13 顆上限', labels.length <= 13, `${labels.length} 顆：${JSON.stringify(labels)}`);
+  check('四條路的入口真的都在（不是被上限截掉）',
+    ['產業趨勢分析', '想問什麼技術', '媒體邀訪需求', '使用說明'].every(x => labels.includes(x)), JSON.stringify(labels));
 }
 
 // ── 情境 21：被拉進群組（join 事件）＋ 群組續問視窗的守門（批次 28）─────────────
