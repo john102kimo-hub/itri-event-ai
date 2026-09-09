@@ -755,14 +755,25 @@ const GROUP_NAV_TAIL = [
 // 不是壞掉，但沒有用。呼叫端不用先自己判斷是不是活動前、也不用先手動 resolve 一次，
 // 這裡永遠拿到「當下該用哪組 chips」的正確答案；resolveEventContent() 對已經 resolve
 // 過的 event 再呼叫一次是安全的（同一批欄位只會算出同樣的結果，不會疊加）。
-function eventQuickChips(rawEvent, { group = false } = {}) {
+// 只有「這場的內容提問」那幾顆，不含導覽（回首頁、媒體邀訪需求…）。
+//
+// ⚠️ 拆出來是因為兩邊要的東西不一樣，混在一起會出事（實測抓到）：按鈕列要「內容 ＋
+// 導覽」全部一起送，但 ownChipEventId() 只能拿**內容**去回推場次——導覽那幾顆是跨場次
+// 的功能入口，每一場的按鈕列都有，拿它們回推等於「按任何一顆導覽鈕都會把綁定接回上一
+// 場」。實際症狀：在群組按「回首頁」（本來就是要解除綁定）之後再按「媒體邀訪需求」，
+// 會被接回剛剛那場、拿到那場的窗口，而不是跨活動的全域窗口清單。
+function eventContentChips(rawEvent) {
   const event = resolveEventContent(rawEvent || {});
   const custom = String(event?.chips || '').split('\n').map(s => s.trim()).filter(Boolean);
+  return custom.length ? custom : DEFAULT_CHIPS;
+}
+
+function eventQuickChips(rawEvent, { group = false } = {}) {
   // ⚠️ LINE quick reply 硬上限 13 顆，超過的會被 buildQuickReply() 從尾巴截掉。
   // 群組多了 5 顆固定導覽，內容 chips 只能留 8 顆；1 對 1 有圖文選單撐著，維持原本
   // 12 顆內容 ＋「媒體邀訪需求」不動（這裡不是「群組比較重要」，是 1 對 1 的那五條
   // 路本來就一直顯示在畫面下方，重複放進按鈕列只會排擠掉同仁自訂的提問）。
-  const contentChips = (custom.length ? custom : DEFAULT_CHIPS).slice(0, group ? 8 : 12);
+  const contentChips = eventContentChips(rawEvent).slice(0, group ? 8 : 12);
   if (!group) return [...contentChips, CONTACT_MENU_LABEL];
   return [...GROUP_NAV_HEAD, ...contentChips, ...GROUP_NAV_TAIL];
 }
@@ -2230,9 +2241,9 @@ async function ownChipEventId(groupId, text) {
   // ① 這個群組上次綁的那場（不看 TTL）有這顆 → 就是那場，最準；DEFAULT_CHIPS 這種
   //    每場共用的按鈕也靠這一步分辨得出來。
   const stored = storedId ? await getEventById(storedId) : null;
-  if (isUsable(stored)) {
-    const texts = eventQuickChips(stored, { group: true }).map(c => (typeof c === 'string' ? c : c.text));
-    if (texts.includes(s) || parseEventContacts(stored).some(c => c.keyword === s)) return { eventId: storedId };
+  if (isUsable(stored) &&
+      (eventContentChips(stored).includes(s) || parseEventContacts(stored).some(c => c.keyword === s))) {
+    return { eventId: storedId };
   }
 
   // ② 同仁自己填的字（自訂 chips／活動前 chips／邀訪關鍵字）幾乎不會跟別場撞在一起，
