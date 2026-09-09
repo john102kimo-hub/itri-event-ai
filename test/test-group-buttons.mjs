@@ -159,6 +159,63 @@ await tap('回首頁', { mentionSelf: true });
     out.some(o => o.kind === 'answer' && o.event === 'quad'), JSON.stringify(out));
 }
 
+// ── ④ 每一則群組回覆都要帶著那排導覽（回報，批次 43）─────────────────────
+// 回報的截圖：按「媒體邀訪需求」→「邀訪：綠能」，拿到窗口聯絡人之後**整則訊息一顆
+// 按鈕都沒有**，問完就斷在那裡。使用者問「建議改成常駐嗎」——LINE 的快速回覆本來
+// 就綁在單一則訊息上，沒有「常駐」這個選項；真正常駐的是圖文選單，而群組不顯示。
+// 所以群組裡「常駐」唯一的實作方式，就是每一則回覆都自己帶著導覽。
+//
+// ③ 那組測試只保證「按了會有回覆」，保證不了「回覆之後還走得下去」——按鈕能按、
+// 但回完就沒有下一顆，路一樣是斷的。這一段補的就是那個缺口。
+console.log('── 每一則群組回覆都要帶著按鈕，不能是死路 ──');
+{
+  reset(); await freshModule();
+  // 一條把各種回覆型態都走過的長路徑：清單、選場、問答、這場的窗口、全域窗口、
+  // 「其他」自由輸入、產業趨勢、技術查詢的反問與答案、使用說明、換場、非文字訊息。
+  const walk = [
+    ['最近有哪些活動', true], ['經濟部四足機器人國產研發平台發表記者會', true],
+    ['這場的重點是什麼', true], ['媒體邀訪需求', true], ['技術規格', false],
+    ['回首頁', true], ['媒體邀訪需求', true], ['邀訪：機器人', false],
+    ['邀訪：其他', false], ['太空', false],
+    ['產業趨勢分析', true], ['想問什麼技術', true], ['半導體', false],
+    ['使用說明', true], ['半導體先進封裝技術發表會', true], ['這場的重點', true]
+  ];
+  const dead = [];
+  for (const [text, mentionSelf] of walk) {
+    // 每一步都重新 import：模組層的限流計數會把長路徑的後半段擋掉（那是限流在做
+    // 它該做的事，不是死路），重新 import 才測得到真正的回覆內容。
+    const saved = state.bindings.get('Cgroup1');
+    reset(); await freshModule();
+    if (saved) state.bindings.set('Cgroup1', saved);
+    const out = await tap(text, { mentionSelf });
+    for (const msg of out) {
+      if (msg.kind !== 'text') continue;
+      if (!msg.quickReply.length) {
+        dead.push(`送出「${text}」→ 回覆沒有任何按鈕：${String(msg.text).replace(/\n/g, ' ⏎ ').slice(0, 70)}`);
+      }
+    }
+  }
+  check('走一遍完整路徑，沒有任何一則回覆是死路（沒有按鈕）', dead.length === 0,
+    dead.length ? `死路 ${dead.length} 則：\n     ` + dead.join('\n     ') : '');
+}
+// 非文字訊息（貼圖、照片）被 @ 到時的回覆也一樣
+{
+  reset(); await freshModule();
+  const body = JSON.stringify({ events: [{
+    type: 'message', replyToken: 'rt_sticker',
+    source: { type: 'group', groupId: 'Cgroup1', userId: 'Uspeaker' },
+    message: { type: 'sticker', mention: { mentionees: [{ index: 0, length: 3, type: 'user', userId: 'Ubot', isSelf: true }] } }
+  }] });
+  const req = new EventEmitter();
+  req.method = 'POST';
+  req.headers = { 'x-line-signature': createHmac('sha256', 'testsecret').update(Buffer.from(body)).digest('base64') };
+  setImmediate(() => { req.emit('data', Buffer.from(body)); req.emit('end'); });
+  sent.length = 0;
+  await handler(req, res);
+  check('群組 @ 我丟貼圖 → 回覆也要帶按鈕，不要回一句就沒下文',
+    sent.length > 0 && (sent[0].quickReply || []).length > 0, JSON.stringify(sent.map(x => ({ t: x.text, q: (x.quickReply || []).length }))));
+}
+
 // ── ③ 反面：放寬守門不能把一般閒聊也放進來 ──────────────────────────────
 console.log('── 反面：一般閒聊仍然要安靜 ──');
 for (const chat of [
