@@ -524,6 +524,21 @@ function lineExtraRules(event) {
     '這是 LINE 對話，請控制在 5 行以內；記者要求完整新聞稿時才給全文，並提醒可到活動網頁下載。',
     '需要附連結時直接給網址純文字，不要用 Markdown 語法（LINE 不會渲染，記者會看到一堆星號與方括號）。',
     `你的回覆會出現在掛著主辦單位名義的官方帳號裡，記者可能直接截圖引用。任何不確定的內容，${contactHint}。`,
+    // ── 查無資料時的機器可讀標記（批次 31）─────────────────────────────
+    // 實際回報（附截圖）：記者在群組問「今年院士有誰」，機器人照實說「我這邊目前沒有
+    // 得獎名單的資料」——答得沒錯，但**工研院官網新聞中心第一筆就是那篇授證新聞**。
+    // 根因是路由：routeIntent() 判 tech_query 要求問句裡明確出現「工研院」（批次 21
+    // 為了避免誤觸刻意訂的），「今年院士有誰」沒提到，加上當時綁著一場活動，就被判成
+    // qa、只拿那場的知識庫回答。我們手上另一個有答案的來源從頭到尾沒被問過。
+    //
+    // 與其放寬路由（那會讓「這場的重點是什麼」這種正常提問也被送去官網，換來更糟的
+    // 誤判），不如在「已經確定這場答不出來」之後才去補查一次——只在真的失敗時才多花
+    // 一次查詢，正常提問一個字節都沒變慢。
+    //
+    // 用標記而不是事後用正則去猜「這句話是不是在說沒有資料」：模型每次的措辭都不一樣
+    // （這次是「我這邊目前沒有得獎名單的資料」，不是規則裡寫的那句），猜錯的兩個方向
+    // 都很糟。這招跟產業趨勢／技術問答的「來源編號：」是同一個既有作法。
+    '如果上面的背景資料裡完全沒有可以回答這一題的內容（也就是你這則回覆的重點是「這部分我沒有資料」），請在整則回覆的最後另起一行，只加上這個格式的標記：[[NO_DATA:關鍵詞]]，關鍵詞是記者這題真正想問的主題，2-6 個字的名詞（例如問「今年院士有誰」就填「院士」，問「得獎名單」就填「得獎名單」），不要填整句問句、不要填「沒有資料」這種描述。這行是給程式判讀用的，不是給記者看的，不算進上面的行數限制；如果背景資料答得出這題，就完全不要加這一行。',
     // 米亞人設（批次 28）。回報的意見：「對答要更如真人般、符合人設」。
     // ⚠️ 這條走的是 extraRules 這個「頻道專屬規則」的管道，只有 LINE 會拿到——
     // 網頁版 api/chat.js 呼叫的是不帶 extraRules 的 buildSystemPrompt(event)，
@@ -1052,6 +1067,45 @@ async function handleTechQueryMessage(replyToken, targetId, text, { speakerId = 
 // memory（批次 28）：要不要帶上「上一輪對話」給模型，並在答完之後記下這一輪。
 // 只有 1 對 1 的記者問答會傳 true——群組多人交錯提問、職員模式問的是後台資料，
 // 兩者回放上一輪只會製造答非所問，見 getRecentTurn() 的說明。
+// ── 「這場答不出來」→ 自動補查工研院官網（批次 31）─────────────────────────
+// 把 AI 加在結尾的 [[NO_DATA:關鍵詞]] 標記切下來（見 lineExtraRules() 的完整說明）。
+// ⚠️ 不管有沒有要用這個關鍵詞，標記一定要切掉——那行是給程式看的，漏在回覆裡讓記者
+// 看到一串 [[NO_DATA:院士]] 比什麼都沒做還糟。回傳 { text, keyword }。
+const NO_DATA_RE = /\n*\s*\[\[NO_DATA[:：]\s*([^\]]*?)\s*\]\]\s*$/;
+
+export function extractNoDataKeyword(raw) {
+  const s = String(raw || '');
+  const m = s.match(NO_DATA_RE);
+  if (!m) return { text: s.trim(), keyword: '' };
+  return { text: s.replace(NO_DATA_RE, '').trim(), keyword: String(m[1] || '').trim().slice(0, 20) };
+}
+
+// 這場的知識庫答不出來時，拿記者真正在問的關鍵詞去工研院官網新聞中心補查一次，
+// 查到就把標題與連結接在答案後面。
+//
+// ⚠️ 只給「線索」，不重寫內容：這裡刻意不再叫一次 AI 去摘要那幾則報導。記者要的是
+// 「哪裡找得到」，直接給標題＋日期＋原文連結最準也最快；多叫一次 AI 除了慢，還多一次
+// 把官網原文講走鐘的機會——而這則回覆掛的是主辦單位名義（同 lineExtraRules() 的顧慮）。
+//
+// 查不到（或抓取失敗）就回空字串，原本那句誠實的「我沒有這項資料」照舊送出去，
+// 不會因為補查失敗而讓記者收不到答案。
+const NO_DATA_MAX_LINKS = 2;
+
+async function itriNewsHintBlock(keyword) {
+  const kw = sanitize(keyword, 20);
+  if (!kw) return '';
+  try {
+    const { ok, items } = await fetchItriNews(kw);
+    if (!ok || !items.length) return '';
+    const lines = items.slice(0, NO_DATA_MAX_LINKS)
+      .map(it => `・${it.title}${it.date ? `（${it.date}）` : ''}\n${it.url}`);
+    return `\n\n———\n這題本場的新聞資料裡沒有，不過工研院官網新聞中心有相關報導，您可以直接看原文：\n${lines.join('\n')}`;
+  } catch (e) {
+    console.error('itriNewsHintBlock 失敗:', e.message);
+    return '';
+  }
+}
+
 async function answerQuestion(replyToken, userId, rawEvent, mediaName, text, { loading = true, allowPreEventSubstitution = true, switchNotice = '', memory = false } = {}) {
   // 活動前只給媒體邀請函、不給正式新聞稿與照片（見 lib/prompt.js resolveEventContent()
   // 的說明）。放在這裡而不是呼叫端各自判斷，理由跟下面的邀訪窗口比對一樣：1 對 1、
@@ -1089,8 +1143,13 @@ async function answerQuestion(replyToken, userId, rawEvent, mediaName, text, { l
   // 上一輪對話（只在 1 對 1、且上一輪答的就是這一場時才有東西）——「那成本呢」這種
   // 省略式續問要接得住，靠的就是這兩則；見 buildTurnHistory() 的說明。
   const history = memory ? await buildTurnHistory(userId, event.id) : [];
-  const aiReply = await askAnthropic(systemPrompt, text, history);
-  const reply = switchNotice + aiReply;
+  const rawReply = await askAnthropic(systemPrompt, text, history);
+  // 標記一定要切掉（不管後面用不用得到那個關鍵詞），見 extractNoDataKeyword() 的 ⚠️。
+  const { text: aiReply, keyword: noDataKeyword } = extractNoDataKeyword(rawReply);
+  // 這場答不出來時，補查一次工研院官網新聞中心——回報的截圖就是這個洞（見
+  // lineExtraRules() 那條規則的說明）。查不到就是空字串，原本的答案照舊。
+  const newsHint = noDataKeyword ? await itriNewsHintBlock(noDataKeyword) : '';
+  const reply = switchNotice + aiReply + newsHint;
   // 診斷用途，不是必要邏輯：路由判斷得準不準、AI 答得順不順，靠這行在 Vercel Logs
   // 裡直接看得到，不用另外接工具。刻意截斷長度，避免整份新聞稿灌爆單行 log。
   console.log(`[line] answer event=${event.id} status=${event.status} q="${text.slice(0, 60)}" reply="${reply.slice(0, 200)}"`);
@@ -1114,6 +1173,8 @@ async function answerQuestion(replyToken, userId, rawEvent, mediaName, text, { l
   // setRecentTurn() 自己吞例外——這是體驗加分，寫失敗絕對不能連累剛剛那則答案。
   // 記的是 aiReply 而不是 reply：switchNotice（「已切換到《X》：」）是講給人看的
   // 系統提示，不是對話內容，回放給模型只會變成雜訊。
+  // 存 aiReply（已切掉標記、不含補查來的連結區塊）——那些連結是給人點的線索，
+  // 回放給模型當對話脈絡只會變成雜訊。
   if (memory) await setRecentTurn(userId, event.id, text, aiReply);
 }
 

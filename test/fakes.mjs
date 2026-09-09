@@ -90,6 +90,7 @@ export function reset() {
   state.itriFetchFail = false;
   state.itriKeywordMustInclude = '';
   state.fallbackReply = null; // null＝用上面的預設假回覆，見 installFetchStub() 的兜底分支
+  state.noDataKeyword = ''; // 非空＝模擬「這場答不出來」，見 installFetchStub() 的問答分支
   sent.length = 0;
 }
 
@@ -334,8 +335,13 @@ export function installFetchStub() {
       // msgs：整個 messages 陣列。批次 28 的對話記憶會在使用者這一則「前面」補上一輪
       // user／assistant（見 api/line.js buildTurnHistory()），只看 question（＝
       // messages[0]）分不出有沒有回放，要驗回放就得看整串。
-      sent.push({ kind: 'answer', event: ev, text: '（假回答）', sys, question: userText, msgs: body.messages });
-      return { ok: true, json: async () => ({ content: [{ type: 'text', text: '（假回答）' }] }) };
+      // state.noDataKeyword 設了字串時，模擬 AI 判斷「背景資料答不出這題」而在結尾加上
+      // 機器可讀標記（見 api/line.js lineExtraRules() 那條規則與 extractNoDataKeyword()）。
+      const answerText = state.noDataKeyword
+        ? `這部分我沒有資料，建議洽現場新聞聯絡人。\n[[NO_DATA:${state.noDataKeyword}]]`
+        : '（假回答）';
+      sent.push({ kind: 'answer', event: ev, text: answerText, sys, question: userText, msgs: body.messages });
+      return { ok: true, json: async () => ({ content: [{ type: 'text', text: answerText }] }) };
     }
     // lib/industry-trends.js fetchIndustryTrendDigest() 打的 IEK 免費焦點清單頁。
     if (u.includes('ieknet.iek.org.tw')) {

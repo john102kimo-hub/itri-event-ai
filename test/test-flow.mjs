@@ -1463,6 +1463,80 @@ out = await send('米亞 這場的重點是什麼');
 check('1 對 1 打「米亞 這場的重點是什麼」→ 照常回答（喚醒詞只影響群組的判斷）',
   out.some(o => o.kind === 'answer' && o.event === 'quad'), JSON.stringify(out.map(o => o.kind)));
 
+// ── 情境 21.8：這場答不出來時，自動補查工研院官網（回報的截圖，批次 31）─────────
+// 回報：記者在群組問「今年院士有誰」，機器人照實說「我這邊目前沒有得獎名單的資料」
+// ——答得沒錯，但工研院官網新聞中心搜「院士」第一筆就是那篇授證新聞（實測過真的
+// 官網）。根因是路由：tech_query 要求問句裡明確出現「工研院」，這句沒有，加上當時
+// 綁著一場活動就被判成 qa，我們手上另一個有答案的來源從頭到尾沒被問過。
+
+console.log('── 這場沒有資料 → 補查官網、把原文連結接在答案後面 ──');
+reset(); await freshModule();
+state.bindings.set('U_reporter', { event_id: 'quad', media_name: '', note: '', bound_at: Date.now() });
+state.noDataKeyword = '院士'; // 模擬 AI 判斷「背景資料答不出這題」
+out = await send('今年院士有誰');
+{
+  // ⚠️ 只看 kind==='text'（真的送出去給記者的訊息）。kind==='answer' 是 fakes 記下的
+  // **模型原始輸出**，標記本來就還在裡面，拿它來驗「有沒有切乾淨」會驗錯東西。
+  const sentText = out.filter(o => o.kind === 'text').map(o => o.text).join('\n');
+  check('原本那句誠實的「我沒有資料」還在，沒有被補查蓋掉',
+    /沒有資料/.test(sentText), JSON.stringify(out.map(o => o.text?.slice(0, 40))));
+  check('後面接上工研院官網的相關報導與原文連結',
+    /工研院官網新聞中心有相關報導/.test(sentText) && /itri\.org\.tw/.test(sentText),
+    JSON.stringify(sentText.slice(0, 300)));
+  check('⚠️ 機器可讀標記一定要切掉，不能讓記者看到 [[NO_DATA:…]]',
+    !/NO_DATA/.test(sentText), sentText);
+}
+state.noDataKeyword = '';
+
+// 補查是「查得到才附」——官網查不到時不能硬掰，也不能因此連原本的答案都不見
+reset(); await freshModule();
+state.bindings.set('U_reporter', { event_id: 'quad', media_name: '', note: '', bound_at: Date.now() });
+state.noDataKeyword = '院士';
+state.itriKeywordMustInclude = '絕對查不到的字';
+out = await send('今年院士有誰');
+{
+  const sentText = out.filter(o => o.kind === 'text').map(o => o.text).join('\n');
+  check('官網也查不到 → 只給原本那句誠實的答案，不附空的連結區塊',
+    /沒有資料/.test(sentText) && !/工研院官網新聞中心有相關報導/.test(sentText) && !/NO_DATA/.test(sentText),
+    sentText);
+}
+state.itriKeywordMustInclude = '';
+state.noDataKeyword = '';
+
+// 官網整個抓不到（網路問題、改版）也不能連累原本的答案
+reset(); await freshModule();
+state.bindings.set('U_reporter', { event_id: 'quad', media_name: '', note: '', bound_at: Date.now() });
+state.noDataKeyword = '院士';
+state.itriFetchFail = true;
+out = await send('今年院士有誰');
+{
+  const sentText = out.filter(o => o.kind === 'text').map(o => o.text).join('\n');
+  check('官網抓取失敗 → 原本的答案照樣送得出去，不會整題掛掉',
+    /沒有資料/.test(sentText) && !/NO_DATA/.test(sentText), sentText);
+}
+state.itriFetchFail = false;
+state.noDataKeyword = '';
+
+// 答得出來的正常提問完全不受影響——不多打一次官網、回覆裡也沒有多餘的區塊
+reset(); await freshModule();
+state.bindings.set('U_reporter', { event_id: 'quad', media_name: '', note: '', bound_at: Date.now() });
+out = await send('這場的重點是什麼');
+check('這場答得出來的正常提問 → 不補查、回覆裡沒有多餘的連結區塊（一個字節都沒變慢）',
+  !/工研院官網新聞中心有相關報導/.test(out.filter(o => o.kind === 'text').map(o => o.text).join('')),
+  JSON.stringify(out.map(o => o.text?.slice(0, 40))));
+
+// 群組（回報的實際情境）也要有同一條後備
+reset(); await freshModule();
+state.bindings.set('Cgroup1', { event_id: 'quad', media_name: '', note: '', bound_at: Date.now() });
+state.noDataKeyword = '院士';
+out = await sendGroup('@我 今年院士有誰', { mentionSelf: true, mentionText: '@我 ' });
+{
+  const sentText = out.filter(o => o.kind === 'text').map(o => o.text).join('\n');
+  check('群組裡同一題（回報的實際情境）也接得上官網補查',
+    /工研院官網新聞中心有相關報導/.test(sentText) && !/NO_DATA/.test(sentText), sentText.slice(0, 300));
+}
+state.noDataKeyword = '';
+
 // ── 情境 22：1 對 1 的上一輪對話記憶（批次 28）───────────────────────────────
 // 回報的意見：「對答要更如真人般」。最不像人的地方不是語氣，是完全沒有對話記憶——
 // 記者問「這項技術何時商業化」，答完再問「那成本呢」，模型連上一句是什麼都看不到。
