@@ -1861,6 +1861,86 @@ out = await sendGroup('@我 半導體先進封裝技術發表會', { mentionSelf
     /已為您換到/.test(last?.text || '') && texts.includes('回首頁'), JSON.stringify(out));
 }
 
+// ── 情境 21.996：按鈕永遠要按得動，不管隔多久（實測回報，批次 41）─────────────────
+// 回報的截圖：群組裡的按鈕列停在下午 6:55 那則答案上，晚上 8:58 有人滑回去點
+// 「這次活動的主要發表內容是什麼？」——完全沒反應。「人家按按鈕，不會再特別加 @ 或
+// 米亞」，所以按鈕沉默等於整條路斷掉。
+//
+// 根因是兩道**各自獨立**的門，只要有一道關著就沉默：
+//   ① 守門（isOwnButtonText）本來拿「目前綁定的那場」比對 chips，但活動綁定有 6 小時
+//      TTL，過了就 getBinding() → null，連比對都沒得比
+//   ② 就算守門放行，handleGroupMessage() 的 getBinding() 照樣 null → 掉進
+//      handleUnbound() 的 silentOnOther → 沉默的位置只是往後挪了一段
+console.log('── 群組：隔了幾小時再點按鈕，一樣要答得出來 ──');
+const HOURS_7 = 7 * 60 * 60 * 1000;
+
+reset(); await freshModule();
+state.bindings.set('Cgroup1', {
+  event_id: 'semi', media_name: '', note: '',
+  bound_at: Date.now() - HOURS_7,                 // 綁定早就過了 6 小時 TTL
+  groupSessionUntil: Date.now() - 60000           // 續問視窗也過期
+});
+out = await sendGroup('這次活動的主要發表內容是什麼？', { mentionSelf: false });
+check('綁定過期 7 小時後點預設 chip → 綁定接回原本那場並回答（就是回報的截圖）',
+  out.some(o => o.kind === 'answer' && o.event === 'semi'), JSON.stringify(out));
+
+reset(); await freshModule();
+state.bindings.set('Cgroup1', {
+  event_id: 'quad', media_name: '', note: '',
+  bound_at: Date.now() - HOURS_7, groupSessionUntil: Date.now() - 60000
+});
+out = await sendGroup('重點', { mentionSelf: false });
+check('綁定過期後點同仁自訂的 chip（quad 的「重點」）→ 一樣接得回來',
+  out.some(o => o.kind === 'answer' && o.event === 'quad'), JSON.stringify(out));
+
+// 邀訪窗口關鍵字按鈕也是我們送出去的，同樣不該因為綁定過期就啞掉
+reset(); await freshModule();
+state.bindings.set('Cgroup1', {
+  event_id: 'quad', media_name: '', note: '',
+  bound_at: Date.now() - HOURS_7, groupSessionUntil: Date.now() - 60000
+});
+out = await sendGroup('技術規格', { mentionSelf: false });
+check('綁定過期後點邀訪窗口關鍵字 → 一樣給得出聯絡人', out.length > 0 && /陳美玲/.test(out.at(-1)?.text || ''),
+  JSON.stringify(out));
+
+// 連綁定都被清掉、只剩一顆每場共用的預設 chip——推不出是哪一場沒關係，
+// **就是不能沉默**：反問一句「您想問哪一場」也好過按了沒反應
+reset(); await freshModule();
+out = await sendGroup('這次活動的主要發表內容是什麼？', { mentionSelf: false });
+check('完全沒有綁定時點預設 chip → 至少要有回覆，不能沉默', out.length > 0, JSON.stringify(out));
+
+// 自訂 chip 只有那一場有，就算完全沒綁定也推得出來是哪一場
+reset(); await freshModule();
+out = await sendGroup('這場的技術突破是什麼？', { mentionSelf: false });
+check('沒有綁定時點某一場專屬的自訂 chip → 直接接到那一場（soon）',
+  out.some(o => o.kind === 'answer' && o.event === 'soon'), JSON.stringify(out));
+
+// 活動前那組 invite_letter_chips 也算我們的按鈕
+reset(); await freshModule();
+out = await sendGroup('邀請函內容是什麼？', { mentionSelf: false });
+check('沒有綁定時點「活動前」那組 chip → 一樣接得到那一場', out.length > 0, JSON.stringify(out));
+
+console.log('── 放寬之後，一般閒聊仍然要安靜 ──');
+for (const chat of ['大家中午吃什麼', '我等等把資料寄給你', '那我先走囉']) {
+  reset(); await freshModule();
+  state.bindings.set('Cgroup1', {
+    event_id: 'semi', media_name: '', note: '',
+    bound_at: Date.now() - HOURS_7, groupSessionUntil: Date.now() - 60000
+  });
+  out = await sendGroup(chat, { mentionSelf: false });
+  check(`綁定過期後的一般閒聊「${chat}」→ 維持安靜（守門沒有被放寬）`, out.length === 0, JSON.stringify(out));
+}
+
+// ⚠️ 保守：綁定還在的時候，點到別場的舊按鈕**不會**偷偷換場。跨場次比對只用來
+// 「認出這是我們的按鈕」跟「沒有綁定時推出場次」，不拿來當換場依據——「新聞稿」
+// 這種字同時是 quad 的邀訪關鍵字、也是任何一場都可能想問的東西，拿它換場等於
+// 把記者從他正在問的那場拉走（LINE-PLAN.md 坑 6）。
+reset(); await freshModule();
+state.bindings.set('Cgroup1', { event_id: 'semi', media_name: '', note: '', bound_at: Date.now() });
+out = await sendGroup('@我 重點', { mentionSelf: true, mentionText: '@我 ' });
+check('綁定還在時點到別場的舊 chip → 不會偷偷換到別場去',
+  !out.some(o => o.kind === 'answer' && o.event === 'quad'), JSON.stringify(out));
+
 // ── 情境 21.99：跨場次——答案在別場的新聞稿裡也要答得出來（批次 36）─────────────
 // 回報的意見：「這一定要切來切去特定活動專屬回答系統嗎？不能一體適用？」
 // 記者問「今年院士有誰」，答案就寫在《工研院院士授證典禮》那場的新聞稿裡，但問答只讀

@@ -133,6 +133,15 @@ async function getBinding(userId) {
 // 記者三個月後再回來問別場，名字還在，不用重問。跟 getBinding() 分開一支的原因：
 // getBinding() 的 6 小時 TTL 過期就回 null，但過期只代表「不知道現在要問哪一場」，
 // 不代表「不知道這個人是誰」，兩者不能混在一起判斷。
+// 綁定的活動 id，**不看 6 小時 TTL**——跟 getStoredMediaName() 同一個道理：TTL 過期
+// 只代表「不知道現在該問哪一場」，不代表「這個群組從來沒綁過場次」。按鈕辨識要用這支，
+// 不能用 getBinding()（見 ownChipEventId() 的 ⚠️，那是實測回報的沉默來源）。
+async function getStoredEventId(userId) {
+  const rows = await getAllLineUserRows();
+  const row = rows.find(r => r[0] === userId);
+  return row ? (row[1] || '') : '';
+}
+
 async function getStoredMediaName(userId) {
   const rows = await getAllLineUserRows();
   const row = rows.find(r => r[0] === userId);
@@ -2194,15 +2203,60 @@ async function isOwnButtonText(groupId, text, speakerId) {
   // 要唯一命中」的門檻，見 lib/menu.js，不會被一個短詞誤中）。
   if (matchEventByName(s, buildCalendarCards(await getAllEventRows()))) return true;
 
-  // 同仁在後台為「目前這場」設定的快速提問 chips 與邀訪窗口關鍵字——內容是同仁自由
-  // 填的，沒辦法寫死在上面那個集合裡，但它們確確實實是我們送出去的按鈕。
-  const binding = await getBinding(groupId);
-  const current = binding?.event_id ? await getEventById(binding.event_id) : null;
-  if (current) {
-    if (eventQuickChips(current, { group: true }).some(c => (typeof c === 'string' ? c : c.text) === s)) return true;
-    if (parseEventContacts(current).some(c => c.keyword === s)) return true;
+  // 同仁在後台設定的快速提問 chips 與邀訪窗口關鍵字（或沒設定時的 DEFAULT_CHIPS）——
+  // 內容是同仁自由填的，沒辦法寫死在上面那個集合裡，但它們確確實實是我們送出去的按鈕。
+  return !!(await ownChipEventId(groupId, s));
+}
+
+// 這則訊息是不是「某一場的快速提問按鈕／邀訪窗口關鍵字」；是的話回傳
+// { eventId }（eventId 可能是空字串＝認得這顆按鈕，但推不出是哪一場），不是回 null。
+//
+// ⚠️ 這支刻意「不」呼叫 getBinding()。實測回報：群組裡的按鈕列停在下午 6:55 那則
+// 訊息上，同事晚上 8:58 才滑回去點「這次活動的主要發表內容是什麼？」——完全沒反應。
+// 原本的寫法是「拿目前綁定的那場，比對它的 chips」，兩個地方會落空：
+//   ① 活動綁定有 6 小時 TTL，過了就 getBinding() → null，於是連比對都沒得比。
+//      但 TTL 過期只代表「不知道現在該問哪一場」，不代表「這句話從來不是我們的
+//      按鈕」——跟 getStoredMediaName()／getStoredNote() 不吃 TTL 是同一個道理。
+//   ② 就算綁定還在，中途換過場的話，舊訊息上的按鈕屬於**上一場**，跟現在綁的那場
+//      對不起來，一樣會被判成「不是我們的按鈕」。
+// LINE 的快速回覆按鈕會永遠留在對話紀錄裡，「隔幾小時往上滑再點」是常態不是例外，
+// 所以比對範圍要放大到「所有我們可能送出去的 chips」，再回推是哪一場。
+async function ownChipEventId(groupId, text) {
+  const s = String(text || '').trim();
+  if (!s) return null;
+
+  const storedId = await getStoredEventId(groupId);
+
+  // ① 這個群組上次綁的那場（不看 TTL）有這顆 → 就是那場，最準；DEFAULT_CHIPS 這種
+  //    每場共用的按鈕也靠這一步分辨得出來。
+  const stored = storedId ? await getEventById(storedId) : null;
+  if (isUsable(stored)) {
+    const texts = eventQuickChips(stored, { group: true }).map(c => (typeof c === 'string' ? c : c.text));
+    if (texts.includes(s) || parseEventContacts(stored).some(c => c.keyword === s)) return { eventId: storedId };
   }
-  return false;
+
+  // ② 同仁自己填的字（自訂 chips／活動前 chips／邀訪關鍵字）幾乎不會跟別場撞在一起，
+  //    唯一命中就當作是那一場——這條讓「換過場之後點舊按鈕」也能回到正確的場次。
+  //
+  //    ⚠️ 這條是刻意選的取捨，不是沒想到：它同時把「別場的短 chip」（quad 的
+  //    「重點」「應用」）也放進守門，於是群組裡有人單獨打一句「重點」也會被當成
+  //    按鈕。判斷是整句**完全相同**才算，而且要剛好等於某場設定過的字，誤觸機率
+  //    不高；反過來若限制成「只認目前這場的」，換過場之後點舊按鈕就會再度沉默——
+  //    那正是回報的問題本身。按鈕不動的代價比偶爾多答一句大得多，所以往這邊靠。
+  const customOf = ev => [
+    ...String(ev.chips || '').split('\n'),
+    ...String(ev.invite_letter_chips || '').split('\n')
+  ].map(x => x.trim()).filter(Boolean);
+  const owners = (await getAllEventRows()).map(rowToEvent).filter(isUsable)
+    .filter(ev => customOf(ev).includes(s) || parseEventContacts(ev).some(c => c.keyword === s));
+  if (owners.length === 1) return { eventId: owners[0].id };
+  if (owners.length > 1) return { eventId: storedId };
+
+  // ③ 每一場共用的預設 chips，而且上次綁的那場也對不上（多半是綁定被清掉了）——
+  //    仍然認得這是我們的按鈕，場次交給呼叫端去問。重點是**不要沉默**：按鈕按了
+  //    沒反應，比多問一句「您想問哪一場」糟糕得多。
+  if (DEFAULT_CHIPS.includes(s)) return { eventId: storedId };
+  return null;
 }
 
 const GROUP_FIXED_BUTTONS = new Set([
@@ -2418,7 +2472,29 @@ async function handleGroupMessage(replyToken, groupId, text, { mentioned, speake
   // 那裡的說明（被守門擋掉的訊息不該吃掉限流額度，更不該讓機器人冒出一句
   // 「提問太頻繁」插話）。守門擋掉時也不會呼叫 touchGroupSession()，理由跟批次 14
   // 「@ 到別人時安靜」一樣：不幫這種訊息續命，視窗才有機會真的到期。
-  const binding = await getBinding(groupId);
+  let binding = await getBinding(groupId);
+
+  // 綁定過期（6 小時 TTL）或指向別場，但這則訊息是某一場的快速提問按鈕——把綁定接
+  // 回那一場再往下走（批次 41）。
+  //
+  // ⚠️ 只補「守門放行了、卻沒有場次可以回答」這個洞，不是新的換場機制：
+  // isOwnButtonText() 現在認得舊訊息上的按鈕（見 ownChipEventId() 的 ⚠️），但如果
+  // 這裡的 getBinding() 照樣回 null，訊息會掉進 handleUnbound()，而群組沒被 @ 到時
+  // 那支是 silentOnOther——結果還是「按了沒反應」，只是沉默的位置往後挪了一段。
+  // 守門放行跟真的答得出來，是兩道各自獨立的門，兩道都要開。
+  // 這則訊息是不是我們自己送出去的按鈕（很可能是好幾小時前那則訊息上的）。下面兩個
+  // 地方都要用：接回綁定，以及最後那道「按鈕永遠不沉默」。讀的都是 60 秒快取，
+  // 不會多打 Sheets。
+  const ownButton = await isOwnButtonText(groupId, text, speakerId);
+
+  if (!binding?.event_id) {
+    const owned = await ownChipEventId(groupId, text);
+    if (owned?.eventId && isUsable(await getEventById(owned.eventId))) {
+      await upsertBinding(groupId, owned.eventId, '');
+      binding = await getBinding(groupId);
+      console.log(`[line] 群組點了舊按鈕，綁定接回 event=${owned.eventId} text="${text.slice(0, 40)}"`);
+    }
+  }
 
   const metaIntent = detectMetaIntent(text);
   if (metaIntent) {
@@ -2442,7 +2518,11 @@ async function handleGroupMessage(replyToken, groupId, text, { mentioned, speake
   }
 
   if (!binding) {
-    await handleUnbound(replyToken, groupId, text, { silentOnOther: !mentioned, askMediaName: false, remember: false });
+    // ⚠️ silentOnOther 對「我們自己的按鈕」一律關掉（批次 41）：安靜是為了不要在群組
+    // 裡對著別人的閒聊插話，但按鈕是**我們自己請對方按的**，按了沒反應永遠是 bug，
+    // 不是體貼。推不出場次時 handleUnbound() 會反問「您想問哪一場」並附上清單——
+    // 多問一句，比裝作沒看到好得多。
+    await handleUnbound(replyToken, groupId, text, { silentOnOther: !mentioned && !ownButton, askMediaName: false, remember: false });
     await touchGroupSession(groupId); // 不管有沒有真的答上，只要走到這裡就算還在互動，續命
     return;
   }
@@ -2493,7 +2573,9 @@ async function handleGroupMessage(replyToken, groupId, text, { mentioned, speake
   //
   // 真的被 @ 到時不受影響——跟 1 對 1、跟 handleUnbound() 的 silentOnOther:false
   // 同一個原則，明確叫了機器人就不能不理人。
-  if (!mentioned && routed.intent === 'other') return;
+  // 同上：按鈕不受這道安靜門檻約束。綁定中點到「這場沒有的內容」時 routeIntent()
+  // 有可能判成 other，那也該老實回一句，不能讓按鈕變成按了沒反應。
+  if (!mentioned && !ownButton && routed.intent === 'other') return;
 
   // 綁定中，但這題其實在問整體產業趨勢、不是這場活動的內容——不動原本的活動
   // 綁定（跟「延續這場討論」是兩件事，換場判斷只在下面 qa 分支才做），答完照樣
