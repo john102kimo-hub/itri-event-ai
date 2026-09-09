@@ -1236,12 +1236,27 @@ function hasChinese(text) {
   return /[一-鿿]/.test(String(text || ''));
 }
 
-async function itriNewsHintBlock(keyword, { chinese = true, question = '' } = {}) {
-  const kw = sanitize(keyword, 20);
-  if (!kw) return '';
+// keywords：候選關鍵詞，依序試到查得到為止。
+//
+// ⚠️ 批次 39：原本這裡只收「一個」關鍵詞，呼叫端用 `標記 || 猜的` 二選一——實測踩到
+// 的正是這個：模型的標記吐成一整句（「今年受證院士的具體名單和人數」，官網查 0 筆），
+// 而句型判斷猜出來的「院士」查得到 10 筆，卻因為標記優先、標記查不到就整個放棄，
+// 從來沒被試過。
+//
+// 兩個來源各有各的長處——標記的語意最準、猜的最乾淨——不該二選一，該依序試。
+async function itriNewsHintBlock(keywords, { chinese = true, question = '' } = {}) {
+  const list = [...new Set((Array.isArray(keywords) ? keywords : [keywords])
+    .map(k => sanitize(k, 40)).filter(Boolean))];
+  if (!list.length) return '';
   try {
-    const { ok, items } = await fetchItriNews(kw);
-    if (!ok || !items.length) return '';
+    let kw = '', items = [];
+    for (const candidate of list) {
+      const res = await fetchItriNews(candidate);
+      if (res.ok && res.items.length) { kw = candidate; items = res.items; break; }
+      console.log(`[line] 補查官網 kw="${candidate}" 查無資料，試下一個候選`);
+    }
+    if (!items.length) return '';
+    console.log(`[line] 補查官網命中 kw="${kw}" ${items.length} 筆`);
 
     const links = items.slice(0, NO_DATA_MAX_LINKS)
       .map(it => `・${it.title}${it.date ? `（${it.date}）` : ''}\n${it.url}`)
@@ -1388,14 +1403,17 @@ async function answerQuestion(replyToken, userId, rawEvent, mediaName, text, { l
   // lineExtraRules() 那條規則的說明）。查不到就是空字串，原本的答案照舊。
   // 標記優先（模型抓的關鍵詞語意最準），沒有標記就看回覆內容像不像「我沒有這項資料」，
   // 像的話從問句猜一個關鍵詞——見 NO_DATA_PHRASE_RE 的說明（批次 37）。
-  const fallbackKeyword = (!noDataKeyword && NO_DATA_PHRASE_RE.test(aiReply))
-    ? guessNoDataKeyword(text) : '';
-  const lookupKeyword = noDataKeyword || fallbackKeyword;
-  if (lookupKeyword) {
-    console.log(`[line] 補查官網 kw="${lookupKeyword}" 來源=${noDataKeyword ? '標記' : '句型判斷'}`);
+  // 兩個來源都算數，依序試（見 itriNewsHintBlock() 的 ⚠️）：標記的語意最準，但模型
+  // 常常把整句話塞進去、官網那種接近精準比對的搜尋查不到；猜的比較乾淨、命中率高。
+  // 只要其中一個查得到就算數。
+  const phraseHit = NO_DATA_PHRASE_RE.test(aiReply);
+  const guessed = (noDataKeyword || phraseHit) ? guessNoDataKeyword(text) : '';
+  const lookupKeywords = [...new Set([noDataKeyword, guessed].filter(Boolean))];
+  if (lookupKeywords.length) {
+    console.log(`[line] 補查官網 候選=${JSON.stringify(lookupKeywords)} 標記=${noDataKeyword || '-'} 句型=${phraseHit}`);
   }
-  const newsHint = lookupKeyword
-    ? await itriNewsHintBlock(lookupKeyword, { chinese: hasChinese(aiReply), question: text })
+  const newsHint = lookupKeywords.length
+    ? await itriNewsHintBlock(lookupKeywords, { chinese: hasChinese(aiReply), question: text })
     : '';
   const reply = switchNotice + aiReply + newsHint;
   // 診斷用途，不是必要邏輯：路由判斷得準不準、AI 答得順不順，靠這行在 Vercel Logs

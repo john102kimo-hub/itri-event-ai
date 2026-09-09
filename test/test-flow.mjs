@@ -1716,6 +1716,35 @@ check('正常答得出來的回覆 → 不會被誤判成沒有資料、不會�
   JSON.stringify(out.filter(o => o.kind === 'text').map(o => o.text?.slice(0, 60))));
 state.answerText = '';
 
+console.log('── 標記查不到時要退回句型判斷猜的關鍵詞（批次 39）──');
+// 實測踩到的：模型的標記吐成一整句「今年受證院士的具體名單和人數」（官網查 0 筆），
+// 而句型判斷猜出來的「院士」查得到——卻因為「標記優先、標記查不到就放棄」而從來
+// 沒被試過。兩個來源不該二選一，該依序試。
+reset(); await freshModule();
+state.bindings.set('U_reporter', { event_id: 'quad', media_name: '', note: '', bound_at: Date.now() });
+state.noDataKeyword = '今年受證院士的具體名單和人數'; // 模型吐了一整句當標記
+state.itriKeywordMustInclude = '院士';                 // 官網只有查「院士」才有結果
+out = await send('今年院士');
+{
+  const sentText = out.filter(o => o.kind === 'text').map(o => o.text).join('\n');
+  check('標記是一整句查不到 → 退回句型判斷猜的「院士」，照樣補查得到',
+    /工研院官網新聞中心/.test(sentText) && /itri\.org\.tw/.test(sentText), sentText.slice(-300));
+}
+state.noDataKeyword = '';
+state.itriKeywordMustInclude = '';
+
+// 兩個候選都查不到時，安靜退回原本的答案，不硬掰
+reset(); await freshModule();
+state.bindings.set('U_reporter', { event_id: 'quad', media_name: '', note: '', bound_at: Date.now() });
+state.noDataKeyword = '院士';
+state.itriKeywordMustInclude = '絕對查不到的字';
+out = await send('今年院士');
+check('所有候選都查不到 → 只給原本那句誠實的回答，不附空區塊',
+  !/工研院官網新聞中心/.test(out.filter(o => o.kind === 'text').map(o => o.text).join('')),
+  JSON.stringify(out.filter(o => o.kind === 'text').map(o => o.text?.slice(0, 60))));
+state.noDataKeyword = '';
+state.itriKeywordMustInclude = '';
+
 console.log('── 官網找到了就「讀懂它」，不是只丟連結（批次 38）──');
 // 使用者確認：院士授證那場的知識庫是空的，內容只存在工研院官網新聞室——也就是說
 // 這條補查是這題唯一答得出來的路，那就不能只給連結叫記者自己點進去看。
