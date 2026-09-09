@@ -91,6 +91,7 @@ export function reset() {
   state.itriKeywordMustInclude = '';
   state.fallbackReply = null; // null＝用上面的預設假回覆，見 installFetchStub() 的兜底分支
   state.noDataKeyword = ''; // 非空＝模擬「這場答不出來」，見 installFetchStub() 的問答分支
+  state.answerText = ''; // 非空＝模擬模型吐出這段原始文字，見 installFetchStub() 的問答分支
   sent.length = 0;
 }
 
@@ -337,9 +338,12 @@ export function installFetchStub() {
       // messages[0]）分不出有沒有回放，要驗回放就得看整串。
       // state.noDataKeyword 設了字串時，模擬 AI 判斷「背景資料答不出這題」而在結尾加上
       // 機器可讀標記（見 api/line.js lineExtraRules() 那條規則與 extractNoDataKeyword()）。
-      const answerText = state.noDataKeyword
-        ? `這部分我沒有資料，建議洽現場新聞聯絡人。\n[[NO_DATA:${state.noDataKeyword}]]`
-        : '（假回答）';
+      // state.answerText 設了字串時，模擬模型吐出那段原始文字（用來測 Markdown 清理）。
+      const answerText = state.answerText
+        ? state.answerText
+        : state.noDataKeyword
+          ? `這部分我沒有資料，建議洽現場新聞聯絡人。\n[[NO_DATA:${state.noDataKeyword}]]`
+          : '（假回答）';
       sent.push({ kind: 'answer', event: ev, text: answerText, sys, question: userText, msgs: body.messages });
       return { ok: true, json: async () => ({ content: [{ type: 'text', text: answerText }] }) };
     }
