@@ -92,6 +92,7 @@ export function reset() {
   state.fallbackReply = null; // null＝用上面的預設假回覆，見 installFetchStub() 的兜底分支
   state.noDataKeyword = ''; // 非空＝模擬「這場答不出來」，見 installFetchStub() 的問答分支
   state.newsDigestText = ''; // 非空＝模擬「官網補查那支模型」吐出這段話（批次 44）
+  state.memories = [];       // bot_memory 的列（批次 46）：[時間, 範圍, 類型, 內容, 建立者, 狀態]
   state.answerText = ''; // 非空＝模擬模型吐出這段原始文字，見 installFetchStub() 的問答分支
   sent.length = 0;
 }
@@ -116,6 +117,7 @@ export const sheets = {
     if (range.startsWith('line_users!')) return bindingRows();
     if (range.startsWith('line_staff!')) return state.staff.map(r => [...r]);
     if (range.startsWith('contacts_directory!')) return state.contactsDirectory ? [[state.contactsDirectory]] : [];
+    if (range.startsWith('bot_memory!')) return state.memories.map(r => [...r]);
     return [];
   },
   async appendRows(range, rows) {
@@ -128,6 +130,7 @@ export const sheets = {
       });
     }
     if (range.startsWith('line_staff!')) state.staff.push(...rows.map(r => [...r]));
+    if (range.startsWith('bot_memory!')) state.memories.push(...rows.map(r => [...r]));
     if (range.startsWith('events!')) state.events.push(...rows.map(r => [...r]));
   },
   async updateRange(range, values) {
@@ -137,6 +140,12 @@ export const sheets = {
     if (evM) {
       const row = state.events[Number(evM[2]) - 2];
       if (row) values[0].forEach((v, i) => { row[evM[1].charCodeAt(0) - 65 + i] = v; });
+      return;
+    }
+    const memM = range.match(/^bot_memory!([A-F])(\d+)$/);
+    if (memM) {
+      const row = state.memories[Number(memM[2]) - 2];
+      if (row) row[memM[1].charCodeAt(0) - 65] = values[0][0];
       return;
     }
     const staffM = range.match(/^line_staff!([A-E])(\d+)(?::([A-E])(\d+))?$/);
