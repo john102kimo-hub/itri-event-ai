@@ -51,6 +51,11 @@ import {
 } from '../lib/staff.js';
 import { buildGeoBriefFlex, formatGeoBriefText } from '../lib/geo-brief.js';
 import {
+  getMemories, addMemory, setMemoryStatus, parseMemoryCommand,
+  formatFactBlock, formatStyleRules, formatMemoryList,
+  ON as MEM_ON, PENDING as MEM_PENDING, OFF as MEM_OFF, MEMORY_MAX_ACTIVE
+} from '../lib/bot-memory.js';
+import {
   CONTACTS_DIR_RANGE, GLOBAL_CONTACT_TOPICS, ensureContactsDirectorySheet,
   parseContactsDirectory, formatGlobalContact, matchGlobalContactByText
 } from '../lib/contacts-directory.js';
@@ -854,6 +859,10 @@ const ZH_TW_RULE = '用字：一律使用台灣慣用的繁體中文與台灣用
 async function askAnthropic(systemPrompt, userText, history = [], { extraSystem = '' } = {}) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return '系統目前無法回答，請稍後再試或洽現場工作人員。';
+  // 公關同仁用對話交代的回答偏好（批次 46）。放在這裡而不是各個呼叫端：這支是所有
+  // 模型呼叫的唯一入口，四條問答路線一次到位，新增路線也不會忘記帶上。
+  // ⚠️ 讀的是 60 秒快取（見 lib/bot-memory.js），不會每則提問都打一次 Sheets。
+  const styleRules = formatStyleRules(await getMemories());
   try {
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -863,7 +872,7 @@ async function askAnthropic(systemPrompt, userText, history = [], { extraSystem 
         thinking: { type: 'disabled' }, // 見 ANSWER_MODEL 的 ⚠️
         max_tokens: 4096,
         system: [
-          { type: 'text', text: `${systemPrompt}\n${ZH_TW_RULE}`, cache_control: { type: 'ephemeral' } },
+          { type: 'text', text: [systemPrompt, ZH_TW_RULE, styleRules].filter(Boolean).join('\n'), cache_control: { type: 'ephemeral' } },
           ...(extraSystem ? [{ type: 'text', text: extraSystem }] : [])
         ],
         messages: [...history, { role: 'user', content: String(userText).slice(0, 8000) }]
@@ -957,6 +966,16 @@ const GROUP_NAV = [...GROUP_NAV_HEAD, ...GROUP_NAV_TAIL];
 // LINE 的 id 前綴：使用者 U、群組 C、聊天室 R（官方文件的慣例，很穩定）。判斷錯的
 // 代價也只是「群組少一排導覽」或「1 對 1 多一排」，不會壞掉。
 const isGroupTarget = id => /^[CR]/.test(String(id || ''));
+
+// replyOrPushMessages() 收的是原始訊息物件，不像 replyOrPush() 會幫忙把字串陣列
+// 轉成 quickReply。使用說明那則要自己組一份——格式跟 lib/line.js 的 buildQuickReply()
+// 一樣（LINE 的 quick reply 物件），只是這裡只需要固定這幾顆。
+function buildHelpQuickReply() {
+  const items = ['最近有哪些活動', '產業趨勢分析', '想問什麼技術', CONTACT_MENU_LABEL];
+  return {
+    items: items.map(text => ({ type: 'action', action: { type: 'message', label: text, text } }))
+  };
+}
 
 // ⚠️ 這一層是「群組導覽不會漏掉」的結構性保證（批次 43），不是方便而已。
 //
@@ -1695,7 +1714,11 @@ async function answerQuestion(replyToken, userId, rawEvent, mediaName, text, { l
     return;
   }
 
-  const systemPrompt = buildSystemPrompt(event, lineExtraRules(event));
+  // 同仁後續補充／更正（批次 46）。接在新聞稿之後、標明「以這裡為準」——同仁最常用
+  // 它更正已經過時的內容（改地點、改時間），只寫「補充資料」的話，模型看到兩個互相
+  // 矛盾的說法時不知道該信哪一個。
+  const factBlock = formatFactBlock(await getMemories(), event.id);
+  const systemPrompt = buildSystemPrompt(event, lineExtraRules(event)) + factBlock;
   // 上一輪對話（只在 1 對 1、且上一輪答的就是這一場時才有東西）——「那成本呢」這種
   // 省略式續問要接得住，靠的就是這兩則；見 buildTurnHistory() 的說明。
   const history = memory ? await buildTurnHistory(userId, event.id) : [];
@@ -1867,6 +1890,95 @@ async function handleSetupRichMenu(replyToken, userId) {
 //   - 不做軟綁定：職員一次對話常常在不同活動之間跳來跳去（查完 A 場數據又問 B 場
 //     內容），鎖定單一活動反而綁手綁腳
 //   - 多了 geo_status／event_analytics／create_event／training_link 四種指令
+// 同仁按下的確認鈕送出的字串。用完整句子而不是「是／否」——這兩顆按鈕會留在對話
+// 紀錄裡，隔天滑回去按到「是」卻不記得在確認什麼，比按不到更糟。
+const TEACH_YES = '✅ 記起來';
+const TEACH_NO = '✖ 不用記';
+
+// 回傳 true 代表這則訊息已經被當成「教學指令」處理完了，呼叫端不要再往下走。
+async function handleTeachMessage(replyToken, userId, text) {
+  const s = String(text || '').trim();
+  const mems = await getMemories();
+
+  // 確認／取消：把最近一筆 pending 收掉。只收「這個人自己」剛剛留下的那一筆——
+  // 兩位同仁同時在教的時候，不能互相確認到對方的內容。
+  if (s === TEACH_YES || s === TEACH_NO) {
+    const mine = mems.filter(m => m.status === MEM_PENDING && m.by === userId);
+    const last = mine[mine.length - 1];
+    if (!last) {
+      await replyOrPush(replyToken, userId, '沒有等著確認的內容喔。', ['記憶清單']);
+      return true;
+    }
+    await setMemoryStatus(last.rowNumber, s === TEACH_YES ? MEM_ON : MEM_OFF);
+    await replyOrPush(replyToken, userId,
+      s === TEACH_YES ? `好，我記起來了 ✅\n「${last.text}」\n\n以後回答都會照這個來。要查或取消，打「記憶清單」。`
+                      : '好，那就當作沒這回事 👌',
+      ['記憶清單']);
+    return true;
+  }
+
+  const cmd = parseMemoryCommand(s);
+  if (!cmd) return false;
+
+  if (cmd.kind === 'list') {
+    await replyOrPush(replyToken, userId, formatMemoryList(mems), ['最近有哪些活動']);
+    return true;
+  }
+
+  if (cmd.kind === 'forget') {
+    const active = mems.filter(m => m.status === MEM_ON);
+    const target = active[cmd.index - 1];
+    if (!target) {
+      await replyOrPush(replyToken, userId, `沒有第 ${cmd.index} 條喔，先打「記憶清單」看一下編號。`, ['記憶清單']);
+      return true;
+    }
+    await setMemoryStatus(target.rowNumber, MEM_OFF);
+    await replyOrPush(replyToken, userId, `已經忘記這條 🗑\n「${target.text}」`, ['記憶清單']);
+    return true;
+  }
+
+  // cmd.kind === 'save'
+  if (mems.filter(m => m.status === MEM_ON).length >= MEMORY_MAX_ACTIVE) {
+    await replyOrPush(replyToken, userId,
+      `我記的東西已經到上限（${MEMORY_MAX_ACTIVE} 條）了。這些內容每一題都會帶進去，太多會讓我變慢也變貴——請先打「記憶清單」忘記幾條再教我。`,
+      ['記憶清單']);
+    return true;
+  }
+
+  // scope 'event' 代表「記在同仁現在綁定的那一場」。沒綁定就問一下是哪一場，
+  // 不要默默記成全站——那是兩件完全不同的事。
+  let scope = cmd.scope;
+  if (scope === 'event') {
+    const binding = await getBinding(userId);
+    const current = binding?.event_id ? await getEventById(binding.event_id) : null;
+    if (!isUsable(current)) {
+      await replyOrPush(replyToken, userId,
+        '要記在哪一場呢？請先打活動名稱切到那一場，再跟我說一次。\n\n（如果這件事是所有場次都適用的，改打「全站記住：⋯⋯」）',
+        ['最近有哪些活動']);
+      return true;
+    }
+    scope = current.id;
+  }
+
+  await addMemory({
+    scope, type: cmd.type, text: cmd.text, by: userId,
+    status: cmd.confirm ? MEM_PENDING : MEM_ON
+  });
+
+  if (cmd.confirm) {
+    // 自然語句：先問一次再生效。理由見 lib/bot-memory.js 開頭的 ⚠️。
+    await replyOrPush(replyToken, userId,
+      `這句話要我以後都照做嗎？\n「${cmd.text}」`, [TEACH_YES, TEACH_NO]);
+  } else {
+    const where = cmd.type === 'style' ? '所有回答' : (scope === 'global' ? '所有場次' : '這一場');
+    await replyOrPush(replyToken, userId,
+      `記起來了 ✅\n「${cmd.text}」\n\n之後${where}都會照這個來。要查或取消，打「記憶清單」。`,
+      ['記憶清單']);
+  }
+  console.log(`[line] 教學 user=${userId} type=${cmd.type} scope=${scope} confirm=${cmd.confirm} text="${cmd.text.slice(0, 40)}"`);
+  return true;
+}
+
 async function handleStaffMessage(replyToken, userId, text) {
   // ⚠️ 退出一定要在 routeStaffIntent() 之前用字面比對攔下來。交給 AI 判意圖會被歸到
   // 'other'，使用者只會拿到一份能力清單、永遠退不出去（實際回報過的狀況）。
@@ -1880,6 +1992,12 @@ async function handleStaffMessage(replyToken, userId, text) {
       ['最近有哪些活動', '使用說明']);
     return;
   }
+
+  // ── 用對話教米亞（批次 46）────────────────────────────────────────────
+  // ⚠️ 一定要排在 routeStaffIntent() 之前，而且用字面比對——跟 isExitStaffCommand()
+  // 同一個理由：「這句話會不會被寫進知識庫、讓每個記者都讀到」，不該取決於模型當下
+  // 判得準不準。
+  if (await handleTeachMessage(replyToken, userId, text)) return;
 
   const rows = await getAllEventRows();
   // 職員要用「全部場次」的候選清單，不能用記者版的 buildCalendarCards()——
@@ -2054,7 +2172,24 @@ async function handleMetaIntent(replyToken, userId, text, metaIntent, binding, {
   }
 
   if (metaIntent === 'help') {
-    await replyOrPush(replyToken, userId, HELP_TEXT, ['最近有哪些活動']);
+    // ⚠️ 直接把影片送進對話裡播，不是丟一條連結（批次 46）。
+    // 回報的原話：「影片現在是跳連結，有可能直接在對話傳或播影片嗎？不會有人特別
+    // 還會去點連結的」——完全正確。使用說明的目的是「讓人真的看」，一條連結把
+    // 「看」變成一個要主動決定的動作，多數人就滑過去了；LINE 的 video 訊息會直接
+    // 在對話裡顯示成可播放的畫面，門檻是零。
+    //
+    // 影片是 public/mia-guide.mp4（30 秒、720×1280、約 1.3 MB，遠低於 LINE 的
+    // 200 MB 上限），封面是第一格的截圖。兩個都必須是 https 直連網址，所以放在自家
+    // 站台的 public/ 底下跟著部署走——不依賴任何外部服務，也不會有連結過期的問題。
+    //
+    // 影片送失敗（網路、LINE 端拒絕）時不能連文字說明都沒了：兩則是同一次
+    // replyOrPushMessages，LINE 會整批處理；真的整批失敗，下面那行還會用 push 補一次
+    // 純文字，記者至少拿得到說明。
+    const ok = await replyOrPushMessages(replyToken, userId, [
+      { type: 'video', originalContentUrl: `${SITE}/mia-guide.mp4`, previewImageUrl: `${SITE}/mia-guide-cover.jpg` },
+      { type: 'text', text: HELP_TEXT, quickReply: buildHelpQuickReply() }
+    ]);
+    if (!ok) await replyOrPush(replyToken, userId, HELP_TEXT, ['最近有哪些活動']);
     return;
   }
 
