@@ -2198,9 +2198,21 @@ async function handleMetaIntent(replyToken, userId, text, metaIntent, binding, {
     // 影片送失敗（網路、LINE 端拒絕）時不能連文字說明都沒了：兩則是同一次
     // replyOrPushMessages，LINE 會整批處理；真的整批失敗，下面那行還會用 push 補一次
     // 純文字，記者至少拿得到說明。
+    // ⚠️ 順序是「文字在前、影片在後」（批次 49）。回報：「先放文字再放影片，不然文字
+    // 這麼多，影片早就被淹沒看不到」——完全正確。聊天室是由上往下長的，最後一則才停
+    // 在畫面最下方、緊貼輸入框；影片放前面，後面那串文字會把它整個推出畫面。
+    // HELP_TEXT 也同時精簡到 18 行（原本 33 行）——影片負責講完整流程，文字只留速查。
+    //
+    // ⚠️ quickReply 掛在**最後一則**：LINE 只顯示最後一則訊息的快速回覆，掛在文字那則
+    // 會整排消失。
     const ok = await replyOrPushMessages(replyToken, userId, [
-      { type: 'video', originalContentUrl: `${SITE}/mia-guide.mp4`, previewImageUrl: `${SITE}/mia-guide-cover.jpg` },
-      { type: 'text', text: HELP_TEXT, quickReply: buildHelpQuickReply() }
+      { type: 'text', text: HELP_TEXT },
+      {
+        type: 'video',
+        originalContentUrl: `${SITE}/mia-guide.mp4`,
+        previewImageUrl: `${SITE}/mia-guide-cover.jpg`,
+        quickReply: buildHelpQuickReply()
+      }
     ]);
     if (!ok) await replyOrPush(replyToken, userId, HELP_TEXT, ['最近有哪些活動']);
     return;

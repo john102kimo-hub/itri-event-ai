@@ -49,5 +49,22 @@ if (existsSync(COVER)) {
   check('封面在 1 MB 內', statSync(COVER).size < 1024 * 1024, `${(statSync(COVER).size / 1024).toFixed(0)} KB`);
 }
 
+// ── 米亞的聲音（批次 50）─────────────────────────────────────────────
+// 朱朱要的不只是這一支影片好聽，是「以後都用這個聲音」。那個聲音沒辦法在這裡合成
+// （是她在 Vidnoz 上挑的），所以參考檔本身就是資產——刪掉就再也回不去同一個聲音了。
+// 這幾條擋的是「有人整理 tools/ 的時候順手清掉」。
+const VOICE_REF = new URL('../tools/guide-video/voice/mia-voice-ref.wav', import.meta.url);
+const VOICE_RECIPE = new URL('../tools/guide-video/voice/cute.py', import.meta.url);
+
+check('⚠️ 米亞的原始聲音檔還在（刪了就回不去同一個聲音）', existsSync(VOICE_REF),
+  'tools/guide-video/voice/mia-voice-ref.wav');
+check('聲音的加工配方還在', existsSync(VOICE_RECIPE));
+if (existsSync(VOICE_REF)) {
+  const wav = readFileSync(VOICE_REF).subarray(0, 12).toString('latin1');
+  check('聲音檔是 WAV（RIFF/WAVE）', wav.startsWith('RIFF') && wav.includes('WAVE'), wav);
+  check('聲音檔不是空的（至少 100 KB）', statSync(VOICE_REF).size > 100 * 1024,
+    `${(statSync(VOICE_REF).size / 1024).toFixed(0)} KB`);
+}
+
 console.log(`\n${fail === 0 ? '✅' : '❌'} 使用說明影片檔測試通過 ${pass}／失敗 ${fail}`);
 process.exit(fail === 0 ? 0 : 1);
