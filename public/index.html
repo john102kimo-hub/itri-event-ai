@@ -599,9 +599,9 @@ textarea.form-control { min-height: 200px; resize: vertical; line-height: 1.6; }
       <label>活動知識庫（新聞稿 / 技術資料）*</label>
       <textarea class="form-control" id="input-kb"
         placeholder="貼入本次活動的新聞稿或重要資訊，AI 將根據此內容回答記者問題…"
-        oninput="document.getElementById('kb-count').textContent=this.value.length+' / 8000 字'"></textarea>
+        oninput="updateKbCount()"></textarea>
       <div class="char-count" id="kb-count">0 / 8000 字</div>
-      <div class="form-hint">新增活動時已內建固定範本，照格式填空即可，不會漏欄位。<b>範圍限制與結尾警語由系統自動加上，不需自己寫。</b>最多 8000 字。</div>
+      <div class="form-hint">新增活動時已內建固定範本，照格式填空即可，不會漏欄位。<b>範圍限制與結尾警語由系統自動加上，不需自己寫。</b>建議 8000 字以內（超過會讓 AI 每次回答變慢、變貴）；硬上限 45000 字，超過存不進去。</div>
     </div>
     <div class="form-group">
       <label>快速問題按鈕（每行一題）</label>
@@ -741,6 +741,10 @@ async function loadContactsDirectory() {
 async function saveContactsDirectory() {
   const statusEl = document.getElementById('contacts-directory-status');
   const content = document.getElementById('input-contacts-directory').value;
+  if (content.length > CONTACTS_DIR_LIMIT) {
+    statusEl.textContent = `內容 ${content.length} 字，超過上限 ${CONTACTS_DIR_LIMIT} 字，請刪減後再存`;
+    return;
+  }
   statusEl.textContent = '儲存中…';
   try {
     const res = await authedFetch('/api/events', {
@@ -1119,6 +1123,41 @@ function renderAnalytics(data, eid) {
 // 「最新問答」併入問答分析後移除——功能重複（同一張表、同一個刪除鈕），
 // 問答分析的「全部活動」篩選 + 上面拉高的 limit 已經涵蓋原本這個視圖的用途。
 
+// ── 知識庫字數上限 ────────────────────────────────────────
+// 原本三個地方各說各話：這裡的文案寫「最多 8000 字」但完全不擋（送出去才被後端退）、
+// 同仁編輯頁寫一樣的字卻是超過 8000 跳 confirm、後端的硬上限其實是 45000。
+// 也就是說畫面上那句「最多 8000 字」是假的，而真正會被退件的那條線沒人講。
+//
+// 合併成一套，兩個數字各有各的意思：
+//   8000  建議值（軟）——超過只是讓每次回答的輸入變長、變慢、變貴，還是存得進去
+//   45000 硬上限——Google Sheets 單一儲存格約 5 萬字元，超過真的存不了
+//
+// 這兩個數字必須跟 api/events.js 的 KB_MAX_LEN 對得上，而 public/ 是靜態檔沒辦法
+// import lib/，所以只能各寫一份 —— test/kb-limit.test.mjs 會比對三個檔案不准漂開。
+const KB_SOFT_LIMIT = 8000;
+const KB_HARD_LIMIT = 45000;
+// 邀訪窗口分工是另一張表、另一條上限（api/events.js 的 CONTACTS_DIR_MAX_LEN），
+// 原本前台完全沒提也沒擋——貼太長就是存下去才看到一句 400。同樣在前台先擋。
+const CONTACTS_DIR_LIMIT = 20000;
+
+// 打字當下就看得到，不要等到按儲存才知道白打了。超過硬上限直接標紅，
+// 因為那不是「建議你刪一點」，是「現在按儲存會失敗」。
+function updateKbCount() {
+  const el = document.getElementById('input-kb');
+  const out = document.getElementById('kb-count');
+  const n = el.value.length;
+  if (n > KB_HARD_LIMIT) {
+    out.textContent = `${n} 字 — 超過上限 ${KB_HARD_LIMIT} 字，存不進去`;
+    out.style.color = '#ef4444';
+  } else if (n > KB_SOFT_LIMIT) {
+    out.textContent = `${n} 字 — 超過建議的 ${KB_SOFT_LIMIT} 字`;
+    out.style.color = 'var(--accent)';
+  } else {
+    out.textContent = `${n} / ${KB_SOFT_LIMIT} 字`;
+    out.style.color = '';
+  }
+}
+
 // ── 未儲存保護 ────────────────────────────────────────────
 // 回報：「在後台新增活動時，如果滑鼠點到旁邊就會跳掉，造成資料未存」。
 // 根因是 overlay 的 onclick 直接呼叫 closeModal()——點到 modal 外面那圈灰底，整份表單
@@ -1168,7 +1207,7 @@ function applySnapshot(snap) {
 function syncModalDerived() {
   const color = (document.getElementById('input-color').value || '').trim() || '#0F9E7A';
   document.getElementById('color-preview').style.background = color;
-  document.getElementById('kb-count').textContent = document.getElementById('input-kb').value.length + ' / 8000 字';
+  updateKbCount();
 }
 
 // 跟基準比，而不是「有沒有打過字」——打了又改回來就該算沒改，
@@ -1299,7 +1338,7 @@ function showCreateModal(prefillDate) {
   document.getElementById('input-invite-letter').value = '';
   document.getElementById('input-invite-letter-chips').value = '';
   document.getElementById('input-kb').value = KB_TEMPLATE;
-  document.getElementById('kb-count').textContent = KB_TEMPLATE.length + ' / 8000 字';
+  updateKbCount();
   document.getElementById('input-chips').value = '';
   document.getElementById('input-greeting').value = '';
   document.getElementById('input-images').value = '';
@@ -1340,7 +1379,7 @@ async function copyFromEvent(sel) {
     const ev = await res.json();
     if (ev.error) throw new Error(ev.error);
     document.getElementById('input-kb').value = ev.knowledge_base || KB_TEMPLATE;
-    document.getElementById('kb-count').textContent = (document.getElementById('input-kb').value.length) + ' / 8000 字';
+    updateKbCount();
     if (ev.organizer) document.getElementById('input-organizer').value = ev.organizer;
     if (ev.chips) document.getElementById('input-chips').value = ev.chips;
     markModalChanged();
@@ -1367,7 +1406,7 @@ async function showEditModal(eventId) {
     document.getElementById('input-color').value = ev.color || '#0F9E7A';
     document.getElementById('color-preview').style.background = ev.color || '#0F9E7A';
     document.getElementById('input-kb').value = ev.knowledge_base || '';
-    document.getElementById('kb-count').textContent = (ev.knowledge_base?.length || 0) + ' / 8000 字';
+    updateKbCount();
     document.getElementById('input-chips').value = ev.chips || '';
     document.getElementById('input-greeting').value = ev.greeting || '';
     document.getElementById('input-images').value = ev.images || '';
@@ -1425,6 +1464,15 @@ async function saveEvent() {
 
   if (!name) { toast('活動名稱必填'); return; }
   if (!knowledge_base) { toast('知識庫不可為空'); return; }
+  // 硬上限在前台就擋掉。打了四萬多字才被後端退 400，是最傷的一種失敗。
+  if (knowledge_base.length > KB_HARD_LIMIT) {
+    toast(`知識庫 ${knowledge_base.length} 字，超過上限 ${KB_HARD_LIMIT} 字，請刪減後再存`);
+    return;
+  }
+  if (knowledge_base.length > KB_SOFT_LIMIT &&
+      !confirm(`知識庫已超過建議的 ${KB_SOFT_LIMIT} 字（目前 ${knowledge_base.length} 字），超長內容會讓 AI 回答變慢變貴，確定要存？`)) {
+    return;
+  }
 
   const btn = document.getElementById('save-btn');
   btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader"></i> 儲存中…';

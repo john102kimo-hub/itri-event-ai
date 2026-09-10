@@ -236,10 +236,10 @@ textarea.form-control { min-height: 240px; resize: vertical; line-height: 1.65; 
     <div class="form-group">
       <textarea class="form-control" id="input-kb"
         placeholder="貼入本次活動的新聞稿或重要資訊…"
-        oninput="document.getElementById('kb-count').textContent=this.value.length+' / 8000 字'"></textarea>
+        oninput="updateKbCount()"></textarea>
       <div class="char-count" id="kb-count">0 / 8000 字</div>
       <div class="form-hint">
-        照下方欄位格式填空即可，不會漏欄位。<b>回答範圍限制與結尾警語由系統自動加上，不需自己寫。</b>最多 8000 字。
+        照下方欄位格式填空即可，不會漏欄位。<b>回答範圍限制與結尾警語由系統自動加上，不需自己寫。</b>建議 8000 字以內（超過會讓 AI 每次回答變慢、變貴）；硬上限 45000 字，超過存不進去。
         <br>若欄位是空的，可按 <a href="#" onclick="fillTemplate();return false" style="color:var(--primary);font-weight:600">帶入填寫範本</a>。
       </div>
     </div>
@@ -384,6 +384,29 @@ function updateStatusHint() {
   document.getElementById('status-hint').textContent = STATUS_HINTS[v] || '';
 }
 
+// ── 知識庫字數上限 ────────────────────────────────────────
+// 跟後台 public/index.html 與後端 api/events.js 的 KB_MAX_LEN 是同一套數字，
+// 意思分兩層：8000 是建議值（超過只是變慢變貴，還是存得進去），45000 是硬上限
+// （Google Sheets 單一儲存格約 5 萬字元，超過真的存不了）。
+// public/ 是靜態檔沒辦法 import lib/，只能各寫一份 —— test/kb-limit.test.mjs 釘住不准漂開。
+const KB_SOFT_LIMIT = 8000;
+const KB_HARD_LIMIT = 45000;
+
+function updateKbCount() {
+  const out = document.getElementById('kb-count');
+  const n = document.getElementById('input-kb').value.length;
+  if (n > KB_HARD_LIMIT) {
+    out.textContent = `${n} 字 — 超過上限 ${KB_HARD_LIMIT} 字，存不進去`;
+    out.style.color = '#ef4444';
+  } else if (n > KB_SOFT_LIMIT) {
+    out.textContent = `${n} 字 — 超過建議的 ${KB_SOFT_LIMIT} 字`;
+    out.style.color = 'var(--accent)';
+  } else {
+    out.textContent = `${n} / ${KB_SOFT_LIMIT} 字`;
+    out.style.color = '';
+  }
+}
+
 // 記錄頁面載入當下的狀態，存檔時用來判斷「這次是不是第一次從未發布切成進行中」（= 發布）
 let loadedStatus = 'active';
 
@@ -418,7 +441,7 @@ async function load() {
     document.getElementById('input-color').value = ev.color || '#0F9E7A';
     document.getElementById('color-preview').style.background = ev.color || '#0F9E7A';
     document.getElementById('input-kb').value = ev.knowledge_base || '';
-    document.getElementById('kb-count').textContent = (ev.knowledge_base?.length || 0) + ' / 8000 字';
+    updateKbCount();
     document.getElementById('input-chips').value = ev.chips || '';
     document.getElementById('input-greeting').value = ev.greeting || '';
     document.getElementById('input-images').value = ev.images || '';
@@ -461,7 +484,7 @@ function fillTemplate() {
   const kb = document.getElementById('input-kb');
   if (kb.value.trim() && !confirm('目前欄位已有內容，帶入範本會覆蓋掉，確定嗎？')) return;
   kb.value = KB_TEMPLATE;
-  document.getElementById('kb-count').textContent = KB_TEMPLATE.length + ' / 8000 字';
+  updateKbCount();
 }
 
 // 「以既有活動為範本」：用公開活動列表（不含知識庫）填下拉選單，排除自己這一場。
@@ -494,7 +517,7 @@ async function copyFromEvent(sourceId) {
     const src = data.copy_source;
     if (!src) throw new Error('找不到該場活動的內容');
     document.getElementById('input-kb').value = src.knowledge_base || KB_TEMPLATE;
-    document.getElementById('kb-count').textContent = document.getElementById('input-kb').value.length + ' / 8000 字';
+    updateKbCount();
     if (src.organizer) document.getElementById('input-organizer').value = src.organizer;
     if (src.chips) document.getElementById('input-chips').value = src.chips;
     dirty = true;
@@ -516,8 +539,13 @@ async function save() {
     return;
   }
 
-  if (knowledge_base.length > 8000 &&
-      !confirm('知識庫已超過 8000 字（目前 ' + knowledge_base.length + ' 字），超長內容會讓 AI 回答變慢變貴，確定要存？')) {
+  // 硬上限在前台就擋掉。同仁打了四萬多字才被後端退 400，是最傷的一種失敗。
+  if (knowledge_base.length > KB_HARD_LIMIT) {
+    toast(`知識庫 ${knowledge_base.length} 字，超過上限 ${KB_HARD_LIMIT} 字，請刪減後再存`);
+    return;
+  }
+  if (knowledge_base.length > KB_SOFT_LIMIT &&
+      !confirm(`知識庫已超過建議的 ${KB_SOFT_LIMIT} 字（目前 ${knowledge_base.length} 字），超長內容會讓 AI 回答變慢變貴，確定要存？`)) {
     return;
   }
 
