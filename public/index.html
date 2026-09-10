@@ -285,6 +285,17 @@ textarea.form-control { min-height: 200px; resize: vertical; line-height: 1.6; }
 .form-hint { font-size: 0.76rem; color: var(--muted); margin-top: 4px; }
 .char-count { font-size: 0.76rem; color: var(--muted); text-align: right; margin-top: 4px; }
 .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px; }
+
+/* 草稿還原橫幅：上一次沒存到的內容還躺在 localStorage 裡時才出現 */
+.draft-banner {
+  display: none; align-items: center; gap: 10px; flex-wrap: wrap;
+  background: #fff7ed; border: 1px solid #fed7aa; border-radius: 10px;
+  padding: 12px 14px; margin-bottom: 18px;
+  font-size: 0.83rem; line-height: 1.55;
+}
+.draft-banner i { color: var(--accent); font-size: 20px; flex-shrink: 0; }
+.draft-banner .draft-text { flex: 1; min-width: 180px; }
+.draft-banner .btn { padding: 6px 12px; font-size: 0.8rem; flex-shrink: 0; white-space: nowrap; }
 .color-preview { display: inline-block; width: 20px; height: 20px; border-radius: 4px; vertical-align: middle; margin-left: 8px; border: 1px solid var(--border); }
 
 /* Toast */
@@ -491,11 +502,19 @@ textarea.form-control { min-height: 200px; resize: vertical; line-height: 1.6; }
 </div>
 
 <!-- 新增/編輯活動 Modal -->
-<div id="event-modal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeModal()">
+<div id="event-modal" class="modal-overlay" style="display:none" onclick="if(event.target===this)requestCloseModal('backdrop')">
   <div class="modal">
     <h2><i class="ti ti-calendar-plus" style="color:var(--primary)"></i>
       <span id="modal-title">新增活動</span>
     </h2>
+    <div class="draft-banner" id="draft-banner">
+      <i class="ti ti-rotate-clockwise"></i>
+      <div class="draft-text">
+        上次有一份<b>沒有存到</b>的內容（<span id="draft-time"></span>），要接著改嗎？
+      </div>
+      <button type="button" class="btn btn-primary" onclick="restoreDraft()"><i class="ti ti-check"></i> 還原</button>
+      <button type="button" class="btn btn-outline" onclick="discardDraft()">捨棄</button>
+    </div>
     <input type="hidden" id="edit-event-id">
     <div class="form-group">
       <label>活動名稱 *</label>
@@ -570,7 +589,7 @@ textarea.form-control { min-height: 200px; resize: vertical; line-height: 1.6; }
 
     <div class="form-group" id="copy-template-group" style="display:none;background:var(--primary-light);border:1px solid var(--border);border-radius:10px;padding:14px">
       <label style="display:flex;align-items:center;gap:6px"><i class="ti ti-copy" style="color:var(--primary)"></i> 以既有活動為範本（複製其知識庫來改）</label>
-      <select class="form-control" id="copy-template-select" onchange="copyFromEvent(this.value)" style="cursor:pointer">
+      <select class="form-control" id="copy-template-select" onchange="copyFromEvent(this)" style="cursor:pointer">
         <option value="">— 選擇要複製的活動 —</option>
       </select>
       <div class="form-hint">選一場舊活動，會把它的知識庫與主辦單位帶進下方欄位，你再修改即可。</div>
@@ -580,9 +599,9 @@ textarea.form-control { min-height: 200px; resize: vertical; line-height: 1.6; }
       <label>活動知識庫（新聞稿 / 技術資料）*</label>
       <textarea class="form-control" id="input-kb"
         placeholder="貼入本次活動的新聞稿或重要資訊，AI 將根據此內容回答記者問題…"
-        oninput="document.getElementById('kb-count').textContent=this.value.length+' / 8000 字'"></textarea>
+        oninput="updateKbCount()"></textarea>
       <div class="char-count" id="kb-count">0 / 8000 字</div>
-      <div class="form-hint">新增活動時已內建固定範本，照格式填空即可，不會漏欄位。<b>範圍限制與結尾警語由系統自動加上，不需自己寫。</b>最多 8000 字。</div>
+      <div class="form-hint">新增活動時已內建固定範本，照格式填空即可，不會漏欄位。<b>範圍限制與結尾警語由系統自動加上，不需自己寫。</b>建議 8000 字以內（超過會讓 AI 每次回答變慢、變貴）；硬上限 45000 字，超過存不進去。</div>
     </div>
     <div class="form-group">
       <label>快速問題按鈕（每行一題）</label>
@@ -622,7 +641,7 @@ textarea.form-control { min-height: 200px; resize: vertical; line-height: 1.6; }
       </select>
     </div>
     <div class="modal-actions">
-      <button class="btn btn-outline" onclick="closeModal()">取消</button>
+      <button class="btn btn-outline" onclick="requestCloseModal('button')">取消</button>
       <button class="btn btn-danger" id="archive-btn" onclick="archiveEvent()" style="display:none">封存活動</button>
       <button class="btn btn-primary" id="save-btn" onclick="saveEvent()"><i class="ti ti-check"></i> 儲存</button>
     </div>
@@ -722,6 +741,10 @@ async function loadContactsDirectory() {
 async function saveContactsDirectory() {
   const statusEl = document.getElementById('contacts-directory-status');
   const content = document.getElementById('input-contacts-directory').value;
+  if (content.length > CONTACTS_DIR_LIMIT) {
+    statusEl.textContent = `內容 ${content.length} 字，超過上限 ${CONTACTS_DIR_LIMIT} 字，請刪減後再存`;
+    return;
+  }
   statusEl.textContent = '儲存中…';
   try {
     const res = await authedFetch('/api/events', {
@@ -1100,6 +1123,203 @@ function renderAnalytics(data, eid) {
 // 「最新問答」併入問答分析後移除——功能重複（同一張表、同一個刪除鈕），
 // 問答分析的「全部活動」篩選 + 上面拉高的 limit 已經涵蓋原本這個視圖的用途。
 
+// ── 知識庫字數上限 ────────────────────────────────────────
+// 原本三個地方各說各話：這裡的文案寫「最多 8000 字」但完全不擋（送出去才被後端退）、
+// 同仁編輯頁寫一樣的字卻是超過 8000 跳 confirm、後端的硬上限其實是 45000。
+// 也就是說畫面上那句「最多 8000 字」是假的，而真正會被退件的那條線沒人講。
+//
+// 合併成一套，兩個數字各有各的意思：
+//   8000  建議值（軟）——超過只是讓每次回答的輸入變長、變慢、變貴，還是存得進去
+//   45000 硬上限——Google Sheets 單一儲存格約 5 萬字元，超過真的存不了
+//
+// 這兩個數字必須跟 api/events.js 的 KB_MAX_LEN 對得上，而 public/ 是靜態檔沒辦法
+// import lib/，所以只能各寫一份 —— test/kb-limit.test.mjs 會比對三個檔案不准漂開。
+const KB_SOFT_LIMIT = 8000;
+const KB_HARD_LIMIT = 45000;
+// 邀訪窗口分工是另一張表、另一條上限（api/events.js 的 CONTACTS_DIR_MAX_LEN），
+// 原本前台完全沒提也沒擋——貼太長就是存下去才看到一句 400。同樣在前台先擋。
+const CONTACTS_DIR_LIMIT = 20000;
+
+// 打字當下就看得到，不要等到按儲存才知道白打了。超過硬上限直接標紅，
+// 因為那不是「建議你刪一點」，是「現在按儲存會失敗」。
+function updateKbCount() {
+  const el = document.getElementById('input-kb');
+  const out = document.getElementById('kb-count');
+  const n = el.value.length;
+  if (n > KB_HARD_LIMIT) {
+    out.textContent = `${n} 字 — 超過上限 ${KB_HARD_LIMIT} 字，存不進去`;
+    out.style.color = '#ef4444';
+  } else if (n > KB_SOFT_LIMIT) {
+    out.textContent = `${n} 字 — 超過建議的 ${KB_SOFT_LIMIT} 字`;
+    out.style.color = 'var(--accent)';
+  } else {
+    out.textContent = `${n} / ${KB_SOFT_LIMIT} 字`;
+    out.style.color = '';
+  }
+}
+
+// ── 未儲存保護 ────────────────────────────────────────────
+// 回報：「在後台新增活動時，如果滑鼠點到旁邊就會跳掉，造成資料未存」。
+// 根因是 overlay 的 onclick 直接呼叫 closeModal()——點到 modal 外面那圈灰底，整份表單
+// 立刻消失，連問都不問。知識庫一填就是好幾百字，這是「絕對不能發生」的事，所以照
+// CLAUDE.md 第 2 條擋在程式裡，不是寫個提示請人小心。三層，由外而內：
+//
+//   1. 點外面    → 有改動就「完全不關」，只跳提示。誤觸最常見的就是這一種，
+//                  連 confirm 都不該跳（跳了也會被順手按掉）。
+//   2. 取消／ESC → 這是明確意圖，跳 confirm 再關。
+//   3. 草稿      → 不管用什麼方式離開（含關分頁、瀏覽器當掉、電腦斷電），內容都已經
+//                  躺在 localStorage 裡，下次打開同一場活動就能還原。
+//
+// 第 3 層是真正的防線：前兩層擋的是「這個 UI 上的誤觸」，第 3 層擋的是「所有我們想不到
+// 的意外」。同一個道理在 edit.html 已經用過（beforeunload），這裡補完整。
+
+// 表單欄位的單一清單：dirty 判斷、草稿存檔、草稿還原三件事共用同一份，
+// 不要各寫各的——以後新增欄位只改這裡一處，測試會釘住「有欄位漏掉」這件事。
+const MODAL_FIELDS = [
+  'input-name', 'input-organizer', 'input-color', 'input-date', 'input-time', 'input-venue',
+  'input-type', 'input-contact', 'input-contacts', 'input-invite-letter', 'input-invite-letter-chips',
+  'input-kb', 'input-chips', 'input-greeting', 'input-images', 'input-status'
+];
+
+const DRAFT_PREFIX = 'itri_event_draft:';
+const DRAFT_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;   // 超過七天的草稿自己過期，不要一直問
+
+let modalOpen = false;
+let modalBaseline = null;      // 開啟當下的欄位內容＝「跟後端一致」的基準，dirty 一律跟它比
+let draftTimer = null;
+let uploadingCount = 0;        // 照片還在傳的時候不准關，不然拿不回那幾個網址
+
+function snapshotForm() {
+  const o = {};
+  MODAL_FIELDS.forEach(id => { const el = document.getElementById(id); o[id] = el ? el.value : ''; });
+  return o;
+}
+
+function applySnapshot(snap) {
+  MODAL_FIELDS.forEach(id => {
+    const el = document.getElementById(id);
+    if (el && snap[id] !== undefined) el.value = snap[id];
+  });
+  syncModalDerived();
+}
+
+// 色塊預覽與字數是靠 oninput 更新的，程式化填值不會觸發，還原後要自己補算
+function syncModalDerived() {
+  const color = (document.getElementById('input-color').value || '').trim() || '#0F9E7A';
+  document.getElementById('color-preview').style.background = color;
+  updateKbCount();
+}
+
+// 跟基準比，而不是「有沒有打過字」——打了又改回來就該算沒改，
+// 而且上傳照片、複製範本這種程式化寫入也一併涵蓋，不用每處記得舉手。
+function isModalDirty() {
+  if (!modalOpen || !modalBaseline) return false;
+  const now = snapshotForm();
+  return MODAL_FIELDS.some(id => now[id] !== modalBaseline[id]);
+}
+
+function draftKey() {
+  return DRAFT_PREFIX + (document.getElementById('edit-event-id').value || 'new');
+}
+
+// localStorage 在無痕視窗、或瀏覽器擋資料時會直接丟例外。草稿是「多一層保險」，
+// 存不了就算了，絕不能因此讓整個新增活動流程壞掉。
+function saveDraft() {
+  if (!modalOpen) return;
+  if (!isModalDirty()) return clearDraft();
+  try {
+    localStorage.setItem(draftKey(), JSON.stringify({ savedAt: Date.now(), fields: snapshotForm() }));
+  } catch (e) { /* 存不了就算了 */ }
+}
+
+function clearDraft() {
+  try { localStorage.removeItem(draftKey()); } catch (e) { /* 同上 */ }
+}
+
+function readDraft() {
+  try {
+    const raw = localStorage.getItem(draftKey());
+    if (!raw) return null;
+    const d = JSON.parse(raw);
+    if (!d || !d.fields) return null;
+    if (Date.now() - (d.savedAt || 0) > DRAFT_MAX_AGE_MS) { clearDraft(); return null; }
+    return d;
+  } catch (e) { return null; }
+}
+
+// 任何一次輸入都把草稿往前推一格（debounce，避免每個按鍵都寫一次 localStorage）
+function markModalChanged() {
+  if (!modalOpen) return;
+  clearTimeout(draftTimer);
+  draftTimer = setTimeout(saveDraft, 400);
+}
+
+function offerDraft() {
+  const banner = document.getElementById('draft-banner');
+  banner.style.display = 'none';
+  const d = readDraft();
+  if (!d) return;
+  // 草稿跟現在畫面上的內容一模一樣就沒必要問（例如存檔成功後又打開同一場）
+  const same = MODAL_FIELDS.every(id => (d.fields[id] || '') === document.getElementById(id).value);
+  if (same) { clearDraft(); return; }
+  document.getElementById('draft-time').textContent =
+    new Date(d.savedAt).toLocaleString('zh-TW', { hour12: false });
+  banner.style.display = 'flex';
+}
+
+function restoreDraft() {
+  const d = readDraft();
+  if (!d) { toast('草稿已失效'); document.getElementById('draft-banner').style.display = 'none'; return; }
+  applySnapshot(d.fields);
+  document.getElementById('draft-banner').style.display = 'none';
+  toast('已還原上次沒存到的內容，記得按「儲存」');
+}
+
+function discardDraft() {
+  clearDraft();
+  document.getElementById('draft-banner').style.display = 'none';
+}
+
+function openModal() {
+  document.getElementById('event-modal').style.display = 'flex';
+  modalOpen = true;
+  modalBaseline = snapshotForm();
+  offerDraft();
+  const box = document.querySelector('#event-modal .modal');
+  if (box) box.scrollTop = 0;
+}
+
+// 所有「想關掉這個 modal」的入口都走這裡，closeModal() 只負責真的關
+function requestCloseModal(via) {
+  if (uploadingCount > 0) { toast('照片還在上傳中，等傳完再關'); return; }
+  if (!isModalDirty()) { closeModal(); return; }
+  saveDraft();
+  if (via === 'backdrop') {
+    toast('內容還沒儲存，先幫你留著了。要離開請按「取消」');
+    return;
+  }
+  if (!confirm('有內容還沒儲存，確定要關閉嗎？\n\n（會存成草稿，下次打開同一場活動可以還原。）')) return;
+  closeModal();
+}
+
+// ESC 關閉：跟「取消」同一條路，一樣要先問過
+document.addEventListener('keydown', e => {
+  if (!modalOpen) return;
+  if (e.key === 'Escape') { e.preventDefault(); requestCloseModal('button'); return; }
+  // Ctrl/Cmd+S 直接存檔——長表單填到一半想存一下是最自然的動作，
+  // 不接住的話瀏覽器會跳「儲存網頁」，反而讓人以為存好了
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); saveEvent(); }
+});
+
+// 關分頁／重新整理：瀏覽器層的最後一道
+window.addEventListener('beforeunload', e => {
+  if (modalOpen && isModalDirty()) { saveDraft(); e.preventDefault(); e.returnValue = ''; }
+});
+
+// 綁在 overlay 上用事件冒泡收所有欄位，之後加欄位不用再補一條 listener
+document.getElementById('event-modal').addEventListener('input', markModalChanged);
+document.getElementById('event-modal').addEventListener('change', markModalChanged);
+
 // ── Modal ─────────────────────────────────────────────────
 // prefillDate：從行事曆點空白日期新增活動時，把那天帶進來（YYYY-MM-DD）
 function showCreateModal(prefillDate) {
@@ -1118,7 +1338,7 @@ function showCreateModal(prefillDate) {
   document.getElementById('input-invite-letter').value = '';
   document.getElementById('input-invite-letter-chips').value = '';
   document.getElementById('input-kb').value = KB_TEMPLATE;
-  document.getElementById('kb-count').textContent = KB_TEMPLATE.length + ' / 8000 字';
+  updateKbCount();
   document.getElementById('input-chips').value = '';
   document.getElementById('input-greeting').value = '';
   document.getElementById('input-images').value = '';
@@ -1131,7 +1351,8 @@ function showCreateModal(prefillDate) {
   // 顯示並填充「以既有活動為範本」下拉
   populateCopyTemplate();
   document.getElementById('copy-template-group').style.display = 'block';
-  document.getElementById('event-modal').style.display = 'flex';
+  document.getElementById('copy-template-select').value = '';
+  openModal();
 }
 
 // 填充「以既有活動為範本」下拉（用已載入的活動清單；新到舊排序，最近一場最常被當範本）
@@ -1143,16 +1364,25 @@ function populateCopyTemplate() {
 }
 
 // 選擇舊活動 → 把其知識庫與主辦單位帶進表單
-async function copyFromEvent(eventId) {
+async function copyFromEvent(sel) {
+  const eventId = typeof sel === 'string' ? sel : sel.value;
   if (!eventId) return;
+  // 這個下拉會整段蓋掉知識庫。已經打了東西還被無聲蓋掉，跟「點旁邊就跳掉」是同一種災難。
+  const kb = document.getElementById('input-kb').value.trim();
+  if (kb && kb !== KB_TEMPLATE.trim() &&
+      !confirm('這會覆蓋你已經填的「活動知識庫」內容，確定要帶入這場的資料嗎？')) {
+    if (typeof sel !== 'string') sel.value = '';
+    return;
+  }
   try {
     const res = await authedFetch(`/api/events?action=get&id=${encodeURIComponent(eventId)}`);
     const ev = await res.json();
     if (ev.error) throw new Error(ev.error);
     document.getElementById('input-kb').value = ev.knowledge_base || KB_TEMPLATE;
-    document.getElementById('kb-count').textContent = (document.getElementById('input-kb').value.length) + ' / 8000 字';
+    updateKbCount();
     if (ev.organizer) document.getElementById('input-organizer').value = ev.organizer;
     if (ev.chips) document.getElementById('input-chips').value = ev.chips;
+    markModalChanged();
     toast('已帶入「' + (ev.name || '') + '」的知識庫，請修改成本場內容');
   } catch(e) {
     toast('複製失敗：' + e.message);
@@ -1176,7 +1406,7 @@ async function showEditModal(eventId) {
     document.getElementById('input-color').value = ev.color || '#0F9E7A';
     document.getElementById('color-preview').style.background = ev.color || '#0F9E7A';
     document.getElementById('input-kb').value = ev.knowledge_base || '';
-    document.getElementById('kb-count').textContent = (ev.knowledge_base?.length || 0) + ' / 8000 字';
+    updateKbCount();
     document.getElementById('input-chips').value = ev.chips || '';
     document.getElementById('input-greeting').value = ev.greeting || '';
     document.getElementById('input-images').value = ev.images || '';
@@ -1198,14 +1428,19 @@ async function showEditModal(eventId) {
       isoDate = parts[0] + '-' + String(parts[1]).padStart(2,'0') + '-' + String(parts[2]).padStart(2,'0');
     }
     document.getElementById('input-date').value = isoDate;
-    document.getElementById('event-modal').style.display = 'flex';
+    openModal();
   } catch(e) {
     toast('載入失敗：' + e.message);
   }
 }
 
+// 真的關掉。有未儲存內容時不要直接叫它——走 requestCloseModal()。
 function closeModal() {
+  clearTimeout(draftTimer);
+  modalOpen = false;
+  modalBaseline = null;
   document.getElementById('event-modal').style.display = 'none';
+  document.getElementById('draft-banner').style.display = 'none';
 }
 
 async function saveEvent() {
@@ -1229,6 +1464,15 @@ async function saveEvent() {
 
   if (!name) { toast('活動名稱必填'); return; }
   if (!knowledge_base) { toast('知識庫不可為空'); return; }
+  // 硬上限在前台就擋掉。打了四萬多字才被後端退 400，是最傷的一種失敗。
+  if (knowledge_base.length > KB_HARD_LIMIT) {
+    toast(`知識庫 ${knowledge_base.length} 字，超過上限 ${KB_HARD_LIMIT} 字，請刪減後再存`);
+    return;
+  }
+  if (knowledge_base.length > KB_SOFT_LIMIT &&
+      !confirm(`知識庫已超過建議的 ${KB_SOFT_LIMIT} 字（目前 ${knowledge_base.length} 字），超長內容會讓 AI 回答變慢變貴，確定要存？`)) {
+    return;
+  }
 
   const btn = document.getElementById('save-btn');
   btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader"></i> 儲存中…';
@@ -1248,11 +1492,15 @@ async function saveEvent() {
     const data = await res.json();
     if (data.error) throw new Error(data.error);
 
+    clearDraft();          // 存進後端了，草稿的任務結束
     closeModal();
     toast(id ? '活動已更新！' : '活動已建立！');
     await loadEvents();
   } catch(e) {
-    toast('儲存失敗：' + e.message);
+    // 存不進去（網路斷、Sheets 掛了、內容過長）時 modal 刻意不關，
+    // 草稿也再推一次——這正是最容易整段蒸發的時刻
+    saveDraft();
+    toast('儲存失敗（內容已留在畫面上）：' + e.message);
   }
 
   btn.disabled = false; btn.innerHTML = '<i class="ti ti-check"></i> 儲存';
@@ -1314,6 +1562,7 @@ async function archiveEvent() {
     });
     const data = await res.json();
     if (data.error) throw new Error(data.error);
+    clearDraft();
     closeModal();
     toast('活動已封存');
     await loadEvents();
@@ -1567,6 +1816,8 @@ document.getElementById('input-image-file').addEventListener('change', async (e)
   const statusEl = document.getElementById('upload-status');
   const textarea = document.getElementById('input-images');
 
+  // 上傳中把 modal 鎖住：這時候關掉，檔案已經上傳到 Blob 但網址永遠拿不回來
+  uploadingCount++;
   for (const file of files) {
     if (!file.type.startsWith('image/')) { toast(file.name + ' 不是圖片檔，已略過'); continue; }
     if (file.size > 10 * 1024 * 1024) { toast(file.name + ' 超過 10MB 上限，已略過'); continue; }
@@ -1579,10 +1830,12 @@ document.getElementById('input-image-file').addEventListener('change', async (e)
         clientPayload: JSON.stringify({ password: state.password })
       });
       textarea.value = (textarea.value.trim() ? textarea.value.trim() + '\n' : '') + blob.url;
+      markModalChanged();   // 程式化寫入不會觸發 input 事件，草稿要自己推一次
     } catch (err) {
       toast(file.name + ' 上傳失敗：' + err.message);
     }
   }
+  uploadingCount = Math.max(0, uploadingCount - 1);
   statusEl.textContent = '';
   e.target.value = '';
 });

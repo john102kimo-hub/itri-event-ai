@@ -23,6 +23,7 @@ import { resolveEventContent } from '../lib/prompt.js';
 
 // 跟 events 的 knowledge_base 同一個上限理由：Google Sheets 單一儲存格上限約 5 萬字元，
 // 這份清單目前十幾行遠遠用不到，留餘裕只是避免同仁哪天貼了整份含備註的原始文件進來。
+// ⚠️ public/index.html 鏡射一份（CONTACTS_DIR_LIMIT），同上。
 const CONTACTS_DIR_MAX_LEN = 20000;
 
 // events 表欄位：A id, B name, C color, D knowledge_base, E status,
@@ -36,7 +37,9 @@ const CONTACTS_DIR_MAX_LEN = 20000;
 //               R invite_letter_chips（活動前快速提問；沒填就退回 G 欄原本的 chips）
 const RANGE = 'events!A2:R';
 
-// Google Sheets 單一儲存格上限約 5 萬字元；留一點餘裕避免踩線寫入失敗
+// Google Sheets 單一儲存格上限約 5 萬字元；留一點餘裕避免踩線寫入失敗。
+// ⚠️ public/index.html 與 public/edit.html 各鏡射一份（KB_HARD_LIMIT）——靜態頁沒辦法
+// import 這裡。改這個數字要三個檔案一起改，test/kb-limit.test.mjs 會擋住漂開。
 const KB_MAX_LEN = 45000;
 
 // 活動狀態合法值：
