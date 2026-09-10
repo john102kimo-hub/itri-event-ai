@@ -1303,6 +1303,28 @@ const NO_DATA_FILLER_RE = /今年|去年|明年|今天|昨天|明天|最近|最�
 // 只切尾巴、不全域切——「有機材料」「是非題」這種詞中間的字不能動。
 const NO_DATA_TAIL_RE = /[是有為會在要能與和及]+$/;
 
+// 「這個詞拿去查官網新聞中心根本沒有意義」的關鍵詞（批次 44）。
+//
+// 實際回報的截圖：記者在群組打「新聞稿」，本場正確地回了「這場狀態是稍晚提供，還沒有
+// 完整新聞稿全文」＋大會手冊＋新聞聯絡人——到這裡都對。壞在後面自動接上的補查區塊：
+// 拿「新聞稿」三個字去搜官網，撈回三篇只因為內文出現過「新聞稿」而中的無關報導
+// （致茂論文競賽、管風琴演奏會），還一本正經地列出原文連結。
+//
+// 根因是這類詞講的是「資料本身」，不是主題。官網搜尋是字面比對，用這種詞去查，
+// 命中的必然是雜訊——而雜訊附在一則本來很得體的回答後面，比什麼都不加傷害更大
+// （記者會以為米亞在硬湊）。
+//
+// ⚠️ 只擋「整個關鍵詞剛好等於這些字」，不做包含比對：「得獎名單」「開幕照片」是有主題
+// 的詞，查得到東西也該查；被擋掉的只有孤零零的「名單」「照片」。
+const NO_DATA_GENERIC = new Set([
+  '新聞稿', '新聞', '稿件', '全文', '新聞稿全文', '資料', '相關資料', '內容', '相關內容',
+  '照片', '圖片', '相片', '影片', '簡報', '檔案', '名單', '清單', '說明', '資訊',
+  'press release', 'photo', 'photos', 'material', 'materials', 'information'
+]);
+function isGenericLookupKeyword(kw) {
+  return NO_DATA_GENERIC.has(String(kw || '').trim().toLowerCase());
+}
+
 export function guessNoDataKeyword(question) {
   const kw = String(question || '').replace(NO_DATA_FILLER_RE, '').replace(NO_DATA_TAIL_RE, '').trim();
   // 太短（剩一個字）沒有查詢價值，太長多半是沒抽乾淨的整句話，兩種都放棄——
@@ -1332,7 +1354,13 @@ function hasChinese(text) {
 // 兩個來源各有各的長處——標記的語意最準、猜的最乾淨——不該二選一，該依序試。
 async function itriNewsHintBlock(keywords, { chinese = true, question = '' } = {}) {
   const list = [...new Set((Array.isArray(keywords) ? keywords : [keywords])
-    .map(k => sanitize(k, 40)).filter(Boolean))];
+    .map(k => sanitize(k, 40)).filter(Boolean))]
+    // 泛用詞查了只會撈到雜訊，見 NO_DATA_GENERIC 的說明
+    .filter(k => {
+      if (!isGenericLookupKeyword(k)) return true;
+      console.log(`[line] 補查官網跳過泛用關鍵詞 kw="${k}"`);
+      return false;
+    });
   if (!list.length) return '';
   try {
     let kw = '', items = [];
@@ -1387,6 +1415,7 @@ async function answerFromItriNews(keyword, items, question, chinese) {
     '- 回答控制在 3 行以內，並且明確講出這是工研院官網新聞中心的報導、哪一天發布的。',
     '- 不要用 Markdown 語法。不要加結尾警語（呼叫端的回覆裡已經有了）。',
     '- 不要重複「這題本場資料裡沒有」這件事，呼叫端已經講過，直接講你找到什麼。',
+    '- 不要反問記者、不要建議「換個關鍵字再查一次」、不要說明你查了什麼卻沒查到——這些都是呼叫端的事。你只有兩種輸出：找得到答案就直接講，找不到就回空字串。',
     chinese
       ? '- 用繁體中文回答。'
       : '- Answer in English (the reporter asked in English).',
@@ -1408,6 +1437,17 @@ async function answerFromItriNews(keyword, items, question, chinese) {
     // 以下就丟掉」的魔術數字，會把真的很短但正確的答案（「三位，分別是⋯」）誤殺。
     if (!reply) return '';
     if (/抱歉，目前無法取得回應|系統目前無法回答|無法取得回應/.test(reply)) return '';
+    // ⚠️ 規則有叫模型「摘要裡沒答案就回空字串」，但規則是請求、不是保證。實測回報
+    // 的截圖裡它改成用一整段話說「我手上資料沒有能直接回答的內容耶⋯⋯建議您換個更
+    // 明確的關鍵字」——非空，於是被當成答案用掉，接在「我在工研院官網新聞中心找到
+    // 了：」後面，變成前後文自相矛盾的一則回覆（說找到了，內文說沒找到）。
+    // 這裡補一道程式面的判斷：這段話本身就是「答不出來」的話，一律當空的處理，
+    // 退回只附連結。跟 stripMarkdownForLine() 同一個道理——出口再擋一次比賭它守規矩便宜。
+    if (NO_DATA_PHRASE_RE.test(reply) ||
+        /沒有.{0,8}(直接)?(回答|對應)|沒有直接相關|換個.{0,6}關鍵字|再幫您查|不太相關|沒有提及/.test(reply)) {
+      console.log(`[line] 補查官網：模型自己說答不出來，退回只附連結 kw="${keyword}"`);
+      return '';
+    }
     return reply;
   } catch (e) {
     console.error('answerFromItriNews 失敗:', e.message);

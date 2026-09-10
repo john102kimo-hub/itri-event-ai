@@ -263,5 +263,18 @@ for (const t of ['媒體呢', '媒體嗎', '這場媒體效應如何', '媒體�
   eq(detectMetaIntent(t), null, `「${t}」不該被 contacts 攔走（「媒體」裸詞太泛，刻意不收）`);
 }
 
+console.log('── 使用說明要帶得出 30 秒動畫（批次 44）──');
+{
+  const { HELP_TEXT } = await import('../lib/menu.js');
+  eq(/https:\/\/itri-event-ai\.vercel\.app\/guide\.html/.test(HELP_TEXT), true,
+    '使用說明裡要有 30 秒動畫的網址');
+  // ⚠️ 一定要是自家站台的公開網址。點不開的連結（內部網址、要登入的網址）直接送到
+  // 記者手機上，比沒有連結更糟。
+  eq(/claude\.ai|localhost|127\.0\.0\.1|vercel\.app\/_/.test(HELP_TEXT), false,
+    '不可以放需要登入或點不開的網址');
+  const head = HELP_TEXT.split('\n').slice(0, 4).join('\n');
+  eq(/guide\.html/.test(head), true, '要放在最前面幾行——手機上多半只看得到開頭');
+}
+
 console.log(`\n${fail === 0 ? '✅' : '❌'} 通過 ${pass}／失敗 ${fail}`);
 process.exit(fail === 0 ? 0 : 1);

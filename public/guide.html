@@ -1,0 +1,647 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="30 秒看完工研院 MIA 公關小特派怎麼用：問活動內容、跨場次找答案、群組怎麼叫我、按鈕怎麼用、怎麼找採訪窗口。">
+<meta property="og:type" content="website">
+<meta property="og:title" content="米亞使用說明｜工研院 MIA 公關小特派">
+<meta property="og:description" content="30 秒看完怎麼用：直接問活動內容、跨場次找答案、群組裡叫我一聲、每則回覆都有小按鈕。">
+<meta property="og:image" content="https://itri-event-ai.vercel.app/og-default.png">
+<meta name="twitter:card" content="summary_large_image">
+<title>米亞使用說明｜工研院 MIA 公關小特派</title>
+</head>
+<body>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@500;700;900&family=Fredoka:wght@500;600;700&display=swap">
+
+<style>
+/* ══ tokens ══════════════════════════════════════════════════════════
+   顏色全部從米亞自己身上取：天空藍底、機器人藍、觸角與腮紅的橘、
+   工研院綠只用在品牌落款。工作室外框（背景、控制列）跟著觀看者的
+   深淺色主題走；「手機螢幕裡面」刻意固定不變——它畫的是 LINE 對話，
+   LINE 的聊天底色不會因為你的電腦是深色模式就跟著變。 */
+:root {
+  --sky:       #A9DCF7;
+  --sky-deep:  #7CC4EC;
+  --blue:      #2E90DE;
+  --blue-ink:  #14456E;
+  --pop:       #FF8C42;
+  --pop-soft:  #FFD2AE;
+  --cream:     #FFFDF8;
+  --itri:      #0F9E7A;
+
+  --studio:    #DCEEFA;   /* 舞台外的地板 */
+  --chrome:    #FFFFFF;   /* 控制列 */
+  --chrome-ink:#14456E;
+  --chrome-dim:#5F7F9B;
+  --hair:      #C4DDEE;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --studio:    #08161F;
+    --chrome:    #10242F;
+    --chrome-ink:#DCEEFA;
+    --chrome-dim:#7FA3B8;
+    --hair:      #1E3A4A;
+  }
+}
+:root[data-theme="dark"] {
+  --studio:    #08161F;
+  --chrome:    #10242F;
+  --chrome-ink:#DCEEFA;
+  --chrome-dim:#7FA3B8;
+  --hair:      #1E3A4A;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--studio);
+  color: var(--chrome-ink);
+  font-family: 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', system-ui, sans-serif;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+  padding-block: 28px 34px;
+  padding-left: 16px;
+  padding-right: 16px;
+  min-height: 100vh;
+}
+
+/* ══ 舞台：9:16 直式，記者是在手機上看這支 ══════════════════════════ */
+.phone {
+  position: relative;
+  width: min(360px, 92vw);
+  aspect-ratio: 9 / 16;
+  border-radius: 34px;
+  overflow: hidden;
+  background: var(--sky);
+  box-shadow:
+    0 2px 0 rgba(255,255,255,.6) inset,
+    0 18px 44px -14px rgba(20,69,110,.45),
+    0 0 0 8px var(--chrome);
+  isolation: isolate;
+}
+
+/* 底層的天空與雲——整支片子從頭到尾都在，讓場景切換不會像換投影片 */
+.sky-far, .sky-near { position: absolute; inset: 0; pointer-events: none; }
+.sky-far  { background: radial-gradient(120% 80% at 50% 0%, #C8EAFB 0%, var(--sky) 55%, var(--sky-deep) 100%); }
+.cloud {
+  position: absolute;
+  background: rgba(255,255,255,.72);
+  border-radius: 999px;
+  filter: blur(.3px);
+  animation: drift 26s linear infinite;
+}
+.cloud.a { width: 120px; height: 34px; top: 12%;  left: -40%; animation-duration: 30s; }
+.cloud.b { width: 84px;  height: 26px; top: 26%;  left: -30%; animation-duration: 38s; animation-delay: -12s; }
+.cloud.c { width: 150px; height: 40px; top: 68%;  left: -50%; animation-duration: 44s; animation-delay: -22s; opacity: .5; }
+@keyframes drift { to { transform: translateX(320px); } }
+
+/* ══ 場景 ════════════════════════════════════════════════════════════ */
+.scene {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;   /* 直式畫面：內容置中，不要全部擠在上緣、下半截空著 */
+  gap: 13px;
+  padding: 62px 20px 34px;   /* 上緣留給絕對定位的場號 */
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity .45s ease;
+  text-align: center;
+}
+.scene.on { opacity: 1; visibility: visible; }
+
+/* 場號：這六格是有順序的教學步驟，編號是真的在說「第幾步」，不是裝飾 */
+.step {
+  position: absolute;        /* 釘在上緣，不參與內容置中 */
+  top: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-family: 'Fredoka', 'Noto Sans TC', sans-serif;
+  font-weight: 600;
+  font-size: 12px;
+  letter-spacing: .14em;
+  color: var(--blue-ink);
+  background: rgba(255,255,255,.72);
+  border-radius: 999px;
+  padding: 4px 13px;
+  opacity: .85;
+}
+
+.line-1 {
+  font-weight: 900;
+  font-size: clamp(25px, 7.6vw, 31px);
+  line-height: 1.24;
+  letter-spacing: -.01em;
+  color: var(--blue-ink);
+  text-wrap: balance;
+  margin: 0;
+  text-shadow: 0 2px 0 rgba(255,255,255,.55);
+}
+.line-1 em { font-style: normal; color: #D4611B; }
+.line-2 {
+  font-weight: 700;
+  font-size: 14.5px;
+  line-height: 1.55;
+  color: #2C5C82;
+  text-wrap: balance;
+  margin: 0;
+  max-width: 26ch;
+}
+
+.scene.on .step   { animation: step-in .5s .05s backwards cubic-bezier(.2,1.5,.4,1); }
+@keyframes step-in { from { opacity: 0; transform: translateX(-50%) scale(.7); } }
+.scene.on .line-1 { animation: rise .55s .12s backwards cubic-bezier(.2,.9,.3,1); }
+.scene.on .line-2 { animation: rise .55s .26s backwards cubic-bezier(.2,.9,.3,1); }
+@keyframes pop-in { from { opacity: 0; transform: scale(.7); } }
+@keyframes rise   { from { opacity: 0; transform: translateY(14px); } }
+
+/* ══ 米亞（SVG，可以眨眼、揮手、彈跳——貼一張靜態圖做不到這些）══════ */
+.mia { width: 162px; flex: none; overflow: visible; }
+.mia.sm { width: 116px; }
+.scene.on .mia { animation: bounce-in .6s cubic-bezier(.2,1.4,.4,1) backwards; }
+@keyframes bounce-in { from { opacity: 0; transform: translateY(26px) scale(.86); } }
+
+.mia .body-g { animation: bob 2.6s ease-in-out infinite; transform-origin: 100px 200px; }
+@keyframes bob { 0%,100% { transform: translateY(0) } 50% { transform: translateY(-7px) } }
+
+.mia .eye { animation: blink 4.4s infinite; transform-origin: center; transform-box: fill-box; }
+.mia .eye.r { animation-delay: .04s; }
+@keyframes blink { 0%,92%,100% { transform: scaleY(1) } 95% { transform: scaleY(.12) } }
+
+.mia .tip { animation: glow 1.7s ease-in-out infinite; transform-origin: center; transform-box: fill-box; }
+@keyframes glow { 0%,100% { transform: scale(1); opacity: 1 } 50% { transform: scale(1.16); opacity: .82 } }
+
+.mia .gear { animation: spin 9s linear infinite; transform-origin: 158px 46px; }
+@keyframes spin { to { transform: rotate(360deg) } }
+
+.mia .wave { animation: wave 1.5s ease-in-out infinite; transform-origin: 50px 178px; }
+@keyframes wave { 0%,100% { transform: rotate(-6deg) } 50% { transform: rotate(24deg) } }
+
+/* ══ 對話泡泡（場景 2）══════════════════════════════════════════════ */
+.chat { display: flex; flex-direction: column; gap: 8px; width: 100%; max-width: 290px; }
+.row { display: flex; }
+.row.me { justify-content: flex-end; }
+.bub {
+  max-width: 84%;
+  padding: 10px 13px;
+  border-radius: 15px;
+  font-size: 13.5px;
+  font-weight: 500;
+  line-height: 1.5;
+  text-align: left;
+  box-shadow: 0 2px 6px rgba(20,69,110,.14);
+}
+.bub.me  { background: #C8F0A8; color: #1B3312; border-bottom-right-radius: 5px; }
+.bub.mia { background: #FFFFFF; color: #14304A; border-bottom-left-radius: 5px; }
+.bub b { color: #0B6B52; }
+.scene.on .row { animation: rise .5s backwards cubic-bezier(.2,.9,.3,1); }
+.scene.on .row:nth-child(1) { animation-delay: .5s; }
+.scene.on .row:nth-child(2) { animation-delay: 1.15s; }
+.scene.on .row:nth-child(3) { animation-delay: 1.8s; }
+
+/* 打字中的三個點 */
+.dots { display: inline-flex; gap: 4px; align-items: center; }
+.dots i { width: 6px; height: 6px; border-radius: 50%; background: #8FA8BC; animation: hop .9s infinite; }
+.dots i:nth-child(2) { animation-delay: .15s; }
+.dots i:nth-child(3) { animation-delay: .3s; }
+@keyframes hop { 0%,60%,100% { transform: translateY(0); opacity: .5 } 30% { transform: translateY(-4px); opacity: 1 } }
+
+/* ══ 三層找答案（場景 3）════════════════════════════════════════════ */
+.ladder { display: flex; flex-direction: column; gap: 7px; width: 100%; max-width: 292px; }
+.rung {
+  display: flex; align-items: center; gap: 10px;
+  background: rgba(255,255,255,.94);
+  border-radius: 13px;
+  padding: 10px 12px;
+  text-align: left;
+  box-shadow: 0 2px 7px rgba(20,69,110,.13);
+}
+.rung .n {
+  font-family: 'Fredoka', sans-serif; font-weight: 700; font-size: 13px;
+  width: 24px; height: 24px; flex: none; border-radius: 8px;
+  display: grid; place-items: center; color: #fff; background: var(--blue);
+}
+.rung:nth-child(2) .n { background: #4FA8E8; }
+.rung:nth-child(3) .n { background: var(--pop); }
+.rung .t { font-size: 13px; font-weight: 700; color: var(--blue-ink); line-height: 1.35; }
+.rung .t small { display: block; font-size: 11.5px; font-weight: 500; color: #5D7E99; margin-top: 1px; }
+.scene.on .rung { animation: slide-in .5s backwards cubic-bezier(.2,.9,.3,1); }
+.scene.on .rung:nth-child(1) { animation-delay: .55s; }
+.scene.on .rung:nth-child(2) { animation-delay: 1.2s; }
+.scene.on .rung:nth-child(3) { animation-delay: 1.85s; }
+@keyframes slide-in { from { opacity: 0; transform: translateX(-16px); } }
+
+/* ══ 兩種叫法（場景 4）══════════════════════════════════════════════ */
+.calls { display: flex; flex-direction: column; gap: 9px; width: 100%; max-width: 280px; }
+.call {
+  background: #fff; border-radius: 14px; padding: 11px 14px;
+  text-align: left; box-shadow: 0 2px 7px rgba(20,69,110,.13);
+  font-size: 14px; font-weight: 700; color: var(--blue-ink);
+}
+.call span { color: #D4611B; }
+.call small { display: block; font-size: 11.5px; font-weight: 500; color: #5D7E99; margin-top: 3px; }
+.hush {
+  display: inline-flex; align-items: center; gap: 7px;
+  background: rgba(20,69,110,.09);
+  border: 1.5px dashed rgba(20,69,110,.3);
+  border-radius: 999px; padding: 7px 15px;
+  font-size: 12.5px; font-weight: 700; color: var(--blue-ink);
+}
+.scene.on .call { animation: rise .5s backwards cubic-bezier(.2,.9,.3,1); }
+.scene.on .call:nth-child(1) { animation-delay: .5s; }
+.scene.on .call:nth-child(2) { animation-delay: 1.1s; }
+.scene.on .hush { animation: pop-in .5s 1.9s backwards cubic-bezier(.2,1.5,.4,1); }
+
+/* ══ 導覽按鈕（場景 5）══════════════════════════════════════════════ */
+.chips { display: flex; flex-wrap: wrap; gap: 7px; justify-content: center; max-width: 300px; }
+.chip {
+  background: #fff; color: #1D6FB8;
+  border: 1.5px solid #9FD0F2; border-radius: 999px;
+  padding: 7px 13px; font-size: 12.5px; font-weight: 700;
+  box-shadow: 0 2px 5px rgba(20,69,110,.12);
+}
+.scene.on .chip { animation: pop-in .42s backwards cubic-bezier(.2,1.6,.4,1); }
+.scene.on .chip:nth-child(1) { animation-delay: .5s; }
+.scene.on .chip:nth-child(2) { animation-delay: .68s; }
+.scene.on .chip:nth-child(3) { animation-delay: .86s; }
+.scene.on .chip:nth-child(4) { animation-delay: 1.04s; }
+.scene.on .chip:nth-child(5) { animation-delay: 1.22s; }
+
+.stamp {
+  display: inline-block;
+  background: var(--pop); color: #fff;
+  font-size: 12.5px; font-weight: 900; letter-spacing: .02em;
+  border-radius: 999px; padding: 7px 16px;
+  box-shadow: 0 3px 0 #D4611B;
+}
+.scene.on .stamp { animation: pop-in .5s 1.75s backwards cubic-bezier(.2,1.6,.4,1); }
+
+/* ══ 收尾落款 ════════════════════════════════════════════════════════ */
+.sign { display: flex; flex-direction: column; align-items: center; gap: 3px; }
+.sign .name {
+  font-weight: 900; font-size: 16px; color: var(--blue-ink);
+  display: flex; align-items: center; gap: 7px;
+}
+.sign .name i {
+  width: 9px; height: 9px; border-radius: 2px; background: var(--itri); display: inline-block;
+}
+.sign .sub { font-size: 12px; font-weight: 500; color: #4E759A; }
+/* 個資告知：正式帳號的合規文案，收尾一定要帶上 */
+.sign .privacy { font-size: 9.5px; font-weight: 500; color: #6389A8; max-width: 25ch; line-height: 1.55; margin-top: 4px; }
+.scene.on .sign { animation: rise .55s 1.5s backwards cubic-bezier(.2,.9,.3,1); }
+
+/* ══ 進度條：貼在手機底緣，錄影時它就是片子的一部分 ═════════════════ */
+.bar { position: absolute; left: 0; right: 0; bottom: 0; height: 5px; background: rgba(20,69,110,.14); }
+.bar > i { display: block; height: 100%; width: 0; background: var(--pop); box-shadow: 0 0 10px rgba(255,140,66,.7); }
+
+/* ══ 控制列（不會被錄進去——按「隱藏控制列」就收起來）═══════════════ */
+.deck {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: center;
+  background: var(--chrome);
+  border: 1px solid var(--hair);
+  border-radius: 16px;
+  padding: 10px 12px;
+  box-shadow: 0 6px 18px -10px rgba(20,69,110,.4);
+  max-width: min(520px, 96vw);
+}
+/* 錄影模式：只留手機，並且撐滿整個螢幕高度——螢幕錄影錄下來就是可以發的影片檔 */
+body.clean { background: #000; padding: 0; justify-content: center; gap: 0; min-height: 100vh; }
+body.clean .deck, body.clean .notes { display: none; }
+body.clean .phone {
+  width: auto;
+  height: 100vh;
+  max-width: 100vw;
+  aspect-ratio: 9 / 16;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+button {
+  font-family: inherit; font-weight: 700; font-size: 13px;
+  border-radius: 10px; border: 1.5px solid var(--hair);
+  background: transparent; color: var(--chrome-ink);
+  padding: 8px 13px; cursor: pointer;
+  transition: background .15s, border-color .15s, transform .1s;
+}
+button:hover { background: rgba(46,144,222,.12); border-color: var(--blue); }
+button:active { transform: translateY(1px); }
+button:focus-visible { outline: 3px solid var(--pop); outline-offset: 2px; }
+button.key { background: var(--blue); border-color: var(--blue); color: #fff; min-width: 92px; }
+button.key:hover { background: #1F7CC6; }
+
+.jump { display: flex; gap: 5px; }
+.jump button {
+  font-family: 'Fredoka', sans-serif; font-size: 12px;
+  width: 30px; height: 30px; padding: 0; border-radius: 9px;
+}
+.jump button[aria-current="true"] { background: var(--pop); border-color: var(--pop); color: #fff; }
+
+.clock {
+  font-family: 'Fredoka', sans-serif; font-weight: 600; font-size: 13px;
+  color: var(--chrome-dim); font-variant-numeric: tabular-nums; min-width: 62px; text-align: center;
+}
+
+.notes {
+  max-width: min(520px, 96vw);
+  font-size: 12.5px; line-height: 1.7; color: var(--chrome-dim);
+  text-align: center; margin: 0;
+}
+.notes b { color: var(--chrome-ink); }
+.notes code {
+  font-family: 'Fredoka', ui-monospace, monospace;
+  font-size: 11.5px;
+  background: var(--chrome);
+  border: 1px solid var(--hair);
+  border-radius: 5px;
+  padding: 1px 6px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cloud, .mia .body-g, .mia .eye, .mia .tip, .mia .gear, .mia .wave, .dots i { animation: none !important; }
+  .scene *, .scene { animation: none !important; }
+}
+</style>
+
+<div class="phone" id="phone">
+  <div class="sky-far"></div>
+  <div class="sky-near">
+    <span class="cloud a"></span><span class="cloud b"></span><span class="cloud c"></span>
+  </div>
+
+  <!-- ① 我是誰 ───────────────────────────────────────────────────── -->
+  <section class="scene on" data-scene="0">
+    <span class="step">1 / 6</span>
+    <svg class="mia" viewBox="0 0 200 240" aria-label="米亞">
+      <g class="body-g">
+        <!-- 觸角 -->
+        <path d="M100 44 L100 20" stroke="#2E90DE" stroke-width="6" stroke-linecap="round" fill="none"/>
+        <circle class="tip" cx="100" cy="14" r="11" fill="#FF8C42"/>
+        <!-- 齒輪 -->
+        <g class="gear">
+          <g fill="#2E90DE">
+            <rect x="152" y="28" width="12" height="36" rx="3"/>
+            <rect x="140" y="40" width="36" height="12" rx="3"/>
+            <rect x="152" y="28" width="12" height="36" rx="3" transform="rotate(45 158 46)"/>
+            <rect x="140" y="40" width="36" height="12" rx="3" transform="rotate(45 158 46)"/>
+          </g>
+          <circle cx="158" cy="46" r="13" fill="#2E90DE"/>
+          <circle cx="158" cy="46" r="5.5" fill="#A9DCF7"/>
+        </g>
+        <!-- 耳機 -->
+        <rect x="14" y="84" width="22" height="38" rx="11" fill="#2E90DE"/>
+        <rect x="164" y="84" width="22" height="38" rx="11" fill="#2E90DE"/>
+        <!-- 頭 -->
+        <circle cx="100" cy="98" r="62" fill="#DCF0FD" stroke="#2E90DE" stroke-width="7"/>
+        <ellipse cx="100" cy="101" rx="50" ry="45" fill="#FFFFFF"/>
+        <!-- 眼睛 -->
+        <ellipse class="eye" cx="80" cy="96" rx="13" ry="16" fill="#3A2A1F"/>
+        <ellipse class="eye r" cx="120" cy="96" rx="13" ry="16" fill="#3A2A1F"/>
+        <circle cx="75" cy="90" r="4.6" fill="#fff"/><circle cx="84" cy="101" r="2.4" fill="#fff"/>
+        <circle cx="115" cy="90" r="4.6" fill="#fff"/><circle cx="124" cy="101" r="2.4" fill="#fff"/>
+        <!-- 腮紅 -->
+        <ellipse cx="58" cy="114" rx="10" ry="5.5" fill="#FFB08A"/>
+        <ellipse cx="142" cy="114" rx="10" ry="5.5" fill="#FFB08A"/>
+        <!-- 嘴 -->
+        <path d="M88 116 q12 16 24 0 z" fill="#3A2A1F"/>
+        <path d="M95 124 q5 6 10 0 z" fill="#F0714D"/>
+        <!-- 身體 -->
+        <rect x="50" y="150" width="100" height="78" rx="36" fill="#FFFFFF" stroke="#2E90DE" stroke-width="7"/>
+        <rect x="70" y="176" width="60" height="24" rx="6" fill="#F4FAFF" stroke="#BFDCEF" stroke-width="2"/>
+        <rect x="76" y="183" width="10" height="10" rx="2" fill="#0F9E7A"/>
+        <text x="91" y="192" font-family="Fredoka, sans-serif" font-size="11" font-weight="700" fill="#14456E">ITRI</text>
+        <!-- 手 -->
+        <circle class="wave" cx="34" cy="184" r="17" fill="#2E90DE"/>
+        <circle cx="166" cy="192" r="17" fill="#2E90DE"/>
+      </g>
+    </svg>
+    <h2 class="line-1">嗨，我是<em>米亞</em></h2>
+    <p class="line-2">工研院的 AI 公關小特派<br>記者會的事，24 小時都問得到</p>
+  </section>
+
+  <!-- ② 直接問 ───────────────────────────────────────────────────── -->
+  <section class="scene" data-scene="1">
+    <span class="step">2 / 6</span>
+    <h2 class="line-1">想問什麼，<em>直接打</em></h2>
+    <p class="line-2">不用等窗口回電，也不用翻新聞稿</p>
+    <div class="chat">
+      <div class="row me"><div class="bub me">這場的重點是什麼？</div></div>
+      <div class="row"><div class="bub mia"><span class="dots"><i></i><i></i><i></i></span></div></div>
+      <div class="row"><div class="bub mia">這場發表<b>四足機器人國產研發平台</b>，整合感測、運動控制與 AI 決策，可用於巡檢與救災⋯⋯</div></div>
+    </div>
+  </section>
+
+  <!-- ③ 查不到就自己去找 ─────────────────────────────────────────── -->
+  <section class="scene" data-scene="2">
+    <span class="step">3 / 6</span>
+    <h2 class="line-1">這場沒有？<br><em>我自己去找</em></h2>
+    <div class="ladder">
+      <div class="rung"><span class="n">1</span><span class="t">這場的新聞稿<small>公關同仁上傳的完整內容</small></span></div>
+      <div class="rung"><span class="n">2</span><span class="t">其他場次<small>會講清楚是哪一場的資料</small></span></div>
+      <div class="rung"><span class="n">3</span><span class="t">工研院官網新聞中心<small>讀懂之後回答，附上原文連結</small></span></div>
+    </div>
+    <p class="line-2">都沒有，我就老實說沒有——不會亂編</p>
+  </section>
+
+  <!-- ④ 群組怎麼叫我 ─────────────────────────────────────────────── -->
+  <section class="scene" data-scene="3">
+    <span class="step">4 / 6</span>
+    <h2 class="line-1">群組裡，<em>叫我一聲</em></h2>
+    <div class="calls">
+      <div class="call"><span>@ 米亞</span> 今年院士有誰？<small>@ 我一下，後面接著打問題</small></div>
+      <div class="call"><span>米亞</span> 今年院士有誰？<small>找不到 @ 我？用「米亞」開頭也行</small></div>
+    </div>
+    <span class="hush">🤐 沒叫我，我一句都不插話</span>
+  </section>
+
+  <!-- ⑤ 按鈕永遠都在 ─────────────────────────────────────────────── -->
+  <section class="scene" data-scene="4">
+    <span class="step">5 / 6</span>
+    <svg class="mia sm" viewBox="0 0 200 240" aria-hidden="true">
+      <g class="body-g">
+        <path d="M100 44 L100 20" stroke="#2E90DE" stroke-width="6" stroke-linecap="round" fill="none"/>
+        <circle class="tip" cx="100" cy="14" r="11" fill="#FF8C42"/>
+        <rect x="14" y="84" width="22" height="38" rx="11" fill="#2E90DE"/>
+        <rect x="164" y="84" width="22" height="38" rx="11" fill="#2E90DE"/>
+        <circle cx="100" cy="98" r="62" fill="#DCF0FD" stroke="#2E90DE" stroke-width="7"/>
+        <ellipse cx="100" cy="101" rx="50" ry="45" fill="#FFFFFF"/>
+        <ellipse class="eye" cx="80" cy="96" rx="13" ry="16" fill="#3A2A1F"/>
+        <ellipse class="eye r" cx="120" cy="96" rx="13" ry="16" fill="#3A2A1F"/>
+        <circle cx="75" cy="90" r="4.6" fill="#fff"/><circle cx="115" cy="90" r="4.6" fill="#fff"/>
+        <ellipse cx="58" cy="114" rx="10" ry="5.5" fill="#FFB08A"/>
+        <ellipse cx="142" cy="114" rx="10" ry="5.5" fill="#FFB08A"/>
+        <path d="M88 116 q12 16 24 0 z" fill="#3A2A1F"/>
+        <path d="M95 124 q5 6 10 0 z" fill="#F0714D"/>
+        <rect x="50" y="150" width="100" height="78" rx="36" fill="#FFFFFF" stroke="#2E90DE" stroke-width="7"/>
+        <circle class="wave" cx="34" cy="184" r="17" fill="#2E90DE"/>
+        <circle cx="166" cy="192" r="17" fill="#2E90DE"/>
+      </g>
+    </svg>
+    <h2 class="line-1">每則回覆<br>都有<em>小按鈕</em></h2>
+    <div class="chips">
+      <span class="chip">🏠 回首頁</span>
+      <span class="chip">📅 其他活動</span>
+      <span class="chip">📊 產業趨勢</span>
+      <span class="chip">🔬 問技術</span>
+      <span class="chip">📞 邀訪窗口</span>
+    </div>
+    <span class="stamp">隔多久滑回去按，都算數</span>
+  </section>
+
+  <!-- ⑥ 找窗口 ＋ 落款 ───────────────────────────────────────────── -->
+  <section class="scene" data-scene="5">
+    <span class="step">6 / 6</span>
+    <h2 class="line-1">要安排採訪？</h2>
+    <p class="line-2">打「<strong>媒體邀訪需求</strong>」或按 📞<br>我幫你找到對的窗口</p>
+    <svg class="mia" viewBox="0 0 200 240" aria-hidden="true">
+      <g class="body-g">
+        <path d="M100 44 L100 20" stroke="#2E90DE" stroke-width="6" stroke-linecap="round" fill="none"/>
+        <circle class="tip" cx="100" cy="14" r="11" fill="#FF8C42"/>
+        <g class="gear">
+          <g fill="#2E90DE">
+            <rect x="152" y="28" width="12" height="36" rx="3"/>
+            <rect x="140" y="40" width="36" height="12" rx="3"/>
+            <rect x="152" y="28" width="12" height="36" rx="3" transform="rotate(45 158 46)"/>
+            <rect x="140" y="40" width="36" height="12" rx="3" transform="rotate(45 158 46)"/>
+          </g>
+          <circle cx="158" cy="46" r="13" fill="#2E90DE"/>
+          <circle cx="158" cy="46" r="5.5" fill="#A9DCF7"/>
+        </g>
+        <rect x="14" y="84" width="22" height="38" rx="11" fill="#2E90DE"/>
+        <rect x="164" y="84" width="22" height="38" rx="11" fill="#2E90DE"/>
+        <circle cx="100" cy="98" r="62" fill="#DCF0FD" stroke="#2E90DE" stroke-width="7"/>
+        <ellipse cx="100" cy="101" rx="50" ry="45" fill="#FFFFFF"/>
+        <ellipse class="eye" cx="80" cy="96" rx="13" ry="16" fill="#3A2A1F"/>
+        <ellipse class="eye r" cx="120" cy="96" rx="13" ry="16" fill="#3A2A1F"/>
+        <circle cx="75" cy="90" r="4.6" fill="#fff"/><circle cx="84" cy="101" r="2.4" fill="#fff"/>
+        <circle cx="115" cy="90" r="4.6" fill="#fff"/><circle cx="124" cy="101" r="2.4" fill="#fff"/>
+        <ellipse cx="58" cy="114" rx="10" ry="5.5" fill="#FFB08A"/>
+        <ellipse cx="142" cy="114" rx="10" ry="5.5" fill="#FFB08A"/>
+        <path d="M88 116 q12 16 24 0 z" fill="#3A2A1F"/>
+        <path d="M95 124 q5 6 10 0 z" fill="#F0714D"/>
+        <rect x="50" y="150" width="100" height="78" rx="36" fill="#FFFFFF" stroke="#2E90DE" stroke-width="7"/>
+        <rect x="70" y="176" width="60" height="24" rx="6" fill="#F4FAFF" stroke="#BFDCEF" stroke-width="2"/>
+        <rect x="76" y="183" width="10" height="10" rx="2" fill="#0F9E7A"/>
+        <text x="91" y="192" font-family="Fredoka, sans-serif" font-size="11" font-weight="700" fill="#14456E">ITRI</text>
+        <circle class="wave" cx="34" cy="184" r="17" fill="#2E90DE"/>
+        <circle cx="166" cy="192" r="17" fill="#2E90DE"/>
+      </g>
+    </svg>
+    <div class="sign">
+      <span class="name"><i></i>工研院 MIA｜公關小特派</span>
+      <span class="sub">有問題，找米亞就對了</span>
+      <span class="privacy">本帳號會記錄提問內容以改善新聞服務，不會蒐集您的個人資料</span>
+    </div>
+  </section>
+
+  <div class="bar"><i id="bar"></i></div>
+</div>
+
+<div class="deck" role="group" aria-label="播放控制">
+  <button class="key" id="play" aria-label="播放或暫停">⏸ 暫停</button>
+  <button id="again">↻ 重播</button>
+  <span class="clock" id="clock" aria-live="off">0.0 / 30.0s</span>
+  <div class="jump" role="group" aria-label="跳到第幾格">
+    <button data-go="0" aria-current="true">1</button>
+    <button data-go="1">2</button>
+    <button data-go="2">3</button>
+    <button data-go="3">4</button>
+    <button data-go="4">5</button>
+    <button data-go="5">6</button>
+  </div>
+  <button id="clean">🎬 全螢幕</button>
+</div>
+
+<p class="notes">
+  30 秒看完米亞怎麼用。按 <b>🎬 全螢幕</b> 可以放大看，按 <code>Esc</code> 退出。<br>
+  想直接開始，回 LINE 打「<b>最近有哪些活動</b>」就可以。
+</p>
+
+<script>
+(function () {
+  const SPAN = 5000;                                   // 每格 5 秒 × 6 格 = 30 秒
+  const scenes = [...document.querySelectorAll('.scene')];
+  const jumps  = [...document.querySelectorAll('[data-go]')];
+  const bar    = document.getElementById('bar');
+  const clock  = document.getElementById('clock');
+  const play   = document.getElementById('play');
+  const total  = scenes.length * SPAN;
+
+  let t0 = performance.now();
+  let elapsed = 0;
+  let running = true;
+  let shown = -1;
+
+  const calm = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  function show(i) {
+    if (i === shown) return;
+    shown = i;
+    scenes.forEach((s, n) => s.classList.toggle('on', n === i));
+    jumps.forEach((b, n) => b.setAttribute('aria-current', String(n === i)));
+  }
+
+  function frame(now) {
+    if (running) {
+      elapsed += now - t0;
+      if (elapsed >= total) elapsed -= total;            // 無縫循環
+    }
+    t0 = now;
+    show(Math.min(scenes.length - 1, Math.floor(elapsed / SPAN)));
+    bar.style.width = (elapsed / total * 100).toFixed(2) + '%';
+    clock.textContent = (elapsed / 1000).toFixed(1) + ' / 30.0s';
+    requestAnimationFrame(frame);
+  }
+
+  function setRunning(on) {
+    running = on;
+    play.textContent = on ? '⏸ 暫停' : '▶ 播放';
+  }
+
+  play.addEventListener('click', () => setRunning(!running));
+  document.getElementById('again').addEventListener('click', () => {
+    elapsed = 0; shown = -1; setRunning(true);
+  });
+  jumps.forEach((b, n) => b.addEventListener('click', () => {
+    elapsed = n * SPAN;
+    shown = -1;                                          // 強制重播該格的進場動畫
+    setRunning(false);
+  }));
+
+  // 錄影模式：只留手機、撐滿螢幕、從頭播一次。Esc 或點畫面退出。
+  const clean = document.getElementById('clean');
+  function setClean(on) {
+    document.body.classList.toggle('clean', on);
+    if (on) {
+      elapsed = 0; shown = -1; setRunning(true);
+      document.documentElement.requestFullscreen?.().catch(() => {});
+    } else if (document.fullscreenElement) {
+      document.exitFullscreen?.().catch(() => {});
+    }
+  }
+  clean.addEventListener('click', () => setClean(true));
+  document.getElementById('phone').addEventListener('click', () => {
+    if (document.body.classList.contains('clean')) setClean(false);
+  });
+  document.addEventListener('fullscreenchange', () => {
+    if (!document.fullscreenElement) document.body.classList.remove('clean');
+  });
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') setClean(false);
+  });
+
+  if (calm) setRunning(false);                           // 會暈的人先停在第一格
+  requestAnimationFrame(frame);
+})();
+</script>
+
+</body>
+</html>
