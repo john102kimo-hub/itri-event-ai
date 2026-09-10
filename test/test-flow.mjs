@@ -1941,6 +1941,63 @@ out = await sendGroup('@我 重點', { mentionSelf: true, mentionText: '@我 ' }
 check('綁定還在時點到別場的舊 chip → 不會偷偷換到別場去',
   !out.some(o => o.kind === 'answer' && o.event === 'quad'), JSON.stringify(out));
 
+// ── 情境 21.985：補查不能亂抓（實測回報的截圖，批次 44）─────────────────────────
+// 回報：群組裡打「新聞稿」，本場正確地回了「這場狀態是稍晚提供，還沒有完整新聞稿全文」
+// ＋大會手冊＋新聞聯絡人——到這裡都對。壞在後面自動接上的補查區塊：拿「新聞稿」三個字
+// 去搜官網，撈回三篇只因為內文出現過「新聞稿」而中的無關報導（致茂論文競賽、管風琴演
+// 奏會），還一本正經列出原文連結；而且開頭寫「我在工研院官網新聞中心找到了：」，內文卻
+// 寫「我手上資料沒有能直接回答的內容耶」——同一則訊息自己打自己。
+console.log('── 泛用關鍵詞不拿去查官網（查了只會撈到雜訊）──');
+// ⚠️ 綁 semi 不綁 quad：quad 的 fixture 把「新聞稿」設成邀訪窗口關鍵字，那條路會先
+// 命中、根本走不到補查，測了等於沒測（第一版就是這樣，在壞掉的程式上照樣綠燈）。
+for (const generic of ['新聞稿', '照片', '資料', '名單', '簡報']) {
+  reset(); await freshModule();
+  state.bindings.set('U_reporter', { event_id: 'semi', media_name: '', note: '', bound_at: Date.now() });
+  state.noDataKeyword = generic;
+  out = await send(generic);
+  const sentText = out.filter(o => o.kind === 'text').map(o => o.text).join('\n');
+  check(`「${generic}」→ 不去查官網、不附無關連結`,
+    !/工研院官網新聞中心/.test(sentText) && !/itri\.org\.tw\/ListStyle/.test(sentText), sentText.slice(0, 200));
+}
+// 有主題的詞不受影響——「得獎名單」「開幕照片」照樣查
+for (const real of ['得獎名單', '院士']) {
+  reset(); await freshModule();
+  state.bindings.set('U_reporter', { event_id: 'semi', media_name: '', note: '', bound_at: Date.now() });
+  state.noDataKeyword = real;
+  out = await send(real);
+  const sentText = out.filter(o => o.kind === 'text').map(o => o.text).join('\n');
+  check(`「${real}」是有主題的詞 → 照樣補查`, /工研院官網新聞中心/.test(sentText), sentText.slice(0, 200));
+}
+
+console.log('── 補查的模型自己說「答不出來」時，不能被當成答案用 ──');
+reset(); await freshModule();
+state.bindings.set('U_reporter', { event_id: 'quad', media_name: '', note: '', bound_at: Date.now() });
+state.noDataKeyword = '院士';
+// 回報截圖裡模型真的吐出來的那段話（規則叫它回空字串，它改成用一整段話說沒查到）
+state.newsDigestText = '這題我手上資料沒有能直接回答的內容耶。目前查到的三篇都是工研院官網新聞中心的報導，但都跟您問的內容沒有直接對應資訊 😊\n\n建議您可以換個更明確的關鍵字，例如活動名稱或日期，我再幫您查一次。';
+out = await send('今年院士有誰');
+{
+  const sentText = out.filter(o => o.kind === 'text').map(o => o.text).join('\n');
+  check('模型那段「答不出來」的話不會出現在記者收到的訊息裡',
+    !/沒有能直接回答|換個更明確的關鍵字|再幫您查一次/.test(sentText), sentText.slice(0, 400));
+  check('退回「只附原文連結」那條路，連結還是給得到',
+    /itri\.org\.tw/.test(sentText), sentText.slice(0, 400));
+  check('⚠️ 引言不能說「找到了」——那是前後文自己打自己的來源',
+    !/新聞中心找到了/.test(sentText), sentText.slice(0, 400));
+}
+
+// 模型真的答得出來時，照舊用它的答案（批次 38 的行為不能被這次的防線誤殺）
+reset(); await freshModule();
+state.bindings.set('U_reporter', { event_id: 'quad', media_name: '', note: '', bound_at: Date.now() });
+state.noDataKeyword = '院士';
+state.newsDigestText = '工研院官網新聞中心 2026/09/07 的報導寫到，第 15 屆新任院士由賴總統親自授證，涵蓋半導體、資通訊與智慧醫療三個領域。';
+out = await send('今年院士有誰');
+{
+  const sentText = out.filter(o => o.kind === 'text').map(o => o.text).join('\n');
+  check('模型答得出來時，答案照舊送出去', /第 15 屆新任院士由賴總統親自授證/.test(sentText), sentText.slice(0, 400));
+  check('這種時候引言才會說「找到了」', /新聞中心找到了/.test(sentText), sentText.slice(0, 400));
+}
+
 // ── 情境 21.99：跨場次——答案在別場的新聞稿裡也要答得出來（批次 36）─────────────
 // 回報的意見：「這一定要切來切去特定活動專屬回答系統嗎？不能一體適用？」
 // 記者問「今年院士有誰」，答案就寫在《工研院院士授證典禮》那場的新聞稿裡，但問答只讀

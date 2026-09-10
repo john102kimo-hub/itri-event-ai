@@ -91,6 +91,7 @@ export function reset() {
   state.itriKeywordMustInclude = '';
   state.fallbackReply = null; // null＝用上面的預設假回覆，見 installFetchStub() 的兜底分支
   state.noDataKeyword = ''; // 非空＝模擬「這場答不出來」，見 installFetchStub() 的問答分支
+  state.newsDigestText = ''; // 非空＝模擬「官網補查那支模型」吐出這段話（批次 44）
   state.answerText = ''; // 非空＝模擬模型吐出這段原始文字，見 installFetchStub() 的問答分支
   sent.length = 0;
 }
@@ -346,6 +347,13 @@ export function installFetchStub() {
       // 標記只該出現在「活動問答」那份 prompt 的回覆裡——官網補查那支（批次 38 的
       // answerFromItriNews）是另一份 prompt、沒有要求標記，模擬時也不該吐標記出來。
       const isEventQa = sys.includes('【本次活動背景資料】');
+      // 官網補查那一支（answerFromItriNews）是另一份 prompt。要驗「它自己說答不出來
+      // 的時候，呼叫端不能把那段話當答案用」，就得能單獨控制它的輸出。
+      const isNewsDigest = sys.includes('工研院官網新聞中心 搜尋');
+      if (isNewsDigest && state.newsDigestText) {
+        sent.push({ kind: 'digest', text: state.newsDigestText, sys, sysAll, question: userText });
+        return { ok: true, json: async () => ({ content: [{ type: 'text', text: state.newsDigestText }] }) };
+      }
       const answerText = state.answerText
         ? state.answerText
         : (state.noDataKeyword && isEventQa)
