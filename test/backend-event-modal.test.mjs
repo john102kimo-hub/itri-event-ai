@@ -63,7 +63,12 @@ const sandbox = {
   confirm: () => confirmAnswer,
   alert() {},
   addEventListener() {}, removeEventListener() {},
-  fetch: async () => fetchImpl(),
+  fetch: async (url, opts) => {
+    if (String(url).includes('action=get&id=')) {
+      return { ok: true, status: 200, json: async () => EXISTING };
+    }
+    return fetchImpl(url, opts);
+  },
   document: {
     getElementById(id) { if (!els.has(id)) els.set(id, makeEl(id)); return els.get(id); },
     querySelector: sel => (sel === '#event-modal .modal' ? sandbox.document.getElementById('__modal-box') : null),
@@ -77,6 +82,15 @@ sandbox.globalThis = sandbox;
 let confirmAnswer = true;
 let fetchImpl = () => ({ ok: true, status: 200, json: async () => ({ success: true, id: 'ev-new' }) });
 
+// showEditModal 會先去後端把該場資料撈回來，假一份給它
+const EXISTING = {
+  id: 'ev-semicon', name: '2026晶鏈高峰論壇（Semicon Network Summit）',
+  organizer: '工研院', color: '#0F9E7A', knowledge_base: '【新聞稿全文】原本就存好的內容',
+  chips: '', greeting: '', images: '', event_time: '', venue: '', event_type: '論壇',
+  press_contact: '', contacts: '', invite_letter: '', invite_letter_chips: '',
+  status: 'active', event_date: '2026-09-01',
+};
+
 // 頂層的 const／let 不會掛到 global 上（函式宣告才會），補一小段尾巴把要驗的兩個
 // 內部狀態接出來——測的還是原檔那段程式，沒有另外抄一份。
 runInNewContext(code + `
@@ -86,6 +100,8 @@ runInNewContext(code + `
 
 const $ = id => sandbox.document.getElementById(id);
 const modalDisplay = () => $('event-modal').style.display;
+// 測試之間收掉 modal，不要讓上一段的狀態影響下一段
+const closeQuietly = () => { sandbox.discardDraft(); sandbox.closeModal(); };
 
 // ── 三、MODAL_FIELDS 要跟 modal 裡的欄位對得起來 ────────────────────────────
 const declared = new Set(sandbox.__MODAL_FIELDS);
@@ -150,7 +166,42 @@ await sandbox.saveEvent();
 check('★ 存檔失敗時 modal 不關（內容還在畫面上）', modalDisplay() === 'flex');
 check('　 且草稿仍留著', store.get('itri_event_draft:new')?.includes('這次後端會壞掉'));
 
+// ── 六之二、編輯既有活動也一樣（回報影片走的是這條路，不是「新增」）─────────
+// 影片：點卡片的「編輯」→ 在「邀訪聯絡窗口分工」打字 → 滑鼠點到右邊卡片區的灰底
+// → modal 整個不見、字全沒了。這條路的 baseline 是後端撈回來的內容，跟「新增」不同，
+// 要分開驗。
+{
+  store.clear();
+  await sandbox.showEditModal('ev-semicon');
+  check('編輯：modal 打開且帶入既有內容', modalDisplay() === 'flex' &&
+    $('input-kb').value.includes('原本就存好的內容'));
+
+  sandbox.requestCloseModal('backdrop');
+  check('編輯：沒改任何東西時，點旁邊關得掉', modalDisplay() === 'none');
+
+  await sandbox.showEditModal('ev-semicon');
+  $('input-contacts').value = '徐喬涵035915128 XXX';
+  sandbox.markModalChanged();
+  sandbox.requestCloseModal('backdrop');
+  check('★ 編輯：打了字之後點旁邊不會關掉（回報影片的情境）', modalDisplay() === 'flex');
+  check('　 剛打的窗口分工還在', $('input-contacts').value === '徐喬涵035915128 XXX');
+
+  confirmAnswer = true;
+  sandbox.requestCloseModal('button');
+  check('編輯：確認後才關，且草稿存在該場活動自己的 key 下',
+    modalDisplay() === 'none' && store.has('itri_event_draft:ev-semicon'));
+
+  await sandbox.showEditModal('ev-semicon');
+  check('編輯：重開同一場跳出草稿橫幅', $('draft-banner').style.display === 'flex');
+  sandbox.restoreDraft();
+  check('編輯：還原拿回剛剛打的窗口分工', $('input-contacts').value === '徐喬涵035915128 XXX');
+  closeQuietly();
+}
+
 // ── 七、上傳中不准關 ───────────────────────────────────────────────────────
+sandbox.showCreateModal('2026-09-20');
+$('input-name').value = '上傳中的活動';
+sandbox.markModalChanged();
 sandbox.__setUploading(1);
 sandbox.requestCloseModal('button');
 check('照片上傳中時關不掉（不然拿不回圖片網址）', modalDisplay() === 'flex');
