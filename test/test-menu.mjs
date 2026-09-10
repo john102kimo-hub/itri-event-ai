@@ -272,8 +272,10 @@ console.log('── 使用說明要帶得出 30 秒動畫（批次 44）──')
   // 記者手機上，比沒有連結更糟。
   eq(/claude\.ai|localhost|127\.0\.0\.1|vercel\.app\/_/.test(HELP_TEXT), false,
     '不可以放需要登入或點不開的網址');
-  const head = HELP_TEXT.split('\n').slice(0, 4).join('\n');
+  const head = HELP_TEXT.split('\n').slice(0, 5).join('\n');
   eq(/guide\.html/.test(head), true, '要放在最前面幾行——手機上多半只看得到開頭');
+  // 影片現在直接播在這則文字上面，這行不該再寫成「請你去點」
+  eq(/上面那支 30 秒影片/.test(HELP_TEXT), true, '文案要對得上「影片就在上面」這件事');
 }
 
 console.log(`\n${fail === 0 ? '✅' : '❌'} 通過 ${pass}／失敗 ${fail}`);

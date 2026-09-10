@@ -179,7 +179,12 @@ export const line = {
     sent.push({ kind: 'text', text, quickReply: quickReplyItems || [] });
     return true;
   },
-  async replyOrPushMessages(replyToken, userId, messages) { sent.push({ kind: 'flex', messages }); return true; },
+  // messages 原封不動帶出來：使用說明現在是「影片 ＋ 文字」兩則一起送（批次 46），
+  // 測試要驗得到影片那則的網址，不能只看有沒有送出去。
+  async replyOrPushMessages(replyToken, userId, messages) {
+    sent.push({ kind: 'flex', messages, text: (messages || []).filter(m => m?.type === 'text').map(m => m.text).join('\n') });
+    return true;
+  },
   async startLoading() {},
   async pushImages() { return { ok: true, skipped: true }; },
   async createRichMenu() { return 'rm_fake'; },

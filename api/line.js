@@ -958,6 +958,16 @@ const GROUP_NAV = [...GROUP_NAV_HEAD, ...GROUP_NAV_TAIL];
 // 代價也只是「群組少一排導覽」或「1 對 1 多一排」，不會壞掉。
 const isGroupTarget = id => /^[CR]/.test(String(id || ''));
 
+// replyOrPushMessages() 收的是原始訊息物件，不像 replyOrPush() 會幫忙把字串陣列
+// 轉成 quickReply。使用說明那則要自己組一份——格式跟 lib/line.js 的 buildQuickReply()
+// 一樣（LINE 的 quick reply 物件），只是這裡只需要固定這幾顆。
+function buildHelpQuickReply() {
+  const items = ['最近有哪些活動', '產業趨勢分析', '想問什麼技術', CONTACT_MENU_LABEL];
+  return {
+    items: items.map(text => ({ type: 'action', action: { type: 'message', label: text, text } }))
+  };
+}
+
 // ⚠️ 這一層是「群組導覽不會漏掉」的結構性保證（批次 43），不是方便而已。
 //
 // 回報：在群組按「媒體邀訪需求」→「邀訪：綠能」，拿到窗口聯絡人之後**整則訊息一顆
@@ -2054,7 +2064,24 @@ async function handleMetaIntent(replyToken, userId, text, metaIntent, binding, {
   }
 
   if (metaIntent === 'help') {
-    await replyOrPush(replyToken, userId, HELP_TEXT, ['最近有哪些活動']);
+    // ⚠️ 直接把影片送進對話裡播，不是丟一條連結（批次 46）。
+    // 回報的原話：「影片現在是跳連結，有可能直接在對話傳或播影片嗎？不會有人特別
+    // 還會去點連結的」——完全正確。使用說明的目的是「讓人真的看」，一條連結把
+    // 「看」變成一個要主動決定的動作，多數人就滑過去了；LINE 的 video 訊息會直接
+    // 在對話裡顯示成可播放的畫面，門檻是零。
+    //
+    // 影片是 public/mia-guide.mp4（30 秒、720×1280、約 1.3 MB，遠低於 LINE 的
+    // 200 MB 上限），封面是第一格的截圖。兩個都必須是 https 直連網址，所以放在自家
+    // 站台的 public/ 底下跟著部署走——不依賴任何外部服務，也不會有連結過期的問題。
+    //
+    // 影片送失敗（網路、LINE 端拒絕）時不能連文字說明都沒了：兩則是同一次
+    // replyOrPushMessages，LINE 會整批處理；真的整批失敗，下面那行還會用 push 補一次
+    // 純文字，記者至少拿得到說明。
+    const ok = await replyOrPushMessages(replyToken, userId, [
+      { type: 'video', originalContentUrl: `${SITE}/mia-guide.mp4`, previewImageUrl: `${SITE}/mia-guide-cover.jpg` },
+      { type: 'text', text: HELP_TEXT, quickReply: buildHelpQuickReply() }
+    ]);
+    if (!ok) await replyOrPush(replyToken, userId, HELP_TEXT, ['最近有哪些活動']);
     return;
   }
 

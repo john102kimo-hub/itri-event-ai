@@ -73,19 +73,19 @@ const res = { status() { return this; }, json() { return this; }, end() { return
 async function send(text, userId) {
   sent.length = 0;
   await handler(makeReq(text, userId), res);
-  return sent.map(s => ({ kind: s.kind, text: s.text, event: s.event, quickReply: s.quickReply, sys: s.sys, sysAll: s.sysAll, question: s.question, msgs: s.msgs }));
+  return sent.map(s => ({ kind: s.kind, text: s.text, event: s.event, quickReply: s.quickReply, messages: s.messages, sys: s.sys, sysAll: s.sysAll, question: s.question, msgs: s.msgs }));
 }
 
 async function sendRaw(events) {
   sent.length = 0;
   await handler(makeRawReq(events), res);
-  return sent.map(x => ({ kind: x.kind, text: x.text, event: x.event, quickReply: x.quickReply, sys: x.sys, sysAll: x.sysAll, question: x.question, msgs: x.msgs }));
+  return sent.map(x => ({ kind: x.kind, text: x.text, event: x.event, quickReply: x.quickReply, messages: x.messages, sys: x.sys, sysAll: x.sysAll, question: x.question, msgs: x.msgs }));
 }
 
 async function sendGroup(text, opts) {
   sent.length = 0;
   await handler(makeGroupReq(text, opts), res);
-  return sent.map(s => ({ kind: s.kind, text: s.text, event: s.event, quickReply: s.quickReply, sys: s.sys, sysAll: s.sysAll, question: s.question, msgs: s.msgs }));
+  return sent.map(s => ({ kind: s.kind, text: s.text, event: s.event, quickReply: s.quickReply, messages: s.messages, sys: s.sys, sysAll: s.sysAll, question: s.question, msgs: s.msgs }));
 }
 
 let pass = 0, fail = 0;
@@ -369,7 +369,7 @@ check('點下「只 @」引導附的按鈕（媒體邀訪需求）→ 續問視�
 reset(); await freshModule();
 out = await sendGroup('@我 妳能幫我什麼', { mentionSelf: true, mentionText: '@我 ' });
 check('群組 @ 問「妳能幫我什麼」→ 回使用說明，不是答非所問的「不確定您想問哪一場活動」',
-  out[0]?.kind === 'text' && /怎麼使用這個帳號/.test(out[0].text) && !/不確定/.test(out[0].text),
+  /怎麼使用這個帳號/.test(out[0]?.text || '') && !/不確定/.test(out[0]?.text || ''),
   JSON.stringify(out));
 
 // 沒有 @ 到、單純打字問「妳能幫我什麼」（1 對 1，每則訊息本來就都算在跟我們講話）
@@ -377,7 +377,26 @@ check('群組 @ 問「妳能幫我什麼」→ 回使用說明，不是答非所
 reset(); await freshModule();
 out = await send('你是誰');
 check('1 對 1 問「你是誰」→ 回使用說明，不是答非所問的萬用兜底文案',
-  out[0]?.kind === 'text' && /怎麼使用這個帳號/.test(out[0].text), JSON.stringify(out));
+  /怎麼使用這個帳號/.test(out[0]?.text || ''), JSON.stringify(out));
+
+// ── 使用說明要「直接在對話裡播影片」，不是丟一條連結（回報，批次 46）──────────
+// 回報的原話：「影片現在是跳連結，有可能直接在對話傳或播影片嗎？不會有人特別還會去
+// 點連結的」。一條連結把「看」變成一個要主動決定的動作，多數人就滑過去了。
+console.log('── 使用說明：影片直接播在對話裡 ──');
+reset(); await freshModule();
+out = await send('使用說明');
+{
+  const msgs = out[0]?.messages || [];
+  const video = msgs.find(m => m.type === 'video');
+  check('第一則就是可以直接播的影片，不是連結', !!video, JSON.stringify(msgs.map(m => m.type)));
+  check('影片與封面都是自家站台的 https 直連網址（LINE 只收這種）',
+    /^https:\/\/[^\s]+\.mp4$/.test(video?.originalContentUrl || '') &&
+    /^https:\/\/[^\s]+\.(jpg|jpeg|png)$/.test(video?.previewImageUrl || ''),
+    JSON.stringify(video));
+  check('影片後面接著文字說明，不是只有影片', /怎麼使用這個帳號/.test(out[0]?.text || ''), out[0]?.text?.slice(0, 60));
+  check('文字那則仍然附著按鈕', (msgs.find(m => m.type === 'text')?.quickReply?.items || []).length > 0,
+    JSON.stringify(msgs.find(m => m.type === 'text')?.quickReply));
+}
 
 // 迴歸：真的問不出所以然的話，兜底文案還在——不是把安全網拿掉。
 // 批次 24 改寫了這段文案：舊版把「猜不出來」一律講成「我沒抓到您想問哪一場活動」，
