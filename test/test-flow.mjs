@@ -259,6 +259,84 @@ state.bindings.set('U_reporter', { event_id: 'quad', media_name: '', note: '', b
 out = await send('退出');
 check('記者打「退出」不會被當成職員指令', out[0]?.kind === 'answer', JSON.stringify(out));
 
+// ── 情境 6.5：職員模式 ＝ 記者模式 ＋ 管理（回報：「職員模式要重新思考改進，
+// 不好用」）──────────────────────────────────────────────────────────────
+// 回報的截圖：在職員模式問「最近有發什麼新聞稿」，拿回來的是一份職員功能清單。
+//
+// 根因是結構性的：職員模式**取代**了記者模式，而不是疊在它上面。走進
+// handleStaffMessage() 之後，每一則訊息都只過 routeStaffIntent() 那七個管理意圖，
+// 記者端有的東西一個都叫不到，全部落進 'other'，換來一面功能清單的牆。公關同仁
+// 本來就是這個帳號用得最兇的人，卻是能力最少的人。
+process.env.ADMIN_PASSWORD = '';
+reset(); await freshModule();
+state.staff.push(['U_staff', '', '2026-08-27', '', '']);
+out = await send('最近有發什麼新聞稿', 'U_staff');   // ← 回報原話
+check('職員問「最近有發什麼新聞稿」→ 既不是職員功能清單的牆，也不是【近期活動】行事曆',
+  !out.some(o => o.kind === 'text' && /【管理】|職員模式可以做這些事|【近期活動】/.test(o.text)),
+  JSON.stringify(out));
+check('職員問新聞稿 → 真的去抓工研院官網新聞中心的最新清單',
+  out.some(o => o.sys?.includes('工研院官網新聞中心 最新新聞')),
+  JSON.stringify(out.map(o => o.sys?.slice(0, 60))));
+
+reset(); await freshModule();
+state.staff.push(['U_staff', '', '2026-08-27', '', '']);
+out = await send('產業趨勢分析', 'U_staff');
+check('職員也叫得動產業趨勢（記者端有的能力，職員一樣要有）',
+  out.some(o => o.sys?.includes('IEK 產業情報網')), JSON.stringify(out.map(o => o.sys?.slice(0, 40))));
+
+reset(); await freshModule();
+state.staff.push(['U_staff', '', '2026-08-27', '', '']);
+out = await send('媒體邀訪需求', 'U_staff');
+check('職員也叫得動邀訪窗口清單（真的那一則，不是功能表裡提到「邀訪」兩個字）',
+  out.some(o => o.kind === 'text' && /想了解哪個技術領域/.test(o.text)), JSON.stringify(out));
+
+// ⚠️ 這一組是這個修法真正的風險：**職員自己的指令不可以被記者端的意圖攔走**。
+// 被攔走的話同仁就管不了後台了，比原本「問新聞稿拿到清單」嚴重得多。
+reset(); await freshModule();
+state.staff.push(['U_staff', '', '2026-08-27', '', '']);
+out = await send('查活動後台數據', 'U_staff');
+check('「查活動後台數據」沒有被記者端意圖攔走', /哪一場的後台數據/.test(out[0]?.text || ''), JSON.stringify(out));
+
+reset(); await freshModule();
+state.staff.push(['U_staff', '', '2026-08-27', '', '']);
+out = await send('要媒體訓練連結', 'U_staff');
+check('「要媒體訓練連結」沒有被記者端意圖攔走', /哪一場的媒體訓練連結/.test(out[0]?.text || ''), JSON.stringify(out));
+
+reset(); await freshModule();
+state.staff.push(['U_staff', '', '2026-08-27', '', '']);
+out = await send('GEO現在狀況', 'U_staff');
+check('「GEO現在狀況」沒有被記者端意圖攔走',
+  !out.some(o => o.kind === 'text' && /最新新聞|IEK/.test(o.text)), JSON.stringify(out));
+
+// ⚠️ 'calendar' 刻意不在字面比對那層短路：「所有場次的後台數據」也會命中
+// CALENDAR_RE（「所有…場次」），短路掉就再也查不到後台數據了。
+reset(); await freshModule();
+state.staff.push(['U_staff', '', '2026-08-27', '', '']);
+out = await send('所有場次的後台數據', 'U_staff');
+check('「所有場次的後台數據」走的是後台數據，不是被 CALENDAR_RE 攔成活動列表',
+  /後台數據/.test(out[0]?.text || '') && !/【近期活動】/.test(out[0]?.text || ''), JSON.stringify(out));
+
+// 職員的「使用說明」是職員功能表，不是記者那份 30 秒影片。
+reset(); await freshModule();
+state.staff.push(['U_staff', '', '2026-08-27', '', '']);
+out = await send('使用說明', 'U_staff');
+check('職員打「使用說明」→ 給職員功能表，不是記者的說明影片',
+  out.some(o => o.kind === 'text' && /【管理】/.test(o.text))
+    && !out.some(o => o.kind === 'video'), JSON.stringify(out.map(o => o.kind)));
+check('職員功能表要寫出「記者問得到的您一樣問得到」與「教米亞」兩段（回報的一半是看不出自己能做什麼）',
+  out.some(o => o.kind === 'text' && /記者問得到的/.test(o.text) && /教米亞/.test(o.text)),
+  JSON.stringify(out));
+
+// 聽不懂的時候不要丟清單——針對同仁這一句講一段貼題的話，按鈕仍然是職員那組。
+reset(); await freshModule();
+state.staff.push(['U_staff', '', '2026-08-27', '', '']);
+out = await send('欸你這樣不太行喔', 'U_staff');
+check('職員講了聽不懂的話 → 不再丟一面功能清單的牆',
+  !out.some(o => o.kind === 'text' && /【管理】/.test(o.text)), JSON.stringify(out));
+check('聽不懂時走記者端的智慧兜底，並標明還在職員模式',
+  out.some(o => o.kind === 'fallback') ||
+  out.some(o => o.kind === 'text' && /職員模式/.test(o.text)), JSON.stringify(out));
+
 // ── 情境 7：職員追問「哪一場」要接得住 ──────────────────────────────
 // 回報的 bug：「查活動後台數據」→「請問是想查哪一場？」→ 打「四足」→ 跑去問答。
 process.env.ADMIN_PASSWORD = '';   // getGeoStatusSummary() 會回 null，走沒資料那條
