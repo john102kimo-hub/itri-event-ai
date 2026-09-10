@@ -25,9 +25,12 @@
 以後**任何要出聲的東西**——使用說明影片、活動預告、語音訊息——都用
 `tools/guide-video/voice/` 裡的那一個聲音，不用再問、也不要另外挑語音。
 
-朱朱在 Vidnoz 上挑的童聲，加工配方在 `tools/guide-video/voice/cute.py`，
-怎麼用寫在同一個資料夾的 `README.md`。之前那版 edge-tts（`tools/guide-video/vo.py`）
-被評為「太像機器人念稿」，只留作備援。
+朱朱在 Vidnoz 上挑的「**HsiaoYu（Taiwan）**」，加工配方在
+`tools/guide-video/voice/cute.py`，怎麼用寫在同一個資料夾的 `README.md`。
+
+⚠️ 這跟備援的 `tools/guide-video/vo.py`（edge-tts `zh-TW-HsiaoYuNeural`）是同一個
+語音，但**不能拿 edge-tts 去代替**——兩邊聽起來差很多，差在 Vidnoz 那邊的語調設定。
+edge-tts 那版被評為「太像機器人念稿」，只留作備援。
 
 ## 4. 影片一定要有聲音軌
 
