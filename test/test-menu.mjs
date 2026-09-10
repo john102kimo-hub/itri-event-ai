@@ -272,11 +272,18 @@ console.log('── 使用說明要帶得出 30 秒動畫（批次 44）──')
   // 記者手機上，比沒有連結更糟。
   eq(/claude\.ai|localhost|127\.0\.0\.1|vercel\.app\/_/.test(HELP_TEXT), false,
     '不可以放需要登入或點不開的網址');
-  const head = HELP_TEXT.split('\n').slice(0, 5).join('\n');
-  eq(/guide\.html/.test(head), true, '要放在最前面幾行——手機上多半只看得到開頭');
+  // ⚠️ 回報：「文字這麼多，影片早就被淹沒看不到」。影片現在是最後一則，而文字必須夠短，
+  // 短到影片還留在畫面上。這兩個數字是刻意釘住的門檻，不是隨手寫的——文案一長回去，
+  // 這裡就會紅。
+  eq(HELP_TEXT.split('\n').length <= 20, true,
+    `使用說明要精簡（目前 ${HELP_TEXT.split('\n').length} 行，上限 20）`);
+  eq(HELP_TEXT.length <= 400, true,
+    `使用說明要精簡（目前 ${HELP_TEXT.length} 字，上限 400）`);
+  // 影片是最後一則，所以文字要指「下面」
+  eq(/下面那支/.test(HELP_TEXT), true, '影片在文字後面，措辭要指下面');
   // ⚠️ 文案要「影片沒出來也讀得通」：LINE 送出時回 200、之後才抓媒體檔，抓失敗不會
   // 通知我們，畫面上就是只有文字。指著一個可能不存在的東西講話是壞掉的文案。
-  eq(/30 秒看完/.test(HELP_TEXT), true, '要講清楚有一支 30 秒的說明');
+  eq(/30 秒影片/.test(HELP_TEXT), true, '要講清楚有一支 30 秒的說明');
   eq(/上面那支 30 秒影片就是完整說明/.test(HELP_TEXT), false,
     '不可以寫成「上面那支影片就是完整說明」——影片沒出來時這句話沒有對象');
 }

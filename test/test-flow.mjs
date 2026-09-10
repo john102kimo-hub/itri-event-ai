@@ -116,7 +116,7 @@ check('綁定中打「最近活動」→ 給活動清單，不是丟給該場 AI
 check('活動清單有提醒目前在哪一場', /您目前在問的是/.test(out[0]?.text || ''), out[0]?.text);
 
 out = await send('使用說明');
-check('綁定中打「使用說明」→ 給說明', /怎麼使用這個帳號/.test(out[0]?.text || ''), JSON.stringify(out));
+check('綁定中打「使用說明」→ 給說明', /直接問就好/.test(out[0]?.text || ''), JSON.stringify(out));
 
 // 回報的意見：這顆按鈕原本叫「換一場活動」，但這個帳號能問的不只活動，已經
 // 改名成「回首頁」（見 lib/menu.js REPORTER_MENU 的說明）；「換一場活動」等舊
@@ -189,7 +189,7 @@ check('換場後的第一個問題沒被媒體名稱擷取吃掉',
 // ── 情境 4：沒綁定時 ────────────────────────────────────────────────
 reset(); await freshModule();
 out = await send('使用說明');
-check('沒綁定也問得到使用說明', /怎麼使用這個帳號/.test(out[0]?.text || ''), JSON.stringify(out));
+check('沒綁定也問得到使用說明', /直接問就好/.test(out[0]?.text || ''), JSON.stringify(out));
 out = await send('最近活動');
 check('沒綁定打「最近活動」→ 清單，且不呼叫 AI 路由', out[0]?.kind === 'text' && /近期活動/.test(out[0].text));
 check('沒綁定時清單不會出現「您目前在問的是」', !/您目前在問的是/.test(out[0]?.text || ''));
@@ -378,7 +378,7 @@ check('點下「只 @」引導附的按鈕（媒體邀訪需求）→ 續問視�
 reset(); await freshModule();
 out = await sendGroup('@我 妳能幫我什麼', { mentionSelf: true, mentionText: '@我 ' });
 check('群組 @ 問「妳能幫我什麼」→ 回使用說明，不是答非所問的「不確定您想問哪一場活動」',
-  /怎麼使用這個帳號/.test(out[0]?.text || '') && !/不確定/.test(out[0]?.text || ''),
+  /米亞/.test(out[0]?.text || '') && /直接問就好/.test(out[0]?.text || '') && !/不確定/.test(out[0]?.text || ''),
   JSON.stringify(out));
 
 // 沒有 @ 到、單純打字問「妳能幫我什麼」（1 對 1，每則訊息本來就都算在跟我們講話）
@@ -386,7 +386,7 @@ check('群組 @ 問「妳能幫我什麼」→ 回使用說明，不是答非所
 reset(); await freshModule();
 out = await send('你是誰');
 check('1 對 1 問「你是誰」→ 回使用說明，不是答非所問的萬用兜底文案',
-  /怎麼使用這個帳號/.test(out[0]?.text || ''), JSON.stringify(out));
+  /直接問就好/.test(out[0]?.text || ''), JSON.stringify(out));
 
 // ── 使用說明要「直接在對話裡播影片」，不是丟一條連結（回報，批次 46）──────────
 // 回報的原話：「影片現在是跳連結，有可能直接在對話傳或播影片嗎？不會有人特別還會去
@@ -397,14 +397,21 @@ out = await send('使用說明');
 {
   const msgs = out[0]?.messages || [];
   const video = msgs.find(m => m.type === 'video');
-  check('第一則就是可以直接播的影片，不是連結', !!video, JSON.stringify(msgs.map(m => m.type)));
+  check('有一則可以直接播的影片，不是連結', !!video, JSON.stringify(msgs.map(m => m.type)));
   check('影片與封面都是自家站台的 https 直連網址（LINE 只收這種）',
     /^https:\/\/[^\s]+\.mp4$/.test(video?.originalContentUrl || '') &&
     /^https:\/\/[^\s]+\.(jpg|jpeg|png)$/.test(video?.previewImageUrl || ''),
     JSON.stringify(video));
-  check('影片後面接著文字說明，不是只有影片', /怎麼使用這個帳號/.test(out[0]?.text || ''), out[0]?.text?.slice(0, 60));
-  check('文字那則仍然附著按鈕', (msgs.find(m => m.type === 'text')?.quickReply?.items || []).length > 0,
-    JSON.stringify(msgs.find(m => m.type === 'text')?.quickReply));
+  // ⚠️ 回報：「先放文字再放影片，不然文字這麼多，影片早就被淹沒看不到」。聊天室由上
+  // 往下長，最後一則才停在畫面最下方、緊貼輸入框。
+  check('⚠️ 文字在前、影片在後（影片是最後一則，才不會被文字推出畫面）',
+    msgs[0]?.type === 'text' && msgs[msgs.length - 1]?.type === 'video',
+    JSON.stringify(msgs.map(m => m.type)));
+  check('文字說明還在', /米亞/.test(out[0]?.text || ''), out[0]?.text?.slice(0, 60));
+  // LINE 只顯示「最後一則」的快速回覆——掛錯地方整排會消失
+  check('⚠️ 按鈕掛在最後一則（LINE 只顯示最後一則的快速回覆）',
+    (msgs[msgs.length - 1]?.quickReply?.items || []).length > 0,
+    JSON.stringify(msgs.map(m => ({ t: m.type, q: (m.quickReply?.items || []).length }))));
 }
 
 // 迴歸：真的問不出所以然的話，兜底文案還在——不是把安全網拿掉。
