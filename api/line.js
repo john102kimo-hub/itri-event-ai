@@ -1390,6 +1390,16 @@ async function answerIndustryTrend(replyToken, targetId, text) {
 // 不用自己重試——不管 keywordText 乾不乾淨，這支都不用假設它已經是乾淨關鍵字。
 async function answerTechQuery(replyToken, targetId, keywordText) {
   const keyword = sanitize(keywordText, 60);
+  // ⚠️ 沒有關鍵字、或關鍵字只是「新聞」「新聞稿」這種泛稱時，改走「最新新聞清單」
+  // 那條路。這是 lib/menu.js isLatestNewsQuestion() 那條死板規則之外的第二層：
+  // 記者的講法千變萬化，規則接不住的（「工研院這陣子在忙什麼新聞」）會掉到
+  // routeIntent()，AI 判成 tech_query 但抽不出技術關鍵字——這時候拿泛稱去查官網
+  // 只會撈到雜訊（見 NO_DATA_GENERIC 的說明），列最新清單才是記者真正想要的。
+  // 兩層都要有，理由見 CLAUDE.md 第 2 條：規則是保證，AI 是涵蓋率。
+  if (!keyword || isGenericLookupKeyword(keyword)) {
+    await answerLatestNews(replyToken, targetId, keywordText || '最近有哪些新聞');
+    return;
+  }
   const { ok, items } = await fetchItriNews(keyword);
   // 導到另一條路（整體產業趨勢）的按鈕，跟 answerIndustryTrend() 的 crossItem 對稱：
   // 工研院官網沒報導過某個題目是常態（尤其比較新的領域），但那不代表「這個題目在
@@ -1448,6 +1458,66 @@ async function answerTechQuery(replyToken, targetId, keywordText) {
   await replyOrPush(replyToken, targetId, reply, [...crossItem, CONTACT_MENU_LABEL, '最近有哪些活動']);
   // 跟 answerIndustryTrend() 同一個道理：記住這一輪聊的是工研院技術，下一則只打一個
   // 技術名詞（「那光通訊呢」的省略講法）才接得回來，見 getRecentTopic() 的說明。
+  await setRecentTopic(targetId, 'tech_query');
+}
+
+// ── 「最近工研院有哪些新聞」（回報，附截圖）─────────────────────────────
+// 記者在群組打「米亞 最近工研院有哪些新聞」，米亞回的是【近期活動】行事曆，記者
+// 只好再追問一次「最近發的新聞稿麼」。問的是新聞稿，回的是記者會場次表——在這個
+// 帳號裡這是兩個不同的資料來源（新聞稿在工研院官網新聞中心，場次在 events 表）。
+//
+// 這支跟 answerTechQuery() 的差別只有一個：**不帶關鍵字**，直接抓官網新聞中心的
+// 「最新新聞」第一頁。lib/itri-news.js 的 fetchItriNews() 早就備好這條路（那支的
+// 註解寫著「這個分支是給之後萬一有『不指定技術、直接看工研院最新動態』需求時的
+// 退路」），這裡才第一次真的用到。
+//
+// ⚠️ 為什麼不共用 answerTechQuery()：那支的每一句話都繞著「記者給的那個關鍵字」
+// 打轉——查無資料的文案（「沒有找到跟『ＸＸ』相關的報導」）、導到 IEK 的按鈕
+// （crossTopicKeyword）、比對技術領域窗口（matchGlobalContactByText）三處都要
+// 關鍵字。沒有關鍵字時那三處全部沒有意義，硬併只會讓兩邊互相牽制。
+async function answerLatestNews(replyToken, targetId, question) {
+  const { ok, items } = await fetchItriNews('');
+  if (!ok) {
+    await replyOrPush(replyToken, targetId,
+      '這部分我暫時抓不到工研院官網的最新資料，真不好意思 🙏 建議直接洽媒體邀訪窗口。',
+      ['產業趨勢分析', CONTACT_MENU_LABEL, '最近有哪些活動']);
+    return;
+  }
+  if (!items.length) {
+    // 官網連得上、清單卻是空的——多半是官網改版讓 parseNewsListHtml() 解析不到
+    // （見 lib/itri-news.js）。誠實說抓不到，不要硬掰。
+    await replyOrPush(replyToken, targetId,
+      '我這邊暫時讀不到工研院官網新聞中心的清單，真不好意思 🙏 可以直接看官網：\nhttps://www.itri.org.tw/ListStyle.aspx?DisplayStyle=06&SiteID=1&MmmID=1036276263153520257',
+      ['產業趨勢分析', CONTACT_MENU_LABEL, '最近有哪些活動']);
+    return;
+  }
+
+  const systemPrompt = [
+    '你是工研院 LINE 官方帳號的 AI 新聞助理，名字叫「米亞」，正在回答記者「工研院最近發了哪些新聞」這個問題。下面是「工研院官網新聞中心」最新一頁的新聞稿（標題／日期／摘要），由新到舊。',
+    '只能根據下面清單裡的標題與摘要回答，不要延伸、不要用你自己既有的知識補充清單以外的內容、不要臆測完整新聞稿裡才有但摘要沒寫的細節。',
+    // ⚠️ 這裡刻意要求「條列最新的幾則」而不是「摘要重點」：記者問的是「有哪些」，
+    // 要的是一份可以掃過去的清單，不是一段濃縮成兩句話的綜述。答成綜述等於把他
+    // 真正想要的東西（哪幾則、什麼時候發的）藏起來。
+    '用條列的方式列出最新的 5 則，一則一行，格式是「日期　標題」（標題太長就精簡到 30 字內，但不要改變原意）。開頭先用一句話說明這是工研院官網新聞中心最近發布的新聞稿。',
+    '不要加上你自己的評論或推薦，也不要承諾任何你做不到的事（例如幫忙轉接、稍後回覆、代為查詢）。不要用 Markdown 語法（LINE 不會渲染）。',
+    TONE_RULE, // 見上面 TONE_RULE 的說明：只調語氣，不放寬「只能照資料回答」的規則
+    '回答最後另起一行，只用這個格式標出你列出來的是清單中第幾則（從 1 開始的編號，用逗號分隔），例如「來源編號：1,2,3,4,5」；這行只給程式判讀連結用，不算進上面的行數限制。',
+    '',
+    '【工研院官網新聞中心 最新新聞，由新到舊】',
+    formatNewsForPrompt(items)
+  ].join('\n');
+
+  const rawReply = await askAnthropic(systemPrompt, question);
+  const { text: aiReply, indices } = extractSourceIndices(rawReply);
+  const urls = resolveSourceUrls(indices, items);
+  const linksBlock = urls.length ? `\n\n🔗 原文連結：\n${urls.join('\n')}` : '';
+
+  const reply = `${aiReply}${linksBlock}\n\n想看某一則的細節，直接打標題裡的關鍵字就可以；要安排採訪請洽媒體邀訪窗口。`;
+  console.log(`[line] latest_news items=${items.length} reply="${reply.slice(0, 200)}"`);
+  await replyOrPush(replyToken, targetId, reply,
+    ['產業趨勢分析', '想問什麼技術', CONTACT_MENU_LABEL, '最近有哪些活動']);
+  // 記住這一輪聊的是工研院自己的新聞：下一則只打一個技術名詞（「那半導體呢」的省略
+  // 講法）才接得回 tech_query，見 getRecentTopic() 的說明。
   await setRecentTopic(targetId, 'tech_query');
 }
 
@@ -1823,11 +1893,19 @@ async function answerQuestion(replyToken, userId, rawEvent, mediaName, text, { l
 // 也不會讓每次 webhook 的冷啟動多背一個 73KB 的檔案。
 const SITE = 'https://itri-event-ai.vercel.app';
 
-// 職員的快速回覆按鈕。LINE 上限 13 顆，這裡用 7 顆——圖文選單那六格全部列出來
+// 職員的快速回覆按鈕。LINE 上限 13 顆，這裡用 9 顆——圖文選單那六格全部列出來
 // （選單被收起來時仍然點得到），再加「設定圖文選單」這顆選單本身放不進去的。
 // 原本只給兩顆（活動列表／GEO 狀態），其餘功能同仁得自己知道要打什麼才用得到，
 // 等於功能做了卻沒人找得到。
-const STAFF_QUICK_REPLIES = [...STAFF_MENU.buttons.map(b => b.text), '設定圖文選單'];
+//
+// 「最近有哪些新聞」「記憶清單」是回報「職員模式不好用」之後補的：前者是官網最新
+// 新聞稿（同仁問得最多的東西之一，原本職員模式完全叫不到），後者是「用對話教米亞」
+// 那套（批次 46 做好了，但除了 LINE-PLAN.md 之外沒有任何入口寫著怎麼叫它）。
+// 這兩個補的都不是新功能，是**入口**——見 LINE-PLAN.md 批次 51 的教訓。
+const STAFF_QUICK_REPLIES = [
+  ...STAFF_MENU.buttons.map(b => b.text), '設定圖文選單',
+  '最近有哪些新聞', '記憶清單'
+];
 
 // 職員登入／設定選單時要拿到職員選單的 id。不另外存一份到試算表——選單本來就有
 // name 欄位，用它反查即可，少一個會跟 LINE 那邊不同步的狀態。
@@ -2012,6 +2090,34 @@ async function handleStaffMessage(replyToken, userId, text) {
   // 判得準不準。
   if (await handleTeachMessage(replyToken, userId, text)) return;
 
+  // ── 職員 ＝ 記者 ＋ 管理，不是「另一個世界」（回報：「職員模式要重新思考改進，
+  // 不好用」）────────────────────────────────────────────────────────────
+  // 回報的截圖：在職員模式問「最近有發什麼新聞稿」，拿回來的是一份職員功能清單。
+  //
+  // 根因是結構性的：職員模式**取代**了記者模式，而不是疊在它上面。走到這支之後，
+  // 每一則訊息都只過 routeStaffIntent() 那七個管理意圖，記者端有的東西——最新
+  // 新聞稿、產業趨勢、工研院技術、邀訪窗口——一個都叫不到，全部落進 'other'，
+  // 換來一面功能清單的牆。公關同仁本來就是這個帳號用得最兇的人，卻是能力最少的人。
+  //
+  // 修法：記者端有、管理端沒有的那幾種意圖，直接共用記者端整套處理。用
+  // detectMetaIntent() 的字面比對先攔，不進 routeStaffIntent()——順便省一次模型呼叫。
+  //
+  // ⚠️ 'calendar' 刻意**不**在這裡短路。職員的「所有場次的後台數據」也會命中
+  // CALENDAR_RE（「所有…場次」），短路掉就再也查不到後台數據了——那條要留給
+  // routeStaffIntent() 用語意判。六顆職員按鈕會不會被這裡誤攔，測試有釘住。
+  const metaIntent = detectMetaIntent(text);
+  if (metaIntent === 'news' || metaIntent === 'industry_trend'
+      || metaIntent === 'tech_query' || metaIntent === 'contacts') {
+    console.log(`[line] staff 借用記者端意圖 intent=${metaIntent} q="${text.slice(0, 40)}"`);
+    await handleMetaIntent(replyToken, userId, text, metaIntent, null, {});
+    return;
+  }
+  if (metaIntent === 'help' || metaIntent === 'switch') {
+    // 職員的「使用說明／回首頁」＝職員功能表，不是記者那份說明影片。
+    await sendStaffMenu(replyToken, userId);
+    return;
+  }
+
   const rows = await getAllEventRows();
   // 職員要用「全部場次」的候選清單，不能用記者版的 buildCalendarCards()——
   // 那支會濾掉 draft／archived，職員問得到的場次卻不在候選清單裡，路由回傳的
@@ -2143,10 +2249,46 @@ async function handleStaffMessage(replyToken, userId, text) {
     return;
   }
 
+  // 走到這裡代表 routeStaffIntent() 判成 'other'。但 'other' 在職員這邊涵蓋得太寬：
+  // 那份 prompt 裡根本沒有新聞稿、產業趨勢、技術報導、邀訪窗口這幾種意圖，同仁只要
+  // 問了其中任何一種、講法又剛好沒被上面的字面比對接住，就會掉到這裡。原本這裡直接
+  // 丟一面功能清單的牆——那就是回報截圖裡的那一則。
+  //
+  // 改成交給記者端那條自然語言路由：它認得產業趨勢、工研院技術、活動問答，而且它的
+  // 兜底（sendFallbackGuide）會針對同仁這一句講一段貼題的話，不是列清單。
+  //
+  // ⚠️ 這條路會多花一次模型呼叫（職員路由一次、記者路由一次）。可以接受：走到這裡
+  // 的本來就是「兩邊都沒對上」的少數訊息，而同仁的訊息量遠小於記者。
+  // askMediaName／remember 都關掉：同仁不是記者，不要問他貴媒體的名稱，內部對話也
+  // 不該混進記者的對話記憶。staff:true 讓兜底那則帶職員的按鈕，不是記者的。
+  await handleUnbound(replyToken, userId, text, { askMediaName: false, remember: false, staff: true });
+}
+
+// 職員功能表。同仁打「使用說明」「回首頁」，或按下方選單時看到的就是這一則。
+//
+// ⚠️ 這則**不再**當「聽不懂」的兜底用（見 handleStaffMessage 結尾）。一份清單當答案
+// 是很糟的體驗：同仁問的是一個具體問題，拿回來的是「這裡有八個功能」。
+//
+// 分成三段，因為回報的「不好用」有一半是**看不出自己能做什麼**：原本這份清單只列了
+// 管理功能，同仁根本不知道記者問得到的東西自己也問得到，也不知道可以用對話教米亞
+// （批次 46 做好了，但除了 LINE-PLAN.md 之外沒有任何地方寫著怎麼叫它——跟批次 51
+// 「最新新聞清單沒有入口」是同一個形狀）。
+async function sendStaffMenu(replyToken, userId) {
   await replyOrPush(replyToken, userId,
-    '職員模式可以做這些事（下面按鈕直接點，或用講的也可以）：\n' +
-    STAFF_MENU.buttons.map(b => `・${b.label}——${b.sub}`).join('\n') +
-    '\n・某場活動內容——直接打活動名稱\n・設定圖文選單——重設下方選單',
+    '職員模式 🔧 下面按鈕直接點，或用講的都可以。\n\n' +
+    '【管理】\n' +
+    STAFF_MENU.buttons.filter(b => b.text !== '退出職員模式').map(b => `・${b.label}——${b.sub}`).join('\n') +
+    '\n・設定圖文選單——重設下方選單\n\n' +
+    '【記者問得到的，您一樣問得到】\n' +
+    '・最近有哪些新聞——官網最新新聞稿\n' +
+    '・產業趨勢分析／想問什麼技術\n' +
+    '・媒體邀訪需求——窗口分工\n' +
+    '・直接打活動名稱——問那一場的內容（含未發布）\n\n' +
+    '【教米亞】\n' +
+    '・「記住：這場地點改到南港展覽館」——只記這一場\n' +
+    '・「語氣：回答再短一點」——全站通用\n' +
+    '・打「記憶清單」看目前記得什麼\n\n' +
+    '【離開】打「退出職員模式」回到記者身分。',
     STAFF_QUICK_REPLIES);
 }
 
@@ -2237,6 +2379,16 @@ async function handleMetaIntent(replyToken, userId, text, metaIntent, binding, {
     return;
   }
 
+  if (metaIntent === 'news') {
+    // 直接答，不用像 tech_query 那樣先問一次要哪個技術——記者問的就是「最近有哪些
+    // 新聞」，答案是官網新聞中心的最新清單，本來就不需要關鍵字（見 answerLatestNews）。
+    // 原話刻意照傳給模型（不像 industry_trend 那樣固定換成一句請求句）：這條規則接得
+    // 住的句子本來就是自然語言（「最近發的新聞稿麼」），原話比替換過的句子更貼近
+    // 記者實際想問的。
+    await answerLatestNews(replyToken, userId, text);
+    return;
+  }
+
   if (metaIntent === 'tech_query') {
     // 跟「產業趨勢分析」不同，這裡不能直接答——「想問什麼技術」本身不是一個技術
     // 名稱，answerTechQuery() 需要記者給關鍵字才查得到東西。先問一次、記一個
@@ -2313,7 +2465,7 @@ async function handleMetaIntent(replyToken, userId, text, metaIntent, binding, {
 //
 // remember（批次 28）：軟綁定命中、直接答一題時要不要開對話記憶。1 對 1 開、群組
 // 不開，理由見 getRecentTurn() 的說明（群組多人交錯，上一輪多半是別人的問題）。
-async function handleUnbound(replyToken, userId, text, { silentOnOther = false, askMediaName = true, remember = true } = {}) {
+async function handleUnbound(replyToken, userId, text, { silentOnOther = false, askMediaName = true, remember = true, staff = false } = {}) {
   const rows = await getAllEventRows();
   const cards = buildCalendarCards(rows);
   // 上一則剛回答完的是不是產業趨勢／工研院技術題——沒有這個提示，記者接著打的
@@ -2379,7 +2531,7 @@ async function handleUnbound(replyToken, userId, text, { silentOnOther = false, 
   // intent === 'other'，或 qa 但完全比對不到、或路由本身失敗。
   if (silentOnOther) return; // 群組裡沒被直接 @、又猜不到問題在問什麼 → 安靜，不要沒事跳出來說「不確定」
 
-  await sendFallbackGuide(replyToken, userId, text);
+  await sendFallbackGuide(replyToken, userId, text, { staff });
 }
 
 // 記者剛剛打的是不是「一個光禿禿的主題詞」（截圖裡的「太空」）——是的話，兜底時
@@ -2503,7 +2655,12 @@ async function composeFallbackReply(text) {
   return reply;
 }
 
-async function sendFallbackGuide(replyToken, targetId, text) {
+// staff（職員模式借道這條路時，見 handleStaffMessage 結尾）：底下的按鈕要換成職員
+// 那組，並且補一句「這裡是職員模式」——同仁在職員模式裡拿到一整排記者按鈕會以為
+// 自己被踢出去了。
+async function sendFallbackGuide(replyToken, targetId, text, { staff = false } = {}) {
+  const chips = staff ? STAFF_QUICK_REPLIES : ['最近有哪些活動', '產業趨勢分析', '想問什麼技術', CONTACT_MENU_LABEL, '使用說明'];
+  const staffTail = staff ? '\n\n（您在職員模式，打「使用說明」可以看內部功能。）' : '';
   if (looksLikeBareTopic(text)) {
     const kw = String(text).trim();
     await replyOrPush(replyToken, targetId,
@@ -2511,7 +2668,7 @@ async function sendFallbackGuide(replyToken, targetId, text) {
       [
         { label: `${kw}的產業趨勢`, text: `${kw}產業趨勢` },
         { label: `工研院的${kw}技術`, text: `工研院 ${kw}` },
-        '最近有哪些活動', CONTACT_MENU_LABEL
+        ...(staff ? ['最近有哪些新聞', '使用說明'] : ['最近有哪些活動', CONTACT_MENU_LABEL])
       ]);
     return;
   }
@@ -2519,8 +2676,7 @@ async function sendFallbackGuide(replyToken, targetId, text) {
   // 先試著用米亞的口吻，針對記者「這一句」講一段真的貼題的話（見
   // composeFallbackReply()）；組不出來就退回下面這份固定文案。
   const smart = await composeFallbackReply(text);
-  await replyOrPush(replyToken, targetId, smart || FALLBACK_GUIDE_TEXT,
-    ['最近有哪些活動', '產業趨勢分析', '想問什麼技術', CONTACT_MENU_LABEL, '使用說明']);
+  await replyOrPush(replyToken, targetId, (smart || FALLBACK_GUIDE_TEXT) + staffTail, chips);
 }
 
 // ── 群組續問視窗的「這句話是在跟我講嗎」守門（批次 28）─────────────────────
