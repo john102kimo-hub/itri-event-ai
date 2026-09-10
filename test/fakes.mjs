@@ -78,7 +78,13 @@ export const sent = [];
 // 加「想問什麼技術」測試時踩到的坑：情境 18 比對「機器人」窗口，讀到的卻是被
 // 情境 17 換掉、沒有「機器人」這個主題的精簡版，比對永遠落空。三個都在這裡統一
 // 還原，之後不管哪個情境換了假資料，後面的情境都拿得回原本的預設值。
+// ⚠️ events 是共用 fixture，而且情境會改它（例如驗「同仁放了 20 顆自訂提問」時會覆寫
+// chips 欄）。reset() 原本沒有還原它，改過的值會一路漏到後面每一個情境——那種 bug 的
+// 症狀是「單獨跑會過、整份跑會紅」，最難查。存一份深拷貝，每次 reset 都還原。
+const EVENTS_SNAPSHOT = state.events.map(r => [...r]);
+
 export function reset() {
+  state.events = EVENTS_SNAPSHOT.map(r => [...r]);
   state.bindings.clear();
   state.staff.length = 0;
   state.richMenus.length = 0;

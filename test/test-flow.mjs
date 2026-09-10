@@ -89,6 +89,15 @@ async function sendGroup(text, opts) {
 }
 
 let pass = 0, fail = 0;
+// 1 對 1 與群組的按鈕列現在都長成「導覽在最前面 → 這場的內容提問 → 邀訪窗口」（批次 48）。
+// 測試改成檢查這個形狀，不要寫死整個陣列——寫死的話，之後每加一顆導覽鈕就要改一輪測試，
+// 而真正該保護的是「往外的路在最前面」跟「同仁自訂的提問還在」這兩件事。
+function chipsLookRight(chips, expectContent) {
+  const texts = (chips || []).map(c => (typeof c === 'object' && c ? c.text : c));
+  return texts[0] === '回首頁' && texts[1] === '最近有哪些活動' &&
+    expectContent.every(t => texts.includes(t)) &&
+    texts[texts.length - 1] === '媒體邀訪需求';
+}
 function check(label, cond, detail) {
   if (cond) pass++; else { fail++; console.log(`❌ ${label}${detail ? '\n   ' + detail : ''}`); }
 }
@@ -591,7 +600,7 @@ state.bindings.set('U_reporter', { event_id: 'quad', media_name: '中央社', no
 
 out = await send('這場的重點是什麼');
 check('綁定中的答案要附上這場自訂的 chips（quad 的 fixture 是「重點／應用」）',
-  JSON.stringify(out[1]?.quickReply) === JSON.stringify(['重點', '應用', '媒體邀訪需求']), JSON.stringify(out));
+  chipsLookRight(out[1]?.quickReply, ['重點', '應用']), JSON.stringify(out));
 
 reset(); await freshModule();
 state.bindings.set('U_reporter', { event_id: 'semi', media_name: '', note: '', bound_at: Date.now() });
@@ -607,14 +616,14 @@ check('#代碼綁定確認訊息本身不附 chips（避免跟 ask_name 擷取�
   !(out[0]?.quickReply?.length > 0), JSON.stringify(out));
 out = await send('中央社');
 check('回覆媒體名稱、ask_name 解決之後，「已記錄」那則就附上 chips',
-  JSON.stringify(out[0]?.quickReply) === JSON.stringify(['重點', '應用', '媒體邀訪需求']), JSON.stringify(out));
+  chipsLookRight(out[0]?.quickReply, ['重點', '應用']), JSON.stringify(out));
 
 // 職員模式問活動內容一樣要看得到 chips（同一支 answerQuestion()，沒有另外分岔邏輯）
 reset(); await freshModule();
 state.staff.push(['U_staff', '', '2026-08-27', '', '']);
 out = await send('四足機器人的重點', 'U_staff');
 check('職員模式問活動內容一樣附 chips（走同一支 answerQuestion）',
-  JSON.stringify(out[1]?.quickReply) === JSON.stringify(['重點', '應用', '媒體邀訪需求']), JSON.stringify(out));
+  chipsLookRight(out[1]?.quickReply, ['重點', '應用']), JSON.stringify(out));
 
 // 群組問答也要附 chips——但群組沒有圖文選單，同一排還要背負「導覽」的責任（批次 40）
 reset(); await freshModule();
@@ -634,7 +643,7 @@ out = await send('四足機器人的重點');
 check('自然語言命中照樣直接回答（不被補問卡住）',
   out[0]?.kind === 'answer' && out[0].event === 'quad', JSON.stringify(out));
 check('答案本身還是附著 chips（補問是額外一則，不影響原本的回答格式）',
-  JSON.stringify(out[1]?.quickReply) === JSON.stringify(['重點', '應用', '媒體邀訪需求']), JSON.stringify(out));
+  chipsLookRight(out[1]?.quickReply, ['重點', '應用']), JSON.stringify(out));
 check('沒問過名字的人，答完之後會多一則補問媒體名稱（不擋住答案本身）',
   out[2]?.kind === 'text' && /方便留個貴媒體的名稱/.test(out[2].text), JSON.stringify(out));
 check('補問時設定 ask_name 旗標，下一則會走既有的擷取機制',
@@ -1837,13 +1846,35 @@ out = await sendGroup('@我 這場的重點是什麼', { mentionSelf: true, ment
   check('⚠️ 不超過 LINE 的 13 顆硬上限（超過會從尾巴被截掉，截掉的正好是導覽）', chips.length <= 13, `${chips.length} 顆`);
 }
 
-// 1 對 1 不動：那邊圖文選單一直顯示在畫面下方，同一組入口再塞進按鈕列只會排擠掉
-// 同仁自訂的提問
+// 🔄 批次 48 修正了這裡原本的假設。批次 40 只在群組放導覽，理由寫成「1 對 1 有圖文選單
+// 撐著」——實際回報打臉：在 1 對 1 切進某一場之後「就不知如何回到首頁」。圖文選單雖然
+// 常駐，但它是**收合**的，而記者的視線在剛收到的那則答案上，按鈕列就貼在答案下面。
+// 「存在」跟「當下看得到」是兩件事。
 reset(); await freshModule();
 state.bindings.set('U_reporter', { event_id: 'quad', media_name: '中央社', note: '', bound_at: Date.now() });
 out = await send('這場的重點是什麼');
-check('1 對 1 的按鈕列維持原樣（有圖文選單頂著，不重複塞導覽）',
-  JSON.stringify(out[1]?.quickReply) === JSON.stringify(['重點', '應用', '媒體邀訪需求']), JSON.stringify(out[1]?.quickReply));
+{
+  const texts = (out[1]?.quickReply || []).map(c => (typeof c === 'object' ? c.text : c));
+  check('1 對 1 的按鈕列也要有「回首頁」（回報：切進一場之後找不到路回去）',
+    texts[0] === '回首頁', JSON.stringify(texts));
+  check('1 對 1 也有「其他活動」', texts[1] === '最近有哪些活動', JSON.stringify(texts));
+  check('同仁自訂的提問沒有被導覽擠掉', texts.includes('重點') && texts.includes('應用'), JSON.stringify(texts));
+}
+// 自訂提問很多時，內容 chips 會被截到 10 顆，但導覽與邀訪窗口不能被擠掉——
+// 被截掉的如果是導覽，等於這次的修法白做
+reset(); await freshModule();
+state.events.find(e => e[0] === 'quad')[6] = Array.from({ length: 20 }, (_, i) => `問題${i + 1}`).join('\n');
+state.bindings.set('U_reporter', { event_id: 'quad', media_name: '中央社', note: '', bound_at: Date.now() });
+out = await send('這場的重點是什麼');
+{
+  const chips = out[1]?.quickReply || [];
+  const texts = chips.map(c => (typeof c === 'object' ? c.text : c));
+  check('同仁放了 20 顆自訂提問時，導覽仍然在最前面',
+    texts[0] === '回首頁' && texts[1] === '最近有哪些活動', JSON.stringify(texts));
+  check('邀訪窗口仍然在最後一顆，沒有被 LINE 從尾巴截掉',
+    texts[texts.length - 1] === '媒體邀訪需求', JSON.stringify(texts));
+  check('⚠️ 總數剛好卡在 LINE 的 13 顆硬上限', chips.length === 13, `${chips.length} 顆`);
+}
 
 // 按下去要真的會動——而且是在「續問視窗已經過期」的情況下（按鈕會留在對話紀錄裡，
 // 記者往上滑才按是常態，這正是批次 30/32 踩過兩次的坑）
@@ -2023,43 +2054,42 @@ out = await send('今年院士有誰');
 // 「目前綁定的這一場」，於是不是答不出來、就是要先切過去。
 console.log('── 主場次答不出來、但別場的新聞稿裡有 → 自動把那場帶進來 ──');
 {
-  // 這個情境需要一場「內容裡真的有院士名單」的活動。加進 fixture 之後一定要還原——
-  // reset() 不會重建 state.events，留著會污染後面所有情境。
-  state.events.push(['fellow', '工研院院士授證典禮', '#0F9E7A',
+  // 這個情境需要一場「內容裡真的有院士名單」的活動。
+  const addFellow = () => state.events.push(['fellow', '工研院院士授證典禮', '#0F9E7A',
     '【新聞稿】本屆新任院士包括張三、李四、王五三位，由總統親自授證。', 'active', '2026-09-07',
     '', '', '', '工研院', 'code9', '', '', '', '', '', '', '']);
-  try {
-    reset(); await freshModule();
-    state.bindings.set('U_reporter', { event_id: 'quad', media_name: '', note: '', bound_at: Date.now() });
-    out = await send('今年院士有誰');
-    const a = out.find(o => o.kind === 'answer');
-    check('主場次仍然是綁定的那一場（沒有偷偷換場）', a?.event === 'quad', a?.event);
-    check('第一個（吃快取的）system 區塊還是主場次的內容', /四足機器人/.test(a?.sys || ''), (a?.sys || '').slice(0, 60));
-    check('答案寫在別場新聞稿裡 → 那一場被自動帶進來（回報的案例）',
-      /其他場次：工研院院士授證典禮/.test(a?.sysAll || ''), (a?.sysAll || '').slice(-300));
-    check('帶進來的是那場的新聞稿內容，不是只有名字',
-      /本屆新任院士包括張三/.test(a?.sysAll || ''), '');
-    check('⚠️ 同時一定要有「必須講出是哪一場」的規則（張冠李戴比答不出來嚴重）',
-      /必須在回答裡明確講出是哪一場/.test(a?.sysAll || ''), '');
-    check('跨場次資料不進第一個區塊（不然每題都會打散 ephemeral 快取）',
-      !/其他場次：/.test(a?.sys || ''), '');
 
-    // 問的就是本場的內容時，不該把不相干的場次拖進來（只是拖慢、變貴）
-    reset(); await freshModule();
-    state.bindings.set('U_reporter', { event_id: 'quad', media_name: '', note: '', bound_at: Date.now() });
-    out = await send('四足機器人的應用場域為何');
-    check('問的就是本場內容 → 不會把院士那場拖進來',
-      !/其他場次：工研院院士授證典禮/.test(out.find(o => o.kind === 'answer')?.sysAll || ''), '');
+  reset(); await freshModule(); addFellow();
+  state.bindings.set('U_reporter', { event_id: 'quad', media_name: '', note: '', bound_at: Date.now() });
+  out = await send('今年院士有誰');
+  const a = out.find(o => o.kind === 'answer');
+  check('主場次仍然是綁定的那一場（沒有偷偷換場）', a?.event === 'quad', a?.event);
+  check('第一個（吃快取的）system 區塊還是主場次的內容', /四足機器人/.test(a?.sys || ''), (a?.sys || '').slice(0, 60));
+  check('答案寫在別場新聞稿裡 → 那一場被自動帶進來（回報的案例）',
+    /其他場次：工研院院士授證典禮/.test(a?.sysAll || ''), (a?.sysAll || '').slice(-300));
+  check('帶進來的是那場的新聞稿內容，不是只有名字',
+    /本屆新任院士包括張三/.test(a?.sysAll || ''), '');
+  check('⚠️ 同時一定要有「必須講出是哪一場」的規則（張冠李戴比答不出來嚴重）',
+    /必須在回答裡明確講出是哪一場/.test(a?.sysAll || ''), '');
+  check('跨場次資料不進第一個區塊（不然每題都會打散 ephemeral 快取）',
+    !/其他場次：/.test(a?.sys || ''), '');
 
-    // 群組走同一支 answerQuestion，一樣要有
-    reset(); await freshModule();
-    state.bindings.set('Cgroup1', { event_id: 'quad', media_name: '', note: '', bound_at: Date.now() });
-    out = await sendGroup('@我 今年院士有誰', { mentionSelf: true, mentionText: '@我 ' });
-    check('群組裡同一題也會帶入那一場',
-      /其他場次：工研院院士授證典禮/.test(out.find(o => o.kind === 'answer')?.sysAll || ''), '');
-  } finally {
-    state.events.pop(); // 還原 fixture，不然後面的情境會多出一場活動
-  }
+  // 問的就是本場的內容時，不該把不相干的場次拖進來（只是拖慢、變貴）
+  reset(); await freshModule(); addFellow();
+  state.bindings.set('U_reporter', { event_id: 'quad', media_name: '', note: '', bound_at: Date.now() });
+  out = await send('四足機器人的應用場域為何');
+  check('問的就是本場內容 → 不會把院士那場拖進來',
+    !/其他場次：工研院院士授證典禮/.test(out.find(o => o.kind === 'answer')?.sysAll || ''), '');
+
+  // 群組走同一支 answerQuestion，一樣要有
+  reset(); await freshModule(); addFellow();
+  state.bindings.set('Cgroup1', { event_id: 'quad', media_name: '', note: '', bound_at: Date.now() });
+  out = await sendGroup('@我 今年院士有誰', { mentionSelf: true, mentionText: '@我 ' });
+  check('群組裡同一題也會帶入那一場',
+    /其他場次：工研院院士授證典禮/.test(out.find(o => o.kind === 'answer')?.sysAll || ''), '');
+  // ⚠️ 不用再手動還原 fixture：reset() 現在會把 state.events 還原成原始 fixture
+  // （批次 48 補的，理由見 test/fakes.mjs）。也因為這樣，addFellow() 一定要在 reset()
+  // 之後呼叫——加在前面會被還原掉。
 }
 
 // ── 情境 24：用對話教米亞（回報的需求，批次 46）─────────────────────────────

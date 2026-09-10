@@ -927,7 +927,8 @@ const DEFAULT_CHIPS = [
 // 要打這句話才找得到這個功能——跟內容 chips 放在一起才會被看到。
 const CONTACT_MENU_LABEL = '媒體邀訪需求';
 
-// 群組專用的導覽按鈕（批次 40）。
+// 導覽按鈕（批次 40 起）。群組與 1 對 1 都會用到——批次 48 之前只有群組用，見
+// eventQuickChips() 裡的 🔄。
 //
 // 回報的問題：群組裡切到某一場活動之後「比較難切回來」——原因不是功能不見了
 // （「回首頁」「最近有哪些活動」一直都認得，打字就會動），而是**群組看不到圖文
@@ -952,16 +953,16 @@ const CONTACT_MENU_LABEL = '媒體邀訪需求';
 // 學過一次「按鈕列最後一格的『媒體邀訪需求』不夠明顯，滑一排按鈕容易漏看」，那次
 // 的補救是把入口寫進文字裡。這排在群組裡是唯一的出口，藏在 8 顆自訂提問後面等於
 // 沒有——手機一次只看得到兩三顆。
-const GROUP_NAV_HEAD = [
+const NAV_HEAD = [
   { label: '🏠 回首頁', text: '回首頁' },            // 解除綁定＋列出全部活動與其他功能
   { label: '📅 其他活動', text: '最近有哪些活動' }    // 只列清單、不解除綁定，點活動名稱直接換過去
 ];
-const GROUP_NAV_TAIL = [
+const NAV_TAIL = [
   { label: '📊 產業趨勢', text: '產業趨勢分析' },
   { label: '🔬 問技術', text: '想問什麼技術' },
   { label: '📞 邀訪窗口', text: CONTACT_MENU_LABEL }
 ];
-const GROUP_NAV = [...GROUP_NAV_HEAD, ...GROUP_NAV_TAIL];
+const NAV_ALL = [...NAV_HEAD, ...NAV_TAIL];
 
 // LINE 的 id 前綴：使用者 U、群組 C、聊天室 R（官方文件的慣例，很穩定）。判斷錯的
 // 代價也只是「群組少一排導覽」或「1 對 1 多一排」，不會壞掉。
@@ -994,7 +995,7 @@ function buildHelpQuickReply() {
 // 邀訪主題、這場的快速提問…），不要覆蓋掉。
 async function replyOrPush(replyToken, targetId, text, quickReplyItems) {
   const items = (quickReplyItems && quickReplyItems.length) ? quickReplyItems
-    : (isGroupTarget(targetId) ? GROUP_NAV : quickReplyItems);
+    : (isGroupTarget(targetId) ? NAV_ALL : quickReplyItems);
   return replyOrPushRaw(replyToken, targetId, text, items);
 }
 
@@ -1022,12 +1023,24 @@ function eventContentChips(rawEvent) {
 
 function eventQuickChips(rawEvent, { group = false } = {}) {
   // ⚠️ LINE quick reply 硬上限 13 顆，超過的會被 buildQuickReply() 從尾巴截掉。
-  // 群組多了 5 顆固定導覽，內容 chips 只能留 8 顆；1 對 1 有圖文選單撐著，維持原本
-  // 12 顆內容 ＋「媒體邀訪需求」不動（這裡不是「群組比較重要」，是 1 對 1 的那五條
-  // 路本來就一直顯示在畫面下方，重複放進按鈕列只會排擠掉同仁自訂的提問）。
-  const contentChips = eventContentChips(rawEvent).slice(0, group ? 8 : 12);
-  if (!group) return [...contentChips, CONTACT_MENU_LABEL];
-  return [...GROUP_NAV_HEAD, ...contentChips, ...GROUP_NAV_TAIL];
+  //
+  // 🔄 批次 48 修正了批次 40 的一個判斷錯誤。批次 40 只在群組加導覽，理由寫成
+  // 「1 對 1 有圖文選單撐著，重複放進按鈕列只會排擠掉同仁自訂的提問」——聽起來合理，
+  // 實際回報打臉：使用者在 **1 對 1** 切進某一場之後，「就不知如何回到首頁」。
+  //
+  // 為什麼那個理由不成立：圖文選單雖然常駐，但它是**收合**的（要先點輸入框上方那條
+  // 「功能選單」才展開），而記者的視線在剛收到的那則答案上——按鈕列就貼在答案下面，
+  // 圖文選單不在。「存在」跟「當下看得到」是兩件事，這一整條路上已經是第二次栽在
+  // 同一個分辨上（批次 40 是群組沒有選單，這次是有選單但沒展開）。
+  //
+  // 所以兩邊都放往外的路，只是密度不同：
+  //   群組   ：2 顆往外 ＋ 8 顆內容 ＋ 3 顆其他功能 ＝ 13
+  //   1 對 1 ：2 顆往外 ＋ 10 顆內容 ＋ 邀訪窗口     ＝ 13
+  // 1 對 1 少放「產業趨勢／問技術」那兩顆，是因為那兩條路不是用來「脫困」的，而且
+  // 圖文選單展開後就有——真正被回報找不到的是「回首頁」。
+  const contentChips = eventContentChips(rawEvent).slice(0, group ? 8 : 10);
+  if (!group) return [...NAV_HEAD, ...contentChips, CONTACT_MENU_LABEL];
+  return [...NAV_HEAD, ...contentChips, ...NAV_TAIL];
 }
 
 // 回報的意見：記者被引導「請直接輸入想問的活動名稱，或從下面挑一場」（換場、或
@@ -2969,7 +2982,7 @@ async function handleGroupMessage(replyToken, groupId, text, { mentioned, speake
     if (mentioned) {
       // 一樣附上導覽：這場問不了，記者需要的是「那還能問什麼」，不是一句句點。
       await replyOrPush(replyToken, groupId, '這場活動目前無法問答，請洽現場工作人員。',
-        [...GROUP_NAV_HEAD, ...GROUP_NAV_TAIL]);
+        [...NAV_HEAD, ...NAV_TAIL]);
     }
     return;
   }
