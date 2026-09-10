@@ -1122,6 +1122,69 @@ check('抓取失敗時誠實告知抓不到資料，不會噴例外讓記者什�
 check('抓取失敗時沒有呼叫 Anthropic 硬答',
   !out.some(o => o.kind === 'answer'), JSON.stringify(out));
 
+// ── 情境 18.5：「最近工研院有哪些新聞」（實際回報的截圖）─────────────────────
+// 回報的原話流程：群組裡打「米亞 最近工研院有哪些新聞」→ 米亞回的是【近期活動】
+// 行事曆 → 記者只好再追問一次「最近發的新聞稿麼」。問的是新聞稿，回的是記者會場
+// 次表：在這個帳號裡這是兩個不同的資料來源（新聞稿在工研院官網新聞中心，場次在
+// events 表），答錯的成本是記者以為「這個帳號查不到新聞稿」。
+//
+// 根因：這句話沒對到任何規則，掉進 routeIntent()，AI 看到「最近⋯有哪些」這個跟
+// 「最近有哪些活動」幾乎一樣的句型就判成 calendar。修法兩層（見 CLAUDE.md 第 2 條）：
+//   ① lib/menu.js isLatestNewsQuestion()：死板規則，保證這幾種句型一定答對
+//   ② lib/router.js 的 tech_query 說明 + answerTechQuery() 的泛稱守門：規則接不住
+//      的講法，AI 判成 tech_query 但抽不出技術關鍵字時，也走到最新新聞清單
+
+reset(); await freshModule();
+out = await send('最近工研院有哪些新聞');
+check('1 對 1 問「最近工研院有哪些新聞」→ 不會回成【近期活動】行事曆',
+  !out.some(o => o.kind === 'text' && /近期活動/.test(o.text)), JSON.stringify(out));
+check('拿去問 AI 的是工研院官網新聞中心的最新清單，不是空氣',
+  out.some(o => o.sys?.includes('工研院官網新聞中心 最新新聞')
+    && o.sys?.includes('工研院攜AMRA打造足型機器人新標準')),
+  JSON.stringify(out.map(o => o.sys?.slice(0, 60))));
+
+reset(); await freshModule();
+out = await send('最近發的新聞稿麼');   // ← 記者接著追問的那一句，原字不改
+check('記者追問的「最近發的新聞稿麼」也走到最新新聞清單',
+  out.some(o => o.sys?.includes('工研院官網新聞中心 最新新聞')), JSON.stringify(out));
+
+// 群組：回報那則就是在群組裡打的（帶著「米亞」開頭）。
+reset(); await freshModule();
+out = await sendGroup('@我 最近工研院有哪些新聞', { mentionSelf: true, mentionText: '@我 ' });
+check('群組問「最近工研院有哪些新聞」→ 走最新新聞清單，不是行事曆',
+  out.some(o => o.sys?.includes('工研院官網新聞中心 最新新聞'))
+    && !out.some(o => o.kind === 'text' && /近期活動/.test(o.text)), JSON.stringify(out));
+
+// ⚠️ 這一條才是這個修法真正的風險所在：**有主題的問題不可以被搶走**。
+// 「工研院半導體有什麼新聞嗎」要拿「半導體」去官網搜尋（上面情境 18 已經釘住），
+// 被最新清單搶走的話，記者拿到的是一份不相干的新聞列表，比原本判成 calendar 更糟。
+reset(); await freshModule();
+out = await send('工研院半導體有什麼新聞嗎');
+check('有技術主題的「工研院半導體有什麼新聞嗎」沒有被最新清單搶走，照樣用「半導體」去查',
+  out.some(o => o.kind === 'answer' && o.question === '半導體')
+    && !out.some(o => o.sys?.includes('工研院官網新聞中心 最新新聞')),
+  JSON.stringify(out.map(o => ({ kind: o.kind, question: o.question }))));
+
+// 第二層：按了「想問什麼技術」，記者打的卻是「新聞稿」這種泛稱。以前會拿「新聞稿」
+// 三個字去官網搜尋——官網是字面比對，撈回來的必然是雜訊（NO_DATA_GENERIC 當初就是
+// 為了這個而存在，只是那道守門只擋補查那條路，沒擋到這裡）。現在改成列最新清單，
+// 那才是打這三個字的人真正想要的東西。
+reset(); await freshModule();
+await send('想問什麼技術');
+out = await send('新聞稿');
+check('按「想問什麼技術」後打泛稱「新聞稿」→ 給最新新聞清單，不是拿三個字去搜尋撈雜訊',
+  out.some(o => o.sys?.includes('工研院官網新聞中心 最新新聞'))
+    && !out.some(o => o.kind === 'text' && /沒有找到跟「新聞稿」/.test(o.text)),
+  JSON.stringify(out));
+
+// 抓不到官網時要誠實說，不能硬掰一份新聞清單出來——跟情境 17／18 同一個原則。
+reset(); await freshModule();
+state.itriFetchFail = true;
+out = await send('最近工研院有哪些新聞');
+check('官網抓不到時誠實告知，不會硬答',
+  out.length > 0 && out[0]?.kind === 'text' && /暫時抓不到工研院官網的最新資料/.test(out[0].text)
+    && !out.some(o => o.kind === 'answer'), JSON.stringify(out));
+
 // ── 情境 19：問完產業趨勢之後的追問（實際回報的截圖，批次 24）─────────────────
 // 記者問產業趨勢 → 拿到 IEK 免費焦點的摘要（回覆結尾還主動寫著「有更具體的技術
 // 領域，如衛星通訊、太空科技等，歡迎再提問」）→ 照著打了「太空」兩個字 → 收到

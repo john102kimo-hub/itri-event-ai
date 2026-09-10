@@ -1390,6 +1390,16 @@ async function answerIndustryTrend(replyToken, targetId, text) {
 // 不用自己重試——不管 keywordText 乾不乾淨，這支都不用假設它已經是乾淨關鍵字。
 async function answerTechQuery(replyToken, targetId, keywordText) {
   const keyword = sanitize(keywordText, 60);
+  // ⚠️ 沒有關鍵字、或關鍵字只是「新聞」「新聞稿」這種泛稱時，改走「最新新聞清單」
+  // 那條路。這是 lib/menu.js isLatestNewsQuestion() 那條死板規則之外的第二層：
+  // 記者的講法千變萬化，規則接不住的（「工研院這陣子在忙什麼新聞」）會掉到
+  // routeIntent()，AI 判成 tech_query 但抽不出技術關鍵字——這時候拿泛稱去查官網
+  // 只會撈到雜訊（見 NO_DATA_GENERIC 的說明），列最新清單才是記者真正想要的。
+  // 兩層都要有，理由見 CLAUDE.md 第 2 條：規則是保證，AI 是涵蓋率。
+  if (!keyword || isGenericLookupKeyword(keyword)) {
+    await answerLatestNews(replyToken, targetId, keywordText || '最近有哪些新聞');
+    return;
+  }
   const { ok, items } = await fetchItriNews(keyword);
   // 導到另一條路（整體產業趨勢）的按鈕，跟 answerIndustryTrend() 的 crossItem 對稱：
   // 工研院官網沒報導過某個題目是常態（尤其比較新的領域），但那不代表「這個題目在
@@ -1448,6 +1458,66 @@ async function answerTechQuery(replyToken, targetId, keywordText) {
   await replyOrPush(replyToken, targetId, reply, [...crossItem, CONTACT_MENU_LABEL, '最近有哪些活動']);
   // 跟 answerIndustryTrend() 同一個道理：記住這一輪聊的是工研院技術，下一則只打一個
   // 技術名詞（「那光通訊呢」的省略講法）才接得回來，見 getRecentTopic() 的說明。
+  await setRecentTopic(targetId, 'tech_query');
+}
+
+// ── 「最近工研院有哪些新聞」（回報，附截圖）─────────────────────────────
+// 記者在群組打「米亞 最近工研院有哪些新聞」，米亞回的是【近期活動】行事曆，記者
+// 只好再追問一次「最近發的新聞稿麼」。問的是新聞稿，回的是記者會場次表——在這個
+// 帳號裡這是兩個不同的資料來源（新聞稿在工研院官網新聞中心，場次在 events 表）。
+//
+// 這支跟 answerTechQuery() 的差別只有一個：**不帶關鍵字**，直接抓官網新聞中心的
+// 「最新新聞」第一頁。lib/itri-news.js 的 fetchItriNews() 早就備好這條路（那支的
+// 註解寫著「這個分支是給之後萬一有『不指定技術、直接看工研院最新動態』需求時的
+// 退路」），這裡才第一次真的用到。
+//
+// ⚠️ 為什麼不共用 answerTechQuery()：那支的每一句話都繞著「記者給的那個關鍵字」
+// 打轉——查無資料的文案（「沒有找到跟『ＸＸ』相關的報導」）、導到 IEK 的按鈕
+// （crossTopicKeyword）、比對技術領域窗口（matchGlobalContactByText）三處都要
+// 關鍵字。沒有關鍵字時那三處全部沒有意義，硬併只會讓兩邊互相牽制。
+async function answerLatestNews(replyToken, targetId, question) {
+  const { ok, items } = await fetchItriNews('');
+  if (!ok) {
+    await replyOrPush(replyToken, targetId,
+      '這部分我暫時抓不到工研院官網的最新資料，真不好意思 🙏 建議直接洽媒體邀訪窗口。',
+      ['產業趨勢分析', CONTACT_MENU_LABEL, '最近有哪些活動']);
+    return;
+  }
+  if (!items.length) {
+    // 官網連得上、清單卻是空的——多半是官網改版讓 parseNewsListHtml() 解析不到
+    // （見 lib/itri-news.js）。誠實說抓不到，不要硬掰。
+    await replyOrPush(replyToken, targetId,
+      '我這邊暫時讀不到工研院官網新聞中心的清單，真不好意思 🙏 可以直接看官網：\nhttps://www.itri.org.tw/ListStyle.aspx?DisplayStyle=06&SiteID=1&MmmID=1036276263153520257',
+      ['產業趨勢分析', CONTACT_MENU_LABEL, '最近有哪些活動']);
+    return;
+  }
+
+  const systemPrompt = [
+    '你是工研院 LINE 官方帳號的 AI 新聞助理，名字叫「米亞」，正在回答記者「工研院最近發了哪些新聞」這個問題。下面是「工研院官網新聞中心」最新一頁的新聞稿（標題／日期／摘要），由新到舊。',
+    '只能根據下面清單裡的標題與摘要回答，不要延伸、不要用你自己既有的知識補充清單以外的內容、不要臆測完整新聞稿裡才有但摘要沒寫的細節。',
+    // ⚠️ 這裡刻意要求「條列最新的幾則」而不是「摘要重點」：記者問的是「有哪些」，
+    // 要的是一份可以掃過去的清單，不是一段濃縮成兩句話的綜述。答成綜述等於把他
+    // 真正想要的東西（哪幾則、什麼時候發的）藏起來。
+    '用條列的方式列出最新的 5 則，一則一行，格式是「日期　標題」（標題太長就精簡到 30 字內，但不要改變原意）。開頭先用一句話說明這是工研院官網新聞中心最近發布的新聞稿。',
+    '不要加上你自己的評論或推薦，也不要承諾任何你做不到的事（例如幫忙轉接、稍後回覆、代為查詢）。不要用 Markdown 語法（LINE 不會渲染）。',
+    TONE_RULE, // 見上面 TONE_RULE 的說明：只調語氣，不放寬「只能照資料回答」的規則
+    '回答最後另起一行，只用這個格式標出你列出來的是清單中第幾則（從 1 開始的編號，用逗號分隔），例如「來源編號：1,2,3,4,5」；這行只給程式判讀連結用，不算進上面的行數限制。',
+    '',
+    '【工研院官網新聞中心 最新新聞，由新到舊】',
+    formatNewsForPrompt(items)
+  ].join('\n');
+
+  const rawReply = await askAnthropic(systemPrompt, question);
+  const { text: aiReply, indices } = extractSourceIndices(rawReply);
+  const urls = resolveSourceUrls(indices, items);
+  const linksBlock = urls.length ? `\n\n🔗 原文連結：\n${urls.join('\n')}` : '';
+
+  const reply = `${aiReply}${linksBlock}\n\n想看某一則的細節，直接打標題裡的關鍵字就可以；要安排採訪請洽媒體邀訪窗口。`;
+  console.log(`[line] latest_news items=${items.length} reply="${reply.slice(0, 200)}"`);
+  await replyOrPush(replyToken, targetId, reply,
+    ['產業趨勢分析', '想問什麼技術', CONTACT_MENU_LABEL, '最近有哪些活動']);
+  // 記住這一輪聊的是工研院自己的新聞：下一則只打一個技術名詞（「那半導體呢」的省略
+  // 講法）才接得回 tech_query，見 getRecentTopic() 的說明。
   await setRecentTopic(targetId, 'tech_query');
 }
 
@@ -2234,6 +2304,16 @@ async function handleMetaIntent(replyToken, userId, text, metaIntent, binding, {
     // 觸發詞，確保每次都拿到一樣乾淨的摘要，不受 AI 對「名詞短語 vs. 請求句」
     // 解讀不穩定的影響。
     await answerIndustryTrend(replyToken, userId, '最近有哪些產業趨勢重點');
+    return;
+  }
+
+  if (metaIntent === 'news') {
+    // 直接答，不用像 tech_query 那樣先問一次要哪個技術——記者問的就是「最近有哪些
+    // 新聞」，答案是官網新聞中心的最新清單，本來就不需要關鍵字（見 answerLatestNews）。
+    // 原話刻意照傳給模型（不像 industry_trend 那樣固定換成一句請求句）：這條規則接得
+    // 住的句子本來就是自然語言（「最近發的新聞稿麼」），原話比替換過的句子更貼近
+    // 記者實際想問的。
+    await answerLatestNews(replyToken, userId, text);
     return;
   }
 
