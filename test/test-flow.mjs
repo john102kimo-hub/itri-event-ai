@@ -2322,6 +2322,69 @@ check('「忘記 1」→ 第一條變成 off', state.memories[0][5] === 'off', J
 out = await send('忘記 9', 'U_staff');
 check('編號不存在 → 給提示，不會噴例外', /沒有第 9 條/.test(out[0]?.text || ''), JSON.stringify(out));
 
+console.log('── 按鈕：走進記憶這條路，入口不可以縮水 ──');
+// 回報的截圖：職員模式按「記憶清單」，回覆底下只剩孤零零一顆「最近有哪些活動」。
+// 兩個問題疊在一起——那顆跟記憶完全無關（是記者端的按鈕），而且**按了一顆按鈕，
+// 其他八個入口就消失了**。同仁是從九顆裡點進來的，回來只剩一顆。
+//
+// 這跟批次 52（職員模式取代記者模式、能力整批不見）是同一個形狀，只是縮水的是入口。
+// 規則：職員模式每一則回覆都帶整套入口，情境按鈕只排在前面，不取代它。
+{
+  const { STAFF_MENU: SM } = await import('../lib/menu.js');
+  const staffFull = [...SM.buttons.map(b => b.text), '設定圖文選單', '最近有哪些新聞', '記憶清單', '使用說明'];
+  const chipsOf = () => (sent[sent.length - 1]?.quickReply || [])
+    .map(c => (typeof c === 'string' ? c : (c.text || c.label)));
+  const coversAll = () => staffFull.every(t => chipsOf().includes(t));
+
+  // 空清單（回報截圖就是這個狀態）
+  reset(); await freshModule();
+  state.staff.push(['U_staff', '', '2026-08-27', '', '']);
+  await send('記憶清單', 'U_staff');
+  check('★ 記憶清單（空）→ 整套職員入口都還在，不是只剩一顆', coversAll(), JSON.stringify(chipsOf()));
+  check('★ 不再出現那顆不相干的「最近有哪些活動」當唯一按鈕',
+    chipsOf().length > 1, JSON.stringify(chipsOf()));
+  check('清單是空的時候，第一顆是「使用說明」（裡面有【教米亞】怎麼教）',
+    chipsOf()[0] === '使用說明', JSON.stringify(chipsOf()));
+
+  // 有內容的清單
+  reset(); await freshModule();
+  state.staff.push(['U_staff', '', '2026-08-27', '', '']);
+  state.memories.push(['2026-09-10', 'global', 'style', '回答再短一點', 'U_staff', 'on']);
+  await send('記憶清單', 'U_staff');
+  check('記憶清單（有內容）→ 一樣帶整套入口', coversAll(), JSON.stringify(chipsOf()));
+  check('而且「記憶清單」自己也在按鈕裡（想再看一次不用自己打字）',
+    chipsOf().includes('記憶清單'), JSON.stringify(chipsOf()));
+
+  // 教完、忘記、編號不存在、沒綁定場次——每一則都要帶整套
+  const cases = [
+    ['語氣：回答再短一點', '教完一條之後'],
+    ['忘記 9',             '編號不存在時'],
+    ['記住：地點改到南港', '沒綁定場次、反問是哪一場時'],
+  ];
+  for (const [msg, label] of cases) {
+    reset(); await freshModule();
+    state.staff.push(['U_staff', '', '2026-08-27', '', '']);
+    await send(msg, 'U_staff');
+    check(`${label}也帶整套職員入口`, coversAll(), JSON.stringify(chipsOf()));
+  }
+
+  // ⚠️ 唯一的例外：確認問句只能有兩顆
+  reset(); await freshModule();
+  state.staff.push(['U_staff', '', '2026-08-27', '', '']);
+  await send('不要用表情符號', 'U_staff');
+  check('⚠️ 例外：「要我以後都照做嗎」只給「記起來／不用記」兩顆',
+    chipsOf().length === 2 && chipsOf().some(t => /記起來/.test(t)) && chipsOf().some(t => /不用記/.test(t)),
+    JSON.stringify(chipsOf()));
+  check('　 這一刻刻意不放別的出口（點走就會留下一筆永遠 pending 的內容）',
+    !chipsOf().includes('最近有哪些活動'), JSON.stringify(chipsOf()));
+
+  // 按鈕數不能超過 LINE 的上限
+  reset(); await freshModule();
+  state.staff.push(['U_staff', '', '2026-08-27', '', '']);
+  await send('記憶清單', 'U_staff');
+  check('按鈕數不超過 LINE 上限 13 顆', chipsOf().length <= 13, String(chipsOf().length));
+}
+
 console.log('── ⚠️ 記者不能教它 ──');
 reset(); await freshModule();
 state.bindings.set('U_reporter', { event_id: 'quad', media_name: '', note: '', bound_at: Date.now() });
