@@ -214,6 +214,14 @@
     </div>
   </div>
 
+  <!-- 今日可借勢話題：跟上面的能見度追蹤不同資料，關鍵字沿用同一批正在追蹤的議題 -->
+  <div class="card" id="newsjack-card">
+    <h2><i class="ti ti-bulb" style="color:var(--primary)"></i> 今日可借勢話題</h2>
+    <div class="desc">用 Google News（免費、不用金鑰）掃你正在追蹤的議題關鍵字，抓過去 48 小時內的相關新聞。要不要借、角度怎麼下，自己判斷——這裡只列候選，不幫忙下判斷。</div>
+    <button class="btn btn-outline" onclick="loadNewsjack()"><i class="ti ti-refresh"></i> 掃描今日話題</button>
+    <div id="newsjack-out" style="margin-top:10px"></div>
+  </div>
+
   <!-- 主要動作：同仁只需要做這一件事 -->
   <div class="card start-card">
     <h2><i class="ti ti-wand" style="color:var(--primary)"></i> 追蹤一場活動</h2>
@@ -254,6 +262,18 @@
       <input type="checkbox" id="s-structured" style="margin-top:3px">
       <span>這則稿件是<b>結構化稿</b>（有清楚標題／摘要／可查證數字，且有獨立主題頁可連）——事後會拿來對照這場的半衰期與基線抬升，看結構化寫法有沒有真的留下更多記憶</span>
     </label>
+
+    <div style="margin:6px 0 0 26px">
+      <button type="button" class="btn btn-ghost" style="font-size:.78rem;padding:4px 10px" onclick="toggleStructCheck()">
+        <i class="ti ti-wand"></i> 貼稿件文字自動檢查（不確定算不算結構化稿時用）
+      </button>
+      <div id="struct-check-box" style="display:none;margin-top:8px">
+        <textarea id="struct-check-text" rows="5" style="width:100%;font-size:.82rem;font-family:inherit"
+          placeholder="貼上這則稿件的標題＋內文（第一行當標題），按「檢查」看缺哪幾項——純規則檢查，不是叫 AI 判斷，同一份稿子檢查幾次都會得到同樣的結果"></textarea>
+        <button class="btn btn-outline" style="margin-top:6px" onclick="runStructCheck()"><i class="ti ti-check"></i> 檢查</button>
+        <div id="struct-check-out" style="margin-top:8px;font-size:.82rem;line-height:1.6"></div>
+      </div>
+    </div>
 
     <div id="gen-out"></div>
   </div>
@@ -1438,6 +1458,78 @@ async function delPrompt(id){
   if(r.error) return toast(r.error);
   toast('已刪除'); loadPrompts();
 }
+/* ── 今日可借勢話題 ──
+ * 刻意不放進 loadAll()：這支每次都要對 Google News 打好幾個關鍵字的查詢，比其他
+ * 面板慢也比較容易單獨失敗，不該拖慢或拖垮整頁的重整，改成按鈕手動觸發。 */
+function relTime(iso){
+  if(!iso) return '—';
+  const h = Math.round((Date.now() - new Date(iso).getTime()) / 3600000);
+  if(h < 1) return '剛剛';
+  if(h < 24) return `${h} 小時前`;
+  return `${Math.round(h / 24)} 天前`;
+}
+async function loadNewsjack(){
+  const out = document.getElementById('newsjack-out');
+  out.innerHTML = '<div class="empty">掃描中…（要查好幾個關鍵字，可能要幾秒）</div>';
+  const d = await api('action=newsjack');
+  if(d.error){ out.innerHTML = `<div class="empty">${esc(d.error)}</div>`; return; }
+  if(!d.keywords || !d.keywords.length){
+    out.innerHTML = '<div class="empty">還沒有追蹤中的議題關鍵字，先在下面開一場追蹤。</div>';
+    return;
+  }
+  const failNote = d.failedKeywords.length
+    ? `<div style="font-size:.78rem;color:var(--muted);margin-top:6px">⚠ 這幾個關鍵字這次查詢失敗，不代表沒新聞，重整再試一次：${d.failedKeywords.map(esc).join('、')}</div>`
+    : '';
+  if(!d.candidates.length){
+    out.innerHTML = `<div class="empty">過去 48 小時內，「${d.keywords.map(esc).join('、')}」沒有掃到相關新聞。</div>${failNote}`;
+    return;
+  }
+  out.innerHTML = `<table><thead><tr><th>時間</th><th>新聞</th><th>來源</th><th>符合議題</th></tr></thead><tbody>` +
+    d.candidates.map(c => `<tr>
+      <td style="white-space:nowrap;color:var(--muted);font-size:.78rem">${relTime(c.publishedAt)}</td>
+      <td><a href="${esc(c.link)}" target="_blank" rel="noopener">${esc(c.title)}</a></td>
+      <td style="white-space:nowrap">${esc(c.source || '—')}</td>
+      <td>${c.matchedKeywords.map(k => `<span class="pill">${esc(k)}</span>`).join(' ')}</td>
+    </tr>`).join('') + '</tbody></table>' + failNote;
+}
+
+/* ── 結構化稿自動初檢：純規則檢查，見 lib/structured-check.js，不覆寫同仁的勾選 ── */
+function toggleStructCheck(){
+  const box = document.getElementById('struct-check-box');
+  box.style.display = box.style.display === 'none' ? 'block' : 'none';
+}
+async function runStructCheck(){
+  const raw = document.getElementById('struct-check-text').value;
+  const title = raw.split('\n').map(s => s.trim()).find(Boolean) || '';
+  const out = document.getElementById('struct-check-out');
+  if(!raw.trim()){ out.innerHTML = '請先貼一些文字。'; return; }
+  out.innerHTML = '檢查中…';
+  const d = await post({ action: 'check-structured', title, text: raw });
+  if(d.error){ out.innerHTML = esc(d.error); return; }
+  const rows = d.checks.map(c =>
+    `<div style="color:${c.pass ? '#166534' : '#b91c1c'}">${c.pass ? '✓' : '✗'} ${esc(c.label)}</div>`
+  ).join('');
+  const verdict = d.structured === true
+    ? '<b style="color:#166534">初判：符合結構化稿</b>（可以放心勾上面那格）'
+    : d.structured === false
+      ? '<b style="color:#b91c1c">初判：不算結構化稿</b>'
+      : '<b style="color:#b45309">初判：卡在中間，規則判斷不了</b>（自己再看一眼再決定要不要勾）';
+  out.innerHTML = rows + `<div style="margin-top:6px">${verdict}</div>`;
+  /* ⚠️ 這裡刻意**不**回頭去改上面那個「結構化稿」勾選框。
+   *
+   * lib/structured-check.js、api/geo.js 與 GEO_SETUP.md 三個地方都寫著「不會、也不該
+   * 覆寫同仁的勾選」，第一版卻在這裡真的去改它——而且 structured=false 時會把同仁
+   * 已經勾好的取消掉。
+   *
+   * 為什麼這件事比看起來嚴重：同仁貼進來的常常只是摘要（沒附網址、用「三十億」這種
+   * 中文大寫數字），規則看不到就判 false，勾勾被靜靜取消，按下追蹤就存成
+   * structured:false。那個值正是事件效應表拿來回答「結構化稿是不是真的比較留得住
+   * 記憶」的依據——也就是 lib/structured-check.js 自己警告的「不要用規則硬猜一個
+   * 可能錯的答案汙染那個比較」。
+   *
+   * 上面三句初判文字本來就是寫給人看的指示（「可以放心勾上面那格」），勾不勾由人決定。 */
+}
+
 /* ── 追蹤中的活動 ── */
 async function loadEvents(){
   const d = await api('action=events');

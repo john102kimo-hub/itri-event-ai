@@ -8,14 +8,18 @@
 // GET  ?action=status&password=             今日掃描進度＋可用引擎
 // GET  ?action=series&password=&days=90     時間序列 + 事件 + 衍生指標
 // GET  ?action=detail&password=&date=&prompt_id=  單題原始回答（人工複核用）
+// GET  ?action=newsjack&password=           今日可借勢話題（掃 Google News RSS，見下方說明）
 // GET  ?action=cron&secret=                 排程掃描（Vercel Cron，帶 CRON_SECRET）
 // POST {action, password, ...}              seed / scan / prompt_save / prompt_delete
 //                                           / event_save / event_delete
+//                                           / check-structured（結構化稿自動初檢）
 //
 // 誠實邊界：這裡量到的是「可用 API 的 AI 答案引擎」，不是 ChatGPT／AI Overviews 的
 // 消費端畫面。它是代理指標，趨勢有效、絕對值不可對外宣稱等同某產品。
 
 import { readRange, appendRows, updateRange, ensureSheets } from '../lib/sheets.js';
+import { fetchNewsjackCandidates } from '../lib/newsjacking.js';
+import { checkStructuredContent } from '../lib/structured-check.js';
 
 const SHEETS = {
   geo_prompts: ['id', 'topic', 'prompt', 'keyword', 'brand', 'competitors', 'active', 'created_at'],
@@ -1697,11 +1701,39 @@ export default async function handler(req, res) {
         });
       }
 
+      /**
+       * 今日可借勢話題：不是 GEO 的能見度量測，是同一個資料來源（同仁正在追蹤的議題
+       * 關鍵字）多長出來的一個提案用清單——用 Google News RSS（免費、不用金鑰）掃這些
+       * 關鍵字過去 48 小時內的新聞，給同仁發稿／記者會企劃前先看一眼「現在外面在談
+       * 什麼」。角度值不值得借、風險高不高，一律交給同仁判斷，這裡只吐候選清單，
+       * 見 lib/newsjacking.js 開頭的說明。
+       *
+       * 關鍵字直接沿用 geo_prompts 目前 active 的 distinct keyword，不必另外維護一份
+       * 「工研院關注領域」清單——同仁在 GEO 開新議題追蹤，這裡自動跟著涵蓋。
+       */
+      if (action === 'newsjack') {
+        const prompts = (await safeRead('geo_prompts!A2:H')).filter((r) => r[0]).map(parsePrompt);
+        const keywords = [...new Set(prompts.filter((p) => p.active !== false).map((p) => p.keyword))];
+        if (!keywords.length) return ok(res, { candidates: [], failedKeywords: [], keywords: [] });
+        const { candidates, failedKeywords } = await fetchNewsjackCandidates(keywords);
+        return ok(res, { candidates, failedKeywords, keywords });
+      }
+
       return res.status(400).json({ error: '不支援的操作' });
     }
 
     /* ── POST ── */
     const body = req.body || {};
+
+    /**
+     * 結構化稿自動初檢：同仁開始追蹤新議題前，把稿件標題／內文貼進來先掃一次，
+     * 給「結構化稿」那格勾選前一個參考，見 lib/structured-check.js 開頭的說明。
+     * 純規則計算，不寫入任何分頁，也不影響 track_start 實際存的 structured 值——
+     * 那一格最終還是同仁自己勾。
+     */
+    if (body.action === 'check-structured') {
+      return ok(res, checkStructuredContent({ title: body.title, text: body.text }));
+    }
 
     if (body.action === 'seed') {
       await ensureSheets(SHEETS);
