@@ -1515,8 +1515,19 @@ async function runStructCheck(){
       ? '<b style="color:#b91c1c">初判：不算結構化稿</b>'
       : '<b style="color:#b45309">初判：卡在中間，規則判斷不了</b>（自己再看一眼再決定要不要勾）';
   out.innerHTML = rows + `<div style="margin-top:6px">${verdict}</div>`;
-  if(d.structured === true) document.getElementById('s-structured').checked = true;
-  if(d.structured === false) document.getElementById('s-structured').checked = false;
+  /* ⚠️ 這裡刻意**不**回頭去改上面那個「結構化稿」勾選框。
+   *
+   * lib/structured-check.js、api/geo.js 與 GEO_SETUP.md 三個地方都寫著「不會、也不該
+   * 覆寫同仁的勾選」，第一版卻在這裡真的去改它——而且 structured=false 時會把同仁
+   * 已經勾好的取消掉。
+   *
+   * 為什麼這件事比看起來嚴重：同仁貼進來的常常只是摘要（沒附網址、用「三十億」這種
+   * 中文大寫數字），規則看不到就判 false，勾勾被靜靜取消，按下追蹤就存成
+   * structured:false。那個值正是事件效應表拿來回答「結構化稿是不是真的比較留得住
+   * 記憶」的依據——也就是 lib/structured-check.js 自己警告的「不要用規則硬猜一個
+   * 可能錯的答案汙染那個比較」。
+   *
+   * 上面三句初判文字本來就是寫給人看的指示（「可以放心勾上面那格」），勾不勾由人決定。 */
 }
 
 /* ── 追蹤中的活動 ── */

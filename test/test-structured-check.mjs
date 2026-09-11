@@ -93,5 +93,32 @@ console.log('── 連結規則 ──');
   check('沒有連結不算過', !withTitle('沒有任何網址').checks.find((c) => c.key === 'link').pass);
 }
 
+// ── ⚠️ 前端不准回頭去改那個勾選框 ──────────────────────────────────────────
+// lib/structured-check.js 開頭、api/geo.js 的 check-structured、GEO_SETUP.md 三個地方
+// 都寫著「不會、也不該覆寫同仁的勾選」，第一版的 public/geo.html 卻真的去改它——而且
+// structured=false 時會把同仁已經勾好的取消掉。
+//
+// 為什麼這件事比看起來嚴重：同仁貼進來的常常只是摘要（沒附網址、用「三十億」這種中文
+// 大寫數字），規則看不到就判 false，勾勾被靜靜取消，按下追蹤就存成 structured:false。
+// 那個值正是事件效應表拿來回答「結構化稿是不是真的比較留得住記憶」的依據——也就是
+// 這支檔案自己警告的「不要用規則硬猜一個可能錯的答案汙染那個比較」。
+//
+// 這條是靜態檢查：把 runStructCheck() 的函式本體抓出來，斷言它沒有碰 s-structured。
+import { readFileSync } from 'node:fs';
+{
+  const html = readFileSync(new URL('../public/geo.html', import.meta.url), 'utf8');
+  const start = html.indexOf('async function runStructCheck(');
+  check('public/geo.html 裡找得到 runStructCheck()', start !== -1);
+  if (start !== -1) {
+    const end = html.indexOf('\n}', start);
+    const body = html.slice(start, end);
+    check('★ 檢查結果不准回頭去寫「結構化稿」那個勾選框（同仁的判斷不可以被規則靜靜覆寫）',
+      !/getElementById\(['"]s-structured['"]\)\s*\.checked\s*=/.test(body),
+      body.split('\n').filter((l) => l.includes('s-structured')).join('\n'));
+    check('　 初判文字仍然在（要告訴人結論，只是不幫他勾）',
+      /初判/.test(body), body.slice(-200));
+  }
+}
+
 console.log(`\n${fail === 0 ? '✅' : '❌'} 結構化稿自動初檢測試通過 ${pass}／失敗 ${fail}`);
 process.exit(fail === 0 ? 0 : 1);
