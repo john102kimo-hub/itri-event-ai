@@ -1902,10 +1902,28 @@ const SITE = 'https://itri-event-ai.vercel.app';
 // 新聞稿（同仁問得最多的東西之一，原本職員模式完全叫不到），後者是「用對話教米亞」
 // 那套（批次 46 做好了，但除了 LINE-PLAN.md 之外沒有任何入口寫著怎麼叫它）。
 // 這兩個補的都不是新功能，是**入口**——見 LINE-PLAN.md 批次 51 的教訓。
+//
+// 「使用說明」也在這裡：sendFallbackGuide() 的職員版尾巴一直叫同仁「打『使用說明』
+// 可以看內部功能」，卻沒有任何一顆按鈕點得到——功能有、入口沒有，又是同一個形狀。
 const STAFF_QUICK_REPLIES = [
   ...STAFF_MENU.buttons.map(b => b.text), '設定圖文選單',
-  '最近有哪些新聞', '記憶清單'
+  '最近有哪些新聞', '記憶清單', '使用說明'
 ];
+
+// 職員的按鈕列：把當下最相關的幾顆排到最前面，後面一律接上整套入口。
+//
+// 回報：職員模式裡按「記憶清單」，回覆底下只剩孤零零一顆「最近有哪些活動」。
+// 兩個問題疊在一起——
+//   ① 那顆跟「記憶」完全無關，是記者端的按鈕；
+//   ② 更要命的是**按了一顆按鈕，其他八個入口就消失了**。
+// 同仁是從九顆按鈕裡點進來的，回來只剩一顆，看起來像被降級了。
+//
+// 這跟批次 52（職員模式取代記者模式、能力整批不見）是同一個形狀，只是這次縮水的
+// 是入口不是能力。所以規則定死：**職員模式的每一則回覆都帶著整套入口**，情境按鈕
+// 只是排在前面，不是拿來取代它。去重後砍到 LINE 的 13 顆上限。
+function staffChips(...front) {
+  return [...new Set([...front.filter(Boolean), ...STAFF_QUICK_REPLIES])].slice(0, 13);
+}
 
 // 職員登入／設定選單時要拿到職員選單的 id。不另外存一份到試算表——選單本來就有
 // name 欄位，用它反查即可，少一個會跟 LINE 那邊不同步的狀態。
@@ -1997,14 +2015,14 @@ async function handleTeachMessage(replyToken, userId, text) {
     const mine = mems.filter(m => m.status === MEM_PENDING && m.by === userId);
     const last = mine[mine.length - 1];
     if (!last) {
-      await replyOrPush(replyToken, userId, '沒有等著確認的內容喔。', ['記憶清單']);
+      await replyOrPush(replyToken, userId, '沒有等著確認的內容喔。', staffChips('記憶清單'));
       return true;
     }
     await setMemoryStatus(last.rowNumber, s === TEACH_YES ? MEM_ON : MEM_OFF);
     await replyOrPush(replyToken, userId,
       s === TEACH_YES ? `好，我記起來了 ✅\n「${last.text}」\n\n以後回答都會照這個來。要查或取消，打「記憶清單」。`
                       : '好，那就當作沒這回事 👌',
-      ['記憶清單']);
+      staffChips('記憶清單'));
     return true;
   }
 
@@ -2012,7 +2030,12 @@ async function handleTeachMessage(replyToken, userId, text) {
   if (!cmd) return false;
 
   if (cmd.kind === 'list') {
-    await replyOrPush(replyToken, userId, formatMemoryList(mems), ['最近有哪些活動']);
+    // 清單是空的時候，下一步是「怎麼教」——職員版的「使用說明」裡有【教米亞】那段。
+    // 刻意不做「記住：⋯⋯」按鈕：快速回覆是把固定字串直接送出去，送一句沒有內容的
+    // 「記住：」只會換來一次聽不懂。
+    const empty = !(mems || []).some(m => m.status === MEM_ON);
+    await replyOrPush(replyToken, userId, formatMemoryList(mems),
+      empty ? staffChips('使用說明') : staffChips());
     return true;
   }
 
@@ -2020,11 +2043,11 @@ async function handleTeachMessage(replyToken, userId, text) {
     const active = mems.filter(m => m.status === MEM_ON);
     const target = active[cmd.index - 1];
     if (!target) {
-      await replyOrPush(replyToken, userId, `沒有第 ${cmd.index} 條喔，先打「記憶清單」看一下編號。`, ['記憶清單']);
+      await replyOrPush(replyToken, userId, `沒有第 ${cmd.index} 條喔，先打「記憶清單」看一下編號。`, staffChips('記憶清單'));
       return true;
     }
     await setMemoryStatus(target.rowNumber, MEM_OFF);
-    await replyOrPush(replyToken, userId, `已經忘記這條 🗑\n「${target.text}」`, ['記憶清單']);
+    await replyOrPush(replyToken, userId, `已經忘記這條 🗑\n「${target.text}」`, staffChips('記憶清單'));
     return true;
   }
 
@@ -2032,7 +2055,7 @@ async function handleTeachMessage(replyToken, userId, text) {
   if (mems.filter(m => m.status === MEM_ON).length >= MEMORY_MAX_ACTIVE) {
     await replyOrPush(replyToken, userId,
       `我記的東西已經到上限（${MEMORY_MAX_ACTIVE} 條）了。這些內容每一題都會帶進去，太多會讓我變慢也變貴——請先打「記憶清單」忘記幾條再教我。`,
-      ['記憶清單']);
+      staffChips('記憶清單'));
     return true;
   }
 
@@ -2045,7 +2068,7 @@ async function handleTeachMessage(replyToken, userId, text) {
     if (!isUsable(current)) {
       await replyOrPush(replyToken, userId,
         '要記在哪一場呢？請先打活動名稱切到那一場，再跟我說一次。\n\n（如果這件事是所有場次都適用的，改打「全站記住：⋯⋯」）',
-        ['最近有哪些活動']);
+        staffChips('最近有哪些活動'));
       return true;
     }
     scope = current.id;
@@ -2058,13 +2081,15 @@ async function handleTeachMessage(replyToken, userId, text) {
 
   if (cmd.confirm) {
     // 自然語句：先問一次再生效。理由見 lib/bot-memory.js 開頭的 ⚠️。
+    // ⚠️ 這是整個職員模式**唯一**刻意不帶整套入口的一則：這一刻只有「記／不記」兩條路，
+    // 旁邊擺一排別的出口只會讓人點走、留下一筆永遠 pending 的內容。不要順手統一掉。
     await replyOrPush(replyToken, userId,
       `這句話要我以後都照做嗎？\n「${cmd.text}」`, [TEACH_YES, TEACH_NO]);
   } else {
     const where = cmd.type === 'style' ? '所有回答' : (scope === 'global' ? '所有場次' : '這一場');
     await replyOrPush(replyToken, userId,
       `記起來了 ✅\n「${cmd.text}」\n\n之後${where}都會照這個來。要查或取消，打「記憶清單」。`,
-      ['記憶清單']);
+      staffChips('記憶清單'));
   }
   console.log(`[line] 教學 user=${userId} type=${cmd.type} scope=${scope} confirm=${cmd.confirm} text="${cmd.text.slice(0, 40)}"`);
   return true;
