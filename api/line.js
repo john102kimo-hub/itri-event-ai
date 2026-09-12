@@ -30,6 +30,7 @@
 //   - 沒有有效綁定／路由結果就不能呼叫 Anthropic，跟 api/chat.js「無 event_id 不碰
 //     Anthropic」同一條原則；draft／archived 場次一律不進行事曆清單、不會被路由到
 
+import { AsyncLocalStorage } from 'async_hooks';
 import { readRange, appendRows, updateRange, ensureSheets } from '../lib/sheets.js';
 import { buildSystemPrompt, resolveEventContent } from '../lib/prompt.js';
 import {
@@ -856,7 +857,48 @@ const ANSWER_MODEL = 'claude-sonnet-5';
 // 新增一條路線時忘記加。
 const ZH_TW_RULE = '用字：一律使用台灣慣用的繁體中文與台灣用語，絕對不可以出現簡體字（包含最後那句警語）。記者用英文或其他語言提問時才跟著改用該語言。';
 
-async function askAnthropic(systemPrompt, userText, history = [], { extraSystem = '' } = {}) {
+// ── 這一次請求還剩多少時間（批次 57）────────────────────────────────────────
+// 這支底下每一個 fetch() 原本都沒有 signal，也就是「上游不回應就等到天荒地老」。
+// 那在 Vercel 上不是「慢一點」，是**整支被砍掉**：vercel.json 給 api/line.js 的
+// maxDuration 是 60 秒，時間到 function 直接消失，沒有 catch 會跑到、沒有回覆會送出，
+// 記者那邊就是已讀不回（跟 apologise() 那段是同一種傷害，只是原因不同——那邊是例外，
+// 這邊是根本沒機會丟例外）。
+//
+// 逾時的價值不在「省時間」，在於**把沉默換成一句話**：AbortSignal.timeout() 觸發後
+// fetch 會丟 AbortError，catch 就會回一句「目前無法取得回應」，記者至少知道要再問
+// 一次或找聯絡人。
+//
+// ⚠️ 為什麼不是每支各自寫死一個秒數，而是共用一個「這次請求的死線」：這條路上會依序
+// 打好幾次外部呼叫（路由 → 答題 → 補查官網最多 4 次 HTTP → 再一次模型），寫死的秒數
+// 各自看起來都很合理，加起來卻會超過 60。死線是唯一算得準的東西——每一段都問「還剩
+// 多少」，前面慢了後面就自動讓路，不會有人各自超支。
+//
+// 55 秒不是 60：留 5 秒給送出回覆、寫 qa_log 這些收尾動作。答案算得出來卻沒送出去，
+// 跟沒算出來一樣糟（CLAUDE.md 第 4 條的同一個道理）。
+//
+// ⚠️ 死線存在 AsyncLocalStorage、不是模組層的一個變數：Vercel 的一個執行個體可能同時
+// 處理多個請求，用共用變數的話，後到的請求會把先到的那個死線往後推——先到的那個就會
+// 以為自己還很寬裕，然後在 60 秒被砍掉，正好是這整段要防的事。AsyncLocalStorage 是
+// Node 內建，不違反這個專案「零 npm 依賴」的慣例。
+const REQUEST_BUDGET_MS = 55_000;
+const requestCtx = new AsyncLocalStorage();
+function msLeft() {
+  const at = requestCtx.getStore()?.deadlineAt;
+  return at ? Math.max(0, at - Date.now()) : REQUEST_BUDGET_MS;
+}
+// 給某一段外部呼叫的逾時：想要 want 毫秒，但不能吃掉「送出回覆」要留的 reserve。
+// 回傳 0 代表「已經沒有時間了，這段不要做」——呼叫端要看得懂這個訊號。
+function budgetFor(want, reserve) {
+  return Math.max(0, Math.min(want, msLeft() - reserve));
+}
+
+// 答題模型的上限。刻意給得寬（記者要「完整新聞稿」時模型會吐到 max_tokens 4096，
+// 那本來就慢），真正的保護是上面的死線——實際用的是 budgetFor() 算出來的餘額。
+const ANSWER_TIMEOUT_MS = 45_000;
+// 送出回覆＋寫 qa_log 要留的時間。
+const REPLY_RESERVE_MS = 5_000;
+
+async function askAnthropic(systemPrompt, userText, history = [], { extraSystem = '', timeoutMs = ANSWER_TIMEOUT_MS } = {}) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return '系統目前無法回答，請稍後再試或洽現場工作人員。';
   // 公關同仁用對話交代的回答偏好（批次 46）。放在這裡而不是各個呼叫端：這支是所有
@@ -867,6 +909,10 @@ async function askAnthropic(systemPrompt, userText, history = [], { extraSystem 
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+      // 死線優先：前面（路由、補查）用掉多少，這裡就少多少，見 msLeft() 的說明。
+      // 下限 2 秒——時間真的用完時與其不呼叫、什麼都不回，不如快速失敗走 catch，
+      // 記者拿到的是一句「請稍後再試」而不是沉默。
+      signal: AbortSignal.timeout(Math.max(2_000, budgetFor(timeoutMs, REPLY_RESERVE_MS))),
       body: JSON.stringify({
         model: ANSWER_MODEL,
         thinking: { type: 'disabled' }, // 見 ANSWER_MODEL 的 ⚠️
@@ -1589,6 +1635,13 @@ export function extractNoDataKeyword(raw) {
 // 不會因為補查失敗而讓記者收不到答案。
 const NO_DATA_MAX_LINKS = 2;
 
+// 補查這條路一次能花的時間上限，以及「低於這個數字就不要開始」的門檻。
+// 12 秒的來源：一次官網清單頁實測一兩秒，最壞情況兩個候選詞各查兩次（見
+// lib/itri-news.js 去語助詞重試那段）＝ 4 次，再加一次把結果讀成答案的模型呼叫。
+// 4 秒以下連第一次 HTTP 都不一定回得來，與其開始了又中途放棄，不如直接把答案送出去。
+const LOOKUP_BUDGET_MS = 12_000;
+const LOOKUP_MIN_MS = 4_000;
+
 // ── 不再只靠模型自己標記（批次 37）─────────────────────────────────────────
 // 連續三批（31→33→34）都在修「標記為什麼沒出現」，最後一次實測仍然沒跑：回覆明明
 // 就是「這題目前我手上沒有具體的名單資料」，補查那條路照樣沒動。
@@ -1661,7 +1714,11 @@ function hasChinese(text) {
 // 從來沒被試過。
 //
 // 兩個來源各有各的長處——標記的語意最準、猜的最乾淨——不該二選一，該依序試。
-async function itriNewsHintBlock(keywords, { chinese = true, question = '' } = {}) {
+// budgetMs（批次 57）：這條路總共能花多少時間，由呼叫端從「這次請求還剩多少」算出來
+// （見 answerQuestion() 那段的說明）。時間用完就停在目前的結果上——補查是加分，
+// 不能讓它把已經算好的答案一起拖下水。
+async function itriNewsHintBlock(keywords, { chinese = true, question = '', budgetMs = LOOKUP_BUDGET_MS } = {}) {
+  const until = Date.now() + budgetMs;
   const list = [...new Set((Array.isArray(keywords) ? keywords : [keywords])
     .map(k => sanitize(k, 40)).filter(Boolean))]
     // 泛用詞查了只會撈到雜訊，見 NO_DATA_GENERIC 的說明
@@ -1674,6 +1731,12 @@ async function itriNewsHintBlock(keywords, { chinese = true, question = '' } = {
   try {
     let kw = '', items = [];
     for (const candidate of list) {
+      // 剩下的時間連一次 HTTP 都不夠（見 lib/itri-news.js 的 10 秒逾時）就不要再開始，
+      // 已經查到的就用，沒查到就放棄補查——答案本身早就算好了，那才是要保住的東西。
+      if (Date.now() > until - 2_000) {
+        console.log(`[line] 補查官網：預算用完，不再試候選 kw="${candidate}"`);
+        break;
+      }
       const res = await fetchItriNews(candidate);
       if (res.ok && res.items.length) { kw = candidate; items = res.items; break; }
       console.log(`[line] 補查官網 kw="${candidate}" 查無資料，試下一個候選`);
@@ -1696,7 +1759,13 @@ async function itriNewsHintBlock(keywords, { chinese = true, question = '' } = {
     // 正常答得出來的提問一次都不會多花。用這個代價換「記者真的拿到答案」很划算。
     // ⚠️ 摘要不是全文：規則明講只能根據摘要回答、不足的部分要請記者看原文，
     // 不可以把摘要沒寫的細節補完（跟活動問答同一條底線）。
-    const digest = await answerFromItriNews(kw, items, question, chinese);
+    // 查到了，但剩下的時間不夠再叫一次模型把它讀成答案——那就只附連結（那本來就是
+    // 批次 38 之前的行為，不是壞掉的狀態），記者一樣拿得到線索。
+    const digestBudget = until - Date.now();
+    const digest = digestBudget >= LOOKUP_MIN_MS
+      ? await answerFromItriNews(kw, items, question, chinese, digestBudget)
+      : '';
+    if (digestBudget < LOOKUP_MIN_MS) console.log('[line] 補查官網：預算不夠讀成答案，只附連結');
     const lead = digest
       ? (chinese ? '這題本場的新聞資料裡沒有，不過我在工研院官網新聞中心找到了：'
                  : "This isn't in this event's material, but I found it in ITRI's official newsroom:")
@@ -1712,7 +1781,7 @@ async function itriNewsHintBlock(keywords, { chinese = true, question = '' } = {
 
 // 把官網搜到的報導讀成一段答案。組不出來（沒 API key、呼叫失敗、模型說看不出來）
 // 就回空字串，呼叫端自動退回「只給連結」——那是原本就有的行為，不會更糟。
-async function answerFromItriNews(keyword, items, question, chinese) {
+async function answerFromItriNews(keyword, items, question, chinese, timeoutMs = LOOKUP_BUDGET_MS) {
   const q = sanitize(question, 300) || keyword;
   const systemPrompt = [
     '你是工研院 LINE 官方帳號的 AI 新聞助理，名字叫「米亞」。',
@@ -1738,7 +1807,7 @@ async function answerFromItriNews(keyword, items, question, chinese) {
     // ⚠️ 這一段也要過一次標記清理：這支的規則沒叫模型加 [[NO_DATA:…]]，但同一個
     // 帳號的其他 prompt 有，模型偶爾會把習慣帶過來。漏出去給記者看到的代價太大
     // （批次 33 已經踩過一次），統一清掉比賭它不會發生便宜。
-    const raw = String(await askAnthropic(systemPrompt, q) || '');
+    const raw = String(await askAnthropic(systemPrompt, q, [], { timeoutMs }) || '');
     const reply = extractNoDataKeyword(raw).text.trim();
     // 模型照規則回空字串（摘要裡真的沒有答案），或吐回 askAnthropic 自己的失敗訊息，
     // 兩種都當作「組不出答案」，退回只給連結。
@@ -1851,9 +1920,19 @@ async function answerQuestion(replyToken, userId, rawEvent, mediaName, text, { l
   if (lookupKeywords.length) {
     console.log(`[line] 補查官網 候選=${JSON.stringify(lookupKeywords)} 標記=${noDataKeyword || '-'} 句型=${phraseHit}`);
   }
-  const newsHint = lookupKeywords.length
-    ? await itriNewsHintBlock(lookupKeywords, { chinese: hasChinese(aiReply), question: text })
+  // ⚠️ 補查是**加分**，不能拿已經算出來的答案去賭它（批次 57）。
+  // 這條路最壞情況是：官網 HTTP 最多 4 次（2 個候選詞 × 每個查無資料會去語助詞再試
+  // 一次，見 lib/itri-news.js）＋ 再一次 Sonnet 把結果讀成答案。答題那段已經花掉的
+  // 時間再加上這一串，整支很容易撞到 Vercel 的 60 秒被砍——而被砍掉的那一刻，
+  // 上面那句誠實的「這部分我沒有資料」也跟著消失，記者連本來拿得到的答案都沒了。
+  // 用剩餘時間當預算：不夠就直接跳過補查，把答案先送出去。
+  const lookupBudget = budgetFor(LOOKUP_BUDGET_MS, REPLY_RESERVE_MS);
+  const newsHint = (lookupKeywords.length && lookupBudget >= LOOKUP_MIN_MS)
+    ? await itriNewsHintBlock(lookupKeywords, { chinese: hasChinese(aiReply), question: text, budgetMs: lookupBudget })
     : '';
+  if (lookupKeywords.length && lookupBudget < LOOKUP_MIN_MS) {
+    console.log(`[line] 補查官網跳過：這次請求只剩 ${msLeft()}ms，先把答案送出去`);
+  }
   const reply = switchNotice + aiReply + newsHint;
   // 診斷用途，不是必要邏輯：路由判斷得準不準、AI 答得順不順，靠這行在 Vercel Logs
   // 裡直接看得到，不用另外接工具。刻意截斷長度，避免整份新聞稿灌爆單行 log。
@@ -2472,11 +2551,20 @@ async function handleMetaIntent(replyToken, userId, text, metaIntent, binding, {
   // calendar：只列清單，不解除綁定——記者多半只是想看看有什麼，看完還會繼續問
   // 原本那場。真的要換，按下清單的按鈕（送出的就是完整活動名稱）會走
   // matchEventByName() 自動切過去，不需要他先「離開」再「進入」。
-  const current = binding ? await getEventById(binding.event_id) : null;
-  const suffix = isUsable(current)
-    ? `\n\n（您目前在問的是《${current.name}》，直接發問就會回答這一場；想換場點下面的按鈕即可。）`
+  await sendCalendarReply(replyToken, userId, cards, binding ? await getEventById(binding.event_id) : null);
+}
+
+// 「近期活動」那則回覆的唯一出口（批次 57）。原本只有 handleMetaIntent() 的 calendar
+// 分支長這樣；抽出來是因為現在有三個呼叫端（固定規則命中、1 對 1 綁定中被 AI 判成
+// calendar、群組綁定中被 AI 判成 calendar），三邊必須長得一模一樣——記者不該從
+// 「怎麼問到的」看得出差別。
+async function sendCalendarReply(replyToken, targetId, cards, currentEvent) {
+  const suffix = isUsable(currentEvent)
+    ? `\n\n（您目前在問的是《${currentEvent.name}》，直接發問就會回答這一場；想換場點下面的按鈕即可。）`
     : '';
-  await replyOrPush(replyToken, userId, formatCalendarReply(cards) + suffix + CONTACT_MENU_TEXT_HINT, calendarQuickRepliesForReporter(cards));
+  await replyOrPush(replyToken, targetId,
+    formatCalendarReply(cards) + suffix + CONTACT_MENU_TEXT_HINT,
+    calendarQuickRepliesForReporter(cards));
 }
 
 // 沒有有效綁定時的自然語言處理（批次 3）：讓路由判斷這是查活動列表、問特定一場、
@@ -3207,6 +3295,14 @@ async function handleGroupMessage(replyToken, groupId, text, { mentioned, speake
   // 有可能判成 other，那也該老實回一句，不能讓按鈕變成按了沒反應。
   if (!mentioned && !ownButton && routed.intent === 'other') return;
 
+  // 綁定中，但這題其實是在問「有哪些場次」——理由與 1 對 1 那段完全相同（見
+  // handleEvent() 同一個分支的完整說明）。
+  if (routed.intent === 'calendar') {
+    await sendCalendarReply(replyToken, groupId, buildCalendarCards(await getAllEventRows()), event);
+    await touchGroupSession(groupId);
+    return;
+  }
+
   // 綁定中，但這題其實在問整體產業趨勢、不是這場活動的內容——不動原本的活動
   // 綁定（跟「延續這場討論」是兩件事，換場判斷只在下面 qa 分支才做），答完照樣
   // 續問視窗續命。
@@ -3455,6 +3551,21 @@ async function handleEvent(ev) {
   const routed = await routeIntent(text, buildCalendarCards(await getAllEventRows()),
     { currentEventId: event.id, currentTopic: await getRecentTopic(userId) });
 
+  // 綁定中，但這題其實是在問「有哪些場次」——不動原本的活動綁定，只列清單（跟
+  // handleMetaIntent() 的 calendar 分支同一支，見 sendCalendarReply()）。
+  //
+  // ⚠️ 這個分支批次 57 之前**不存在**：綁定中只認 industry_trend／tech_query 兩種
+  // 「跳出本場」的意圖，routeIntent() 判成 calendar 時直接掉到下面的 answerQuestion()，
+  // 由那一場的 AI 拿它的知識庫回答「最近有哪些活動」——正是 handleMetaIntent() 開頭
+  // 那段註解在講的原始 bug，只是換了一條路徑重演。以前沒被發現，是因為 CALENDAR_RE
+  // 幾乎什麼都吃得下來；這一批把那條規則收緊（見 lib/menu.js EVENT_LOCAL_RE）之後，
+  // 沒有這個分支就會變成真的漏判。規則保證、AI 涵蓋，兩層都要有（CLAUDE.md 第 2 條）。
+  if (routed.intent === 'calendar') {
+    console.log(`[line] 綁定中被判成 calendar，改列清單 q="${text.slice(0, 40)}"`);
+    await sendCalendarReply(replyToken, userId, buildCalendarCards(await getAllEventRows()), event);
+    return;
+  }
+
   // 綁定中，但這題其實在問整體產業趨勢、不是這場活動的內容——不動原本的活動綁定
   // （跟「延續這場討論」是兩件事，換場判斷只在下面才做），記者下一題還是繼續問
   // 原本那場。
@@ -3485,6 +3596,47 @@ async function handleEvent(ev) {
   }
 
   await answerQuestion(replyToken, userId, answerEvent, binding.media_name, text, { switchNotice, memory: true });
+}
+
+// ── 例外的出口：記者永遠不該面對「已讀不回」（批次 57）────────────────────
+// 實測（test/test-resilience.mjs 把 events 表的讀取換成會丟例外的版本）：Sheets 一
+// 出狀況，記者送出的那一則問題**一個字都不會有回應**——handler 的 catch 只 console.error，
+// Vercel Logs 上很乾淨，記者那邊就是已讀不回。
+//
+// 這是 CLAUDE.md 第 4 條「送出成功 ≠ 使用者看得到」的另一面：**我們自己知道出事了，
+// 但沒有人告訴記者**。而且它最容易發生的時機正好是最不能出事的時機——記者會開場後
+// 十分鐘，幾十位記者同時發問，Sheets 那個「每分鐘 60 次、全站共用」的配額最緊繃
+// （見 lib/sheets.js fetchWithRetry() 的說明）。
+//
+// 為什麼補在這裡、而不是在每一支可能丟例外的函式裡各自 try：這是**結構性保證**，
+// 跟 replyOrPush() 包一層補群組導覽、跟 toTraditionalTW() 擋在出口是同一招（CLAUDE.md
+// 第 2 條）。往後任何人新增一條問答路線、忘了自己接例外，記者一樣拿得到一句人話。
+//
+// ⚠️ 群組只有「真的被叫到」才道歉。沒被 @ 到、也沒用喚醒詞的訊息，我們本來就不該
+// 開口——如果因為處理它的過程中出了例外就跳出來講話，那正是這個帳號最該避免的插話
+// （而且看起來像莫名其妙的鬼打牆）。判斷只看事件本身（mention／喚醒詞），不再碰任何
+// 會再丟一次例外的 I/O。
+// ⚠️ 整支包在 try 裡：道歉本身失敗（LINE API 也掛了）不能再往外丟，那會讓 handler
+// 回 500，LINE 就會重送整批 webhook，變成雪上加霜的重試風暴。
+async function apologise(ev, cause) {
+  try {
+    if (ev?.type !== 'message' || !ev.replyToken) return;
+    const isDirect = ev.source?.type === 'user';
+    const targetId = isDirect ? ev.source?.userId : (ev.source?.groupId || ev.source?.roomId);
+    if (!targetId) return;
+    if (!isDirect) {
+      const rawText = ev.message?.type === 'text' ? String(ev.message.text || '') : '';
+      const addressed = isBotMentioned(ev.message?.mention) || WAKE_WORD_RE.test(rawText);
+      if (!addressed) return; // 沒在跟我們講話，出錯也不要插話
+    }
+    console.error(`[line] 回覆道歉訊息 target=${targetId} cause=${cause?.message || '-'}`);
+    // reply token 60 秒只能用一次，走到這裡多半還沒被用掉（例外通常發生在送出回覆
+    // 之前）；真的用掉了 replyOrPush() 會自動退回 push，記者一樣收得到。
+    await replyOrPush(ev.replyToken, targetId,
+      '不好意思，我這邊剛剛卡住了，這一題沒能查出來 🙏\n麻煩再問我一次；如果連續幾次都這樣，請直接洽現場新聞聯絡人，不要等我。');
+  } catch (e) {
+    console.error('道歉訊息也送不出去:', e.message);
+  }
 }
 
 export default async function handler(req, res) {
@@ -3519,17 +3671,22 @@ export default async function handler(req, res) {
 
   const events = Array.isArray(payload.events) ? payload.events : [];
 
-  // 依序處理、不平行——記者會現場的量級不需要平行處理，依序執行也不會讓同一批
-  // webhook 裡的多個事件互搶 Anthropic／Sheets 配額。
-  for (const ev of events) {
-    try {
-      await handleEvent(ev);
-    } catch (e) {
-      // 單一事件出錯不能讓整支回 500——LINE 收到非 2xx 會重送整批 webhook，
-      // 容易在配額耗盡或 Anthropic 暫時出狀況時觸發重試風暴、雪上加霜。
-      console.error('LINE 事件處理失敗:', e.message, ev?.type);
+  // 這一次 function 呼叫的死線（見 msLeft() 的說明）。從這裡起算——LINE 那邊的
+  // reply token 也是 60 秒，兩個時鐘一起起跑最貼近實情。
+  await requestCtx.run({ deadlineAt: Date.now() + REQUEST_BUDGET_MS }, async () => {
+    // 依序處理、不平行——記者會現場的量級不需要平行處理，依序執行也不會讓同一批
+    // webhook 裡的多個事件互搶 Anthropic／Sheets 配額。
+    for (const ev of events) {
+      try {
+        await handleEvent(ev);
+      } catch (e) {
+        // 單一事件出錯不能讓整支回 500——LINE 收到非 2xx 會重送整批 webhook，
+        // 容易在配額耗盡或 Anthropic 暫時出狀況時觸發重試風暴、雪上加霜。
+        console.error('LINE 事件處理失敗:', e.message, ev?.type);
+        await apologise(ev, e); // ⚠️ 記 log 不夠，記者那邊看到的是「已讀不回」，見該支的說明
+      }
     }
-  }
+  });
 
   return res.status(200).json({ ok: true });
 }

@@ -2518,5 +2518,43 @@ for (const [type, must] of [['sticker', '貼圖'], ['image', '圖'], ['audio', '
     JSON.stringify(out));
 }
 
+// ── 情境 25：盤點掃出來的兩條誤判規則，端到端要真的不再誤判（批次 57）─────────
+// test-menu.mjs 已經驗過 detectMetaIntent() 的判斷本身，這裡驗的是**後果**：
+// 誤判 switch 會 clearBinding()、誤判 calendar 會回全站清單，兩者記者都馬上感覺得到。
+reset(); await freshModule();
+state.bindings.set('U_reporter', { event_id: 'quad', media_name: '中央社', note: '', bound_at: Date.now() });
+
+out = await send('換一個問題，這場的合作廠商有哪些？');
+check('★ 「換一個問題」不再被當成回首頁 → 照樣由這場回答',
+  out[0]?.kind === 'answer' && out[0].event === 'quad', JSON.stringify(out));
+check('★ 綁定沒有被清掉（舊規則會把記者踢回首頁）',
+  state.bindings.get('U_reporter')?.event_id === 'quad' && !!state.bindings.get('U_reporter')?.bound_at,
+  JSON.stringify(state.bindings.get('U_reporter')));
+
+out = await send('這場記者會還有哪些活動安排？');
+check('★ 「這場還有哪些活動安排」問的是這一場的議程 → 交給該場回答，不是丟全站清單',
+  out[0]?.kind === 'answer' && out[0].event === 'quad', JSON.stringify(out));
+
+// 收緊規則不能製造漏判：真的在問行事曆時，兩條路都要接得住。
+out = await send('最近有哪些活動');
+check('固定講法照樣命中規則 → 給活動清單',
+  out[0]?.kind === 'text' && /近期活動/.test(out[0].text), JSON.stringify(out));
+
+// 規則接不住、但 AI 判得出來的講法（routeIntent → calendar）。批次 57 之前，綁定中
+// 完全沒有 calendar 分支，這句會掉進 answerQuestion()，由 quad 那場的 AI 拿它的
+// 知識庫回答「最近還會辦嗎」——正是 handleMetaIntent() 開頭那段註解在講的原始 bug。
+out = await send('最近還會辦嗎');
+check('★ 規則沒接住、AI 判成 calendar → 綁定中也要給清單，不是丟給該場 AI',
+  out[0]?.kind === 'text' && /近期活動/.test(out[0].text), JSON.stringify(out));
+check('　 而且不會順手把記者踢出這一場',
+  state.bindings.get('U_reporter')?.event_id === 'quad', JSON.stringify(state.bindings.get('U_reporter')));
+
+// 群組走的是另一支（handleGroupMessage），同一個洞要一起補。
+reset(); await freshModule();
+state.bindings.set('Cgroup1', { event_id: 'quad', bound_at: Date.now(), groupSessionUntil: Date.now() + 60_000 });
+out = await sendGroup('@我 最近還會辦嗎', { mentionSelf: true, mentionText: '@我 ' });
+check('★ 群組綁定中，AI 判成 calendar 也要給清單',
+  out[0]?.kind === 'text' && /近期活動/.test(out[0].text), JSON.stringify(out));
+
 console.log(`\n${fail === 0 ? '✅' : '❌'} 流程測試通過 ${pass}／失敗 ${fail}`);
 process.exit(fail === 0 ? 0 : 1);
