@@ -293,6 +293,15 @@ function extractFakeTechKeyword(text) {
 // 記者拿到的是那場的 AI 說「這部分我沒有資料」，一樣答非所問。
 function fakeReporterRoute(text, currentEventHint, topicHint) {
   const ids = matchEventIds(text);
+  // 綁定中、而且句子裡有「這場／這次／現場」這種指稱詞 → 在問這一場的事，判 qa。
+  // 這是在模擬 lib/router.js currentEventId 那塊提示的精神（「看起來像是在延續、
+  // 追問這場活動的內容，請判成 qa」）。批次 57 補上：detectMetaIntent() 那邊同時
+  // 收緊了 CALENDAR_RE（「這場還有哪些活動安排」不再被當成查全站清單，見
+  // lib/menu.js EVENT_LOCAL_RE），這裡沒有跟上的話，那句話會在這支被判成 calendar，
+  // 測不出真正要驗的「交給該場回答」。
+  if (currentEventHint && /這場|這次|本場|本次|現場|會場|展區/.test(text)) {
+    return { intent: 'qa', event_ids: [currentEventHint], confidence: 'high' };
+  }
   if (/最近|哪些活動|活動列表/.test(text)) return { intent: 'calendar', event_ids: [], confidence: 'high' };
   if (/工研院/.test(text)) return { intent: 'tech_query', event_ids: [], confidence: 'high', tech_keyword: extractFakeTechKeyword(text) };
   if (/趨勢|市場現況|產業現況/.test(text)) return { intent: 'industry_trend', event_ids: [], confidence: 'high' };
