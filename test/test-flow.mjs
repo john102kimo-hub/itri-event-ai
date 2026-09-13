@@ -2608,5 +2608,53 @@ out = await sendGroup('@我 最近還會辦嗎', { mentionSelf: true, mentionTex
 check('★ 群組綁定中，AI 判成 calendar 也要給清單',
   out[0]?.kind === 'text' && /近期活動/.test(out[0].text), JSON.stringify(out));
 
+// ── 情境 24：版面規則要到得了每一條問答路線（回報，批次 59）──────────────────
+// 回報：「文字排版很亂 能夠精進嗎 整體上」。「整體上」是重點——排版不是某一條路的
+// 問題，五條路（活動問答／產業趨勢／工研院技術／官網補查／智慧兜底）全部都有。
+//
+// 所以 LAYOUT_RULE 放在 askAnthropic() 的共用 system 區塊（跟 ZH_TW_RULE 同一個位置），
+// 不是各路線各寫一份。這一組就是那個「共用」的守門：任何一條路被改成繞過 askAnthropic()、
+// 或有人新增第六條路卻自己組 system，這裡就會紅。批次 53「三個各說各話的字數上限」
+// 的教訓——同一件事散在好幾個地方各寫一份，遲早漂開。
+const LAYOUT_MARK = '版面：記者是在手機上看這則訊息';
+const sysOf = (o, kinds) => (o.filter(x => kinds.includes(x.kind)).map(x => x.sys || '').join('\n'));
+
+reset(); await freshModule();
+state.bindings.set('U_reporter', { event_id: 'quad', media_name: '中央社', note: '', bound_at: Date.now() });
+out = await send('這場的技術突破是什麼？');
+check('★ 版面規則有到「活動問答」', sysOf(out, ['answer']).includes(LAYOUT_MARK),
+  sysOf(out, ['answer']).slice(0, 80));
+
+out = await send('產業趨勢分析');
+check('★ 版面規則有到「產業趨勢」', sysOf(out, ['answer']).includes(LAYOUT_MARK),
+  sysOf(out, ['answer']).slice(0, 80));
+
+out = await send('工研院 機器人');
+check('★ 版面規則有到「工研院技術」', sysOf(out, ['answer']).includes(LAYOUT_MARK),
+  sysOf(out, ['answer']).slice(0, 80));
+
+// 官網補查（answerFromItriNews）：要先讓這場「答不出來」才會走到那一支。
+reset(); await freshModule();
+state.bindings.set('U_reporter', { event_id: 'quad', media_name: '中央社', note: '', bound_at: Date.now() });
+state.noDataKeyword = '院士';
+out = await send('今年院士有誰？');
+check('★ 版面規則有到「官網補查」', sysOf(out, ['digest', 'answer']).includes(LAYOUT_MARK),
+  JSON.stringify(out.map(o => o.kind)));
+state.noDataKeyword = '';
+
+reset(); await freshModule();
+out = await send('隨便問一句跟任何主題都不相關的話');
+check('★ 版面規則有到「智慧兜底」', sysOf(out, ['fallback']).includes(LAYOUT_MARK),
+  sysOf(out, ['fallback']).slice(0, 80));
+
+// 語氣規則裡那句跟條列互相打架的話要拿掉——留著的話模型同時收到「該條列」與
+// 「不要條列」，交出來的就是回報截圖那種「列了一長串、卻不用符號也不換行」。
+reset(); await freshModule();
+state.bindings.set('U_reporter', { event_id: 'quad', media_name: '中央社', note: '', bound_at: Date.now() });
+out = await send('這場的技術突破是什麼？');
+check('★ 語氣規則不再有「不要用一長串條列」這句（跟版面規則 ② 直接衝突）',
+  !sysOf(out, ['answer']).includes('不要用一長串條列把記者淹沒'),
+  sysOf(out, ['answer']).slice(0, 80));
+
 console.log(`\n${fail === 0 ? '✅' : '❌'} 流程測試通過 ${pass}／失敗 ${fail}`);
 process.exit(fail === 0 ? 0 : 1);
