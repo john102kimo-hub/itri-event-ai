@@ -72,6 +72,7 @@ const res = { status() { return this; }, json() { return this; }, end() { return
 
 async function send(text, userId) {
   sent.length = 0;
+  state.loadingCalls.length = 0; // 批次 60：每則各自歸零，才驗得出「這一則有沒有跑動畫」
   await handler(makeReq(text, userId), res);
   return sent.map(s => ({ kind: s.kind, text: s.text, event: s.event, quickReply: s.quickReply, messages: s.messages, sys: s.sys, sysAll: s.sysAll, question: s.question, msgs: s.msgs }));
 }
@@ -84,6 +85,7 @@ async function sendRaw(events) {
 
 async function sendGroup(text, opts) {
   sent.length = 0;
+  state.loadingCalls.length = 0;
   await handler(makeGroupReq(text, opts), res);
   return sent.map(s => ({ kind: s.kind, text: s.text, event: s.event, quickReply: s.quickReply, messages: s.messages, sys: s.sys, sysAll: s.sysAll, question: s.question, msgs: s.msgs }));
 }
@@ -2655,6 +2657,65 @@ out = await send('這場的技術突破是什麼？');
 check('★ 語氣規則不再有「不要用一長串條列」這句（跟版面規則 ② 直接衝突）',
   !sysOf(out, ['answer']).includes('不要用一長串條列把記者淹沒'),
   sysOf(out, ['answer']).slice(0, 80));
+
+// ── 情境 25：「輸入中」動畫要每一則都跑（回報，批次 60）──────────────────────
+// 回報：「有時候思考會很久 有可能固定出現像截圖這種… 讓大家知道其實有在思考」。
+// 關鍵字是**「有時候」**——動畫本身早就做好了，但只掛在 answerQuestion() 上，也就是
+// 「活動問答」一條路。產業趨勢、工研院技術、最新新聞、智慧兜底送出後畫面完全沒反應，
+// 而那幾條恰好比較慢（要先抓 IEK／官網再接模型）。會動的那條反而是最快的。
+//
+// 修法是把它移到 handleEvent() 的 1 對 1 咽喉點，在路由與所有 I/O 之前。這一組驗的就是
+// 「每一條路都真的跑到了」——任何一條被改成繞過那個咽喉點就會紅。
+const loadingCount = () => state.loadingCalls.length;
+
+reset(); await freshModule();
+state.bindings.set('U_reporter', { event_id: 'quad', media_name: '中央社', note: '', bound_at: Date.now() });
+
+for (const [label, text] of [
+  ['活動問答', '這場的技術突破是什麼？'],
+  ['產業趨勢', '產業趨勢分析'],
+  ['工研院技術', '工研院 機器人'],
+  ['活動清單（快路徑）', '最近有哪些活動'],
+  ['使用說明（快路徑）', '使用說明']
+]) {
+  await send(text);
+  check(`★ 「輸入中」動畫有跑到：${label}`, loadingCount() === 1,
+    `${label} → 呼叫了 ${loadingCount()} 次`);
+}
+
+// ⚠️ 智慧兜底要**沒有綁定**才走得到：綁定中的話，同一句話會被 routeIntent() 判成
+// 「延續目前這場」而掉進活動問答（那條路本來就有動畫），測試會因為走錯路而假性通過。
+// 第一版就是把它混在上面那個迴圈裡，還原程式碼之後它照樣綠——一條永遠不會紅的測試
+// 比沒有測試更糟（批次 55 學過同一件事），所以獨立出來。
+reset(); await freshModule();
+out = await send('隨便問一句跟任何主題都不相關的話');
+check('★ 「輸入中」動畫有跑到：智慧兜底（而且真的走到兜底那條路）',
+  loadingCount() === 1 && out.some(o => o.kind === 'fallback'),
+  `呼叫 ${loadingCount()} 次，回覆種類 ${JSON.stringify(out.map(o => o.kind))}`);
+
+// 秒數要在 LINE 允許的範圍（5～60，且是 5 的倍數），不然 API 直接退件、動畫永遠不出現。
+reset(); await freshModule();
+await send('最近有哪些活動');
+const secs = state.loadingCalls[0]?.seconds;
+check('★ loadingSeconds 合法（5～60、5 的倍數），不會被 LINE 退件',
+  secs >= 5 && secs <= 60 && secs % 5 === 0, String(secs));
+
+// 職員模式也是人在等——密語登入那一則、以及登入後的每一則指令都要有。
+reset(); await freshModule();
+process.env.LINE_STAFF_PASSCODE = process.env.LINE_STAFF_PASSCODE || '開門';
+await send('開門', 'U_staff');
+check('★ 職員密語那一則也跑動畫', loadingCount() === 1, String(loadingCount()));
+await send('最近有哪些活動', 'U_staff');
+check('★ 職員登入後的指令也跑動畫', loadingCount() === 1, String(loadingCount()));
+
+// ⚠️ 反面：群組不可以跑。LINE 的 /chat/loading/start 只支援一對一，group／room 傳了
+// 穩定失敗，只會在 Vercel Logs 累積一堆沒意義的錯誤。以前是靠呼叫端記得傳
+// loading:false，現在是靠「這段在群組分流之後」這個結構——這條就是那個結構的守門。
+reset(); await freshModule();
+state.bindings.set('Cgroup1', { event_id: 'quad', bound_at: Date.now(), groupSessionUntil: Date.now() + 60_000 });
+await sendGroup('@我 這場的技術突破是什麼？', { mentionSelf: true, mentionText: '@我 ' });
+check('★ 群組不跑動畫（LINE 只支援一對一，傳了必定失敗）', loadingCount() === 0,
+  JSON.stringify(state.loadingCalls));
 
 console.log(`\n${fail === 0 ? '✅' : '❌'} 流程測試通過 ${pass}／失敗 ${fail}`);
 process.exit(fail === 0 ? 0 : 1);
