@@ -64,7 +64,9 @@ export const state = {
   itriHtml: DEFAULT_ITRI_HTML,
   itriFetchFail: false,
   // 空字串＝預設關掉，不管 keyword 是什麼都回 itriHtml（見上面 fetch stub 的說明）。
-  itriKeywordMustInclude: ''
+  itriKeywordMustInclude: '',
+  // 「輸入中」動畫被呼叫的紀錄（批次 60），見下面 line.startLoading() 的說明。
+  loadingCalls: []
 };
 export const sent = [];
 
@@ -100,6 +102,7 @@ export function reset() {
   state.newsDigestText = ''; // 非空＝模擬「官網補查那支模型」吐出這段話（批次 44）
   state.memories = [];       // bot_memory 的列（批次 46）：[時間, 範圍, 類型, 內容, 建立者, 狀態]
   state.answerText = ''; // 非空＝模擬模型吐出這段原始文字，見 installFetchStub() 的問答分支
+  state.loadingCalls.length = 0;
   sent.length = 0;
 }
 
@@ -200,7 +203,15 @@ export const line = {
     sent.push({ kind: 'flex', messages, text: (messages || []).filter(m => m?.type === 'text').map(m => m.text).join('\n') });
     return true;
   },
-  async startLoading() {},
+  // 批次 60：改成記錄下來。回報是「動畫只有時候才出現」，而當初它只掛在活動問答
+  // 那一支上——測試要驗得到「哪幾條路真的呼叫了它」，不能再是一個什麼都不做的空殼。
+  //
+  // ⚠️ 記在 loadingCalls，**不是** sent。sent 代表「記者在對話裡看到的訊息」，幾十條
+  // 既有斷言都靠 out[0] 取第一則回覆；「輸入中」動畫是一個 UI 狀態、不是一則訊息，
+  // 混進 sent 會把那些斷言整批推移一格。分開記也比較貼近它實際上是什麼。
+  async startLoading(userId, seconds) {
+    state.loadingCalls.push({ userId, seconds });
+  },
   async pushImages() { return { ok: true, skipped: true }; },
   async createRichMenu() { return 'rm_fake'; },
   async uploadRichMenuImage() { return true; },

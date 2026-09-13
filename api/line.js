@@ -1960,7 +1960,7 @@ async function answerFromItriNews(keyword, items, question, chinese, timeoutMs =
   }
 }
 
-async function answerQuestion(replyToken, userId, rawEvent, mediaName, text, { loading = true, allowPreEventSubstitution = true, switchNotice = '', memory = false, group = false } = {}) {
+async function answerQuestion(replyToken, userId, rawEvent, mediaName, text, { allowPreEventSubstitution = true, switchNotice = '', memory = false, group = false } = {}) {
   // 活動前只給媒體邀請函、不給正式新聞稿與照片（見 lib/prompt.js resolveEventContent()
   // 的說明）。放在這裡而不是呼叫端各自判斷，理由跟下面的邀訪窗口比對一樣：1 對 1、
   // 群組最後都走這支，寫一次兩邊都受惠。
@@ -1969,12 +1969,11 @@ async function answerQuestion(replyToken, userId, rawEvent, mediaName, text, { l
   // 新聞稿內容準備活動，不能被自己設的「活動前」邏輯反過來卡住自己。
   const event = allowPreEventSubstitution ? resolveEventContent(rawEvent) : rawEvent;
 
-  // 「輸入中」動畫（/chat/loading/start）只支援一對一聊天，LINE 官方文件明講
-  // group／room 不能傳這個端點；group 訊息呼叫它每次都是穩定失敗，只會在
-  // Vercel Logs 裡累積一堆沒意義的錯誤。startLoading() 內部已經吞掉例外不影響
-  // 主流程，但既然知道一定會失敗，group 呼叫端直接傳 loading:false 跳過，
-  // 而不是每一則群組提問都送一次注定失敗的 API 呼叫。
-  if (loading) await startLoading(userId, 55);
+  // ⚠️ 「輸入中」動畫以前在這裡（只有這條路有），批次 60 移到 handleEvent() 的 1 對 1
+  // 咽喉點——回報是「動畫只有時候才出現」，而原因就是它只掛在這一支上，產業趨勢、
+  // 工研院技術、智慧兜底那幾條（剛好是比較慢的）完全沒有。理由與取捨見那邊的說明。
+  // 群組走到這支時本來就不該有動畫（LINE 只支援一對一），移上去之後自然成立，不必再
+  // 靠呼叫端記得傳 loading:false。
 
   // 命中同仁設定的邀訪窗口關鍵字就直接回聯絡資訊，不呼叫 AI——這類回覆要求精準，
   // 電話號碼、LINE ID 這種資訊不該讓 AI 用自然語言重新生成一次（打錯一碼就是
@@ -3305,8 +3304,8 @@ async function handleGroupJoin(replyToken, ev) {
 // 跟 1 對 1（handleUnbound／handleMetaIntent／答題）共用整套邏輯，差異只有：
 //   - 沒有 #代碼／ask_name 媒體名稱擷取——群組裡不會有人主動報媒體名稱，qa_log
 //     統一記成「（群組提問）」
-//   - answerQuestion() 傳 loading:false——「輸入中」動畫不支援 group/room，見
-//     answerQuestion() 開頭的註解
+//   - 沒有「輸入中」動畫——LINE 的 /chat/loading/start 只支援一對一。批次 60 把它移到
+//     handleEvent() 的 1 對 1 咽喉點之後，群組自然走不到，不必再靠呼叫端記得關掉
 //   - mentioned 決定猜不出問題時要不要出聲（見 handleGroupEvent 開頭的說明）
 // 其餘（跳出本場意圖、換場、軟綁定）完全沿用 1 對 1 那一套，用 groupId 當
 // line_users 表的 key——等於「這個群組」自己有一份軟綁定狀態，直接複用整套 TTL／
@@ -3460,7 +3459,7 @@ async function handleGroupMessage(replyToken, groupId, text, { mentioned, speake
     }
   }
 
-  await answerQuestion(replyToken, groupId, answerEvent, '（群組提問）', text, { loading: false, switchNotice, group: true });
+  await answerQuestion(replyToken, groupId, answerEvent, '（群組提問）', text, { switchNotice, group: true });
   await touchGroupSession(groupId);
 }
 
@@ -3537,6 +3536,36 @@ async function handleEvent(ev) {
     await replyOrPush(replyToken, userId, '提問太頻繁，請稍候片刻再試。');
     return;
   }
+
+  // ── 「輸入中」動畫：每一則 1 對 1 訊息都要跑（批次 60）──────────────────────
+  // 回報（附截圖）：「有時候思考會很久 有可能固定出現像截圖這種… 讓大家知道其實有在
+  // 思考」。關鍵字是**「有時候」**——動畫本身早就做好了，但呼叫它的地方只有一個：
+  // answerQuestion()，也就是「活動問答」那一條路。
+  //
+  // 於是記者的體感是這樣的：問某一場活動的內容 → 看得到動畫；問產業趨勢、工研院技術、
+  // 最新新聞，或是任何掉進智慧兜底的問題 → 送出後畫面完全沒有反應。而那幾條路**恰好
+  // 是比較慢的**（產業趨勢要先抓 IEK 清單、技術要先查官網，都是外部網站，再接模型），
+  // 正是最需要讓人知道「我在處理」的那幾條。會動的那條反而是最快的。
+  //
+  // 所以這支不放在各條答題路線裡面，改放在這裡——1 對 1 的唯一咽喉點，在路由、Sheets
+  // 讀取、模型呼叫**全部之前**。三個理由：
+  //   ① 五條答題路線一次到位，以後新增第六條也不會漏掉（同 LAYOUT_RULE 的道理，
+  //      批次 59；也是批次 53「同一件事散在好幾個地方各寫一份，遲早漂開」的教訓）
+  //   ② 慢的不只是模型——routeIntent() 自己就有 15 秒逾時、Sheets 也可能卡在配額重試。
+  //      放在答題函式裡的話，這段等待時間畫面上仍然是死的
+  //   ③ 連職員模式、使用說明、活動清單這種快路徑也一起蓋到。它們一兩秒就回覆，動畫
+  //      只會閃一下就被訊息蓋掉（LINE 收到訊息會自動收掉動畫），沒有副作用——而
+  //      「固定會出現」本來就是這次回報要的東西
+  //
+  // ⚠️ 要 await。不 await 的話有機會「訊息先送到、loading 才送到」，那會變成答案底下
+  // 掛著一個沒人收得掉的動畫，整整轉 55 秒——比沒有動畫更糟。這支自己有 3 秒逾時、
+  // 也自己吞例外（見 lib/line.js startLoading），拖不住後面的答案。
+  //
+  // ⚠️ 群組拿不到這個。LINE 的 /chat/loading/start 官方文件明講只支援一對一，group／
+  // room 傳了穩定失敗。這段在 handleGroupEvent() 分流「之後」，所以群組本來就走不到
+  // 這裡。群組要有同樣的體感只能改成先送一則「稍等一下」的訊息，那等於每一題都洗兩則
+  // 版——這個帳號最該避免的事（LINE-PLAN.md 第 8 節），刻意不做。
+  await startLoading(userId, 55);
 
   // 職員模式（批次 4）：密語比對與已登入狀態一律最優先判斷，整段接管、不再往下走
   // #代碼／reporter 流程——職員用自然語言下所有指令，不用記兩套語法。
