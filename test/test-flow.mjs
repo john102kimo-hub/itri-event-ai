@@ -1402,6 +1402,58 @@ out = await sendGroup('太空', { mentionSelf: false });
 check('群組續問視窗內打裸名詞 → 接回趨勢話題，不會被安靜門檻擋掉',
   out.some(o => o.kind === 'answer' && o.sys?.includes('IEK 產業情報網')), JSON.stringify(out.map(o => o.kind)));
 
+// ── 情境 19-2：趨勢追問是一句完整問句（實際回報的截圖，批次 58）─────────────────
+// 記者按「產業趨勢分析」→ 拿到 IEK 兩則摘要（歐盟晶片法案、人型機器人）→ 打
+// 「有談機器人發展的嗎」→ 收到的是目前綁定那場活動的議程表。他問的是剛剛那則人型
+// 機器人的摘要，拿到的是另一件事。
+//
+// 批次 24 的話題記憶接得住「太空」那種裸名詞，接不住這句：它是一句完整問句，H 欄
+// 只記得「上一則在聊趨勢」這個分類標籤，給不出任何依據判斷「機器人」指的是剛剛那則
+// 摘要，於是輸給「目前綁定哪一場」那塊提示。修法兩層（見 lib/router.js TOPIC_HINTS）：
+//   ① 話題提示改講判準（「他問的是不是我剛剛講過的東西」）而不是列形狀，並明文列出
+//      「什麼才算真的跳開話題」；活動提示那塊也明講「衝突時以話題提示為準」，不再
+//      只靠排序暗示
+//   ② 連「上一則實際答了什麼」一起帶給路由（line_users I 欄），判斷從猜語氣變成比對內容
+//
+// ⚠️ 這個情境刻意綁定 quad——那場的關鍵字裡就有「機器人」（見 fakes.mjs
+// EVENT_KEYWORDS），正是回報截圖的形狀：追問的詞跟某一場活動真的撞名。
+reset(); await freshModule();
+state.answerText = '最新兩則是 9/7 的歐盟晶片法案 2.0，重點從衝產能轉向拉高整個生態系競爭力；另一則是人型機器人的量產瓶頸與供應鏈布局。';
+state.bindings.set('U_reporter', { event_id: 'quad', media_name: '', note: '', bound_at: Date.now() });
+await send('產業趨勢分析');
+check('答完趨勢題 → 連「剛剛實際答了什麼」也記進 line_users I 欄，不是只記一個分類標籤',
+  /"e":"#topic:industry_trend"/.test(state.bindings.get('U_reporter')?.lastTurn || '') &&
+  /人型機器人/.test(state.bindings.get('U_reporter')?.lastTurn || ''),
+  JSON.stringify(state.bindings.get('U_reporter')?.lastTurn));
+
+out = await send('有談機器人發展的嗎');
+check('回報的截圖案例：問完趨勢後打一句完整追問 →（綁定中）不會被拉回那場活動的問答',
+  !out.some(o => o.kind === 'answer' && o.event === 'quad'),
+  JSON.stringify(out.map(o => ({ kind: o.kind, event: o.event }))));
+check('「有談機器人發展的嗎」被接回產業趨勢那條路（原話送進 IEK 那份 prompt）',
+  out.some(o => o.kind === 'answer' && o.question === '有談機器人發展的嗎' && o.sys?.includes('IEK 產業情報網')),
+  JSON.stringify(out.map(o => ({ kind: o.kind, question: o.question }))));
+
+// 反面：同一個話題記憶還在，但這句話明確指著目前這一場——不能被話題提示反過來吃掉。
+// 加寬涵蓋範圍最容易壞掉的就是這一邊，那份「什麼才算真的跳開話題」的否定清單就是
+// 為了這個情境存在的。
+out = await send('這場的主要發表內容是什麼？');
+check('話題記憶還在，但明確指著目前這場（「這場」）→ 照樣交給該場回答，沒有被話題提示吃掉',
+  out.some(o => o.kind === 'answer' && o.event === 'quad'),
+  JSON.stringify(out.map(o => ({ kind: o.kind, event: o.event }))));
+
+// 技術題那條路對稱：答完工研院技術題之後的完整問句追問，一樣要接得回來。
+reset(); await freshModule();
+state.answerText = '工研院近期在四足機器人與自主移動機器人（AMR）都有發表，重點放在足型機構與導航演算法。';
+state.bindings.set('U_reporter', { event_id: 'semi', media_name: '', note: '', bound_at: Date.now() });
+await send('工研院在機器人技術上有什麼進展');
+out = await send('有談到導航演算法嗎');
+check('答完工研院技術題後的完整問句追問 → 接回 tech_query，不是被拉回綁定中的那場活動',
+  !out.some(o => o.kind === 'answer' && o.event === 'semi') &&
+  out.some(o => o.kind === 'answer' && o.sys?.includes('工研院官網新聞中心 搜尋')),
+  JSON.stringify(out.map(o => ({ kind: o.kind, event: o.event }))));
+state.answerText = '';
+
 // ── 情境 20：閒聊短問句被當成主題詞複誦（實際回報的截圖，批次 27）─────────────
 // 記者打「天氣如何」→ 收到「『天氣如何』我可以從兩個方向幫您找 🙂」，底下還掛著
 // 「天氣如何的產業趨勢」「工研院的天氣如何技術」兩顆按鈕。情境 19 的複誦本身是對的
