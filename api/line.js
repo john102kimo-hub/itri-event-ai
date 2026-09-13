@@ -365,23 +365,69 @@ async function getRecentTopic(targetId) {
 // 沒有 line_users 列時要能新增一列（記者可能從沒綁定過任何活動就直接問產業趨勢），
 // 理由與寫法比照 setContactPending()——只是寫的是 H 欄。整支包在 try 裡：話題記憶
 // 是體驗加分，寫失敗不能連累記者剛剛問的那題（答案在呼叫這支之前就已經送出去了）。
-async function setRecentTopic(targetId, topic) {
+//
+// question／answer（批次 58）：連「這一輪實際問了什麼、答了什麼」一起記進 I 欄。
+// H 欄的分類標籤只解決得了「裸名詞追問」——批次 24 當時假設記者的追問長得像「太空」
+// 這種光禿禿的詞，回報的新截圖打破了它：記者打的是「有談機器人發展的嗎」，一句完整
+// 問句，路由只拿得到「上一則在聊趨勢」這個標籤，沒有任何依據判斷「機器人」指的是
+// 剛剛那則人型機器人的摘要，於是被「目前綁定哪一場」拉走，回了那場的議程表。
+// 記下答案節錄之後，路由的判斷就從「猜這句話的語氣」變成「比對這句話問的東西在不在
+// 我剛剛的答案裡」（見 lib/router.js recentAnswerHint()）。
+//
+// ⚠️ 借用 I 欄（last_turn）而不是再開一欄 J：那一欄本來就是「上一輪對話」，趨勢題
+// 答完之後，上一輪本來就是這一題，不是更早以前那場活動的問答。e 欄位填
+// `#topic:產業趨勢` 這種前綴（TOPIC_TURN_MARK），永遠不會等於任何真實的活動 id——
+// buildTurnHistory() 比對的是「上一輪答的是不是同一場」，比不中就不回放，所以這些
+// 列絕對不會被當成某一場活動的脈絡餵進問答（那正是 getRecentTurn() 開頭第三個 ⚠️
+// 在防的事）。
+//
+// ⚠️ H、I 兩格一起寫（一次 updateRange，不是兩次）。沒有 answer 時 I 欄照樣寫成
+// 空字串、不是跳過：這支被呼叫就代表「上一輪是一題趨勢／技術題」，把更早以前那場
+// 活動的問答留在 I 欄才是錯的——那份脈絡已經過期了。
+const TOPIC_TURN_MARK = '#topic:';
+
+async function setRecentTopic(targetId, topic, { question = '', answer = '' } = {}) {
   try {
     await ensureLineUsersSheet();
     const value = topic ? `${topic}@${Date.now()}` : '';
+    const turn = topic && answer
+      ? JSON.stringify({
+          t: Date.now(), e: TOPIC_TURN_MARK + topic,
+          q: sanitize(question, TURN_Q_MAX), a: sanitize(answer, TURN_A_MAX)
+        })
+      : '';
     const rows = await readRange(LINE_USERS_RANGE);
     const idx = rows.findIndex(r => r[0] === targetId);
     if (idx === -1) {
       if (!value) return; // 沒有列可清，本來就沒有話題記憶
-      await appendRows('line_users!A:H', [[targetId, '', '', '', String(Date.now()), '', '', value]]);
+      await appendRows('line_users!A:I', [[targetId, '', '', '', String(Date.now()), '', '', value, turn]]);
     } else {
-      await updateRange(`line_users!H${idx + 2}`, [[value]]);
+      await updateRange(`line_users!H${idx + 2}:I${idx + 2}`, [[value, turn]]);
     }
   } catch (e) {
     console.error('setRecentTopic 失敗:', e.message);
   } finally {
     invalidateLineUsersCache();
   }
+}
+
+// 上一則趨勢／技術題實際答出去的內容（節錄），給 routeIntent() 當比對依據用。
+// 只在「I 欄記的那一輪真的屬於這個話題」時才回傳——中間要是又問了一題活動問答，
+// I 欄早就被 setRecentTurn() 換成那場的內容，那份脈絡不該拿來判趨勢追問。
+//
+// 讀的是 getAllLineUserRows() 那份 60 秒快取（跟 getRecentTopic() 同一份），
+// 兩支一起呼叫也只打一次 Sheets。
+async function getRecentTopicAnswer(targetId, topic) {
+  if (!topic) return '';
+  const turn = await getRecentTurn(targetId);
+  return turn && turn.event_id === TOPIC_TURN_MARK + topic ? turn.a : '';
+}
+
+// routeIntent() 的兩個話題參數一次備齊——三個呼叫端（未綁定、1 對 1 綁定中、群組）
+// 都要同一組東西，分開寫三次遲早會有人只補其中一個。
+async function recentTopicContext(targetId) {
+  const currentTopic = await getRecentTopic(targetId);
+  return { currentTopic, recentTopicAnswer: await getRecentTopicAnswer(targetId, currentTopic) };
 }
 
 // ── 上一輪對話記憶（I 欄，批次 28）────────────────────────────────────────
@@ -1413,7 +1459,11 @@ async function answerIndustryTrend(replyToken, targetId, text) {
   // routeIntent() 才接得回這個話題，不會掉進「我沒抓到您想問哪一場活動」。
   // 放在送出回覆之後：這是加分功能，寫失敗（setRecentTopic 自己吞例外）也絕對不能
   // 讓記者收不到剛剛那則答案。
-  await setRecentTopic(targetId, 'industry_trend');
+  // ⚠️ 一併記下問句與答案節錄（批次 58）：追問常常不是裸名詞，而是一句指著這段
+  // 答案的完整問句（「有談機器人發展的嗎」），路由要看得到這段才判得出來。
+  // 存的是 aiReply 不是 reply——連結區塊與窗口警語是我們自己加的裝飾，不是內容，
+  // 留在脈絡裡只會讓模型把那幾行也當成「剛剛講過的東西」。
+  await setRecentTopic(targetId, 'industry_trend', { question: text, answer: aiReply });
 }
 
 // ── 「想問什麼技術」問答（回報的意見，跟產業趨勢問答平行的另一套）──────────
@@ -1504,7 +1554,8 @@ async function answerTechQuery(replyToken, targetId, keywordText) {
   await replyOrPush(replyToken, targetId, reply, [...crossItem, CONTACT_MENU_LABEL, '最近有哪些活動']);
   // 跟 answerIndustryTrend() 同一個道理：記住這一輪聊的是工研院技術，下一則只打一個
   // 技術名詞（「那光通訊呢」的省略講法）才接得回來，見 getRecentTopic() 的說明。
-  await setRecentTopic(targetId, 'tech_query');
+  // 問句與答案節錄一併記下，理由同 answerIndustryTrend() 那段（批次 58）。
+  await setRecentTopic(targetId, 'tech_query', { question: keyword, answer: aiReply });
 }
 
 // ── 「最近工研院有哪些新聞」（回報，附截圖）─────────────────────────────
@@ -1564,7 +1615,10 @@ async function answerLatestNews(replyToken, targetId, question) {
     ['產業趨勢分析', '想問什麼技術', CONTACT_MENU_LABEL, '最近有哪些活動']);
   // 記住這一輪聊的是工研院自己的新聞：下一則只打一個技術名詞（「那半導體呢」的省略
   // 講法）才接得回 tech_query，見 getRecentTopic() 的說明。
-  await setRecentTopic(targetId, 'tech_query');
+  // 問句與答案節錄一併記下，理由同 answerIndustryTrend() 那段（批次 58）——這條路
+  // 的答案是一份新聞標題清單，記者的追問（「有談機器人的嗎」）幾乎一定是指著清單裡
+  // 的某一則，更需要這段脈絡。
+  await setRecentTopic(targetId, 'tech_query', { question, answer: aiReply });
 }
 
 // 「想問什麼技術」按鈕之後記者自己打的技術名稱——跟 handleContactTopicMessage()
@@ -2590,9 +2644,9 @@ async function handleUnbound(replyToken, userId, text, { silentOnOther = false, 
   // 追問（尤其是「太空」這種裸名詞）在 routeIntent() 眼裡跟純聊天沒兩樣，見
   // getRecentTopic() 開頭那段回報的截圖。讀的是 getBinding() 早就載入的那份 60 秒
   // 快取，不會多打一次 Sheets。
-  const recentTopic = await getRecentTopic(userId);
-  const { intent, event_ids, confidence, tech_keyword } = await routeIntent(text, cards, { currentTopic: recentTopic });
-  console.log(`[line] reporter route q="${text.slice(0, 60)}" → intent=${intent} event_ids=${JSON.stringify(event_ids)} confidence=${confidence} topic=${recentTopic || '-'}`);
+  const topicCtx = await recentTopicContext(userId);
+  const { intent, event_ids, confidence, tech_keyword } = await routeIntent(text, cards, topicCtx);
+  console.log(`[line] reporter route q="${text.slice(0, 60)}" → intent=${intent} event_ids=${JSON.stringify(event_ids)} confidence=${confidence} topic=${topicCtx.currentTopic || '-'}`);
 
   if (intent === 'calendar') {
     await replyOrPush(replyToken, userId, formatCalendarReply(cards) + CONTACT_MENU_TEXT_HINT, calendarQuickRepliesForReporter(cards));
@@ -3280,7 +3334,7 @@ async function handleGroupMessage(replyToken, groupId, text, { mentioned, speake
   // 的討論」跟「真的無關」（見 lib/router.js 的說明），下面的安靜門檻才靠得住。
   // currentTopic 的理由跟 1 對 1 那段完全一樣（見 handleEvent() 同一行的說明）。
   const routed = await routeIntent(text, buildCalendarCards(await getAllEventRows()),
-    { currentEventId: event.id, currentTopic: await getRecentTopic(groupId) });
+    { currentEventId: event.id, ...(await recentTopicContext(groupId)) });
 
   // 回報的意見：批次 14 只擋得住「明確 @ 別人」這種訊號很強的情況，續問視窗內
   // 純聊天、答非所問的訊息（例如「友信你覺得呢」）當時沒有安全的判斷依據——
@@ -3548,8 +3602,11 @@ async function handleEvent(ev) {
   // 下面 industry_trend 分支），接著打一個裸名詞追問——沒有這個提示，那句話會被
   // currentEventId 的提示硬拉回「延續這場活動」，記者拿到的是那場的 AI 說「這部分
   // 我沒有資料」，一樣是答非所問，只是換了一種形式。見 getRecentTopic() 的說明。
+  // ⚠️ 批次 58：只帶話題標籤不夠——記者的追問常常是一句完整問句（回報的截圖：
+  // 「有談機器人發展的嗎」），標籤給不出任何依據，那句話照樣被 currentEventId 拉回
+  // 這一場。recentTopicContext() 會連「上一則實際答了什麼」一起帶上去。
   const routed = await routeIntent(text, buildCalendarCards(await getAllEventRows()),
-    { currentEventId: event.id, currentTopic: await getRecentTopic(userId) });
+    { currentEventId: event.id, ...(await recentTopicContext(userId)) });
 
   // 綁定中，但這題其實是在問「有哪些場次」——不動原本的活動綁定，只列清單（跟
   // handleMetaIntent() 的 calendar 分支同一支，見 sendCalendarReply()）。

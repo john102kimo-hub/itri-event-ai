@@ -291,7 +291,30 @@ function extractFakeTechKeyword(text) {
 // 真的系統提示裡話題那塊排在活動那塊後面（是模型看到的最新一條指示），這裡用
 // 順序表達同一件事——不然綁定中問完趨勢再打個裸名詞，會被硬拉回「延續這場活動」，
 // 記者拿到的是那場的 AI 說「這部分我沒有資料」，一樣答非所問。
-function fakeReporterRoute(text, currentEventHint, topicHint) {
+// 「這句話是在接著問上一則趨勢／技術題，還是真的跳去問某一場活動」——模擬批次 58
+// 加寬後的話題提示（見 lib/router.js TOPIC_HINTS）。真的提示講的判準是「他問的是不是
+// 我剛剛講過的東西」，這裡沒有語意理解可用，用兩件機械化的事表達同一個精神：
+//   ① 先擋掉那份「才算真的跳開話題」的否定清單（指名了活動全名／用了「這場」這種
+//      指稱詞）——這兩項在真的提示裡也是明文列出來的例外。
+//   ② 剩下的算不算接續，就看這句話的核心詞有沒有出現在「我上一則實際答了什麼」裡面。
+//      2 個字的滑動視窗夠粗糙但夠用：測試要驗的是「呼叫端有沒有把答案節錄帶上去、
+//      路由有沒有真的拿它當依據」，不是模擬 LLM 的比對品質。
+function looksLikeTopicFollowUp(text, topicAnswer) {
+  const s = String(text || '').trim();
+  if (/這場|那場|這次|本場|本次|現場|會場|展區/.test(s)) return false;
+  if (state.events.some(e => e[1] && s.includes(e[1]))) return false;
+  // 裸名詞（批次 24 就接得住的那種，例如回報截圖裡的「太空」）——這條不需要答案節錄，
+  // 話題記憶過期成只剩標籤時也要照樣接得回來。
+  if (/^[^\s?？]{2,6}$/.test(s) && !/(什麼|哪|嗎|呢|怎|多少|是否|重點|你|我)/.test(s)) return true;
+  if (!topicAnswer) return false;
+  const core = extractFakeTechKeyword(s).replace(/有談|有沒有|談到|講到|的|了|嗎|呢|還有|別的/g, '').trim();
+  for (let i = 0; i + 2 <= core.length; i++) {
+    if (topicAnswer.includes(core.slice(i, i + 2))) return true;
+  }
+  return false;
+}
+
+function fakeReporterRoute(text, currentEventHint, topicHint, topicAnswer) {
   const ids = matchEventIds(text);
   // 綁定中、而且句子裡有「這場／這次／現場」這種指稱詞 → 在問這一場的事，判 qa。
   // 這是在模擬 lib/router.js currentEventId 那塊提示的精神（「看起來像是在延續、
@@ -305,16 +328,17 @@ function fakeReporterRoute(text, currentEventHint, topicHint) {
   if (/最近|哪些活動|活動列表/.test(text)) return { intent: 'calendar', event_ids: [], confidence: 'high' };
   if (/工研院/.test(text)) return { intent: 'tech_query', event_ids: [], confidence: 'high', tech_keyword: extractFakeTechKeyword(text) };
   if (/趨勢|市場現況|產業現況/.test(text)) return { intent: 'industry_trend', event_ids: [], confidence: 'high' };
-  if (ids.length) return { intent: 'qa', event_ids: ids, confidence: 'high' };
-  // 「裸名詞」在這支要收得比真的模型緊：2～6 個字、而且不含疑問詞或指示詞。
-  // 「這場的重點是什麼」剛好也是 8 個字，只看長度會把它當成裸名詞接回話題——真的
-  // 模型讀得懂那是在問目前這場活動，這裡沒有語意理解可用，只能靠這層額外的字面
-  // 檢查補上，不然測試會在「答完趨勢題、下一題回到原本那場」那個既有情境上炸掉。
-  if (topicHint && /^[^\s?？]{2,6}$/.test(String(text).trim()) && !/(什麼|哪|嗎|呢|怎|多少|是否|重點|這場|那場|你|我)/.test(text)) {
+  // ⚠️ 話題追問要排在活動關鍵字比對（ids）「前面」——這正是回報截圖的形狀：記者問完
+  // 產業趨勢後打「有談機器人發展的嗎」，而「機器人」同時也是 quad 那場的關鍵字
+  // （EVENT_KEYWORDS），排在後面就永遠輪不到這條，一律被判成那場的活動問答。
+  // 真的系統提示裡對應的是「跟活動提示衝突時以話題提示為準」那條明文規則
+  // （見 lib/router.js）。
+  if (topicHint && looksLikeTopicFollowUp(text, topicAnswer)) {
     return topicHint === 'tech_query'
       ? { intent: 'tech_query', event_ids: [], confidence: 'high', tech_keyword: extractFakeTechKeyword(text) }
       : { intent: 'industry_trend', event_ids: [], confidence: 'high' };
   }
+  if (ids.length) return { intent: 'qa', event_ids: ids, confidence: 'high' };
   if (currentEventHint && !/你覺得/.test(text)) return { intent: 'qa', event_ids: [currentEventHint], confidence: 'high' };
   return { intent: 'other', event_ids: [], confidence: 'low' };
 }
@@ -342,12 +366,17 @@ export function installFetchStub() {
       const topicHint = /上一則我剛回答完的是「產業趨勢」/.test(allSys) ? 'industry_trend'
         : /上一則我剛回答完的是「工研院自己在某項技術/.test(allSys) ? 'tech_query'
         : '';
+      // 話題提示裡附的「我上一則實際回答的內容（節錄）」（批次 58，見 lib/router.js
+      // recentAnswerHint()）——真的模型靠這段比對「他問的是不是我剛剛講過的東西」，
+      // 這裡也一樣，所以要真的從系統提示裡撈出來，不是從 state 走後門拿。撈得到就
+      // 代表呼叫端真的把它帶上去了，撈不到 fakeReporterRoute() 自然退回舊行為。
+      const topicAnswer = allSys.match(/（節錄）[^「]*「([\s\S]*?)」\s*$/)?.[1] || '';
       const userText = body.messages?.[0]?.content || '';
 
       // 路由呼叫跟問答呼叫都打同一個端點，用 system prompt 的特徵分辨
       const json = o => ({ ok: true, json: async () => ({ content: [{ type: 'text', text: JSON.stringify(o) }] }) });
       if (sys.includes('內部職員助理')) return json(fakeStaffRoute(userText));
-      if (sys.includes('意圖判斷器')) return json(fakeReporterRoute(userText, currentEventHint, topicHint));
+      if (sys.includes('意圖判斷器')) return json(fakeReporterRoute(userText, currentEventHint, topicHint, topicAnswer));
 
       // 智慧兜底（api/line.js composeFallbackReply()）——四條路都對不上時，用米亞的
       // 口吻針對記者這一句講一段貼題的話。這裡回一段固定的假回覆，並把記者原話一起

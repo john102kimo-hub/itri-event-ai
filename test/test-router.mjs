@@ -107,6 +107,42 @@ await routeIntent('太空', routerCards, { currentTopic: 'nonsense' });
 check('不認得的 currentTopic 值直接忽略，不會塞一塊空的或壞掉的提示進去',
   sysTexts().length === 1, JSON.stringify(sysTexts().length));
 
+// ── 批次 58：追問不只有裸名詞那一種形狀 ────────────────────────────────────
+// 回報的截圖：記者問完產業趨勢，打「有談機器人發展的嗎」，被判成目前綁定那場活動的
+// 問答。批次 24 的提示只列了「裸名詞」與「那ＸＸ呢」兩種形狀，這句話兩種都不是，
+// 等於沒生效；決勝負又只靠「話題那塊排在後面」這個位置上的暗示。這裡驗的一樣是
+// 「該給的有沒有給出去」，不是模型判得準不準。
+console.log('── routeIntent：話題提示的判準與上一則答案節錄（批次 58）──');
+
+await routeIntent('有談機器人發展的嗎', routerCards, { currentTopic: 'industry_trend' });
+s = sysTexts();
+check('話題提示明講「完整問句」也算追問，不是只列裸名詞與「那ＸＸ呢」',
+  /完整問句/.test(s[1]) && /有談機器人發展的嗎/.test(s[1]), s[1]);
+check('話題提示列出「什麼才算真的跳開話題」的否定清單（這場／這次這類指稱詞）',
+  /「這場」/.test(s[1]) && /「這次」/.test(s[1]), s[1]);
+
+await routeIntent('有談機器人發展的嗎', routerCards, {
+  currentTopic: 'industry_trend',
+  recentTopicAnswer: '最新兩則是歐盟晶片法案 2.0，另一則是人型機器人的量產瓶頸。'
+});
+s = sysTexts();
+check('有上一則答案節錄時，節錄整段附在話題提示那一塊裡（不另開區塊打散既有結構）',
+  s.length === 2 && /（節錄）/.test(s[1]) && /人型機器人的量產瓶頸/.test(s[1]), JSON.stringify(s.length));
+check('第一塊仍然逐 byte 不變（節錄因人而異，沒有混進吃快取的那塊）', s[0] === baseSystem[0]);
+
+await routeIntent('太空', routerCards, { currentTopic: 'industry_trend', recentTopicAnswer: '   ' });
+check('沒有節錄（或只有空白）時不會塞一段空的「以下是我上一則實際回答」進去',
+  !/（節錄）/.test(sysTexts()[1] || ''), sysTexts()[1]);
+
+await routeIntent('有談機器人發展的嗎', routerCards, { currentEventId: 'quad', currentTopic: 'industry_trend' });
+s = sysTexts();
+check('兩塊提示同時存在時，活動那塊明講「衝突時以話題提示為準」（不再只靠排序暗示）',
+  /以那段為準/.test(s[1]), s[1]);
+
+await routeIntent('這場的重點是什麼', routerCards, { currentEventId: 'quad' });
+check('沒有話題記憶時，活動提示不會憑空提到「下一段」（那一段根本不存在）',
+  !/下一段/.test(sysTexts()[1] || ''), sysTexts()[1]);
+
 globalThis.fetch = realFetch;
 
 console.log(`\n${fail === 0 ? '✅' : '❌'} 行事曆清單測試通過 ${pass}／失敗 ${fail}`);
