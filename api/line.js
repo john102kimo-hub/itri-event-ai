@@ -1814,6 +1814,35 @@ function isGenericLookupKeyword(kw) {
   return NO_DATA_GENERIC.has(String(kw || '').trim().toLowerCase());
 }
 
+// ── 綁定中點「新聞稿」這類泛用詞的按鈕 → 不能被判去問工研院整體新聞（回報，2026-09）──
+// 實際回報：記者在群組打「創新日」綁定到那一場之後，點了那一場自訂的快速提問按鈕
+// 「新聞稿」，結果拿到的是「工研院官網新聞中心最近發布的新聞」清單（ICT TechDay、
+// VAMAS 研討會…），沒有一則跟創新日有關——按鈕明明是問「這一場」的新聞稿，答案卻是
+// 全站最新新聞。
+//
+// 根因在 routeIntent()：它的 systemPrompt 明講「工研院最近發了哪些新聞／新聞稿」這種
+// 不指定主題的問題算 tech_query（這時候 tech_keyword 留空），這條規則的本意是給「工研院
+// 最近有什麼新聞」這種完整句子用的，但同一份指示也讓模型看到孤零零的「新聞稿」三個字
+// 時往同一個方向偏，蓋過了「目前綁定在這一場」那條 currentEvent 提示——這正是 CLAUDE.md
+// 第 2 條講的「prompt 是請求，不是保證」：模型九成九會照 currentEvent 提示判成 qa，
+// 剩下那一次就是這次記者截圖回報的那一次。
+//
+// 修法不是再去調 routeIntent() 的用詞（同一個坑踩過四次，見 CLAUDE.md 第 2 條）：
+// 已經綁定某一場、而且訊息本身就是這種「講的是資料本身、不是主題」的泛用詞
+// （isGenericLookupKeyword 是整字比對，跟 NO_DATA_GENERIC／批次 44 補查關鍵詞卡住雜訊
+// 用的同一份判準）時，直接把結果釘回這一場的 qa，不再信任 routeIntent() 這次的分類。
+//
+// ⚠️ 只在 tech_keyword 是空字串時才覆蓋：訊息如果明確提到「工研院」或帶了具體技術／
+// 主題（「工研院院士授證的新聞稿」「半導體最近有什麼新聞」），routeIntent() 會抽出
+// 對應的 tech_keyword，這種才是記者真的在問公司整體動態或另一個主題，不能覆蓋，
+// 否則反而會把「這場沒有的話題」硬答成這一場的內容。
+function pinGenericTechQueryToEvent(routed, text, eventId) {
+  if (routed.intent === 'tech_query' && !routed.tech_keyword && isGenericLookupKeyword(text)) {
+    return { ...routed, intent: 'qa', event_ids: [eventId], confidence: 'high' };
+  }
+  return routed;
+}
+
 export function guessNoDataKeyword(question) {
   const kw = String(question || '').replace(NO_DATA_FILLER_RE, '').replace(NO_DATA_TAIL_RE, '').trim();
   // 太短（剩一個字）沒有查詢價值，太長多半是沒抽乾淨的整句話，兩種都放棄——
@@ -3405,8 +3434,10 @@ async function handleGroupMessage(replyToken, groupId, text, { mentioned, speake
   // 這裡新增的。currentEventId 帶目前這場給 routeIntent()，讓它分得出「延續這場
   // 的討論」跟「真的無關」（見 lib/router.js 的說明），下面的安靜門檻才靠得住。
   // currentTopic 的理由跟 1 對 1 那段完全一樣（見 handleEvent() 同一行的說明）。
-  const routed = await routeIntent(text, buildCalendarCards(await getAllEventRows()),
-    { currentEventId: event.id, ...(await recentTopicContext(groupId)) });
+  const routed = pinGenericTechQueryToEvent(
+    await routeIntent(text, buildCalendarCards(await getAllEventRows()),
+      { currentEventId: event.id, ...(await recentTopicContext(groupId)) }),
+    text, event.id);
 
   // 回報的意見：批次 14 只擋得住「明確 @ 別人」這種訊號很強的情況，續問視窗內
   // 純聊天、答非所問的訊息（例如「友信你覺得呢」）當時沒有安全的判斷依據——
@@ -3707,8 +3738,10 @@ async function handleEvent(ev) {
   // ⚠️ 批次 58：只帶話題標籤不夠——記者的追問常常是一句完整問句（回報的截圖：
   // 「有談機器人發展的嗎」），標籤給不出任何依據，那句話照樣被 currentEventId 拉回
   // 這一場。recentTopicContext() 會連「上一則實際答了什麼」一起帶上去。
-  const routed = await routeIntent(text, buildCalendarCards(await getAllEventRows()),
-    { currentEventId: event.id, ...(await recentTopicContext(userId)) });
+  const routed = pinGenericTechQueryToEvent(
+    await routeIntent(text, buildCalendarCards(await getAllEventRows()),
+      { currentEventId: event.id, ...(await recentTopicContext(userId)) }),
+    text, event.id);
 
   // 綁定中，但這題其實是在問「有哪些場次」——不動原本的活動綁定，只列清單（跟
   // handleMetaIntent() 的 calendar 分支同一支，見 sendCalendarReply()）。
