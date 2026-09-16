@@ -2733,10 +2733,17 @@ check('★ 群組不跑動畫（LINE 只支援一對一，傳了必定失敗）'
 // 批次 64：批次 63 那版改完，主管又回饋反過來太硬了——「可以回答莊重有點溫度，但
 // 不要太死板太 AI，可以可愛點沒關係」（連同問個性那句也要一起調）。三句改成用「考考
 // 我」「不好意思」「直球型」這種帶溫度的日常口語，不是俚語也不是公文腔。
+//
+// 批次 65：回報「除了天氣告白問個性，也加入其他記者也可能問的場景」，新增稱讚、
+// 問是不是 AI、關心用語三類（見 api/line.js CHITCHAT_COMPLIMENT_RE／
+// CHITCHAT_AI_IDENTITY_RE／CHITCHAT_CARE_RE）；問個性那句的收尾也再調一次。
 for (const [label, text, mustInclude] of [
   ['天氣', '天氣如何', '出馬'],
   ['告白', '我喜歡你', '浪漫'],
-  ['問個性', '米亞 介紹一下你自己的個性', '直球型']
+  ['問個性', '米亞 介紹一下你自己的個性', '直球型'],
+  ['稱讚', '你好厲害喔', '加油'],
+  ['問是不是AI', '你是AI嗎', '拿手'],
+  ['關心', '辛苦了', '貼心']
 ]) {
   reset(); await freshModule();
   out = await send(text);
@@ -2756,9 +2763,10 @@ for (const [label, text, mustInclude] of [
 for (const text of ['隨便問一句跟任何主題都不相關的話，我很喜歡研究這個', '溫度感測技術是不是很厲害']) {
   reset(); await freshModule();
   out = await send(text);
+  const t = out.at(-1)?.text || '';
   check(`「${text}」不會被寬鬆的關鍵字誤判成閒聊，照樣走原本的路`,
-    !(out.at(-1)?.text || '').includes('出馬') && !(out.at(-1)?.text || '').includes('浪漫') &&
-    !(out.at(-1)?.text || '').includes('直球型'),
+    !t.includes('出馬') && !t.includes('浪漫') && !t.includes('直球型') &&
+    !t.includes('加油') && !t.includes('拿手') && !t.includes('貼心'),
     JSON.stringify(out));
 }
 
@@ -2770,6 +2778,50 @@ out = await send('你是誰');
 check('「你是誰」還是走 HELP_WHOAMI_RE → 使用說明，不會被問個性那組寫死文案接走',
   /直接問就好/.test(out[0]?.text || '') && !(out[0]?.text || '').includes('直球型'),
   JSON.stringify(out));
+
+// ── 情境 27：問機構本身（介紹工研院／院長／董事長）要有正確、寫死的答案（批次 65）──
+// 回報：「可否如果有人問介紹工研院等相關字眼，可否抓官網資料，並告知工研院院長為
+// 張培仁、董事長為吳政忠，加上下列資料 [官網連結]」。這題原本沒對到任何規則，會被
+// routeIntent() 的 tech_query 說明（「工研院最近發了哪些新聞」不指定領域也算
+// tech_query）拉去查最新新聞——答非所問，記者要的是機構簡介跟經營團隊，不是新聞稿
+// 清單。見 lib/menu.js ORG_INTRO_RE／ORG_INTRO_TEXT 的說明：跟院長／董事長姓名這種
+// 「錯了會很難看」的事實一樣，直接寫死一份審過的文案，不靠模型現場答、也不即時解析
+// 官網頁面。
+for (const [label, text] of [
+  ['介紹工研院', '介紹一下工研院'],
+  ['工研院簡介', '工研院簡介'],
+  ['院長是誰', '工研院院長是誰'],
+  ['董事長是誰', '工研院董事長是誰']
+]) {
+  reset(); await freshModule();
+  out = await send(text);
+  check(`「${text}」（${label}）→ 回工研院簡介，帶到董事長吳政忠、院長張培仁跟官網連結`,
+    out[0]?.kind === 'text' && /吳政忠/.test(out[0].text) && /張培仁/.test(out[0].text) &&
+    /itri\.org\.tw/.test(out[0].text),
+    JSON.stringify(out));
+  check(`「${text}」（${label}）→ 不呼叫模型（沒有 kind:'answer'／'fallback' 節點，是 detectMetaIntent 直接攔下的固定文案）`,
+    !out.some(o => o.kind === 'answer' || o.kind === 'fallback'), JSON.stringify(out.map(o => o.kind)));
+  check(`「${text}」（${label}）→ 照樣附上四條路的入口按鈕`,
+    JSON.stringify(out[0]?.quickReply) === JSON.stringify(['最近有哪些活動', '產業趨勢分析', '想問什麼技術', '媒體邀訪需求', '使用說明']),
+    JSON.stringify(out[0]?.quickReply));
+}
+
+// 反面：句子後面還接著具體主題（半導體）的問句，不能被「工研院」三個字誤判成問
+// 機構本身——這種要繼續走 tech_query 查半導體，不能被機構簡介攔截掉。
+reset(); await freshModule();
+out = await send('介紹一下工研院在半導體的技術');
+check('「介紹一下工研院在半導體的技術」→ 不會被 ORG_INTRO_RE 誤判，沒有機構簡介那份固定文案',
+  !/吳政忠|張培仁/.test(out.at(-1)?.text || ''), JSON.stringify(out));
+
+// 職員模式也要借得到這條路——同仁一樣可能被問「工研院是什麼」，不該落到職員自己的
+// 功能清單。跟 news／industry_trend／tech_query／contacts 同一份白名單（見
+// api/line.js handleStaffMessage() 開頭那段「職員借用記者端意圖」的說明）。
+reset(); await freshModule();
+process.env.LINE_STAFF_PASSCODE = process.env.LINE_STAFF_PASSCODE || '開門';
+await send('開門', 'U_staff');
+out = await send('工研院簡介', 'U_staff');
+check('職員模式問「工研院簡介」→ 借用記者端的機構簡介，不是職員功能清單',
+  /吳政忠/.test(out[0]?.text || ''), JSON.stringify(out));
 
 console.log(`\n${fail === 0 ? '✅' : '❌'} 流程測試通過 ${pass}／失敗 ${fail}`);
 process.exit(fail === 0 ? 0 : 1);
