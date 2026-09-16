@@ -41,7 +41,7 @@ import {
 } from '../lib/line.js';
 import { buildCalendarCards, buildAllCalendarCards, routeIntent, formatCalendarReply, calendarQuickReplyItems } from '../lib/router.js';
 import {
-  detectMetaIntent, matchEventByName, HELP_TEXT, buildWelcomeFlex,
+  detectMetaIntent, matchEventByName, HELP_TEXT, ORG_INTRO_TEXT, buildWelcomeFlex,
   buildRichMenuDefinition, ALL_MENUS, REPORTER_MENU, STAFF_MENU
 } from '../lib/menu.js';
 import {
@@ -2366,7 +2366,7 @@ async function handleStaffMessage(replyToken, userId, text) {
   // routeStaffIntent() 用語意判。六顆職員按鈕會不會被這裡誤攔，測試有釘住。
   const metaIntent = detectMetaIntent(text);
   if (metaIntent === 'news' || metaIntent === 'industry_trend'
-      || metaIntent === 'tech_query' || metaIntent === 'contacts') {
+      || metaIntent === 'tech_query' || metaIntent === 'contacts' || metaIntent === 'org_intro') {
     console.log(`[line] staff 借用記者端意圖 intent=${metaIntent} q="${text.slice(0, 40)}"`);
     await handleMetaIntent(replyToken, userId, text, metaIntent, null, {});
     return;
@@ -2663,6 +2663,15 @@ async function handleMetaIntent(replyToken, userId, text, metaIntent, binding, {
     return;
   }
 
+  if (metaIntent === 'org_intro') {
+    // 直接答，不呼叫模型——院長／董事長姓名寫錯是「絕對不能發生」等級的事（跟批次 3
+    // 的一整套坑同一個形狀），見 lib/menu.js ORG_INTRO_TEXT 的說明。附上整套入口
+    // 按鈕，記者問完機構簡介不會卡在死巷子裡，跟 sendFallbackGuide() 同一個道理。
+    await replyOrPush(replyToken, userId, ORG_INTRO_TEXT,
+      ['最近有哪些活動', '產業趨勢分析', '想問什麼技術', CONTACT_MENU_LABEL, '使用說明']);
+    return;
+  }
+
   if (metaIntent === 'contacts') {
     // 邀訪窗口分兩層：先看這場活動自己有沒有設定專屬窗口（events!P，同仁在後台
     // 針對這一場填的），有就照舊給精準的那組；這場沒設定（或根本還沒綁定任何
@@ -2868,7 +2877,7 @@ function looksLikeBareTopic(text) {
 // 不會有「這次生成得比較尷尬」的變數。認不出來的（絕大多數）維持原本流程，退回
 // composeFallbackReply()。
 //
-// ⚠️ 判準刻意收得很窄，只收「不可能是真的在問工研院四條路任何一條」的三類：天氣、
+// ⚠️ 判準刻意收得很窄，只收「不可能是真的在問工研院四條路任何一條」的幾類：天氣、
 // 告白／搭訕、問米亞的個性／自我介紹。範圍不能寫寬——寫寬了會有把真的技術題誤判成
 // 閒聊的風險，例如「溫度感測技術」不能被關鍵字誤中，所以這裡只收「天氣」本身，不收
 // 單獨的「溫度」。跟 looksLikeBareTopic() 同一個原則：寧可漏判、退回下面的智慧兜底，
@@ -2888,11 +2897,23 @@ const CHITCHAT_FLIRT_RE = /(我喜歡你|我喜歡妳|喜歡你|喜歡妳|愛你
 // 角色本身，才是這次回報真正要接住的問題。
 const CHITCHAT_PERSONA_RE = /(你的個性|妳的個性|你是什麼個性|妳是什麼個性|自我介紹|介紹.{0,4}你自己|介紹.{0,4}妳自己)/;
 
+// 批次 65 新增：稱讚／誇獎、問是不是 AI、關心用語——回報：「除了天氣告白問個性，
+// 也加入其他記者也可能問的場景」。三類都跟天氣／告白／問個性同一個判準：句子本身
+// 不可能對到工研院四條路任何一條，才收進來；範圍一樣收得很窄，避免誤傷真的提問。
+const CHITCHAT_COMPLIMENT_RE = /(你好聰明|妳好聰明|你好棒|妳好棒|你好厲害|妳好厲害|你真厲害|妳真厲害|你太厲害了|妳太厲害了|你好優秀|妳好優秀|你好可靠|妳好可靠)/;
+// 「你是AI嗎」不會跟 lib/menu.js 的 HELP_WHOAMI_RE 打架——那條錨定的是「你是誰／
+// 你是什麼」這種問法，不含「AI」「機器人」這幾個字，兩邊不會對同一句話有不同答案。
+const CHITCHAT_AI_IDENTITY_RE = /(你是不是ai|妳是不是ai|你是ai嗎|妳是ai嗎|你是不是機器人|妳是不是機器人|你是機器人嗎|妳是機器人嗎|你會不會被取代|妳會不會被取代|你會不會失業|妳會不會失業|你是真人嗎|妳是真人嗎)/i;
+const CHITCHAT_CARE_RE = /(辛苦了|你會累嗎|妳會累嗎|你累不累|妳累不累|你不用休息嗎|妳不用休息嗎|你要不要休息|妳要不要休息)/;
+
 function detectChitchat(text) {
   const s = String(text || '').trim();
   if (!s) return null;
   if (CHITCHAT_FLIRT_RE.test(s)) return 'flirt';
   if (CHITCHAT_PERSONA_RE.test(s)) return 'persona';
+  if (CHITCHAT_COMPLIMENT_RE.test(s)) return 'compliment';
+  if (CHITCHAT_AI_IDENTITY_RE.test(s)) return 'ai_identity';
+  if (CHITCHAT_CARE_RE.test(s)) return 'care';
   if (CHITCHAT_WEATHER_RE.test(s)) return 'weather';
   return null;
 }
@@ -2909,10 +2930,16 @@ function detectChitchat(text) {
 // 反而沒有人味。這支要找的不是「俚語 vs. 公文腔」這兩個極端，是中間那條線：不動用
 // 賭博／演藝圈黑話，但可以用「考考我」「不好意思」這種帶點表情、帶點溫度的日常口語，
 // 讓米亞聽起來像一個有個性的人，不是一支照規則寫死的罐頭訊息。
+//
+// 批次 65：新增稱讚、問是不是 AI、關心用語三類；問個性那句的收尾也再調一次——原本
+// 「其他的可能要麻煩你問別人囉」聽起來像在打發人，改成先致歉再指路，語氣更軟。
 const CHITCHAT_FIXED_REPLIES = {
   weather: '天氣預報我真的答不出來 🌤️ 不過換成記者會、產業趨勢、工研院技術，這幾個換我出馬就對了，你可以考考我！',
   flirt: '謝謝你這麼說，我有點不好意思 😳 不過把記者會、產業趨勢跟工研院技術這幾件事顧好，就是我最大的浪漫了——這幾類的問題儘管來問我。',
-  persona: '我是米亞，工研院的公關小特派 🙂 個性走直球型，想到什麼就講什麼，不拐彎抹角。平常最愛做的事就是幫記者把記者會內容、產業趨勢、工研院技術、媒體邀訪窗口這幾件事搞定，其他的可能要麻煩你問別人囉。'
+  persona: '我是米亞，工研院的公關小特派 🙂 個性走直球型，想到什麼就講什麼，不拐彎抹角。平常最愛做的事就是幫記者把記者會內容、產業趨勢、工研院技術、媒體邀訪窗口這幾件事搞定。如果超出我理解的問題，請見諒QQ，或是可以聯絡我的同事們為您解答:)',
+  compliment: '謝謝誇獎，我會繼續加油 💪 不過真正厲害的是工研院這些技術跟記者會內容，我只是負責幫你講清楚——這幾類的問題我最樂意接。',
+  ai_identity: '是啊，我是 AI 沒錯 😄 不過我這個 AI 比較專一，只認真做記者會、產業趨勢跟工研院技術這幾件事，這幾類的問題我最拿手。',
+  care: '謝謝你這麼貼心 😊 我是 AI 不會累，隨時都能幫你查記者會、產業趨勢跟工研院技術這幾件事，有需要儘管找我。'
 };
 
 // 任何 routeIntent() 判不出來的訊息最後都會走到這裡（1 對 1 的 handleUnbound()、
