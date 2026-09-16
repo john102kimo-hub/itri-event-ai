@@ -188,6 +188,17 @@ console.log('\n[7] buildReporterPrompt — 語音場次的問題要能用聽的'
   ok(heard.includes('最多兩句話') && heard.includes('不要條列'),
     '語音模式要求問題短、口語——問題一長，練到的是閱讀理解不是臨場反應');
   ok(heard.includes('新聞稿') && read.includes('新聞稿'), '兩種模式都保留「不准問索取素材」那段');
+
+  // ⚠️ 實測回報：語音場次的第一題吐出兩大段。上面寫了「最多兩句話」，底下的通用
+  // 開場卻要求「自我介紹＋說明採訪角度＋提問」三件事——兩條規則直接打架，模型選了
+  // 比較具體的開場那條。語音演練練的是臨場反應，題目一長，主管得先讀完一整段才
+  // 開得了口。開場指示因此也要分兩版。
+  ok(heard.includes('一句話自我介紹'), '語音版開場只要一句自我介紹');
+  ok(heard.includes('不要說明你的採訪角度') && heard.includes('不要鋪陳背景'),
+    '語音版明講不要鋪陳——這是跟「最多兩句話」打架的那三件事');
+  ok(!heard.includes('說明今天想深入了解的角度'),
+    '語音版沒有殘留書面版的開場指示（兩條並存就是上次出包的原因）');
+  ok(read.includes('說明今天想深入了解的角度'), '書面版的開場維持原樣，不受影響');
 }
 
 console.log('\n[8] formatSessionNote／parseVoiceCount — 作答方式寫進 note 欄');
@@ -223,6 +234,11 @@ console.log('\n[9] training.html — 前端結構（不會報錯的那種錯）'
     '有量音量並在沒聲音時當場提示——「按了錄音但沒收到聲音」不會自己報錯');
   ok(js.includes('spoken:') && js.includes('duration:'), '評分請求要帶上「這題是用講的、講了幾秒」');
 
+  // 實測回報：「伺服器的語音辨識沒有啟用」每一題都跳一次，佔兩行、把秒數擠掉
+  ok(js.includes('sttFallbackNoticed'), '「伺服器辨識沒啟用」整場只講一次');
+  ok(/head\.push\(note \|\|/.test(js) && /if \(pendingSeconds >= 1\.2\) head\.push/.test(js),
+    '秒數與長度評語不會被提示訊息蓋掉——那正是這場演練在練的東西');
+
   // ⚠️ 畫面上催他收尾的秒數，跟評分時用的標準必須是同一個數字。不一致的話，
   // 主管會看到自己「照著畫面準時收尾，卻被評語說超時」——而且兩邊都不會報錯。
   // 同 test/kb-limit.test.mjs 對前後台上限做的事。
@@ -246,6 +262,20 @@ console.log('\n[9] training.html — 前端結構（不會報錯的那種錯）'
     '沒收到聲音的警告要壓過時間提示——麥克風沒開比講太久嚴重');
   // 說明卡片在 body，不在 script 裡——這條要對整份 html 檢查
   ok(html.includes('30 秒到 1 分鐘內把重點講完'), '說明卡片一開始就講清楚這場在練什麼');
+
+  // ⚠️ iOS Safari 對 font-size 小於 16px 的輸入框，一 focus 就自動放大整個頁面，
+  // 而且**放大後不會自己縮回來**。主管回報的截圖就是這個：他在開始畫面點了一下
+  // 姓名欄（當時 0.9rem），整場訓練都在放大狀態下跑，header 被狀態列蓋住、進度條
+  // 左右被裁掉。CSS 上完全合法、桌面瀏覽器完全正常——又是一個不會報錯的錯。
+  const css = html.split('<style>')[1].split('</style>')[0];
+  for (const sel of ['#user-input', '#trainee-input', '#transcript-box']) {
+    const block = css.match(new RegExp(sel.replace('#', '#') + '\\s*\\{[^}]*\\}'));
+    const raw = block && block[0].match(/font-size:\s*([^;]+);/);
+    const val = raw ? raw[1].trim() : '';
+    const px = val.endsWith('rem') ? parseFloat(val) * 16 : parseFloat(val);
+    ok(Number.isFinite(px) && px >= 16,
+      `${sel} 的字級 ${val || '（未指定）'} 不小於 16px（小於就會觸發 iOS 自動放大，且縮不回來）`);
+  }
 }
 
 console.log(fails === 0 ? '\n全部通過 ✅' : `\n失敗 ${fails} 項 ❌`);
