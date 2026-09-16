@@ -227,7 +227,9 @@
 
   /* 音量條不是裝飾。「按了錄音但麥克風其實沒收到聲音」是這種介面最常見的失敗，
      而且失敗當下毫無徵兆——講完兩分鐘才發現整段是空的。這條會動，才代表真的錄到。 */
-  #level-track { flex: 1; height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; min-width: 40px; }
+  /* 寬螢幕上不要讓它拉滿整行：這條顯示的是「瞬間音量」，會跟著每個音節劇烈跳動，
+     一條 1000px 寬的東西在旁邊狂閃，反而會把注意力從計時器上拉走。 */
+  #level-track { flex: 0 1 200px; height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; min-width: 40px; }
   #level-fill { height: 100%; width: 0%; background: #0F9E7A; border-radius: 3px; transition: width 0.08s linear; }
   #rec-status.silent #level-fill { background: #f59e0b; }
   #rec-status.silent #rec-hint { color: #b45309; font-weight: 600; }
