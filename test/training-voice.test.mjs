@@ -15,6 +15,7 @@ import {
   scrubTranscript, decodeAudioPayload, describeSpeech, pickTranscribeEngine,
   buildTranscriptionHint, buildEvaluatePrompt, buildReporterPrompt,
   formatSessionNote, parseVoiceCount, MAX_AUDIO_BASE64,
+  speechZone, TARGET_MIN_SEC, TARGET_MAX_SEC, TOO_LONG_SEC,
 } from '../api/training.js';
 
 let fails = 0;
@@ -74,6 +75,25 @@ console.log('\n[3] describeSpeech — 講了多久、多少字、多快');
 
   ok(describeSpeech('嗯', 1).cpm === null, '不到 3 秒不算語速（樣本太短，算出來沒有意義）');
   ok(describeSpeech('測試', undefined).seconds === 0, '沒有秒數也不炸掉');
+}
+
+console.log('\n[3b] speechZone — 30 秒到 1 分鐘講完重點（本場的主要訓練目標）');
+{
+  ok(TARGET_MIN_SEC === 30 && TARGET_MAX_SEC === 60, '目標區間就是主管要求的 30 秒–1 分鐘');
+  ok(speechZone(29) === 'short', '29 秒 → 比目標短');
+  ok(speechZone(30) === 'target' && speechZone(60) === 'target', '30 與 60 秒都算達標（邊界含在內）');
+  ok(speechZone(61) === 'long', '61 秒 → 超過目標');
+  ok(speechZone(TOO_LONG_SEC) === 'long' && speechZone(TOO_LONG_SEC + 1) === 'toolong',
+    `${TOO_LONG_SEC} 秒是「偏長」與「太長」的分界`);
+  ok(speechZone(0) === '', '沒有秒數（打字作答）→ 不分區');
+
+  const d45 = describeSpeech('一'.repeat(150), 45);
+  ok(d45.zone === 'target' && d45.line.includes('落在目標'), '達標的那一題，描述裡講得出來');
+  const d100 = describeSpeech('一'.repeat(350), 100);
+  ok(d100.zone === 'toolong' && d100.line.includes('斷章取義'),
+    '講太久要講明後果——「挑哪一段的人不是他」才是真正的風險');
+  ok(describeSpeech('一'.repeat(40), 15).line.includes('若重點已經完整，這是好事'),
+    '講得短不等於講得差，描述不能寫成扣分理由');
 }
 
 console.log('\n[4] pickTranscribeEngine — 哪一家來轉寫');
@@ -144,6 +164,19 @@ console.log('\n[6] buildEvaluatePrompt — 口說要用口說的標準評');
   ok(spoken.includes('不因此扣分') || spoken.includes('一律不因此扣分'),
     '講明「同音錯字是機器聽錯、不是他講錯」——不寫清楚，主管會被扣一段莫名其妙的分');
   ok(spoken.includes('可直接引用的一句'), '語音模式要求挑出一句可以被記者直接剪出來用的話');
+
+  // ── 主管要求的 30 秒–1 分鐘，要真的變成一個評分項，不是只寫在說明卡片上 ──
+  ok(spoken.includes(`${TARGET_MIN_SEC} 秒到 ${TARGET_MAX_SEC} 秒內把重點講完`),
+    '把「30 秒到 1 分鐘講完重點」寫成硬性要求');
+  ok(spoken.includes('每一題都要講到'), '要求每一題的評語都要交代長度，不能有幾題漏掉');
+  ok(spoken.includes('本題長度：') && spoken.includes(`目標 ${TARGET_MIN_SEC}–${TARGET_MAX_SEC} 秒`),
+    '回覆格式裡有固定的一行講評長度，主管每題都看得到自己落在哪');
+  ok(spoken.includes(`能在 ${TARGET_MAX_SEC} 秒內講完的版本`),
+    '超時的時候，「更好的答法」要給一個真的講得完的版本，不是只說「請講短一點」');
+  ok(spoken.includes('不要建議他把話拉長'),
+    '⚠️ 要的是「60 秒內講完」不是「講滿 60 秒」——沒講清楚，訓練師會叫講太短的人多講一點');
+  ok(spoken.includes('不要因為「講太短」扣分'), '短而完整是好答案，不該被扣分');
+  ok(!written.includes('把重點講完'), '打字作答沒有秒數，不套這套時間標準');
 }
 
 console.log('\n[7] buildReporterPrompt — 語音場次的問題要能用聽的');
@@ -189,6 +222,30 @@ console.log('\n[9] training.html — 前端結構（不會報錯的那種錯）'
   ok(js.includes('peakLevel') && js.includes('幾乎沒收到聲音'),
     '有量音量並在沒聲音時當場提示——「按了錄音但沒收到聲音」不會自己報錯');
   ok(js.includes('spoken:') && js.includes('duration:'), '評分請求要帶上「這題是用講的、講了幾秒」');
+
+  // ⚠️ 畫面上催他收尾的秒數，跟評分時用的標準必須是同一個數字。不一致的話，
+  // 主管會看到自己「照著畫面準時收尾，卻被評語說超時」——而且兩邊都不會報錯。
+  // 同 test/kb-limit.test.mjs 對前後台上限做的事。
+  const feMin = Number(js.match(/const TARGET_MIN_SEC = (\d+)/)?.[1]);
+  const feMax = Number(js.match(/const TARGET_MAX_SEC = (\d+)/)?.[1]);
+  const feTooLong = Number(js.match(/const TOO_LONG_SEC = (\d+)/)?.[1]);
+  ok(feMin === TARGET_MIN_SEC, `前端的目標下限 ${feMin} = 後端的 ${TARGET_MIN_SEC}`);
+  ok(feMax === TARGET_MAX_SEC, `前端的目標上限 ${feMax} = 後端的 ${TARGET_MAX_SEC}`);
+  ok(feTooLong === TOO_LONG_SEC, `前端的「太長」門檻 ${feTooLong} = 後端的 ${TOO_LONG_SEC}`);
+
+  const feMaxRec = Number(js.match(/const MAX_REC_SECONDS = (\d+)/)?.[1]);
+  ok(feMaxRec > TARGET_MAX_SEC,
+    '錄音硬上限要留在目標之上——一到 60 秒就切掉，主管就練不到「自己收尾」這件事');
+
+  // 講完才被告知「你講太久」已經來不及了，要在講到 60 秒的當下就看得到
+  ok(js.includes('updateTimeZone') && js.includes('重點時間，可以準備收尾'),
+    '錄音中會依秒數換提示語（訓練師在旁邊比手勢的那個動作）');
+  ok(js.includes('zone-toolong') && js.includes('太長了，記者會抓不到重點'),
+    '講超過門檻時，計時器會變色並明講後果');
+  ok(js.includes("!status.classList.contains('silent')"),
+    '沒收到聲音的警告要壓過時間提示——麥克風沒開比講太久嚴重');
+  // 說明卡片在 body，不在 script 裡——這條要對整份 html 檢查
+  ok(html.includes('30 秒到 1 分鐘內把重點講完'), '說明卡片一開始就講清楚這場在練什麼');
 }
 
 console.log(fails === 0 ? '\n全部通過 ✅' : `\n失敗 ${fails} 項 ❌`);

@@ -233,6 +233,35 @@ export function scrubTranscript(raw) {
  * 語速的基準：中文口說每分鐘大約 200–260 字是自然的節奏。明顯偏慢多半是在
  * 猶豫、想詞；明顯偏快通常是緊張，記者的筆跟不上、也容易把話講糊。
  */
+// 每一題的目標長度：30 秒到 1 分鐘把重點講完。
+//
+// 這不是憑空訂的數字，是記者端的現實：電視新聞一則受訪片段只用得到 8–15 秒，
+// 平面記者要的是一句能下標的話。30 秒以下常常是重點還沒鋪完就收；超過 1 分鐘，
+// 記者開始挑不出要用哪一段，而**挑的人不是你**——最後被剪出去的，往往是主管
+// 最不想被放大的那句。所以上限比下限重要得多。
+export const TARGET_MIN_SEC = 30;
+export const TARGET_MAX_SEC = 60;
+export const TOO_LONG_SEC = 90;  // 過了這裡就不只是「偏長」，是幾乎一定會被斷章取義
+
+/**
+ * 這一段落在目標區間的哪裡。純粹回報事實，該扣多少分留給訓練師判斷——
+ * 一個 20 秒但精準完整的回答是好答案，不該因為「沒講滿 30 秒」被扣分。
+ */
+export function speechZone(seconds) {
+  if (!seconds) return '';
+  if (seconds < TARGET_MIN_SEC) return 'short';
+  if (seconds <= TARGET_MAX_SEC) return 'target';
+  if (seconds <= TOO_LONG_SEC) return 'long';
+  return 'toolong';
+}
+
+const ZONE_NOTE = {
+  short: `比目標（${TARGET_MIN_SEC}–${TARGET_MAX_SEC} 秒）短。若重點已經完整，這是好事；請確認他沒有漏掉關鍵資訊或數字`,
+  target: `落在目標的 ${TARGET_MIN_SEC}–${TARGET_MAX_SEC} 秒內`,
+  long: `超過目標上限 ${TARGET_MAX_SEC} 秒。記者從這裡開始挑不出要用哪一段`,
+  toolong: `明顯超過目標上限 ${TARGET_MAX_SEC} 秒。這個長度幾乎一定會被斷章取義，而挑哪一段的人不是他`,
+};
+
 export function describeSpeech(text, durationSec) {
   const chars = String(text || '').replace(/[\s\p{P}\p{S}]/gu, '').length;
   const seconds = Number.isFinite(Number(durationSec)) ? Math.max(0, Math.round(Number(durationSec))) : 0;
@@ -244,10 +273,13 @@ export function describeSpeech(text, durationSec) {
     else if (cpm > 340) pace = '偏快，容易讓記者跟不上、話講糊';
     else pace = '自然';
   }
+
+  const zone = speechZone(seconds);
   const line = seconds
-    ? `本題是用講的作答：講了約 ${seconds} 秒、約 ${chars} 字${cpm != null ? `，語速每分鐘約 ${cpm} 字（${pace}）` : ''}。`
+    ? `本題是用講的作答：講了約 ${seconds} 秒、約 ${chars} 字${cpm != null ? `，語速每分鐘約 ${cpm} 字（${pace}）` : ''}。\n`
+      + `長度：${ZONE_NOTE[zone]}。`
     : `本題是用講的作答：約 ${chars} 字。`;
-  return { chars, seconds, cpm, pace, line };
+  return { chars, seconds, cpm, pace, zone, line };
 }
 
 /**
@@ -531,11 +563,25 @@ export function buildEvaluatePrompt({ eventName, knowledgeBase, realQ = '', spee
 【這一題是「用講的」，請用口說的標準評 —— 不要用寫文章的標準】
 ${speech.line}
 
-口說多評這四項：
+【本場的硬性要求：每一題都要在 ${TARGET_MIN_SEC} 秒到 ${TARGET_MAX_SEC} 秒內把重點講完】
+這是這場演練最主要的訓練目標，請當成一個獨立的評分項，**每一題都要講到**：
+- 超過 ${TARGET_MAX_SEC} 秒：在「改進建議」第一條就直接點出來，寫清楚他講了幾秒、
+  哪一段是可以拿掉的（重複的鋪陳、第二次換句話說、背景交代過長），並且「建議更好
+  的答法」要給一個真的能在 ${TARGET_MAX_SEC} 秒內講完的版本，末尾標上大約幾秒。
+- 超過 ${TOO_LONG_SEC} 秒：這一項要明顯影響分數，不能只在建議裡輕描淡寫帶過。
+- 落在 ${TARGET_MIN_SEC}–${TARGET_MAX_SEC} 秒：在「優點」裡具體肯定這件事。
+- 不到 ${TARGET_MIN_SEC} 秒：不要因為「講太短」扣分——短而完整是好事。只要確認他
+  沒有漏掉關鍵的數字、時程或佐證；真的漏了才在建議裡補。
+
+⚠️ 要求的是「${TARGET_MAX_SEC} 秒內講完重點」，不是「講滿 ${TARGET_MAX_SEC} 秒」。
+不要建議他把話拉長。
+
+口說再多評這四項：
 1. 可引用性 — 台灣電視新聞一則受訪片段約 8–15 秒（約 30–60 字）。他這段話裡
    有沒有任何一句，單獨剪出來就能成立、而且是他希望被報的那一句？
 2. 結論先行 — 第一句就是記者的導言。鋪陳太久，前面那段不會被用到。
-3. 長度控制 — 太長記者剪不到重點、容易被斷章取義；太短則沒有內容可寫。
+3. 密度 — 在這個長度裡，有多少是實質資訊（數字、時程、對比、承諾），
+   有多少是可以拿掉也不影響意思的鋪陳。
 4. 贅詞與口頭禪 — 「嗯」「那個」「就是說」「然後」「基本上」出現得多不多。
 
 ⚠️ 這份回答是語音辨識轉成的逐字稿，專有名詞可能有同音錯字（例如「工研院」被
@@ -546,6 +592,8 @@ ${speech.line}
 被記者剪出來用的那一句，長度控制在 40 字以內。` : '';
 
   const quoteLine = speech ? `
+
+本題長度：${speech.seconds} 秒（目標 ${TARGET_MIN_SEC}–${TARGET_MAX_SEC} 秒）— （一句話講評，超時就說明該砍哪一段）
 
 可直接引用的一句：
 （40 字以內）` : '';

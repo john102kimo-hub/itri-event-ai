@@ -206,10 +206,24 @@
   }
   .link-btn:hover { color: var(--primary); }
 
-  #rec-status { display: flex; align-items: center; gap: 8px; font-size: 0.8rem; color: var(--muted); }
+  #rec-status { display: flex; flex-direction: column; gap: 4px; font-size: 0.8rem; color: var(--muted); }
+  .rec-row { display: flex; align-items: center; gap: 8px; }
   #rec-dot { width: 9px; height: 9px; border-radius: 50%; background: #dc2626; animation: pulse 1s infinite; flex-shrink: 0; }
   @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.25; } }
-  #rec-time { font-variant-numeric: tabular-nums; font-weight: 700; color: var(--text); }
+  #rec-time { font-variant-numeric: tabular-nums; font-weight: 700; color: var(--text); font-size: 0.95rem; }
+  #rec-target { font-size: 0.74rem; flex-shrink: 0; }
+  #rec-hint { font-size: 0.78rem; }
+
+  /* 講到第幾秒就換一次顏色與提示。真實媒體訓練師會在旁邊比手勢示意收尾，
+     這幾行就是那個手勢——事後在評語裡才被告知「你講太久了」，已經來不及了。 */
+  #rec-status.zone-target #rec-time { color: #0F9E7A; }
+  #rec-status.zone-target #rec-hint { color: #0F9E7A; font-weight: 600; }
+  #rec-status.zone-long #rec-time,
+  #rec-status.zone-long #rec-hint { color: #d97706; font-weight: 700; }
+  #rec-status.zone-toolong #rec-time,
+  #rec-status.zone-toolong #rec-hint { color: #dc2626; font-weight: 700; }
+  #rec-status.zone-long #level-fill { background: #d97706; }
+  #rec-status.zone-toolong #level-fill { background: #dc2626; }
 
   /* 音量條不是裝飾。「按了錄音但麥克風其實沒收到聲音」是這種介面最常見的失敗，
      而且失敗當下毫無徵兆——講完兩分鐘才發現整段是空的。這條會動，才代表真的錄到。 */
@@ -255,6 +269,7 @@
     display: block; margin-top: 5px;
     font-size: 0.72rem; opacity: 0.75;
   }
+  .msg.user .meta.over { opacity: 1; color: #fde68a; font-weight: 700; }
 
   /* 開始按鈕 */
   #start-area {
@@ -332,7 +347,7 @@
 
 <div id="info-card">
   <i class="ti ti-info-circle"></i>
-  <span>AI 將扮演犀利記者向您提問，<strong>直接用講的回答就好</strong>，不用打字。每題回答後 AI 會就您講的內容評分並給出建議，共進行 <strong>5 題</strong>。</span>
+  <span>AI 將扮演犀利記者向您提問，<strong>直接用講的回答就好</strong>，不用打字。每題請在 <strong>30 秒到 1 分鐘內把重點講完</strong>——這是記者真正用得到的長度。每題回答後 AI 會就您講的內容與長度評分。共 <strong>5 題</strong>。</span>
 </div>
 
 <div id="progress-bar">
@@ -363,10 +378,13 @@
       <button id="switch-to-type" class="link-btn" type="button">改用打字</button>
     </div>
     <div id="rec-status" style="display:none">
-      <span id="rec-dot"></span>
-      <span id="rec-time">0:00</span>
-      <div id="level-track"><div id="level-fill"></div></div>
-      <span id="rec-hint">收音中</span>
+      <div class="rec-row">
+        <span id="rec-dot"></span>
+        <span id="rec-time">0:00</span>
+        <span id="rec-target">目標 0:30–1:00</span>
+        <div id="level-track"><div id="level-fill"></div></div>
+      </div>
+      <div id="rec-hint">目標：1 分鐘內講完重點</div>
     </div>
     <div id="live-caption" style="display:none"></div>
     <div id="voice-note"></div>
@@ -433,8 +451,17 @@ let abandonRecording = false; // 錄到一半改用打字／重新開始：停�
 let pendingSeconds = 0;     // 待送出的這段講了幾秒
 let voiceAnswerCount = 0;   // 這場有幾題是用講的（寫進演練紀錄）
 
-const MAX_REC_SECONDS = 150;   // 單題上限 2 分半：再長音檔會逼近 Vercel 的請求上限，
-                               // 而且一個超過兩分半的回答，記者早就不會用了
+// 每一題的目標長度：30 秒到 1 分鐘把重點講完。
+// ⚠️ 這兩個數字要跟 api/training.js 的 TARGET_MIN_SEC／TARGET_MAX_SEC 一致——畫面上
+// 催他收尾的秒數，跟評分時用的標準不是同一個，主管會看到自己「準時收尾卻被說超時」。
+// test/training-voice.test.mjs 有一條在比對這件事（同 test/kb-limit.test.mjs 的做法）。
+const TARGET_MIN_SEC = 30;
+const TARGET_MAX_SEC = 60;
+const TOO_LONG_SEC = 90;
+
+const MAX_REC_SECONDS = 150;   // 硬上限 2 分半：再長音檔會逼近 Vercel 的請求上限。
+                               // 刻意留在目標值之上——讓講太久的人真的體驗到「太久」，
+                               // 而不是一到 60 秒就被切掉、練不到自己收尾
 const SILENT_PEAK = 0.02;      // 低於這個音量＝這段大概沒收到人聲
 
 // 受訓者姓名/職稱記在瀏覽器裡，下次直接帶出來——跟 event.html 記住記者媒體名稱
@@ -738,6 +765,37 @@ function fmtTime(sec) {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 }
 
+/** 這一段講到哪個區間了。切分方式跟 api/training.js 的 speechZone() 一樣。 */
+function zoneOf(sec) {
+  if (sec < TARGET_MIN_SEC) return 'short';
+  if (sec <= TARGET_MAX_SEC) return 'target';
+  if (sec <= TOO_LONG_SEC) return 'long';
+  return 'toolong';
+}
+
+// 講到第幾秒就換一次顏色跟提示語。這是這一版真正要求主管的事：不是講完之後
+// 在評語裡被告知「你講太久」，而是講到 60 秒的當下就看到催收尾的訊號——
+// 真實的媒體訓練師就是在旁邊比手勢，不是事後寫檢討報告。
+const ZONE_HINT = {
+  short: `目標：${TARGET_MAX_SEC / 60} 分鐘內講完重點`,
+  target: '重點時間，可以準備收尾了',
+  long: `已經超過 ${TARGET_MAX_SEC} 秒，請收尾`,
+  toolong: '太長了，記者會抓不到重點',
+};
+
+function updateTimeZone(sec) {
+  const status = document.getElementById('rec-status');
+  const zone = zoneOf(sec);
+  if (status.dataset.zone === zone) return;   // 只在跨區的那一刻動 DOM
+  status.dataset.zone = zone;
+  status.classList.remove('zone-short', 'zone-target', 'zone-long', 'zone-toolong');
+  status.classList.add('zone-' + zone);
+  // 沒收到聲音的警告優先，不要被時間提示蓋掉
+  if (!status.classList.contains('silent')) {
+    document.getElementById('rec-hint').textContent = ZONE_HINT[zone];
+  }
+}
+
 function showPane(name) {
   document.getElementById('voice-pane').style.display = name === 'voice' ? 'flex' : 'none';
   document.getElementById('confirm-pane').style.display = name === 'confirm' ? 'flex' : 'none';
@@ -922,14 +980,20 @@ async function startRecording() {
   status.style.display = 'flex';
   status.classList.remove('silent');
   document.getElementById('rec-time').textContent = '0:00';
-  document.getElementById('rec-hint').textContent = '收音中';
+  document.getElementById('rec-target').textContent =
+    `目標 ${fmtTime(TARGET_MIN_SEC)}–${fmtTime(TARGET_MAX_SEC)}`;
+  status.classList.remove('zone-short', 'zone-target', 'zone-long', 'zone-toolong');
+  delete status.dataset.zone;
+  updateTimeZone(0);
   document.getElementById('level-fill').style.width = '0%';
   setVoiceNote('');
 
   recTimer = setInterval(() => {
     const sec = (Date.now() - recStartedAt) / 1000;
     document.getElementById('rec-time').textContent = fmtTime(sec);
-    // 講了 5 秒還完全沒有音量＝十之八九麥克風沒收到，當下就要講，不要等他講完
+    updateTimeZone(sec);
+    // 講了 5 秒還完全沒有音量＝十之八九麥克風沒收到，當下就要講，不要等他講完。
+    // ⚠️ 這條要壓過時間提示：麥克風沒開，比講太久嚴重得多。
     if (sec > 5 && peakLevel < SILENT_PEAK) {
       status.classList.add('silent');
       document.getElementById('rec-hint').textContent = '幾乎沒收到聲音，請確認麥克風';
@@ -1038,9 +1102,16 @@ function showTranscript(text, note) {
   box.value = text || '';
   box.style.height = 'auto';
   box.style.height = Math.min(box.scrollHeight, 160) + 'px';
+  const zone = zoneOf(pendingSeconds);
+  const ZONE_TAIL = {
+    short: '，比目標短——重點講完就好，短不是問題',
+    target: `，落在目標 ${fmtTime(TARGET_MIN_SEC)}–${fmtTime(TARGET_MAX_SEC)} 內 👍`,
+    long: `，超過目標的 ${TARGET_MAX_SEC} 秒`,
+    toolong: `，比目標的 ${TARGET_MAX_SEC} 秒久了不少`,
+  };
   document.getElementById('confirm-head-text').textContent = note
     ? note
-    : `聽到的是這樣（講了 ${fmtTime(pendingSeconds)}），送出前可以直接改`;
+    : `聽到的是這樣（講了 ${fmtTime(pendingSeconds)}${ZONE_TAIL[zone] || ''}），送出前可以直接改`;
   document.getElementById('confirm-send-btn').disabled = !String(box.value).trim();
   box.focus();
 }
@@ -1112,7 +1183,11 @@ function addUserMsg(text, seconds) {
   el.className = 'msg user';
   // 講了多久是真實媒體訓練會看的數字（電視新聞一則受訪片段大約 8–15 秒），
   // 貼在自己的回答下面，比只寫在評語裡更有感。
-  const meta = seconds ? `<span class="meta"><i class="ti ti-microphone"></i> 用講的 · ${fmtTime(seconds)}</span>` : '';
+  const over = seconds > TARGET_MAX_SEC;
+  const meta = seconds
+    ? `<span class="meta${over ? ' over' : ''}"><i class="ti ti-microphone"></i> 用講的 · ${fmtTime(seconds)}`
+      + `${over ? `（超過目標 ${TARGET_MAX_SEC} 秒）` : ''}</span>`
+    : '';
   el.innerHTML = `
     <div class="avatar"><i class="ti ti-user"></i></div>
     <div class="bubble">${escHtml(text)}${meta}</div>`;
