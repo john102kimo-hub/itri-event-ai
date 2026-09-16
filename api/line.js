@@ -2853,6 +2853,43 @@ function looksLikeBareTopic(text) {
   return /^[一-鿿A-Za-z0-9]{2,8}$/.test(s) && !GREETING_RE.test(s) && !SENTENCE_RE.test(s);
 }
 
+// ── 風趣兜底：天氣／告白這種「連四條路都不用比」的閒聊（批次 62）───────────────
+// 回報：「有可能加入一些有趣風趣回答，讓他更有生命力嗎，不適合會造成混淆就算了」，
+// 附的兩張截圖是「天氣如何」「我喜歡你」——這兩句現在都會走到 composeFallbackReply()，
+// 讓 Haiku 現場生成一句貼題的話。
+//
+// 這支刻意**不**是去放寬 composeFallbackReply() 的 system prompt、讓模型自己抓「風趣」
+// 的分寸：那支的鐵規則（不能提供事實內容、不能假裝查過）是這個帳號敢用 AI 兜底的
+// 前提，放寬語氣限制等於同一個模型下一次可能抓錯分寸講出一句尷尬或失禮的話——跟
+// Markdown、簡體字踩過的坑同一個形狀（CLAUDE.md 第 2 節：這件事不能只靠 prompt）。
+//
+// 改成反過來：認得出「這句根本不是在問事情，是天氣／告白這種閒聊」的話，直接送出
+// 我們自己寫死、審過的一句俏皮話，連 Haiku 都不呼叫——風趣的部分完全在我們手上，
+// 不會有「這次生成得比較尷尬」的變數。認不出來的（絕大多數）維持原本流程，退回
+// composeFallbackReply()。
+//
+// ⚠️ 判準刻意收得很窄，只收「不可能是真的在問工研院四條路任何一條」的兩類：天氣、
+// 告白／搭訕。範圍不能寫寬——寫寬了會有把真的技術題誤判成閒聊的風險，例如「溫度
+// 感測技術」不能被關鍵字誤中，所以這裡只收「天氣」本身，不收單獨的「溫度」。跟
+// looksLikeBareTopic() 同一個原則：寧可漏判、退回下面的智慧兜底，也不要誤判。
+const CHITCHAT_WEATHER_RE = /(天氣|會不會下雨|會下雨嗎|放晴|颱風|會冷嗎|會熱嗎|會不會冷|會不會熱)/;
+const CHITCHAT_FLIRT_RE = /(我喜歡你|我喜歡妳|喜歡你|喜歡妳|愛你|愛妳|妳好可愛|你好可愛|妳好正|妳好漂亮|妳好美|嫁給我|娶我|妳單身嗎|你單身嗎|要不要交往|當我女朋友|當我男朋友)/;
+
+function detectChitchat(text) {
+  const s = String(text || '').trim();
+  if (!s) return null;
+  if (CHITCHAT_FLIRT_RE.test(s)) return 'flirt';
+  if (CHITCHAT_WEATHER_RE.test(s)) return 'weather';
+  return null;
+}
+
+// 兩句都經過人審——風趣但不離題，收尾都帶回這個帳號真的能幫上忙的事。這份文案就是
+// 「風趣」這件事唯一被允許存在的地方，不留給模型現場發揮（理由見上）。
+const CHITCHAT_FIXED_REPLIES = {
+  weather: '天氣這題我真的槓龜 🌤️ 我腦子裡裝的是記者會、產業趨勢跟工研院技術，氣象台的活還是要問對棚的人。要不要換個我答得出來的？',
+  flirt: '謝謝厚愛，不過我心裡只有記者會、產業趨勢跟工研院技術 😄 感情的事我幫不上忙，這幾題我可拿手多了。'
+};
+
 // 任何 routeIntent() 判不出來的訊息最後都會走到這裡（1 對 1 的 handleUnbound()、
 // 以及綁定中但連目前這場都接不上的情況）。
 //
@@ -2934,6 +2971,15 @@ async function composeFallbackReply(text) {
 async function sendFallbackGuide(replyToken, targetId, text, { staff = false } = {}) {
   const chips = staff ? STAFF_QUICK_REPLIES : ['最近有哪些活動', '產業趨勢分析', '想問什麼技術', CONTACT_MENU_LABEL, '使用說明'];
   const staffTail = staff ? '\n\n（您在職員模式，打「使用說明」可以看內部功能。）' : '';
+
+  // 天氣／告白這種閒聊：不呼叫 Haiku，直接送寫死的俏皮話（見上方 CHITCHAT_FIXED_REPLIES
+  // 的說明）。放在 looksLikeBareTopic 之前，因為裸主題詞判斷同樣會誤收「天氣」兩個字。
+  const chitchat = detectChitchat(text);
+  if (chitchat) {
+    await replyOrPush(replyToken, targetId, CHITCHAT_FIXED_REPLIES[chitchat] + staffTail, chips);
+    return;
+  }
+
   if (looksLikeBareTopic(text)) {
     const kw = String(text).trim();
     await replyOrPush(replyToken, targetId,
