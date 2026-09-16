@@ -177,6 +177,85 @@
   #send-btn:hover:not(:disabled) { background: #0a7a60; }
   #send-btn:disabled { background: var(--border); cursor: default; }
 
+  /* ── 語音作答 ──────────────────────────────────────────────── */
+  #input-area.voice { flex-direction: column; align-items: stretch; gap: 8px; }
+  #voice-pane, #confirm-pane, #type-pane { display: flex; flex-direction: column; gap: 8px; }
+  #type-pane { flex-direction: row; align-items: flex-end; gap: 10px; }
+
+  #mic-row { display: flex; align-items: center; gap: 10px; }
+  #mic-btn {
+    flex: 1;
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    border: none; border-radius: 12px;
+    background: #0F9E7A; color: white;
+    padding: 14px 20px;
+    font-family: var(--font); font-size: 1rem; font-weight: 700;
+    cursor: pointer; transition: background 0.2s;
+  }
+  #mic-btn:hover:not(:disabled) { background: #0a7a60; }
+  #mic-btn:disabled { background: var(--border); color: var(--muted); cursor: default; }
+  #mic-btn.recording { background: #dc2626; }
+  #mic-btn.recording:hover { background: #b91c1c; }
+  #mic-btn i { font-size: 20px; }
+
+  .link-btn {
+    background: none; border: none;
+    color: var(--muted); font-family: var(--font); font-size: 0.82rem;
+    text-decoration: underline; cursor: pointer; padding: 6px 2px;
+    flex-shrink: 0;
+  }
+  .link-btn:hover { color: var(--primary); }
+
+  #rec-status { display: flex; align-items: center; gap: 8px; font-size: 0.8rem; color: var(--muted); }
+  #rec-dot { width: 9px; height: 9px; border-radius: 50%; background: #dc2626; animation: pulse 1s infinite; flex-shrink: 0; }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.25; } }
+  #rec-time { font-variant-numeric: tabular-nums; font-weight: 700; color: var(--text); }
+
+  /* 音量條不是裝飾。「按了錄音但麥克風其實沒收到聲音」是這種介面最常見的失敗，
+     而且失敗當下毫無徵兆——講完兩分鐘才發現整段是空的。這條會動，才代表真的錄到。 */
+  #level-track { flex: 1; height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; min-width: 40px; }
+  #level-fill { height: 100%; width: 0%; background: #0F9E7A; border-radius: 3px; transition: width 0.08s linear; }
+  #rec-status.silent #level-fill { background: #f59e0b; }
+  #rec-status.silent #rec-hint { color: #b45309; font-weight: 600; }
+
+  #live-caption {
+    background: #f9fafb; border: 1px dashed var(--border); border-radius: 10px;
+    padding: 9px 12px; font-size: 0.86rem; line-height: 1.6; color: var(--muted);
+    max-height: 90px; overflow-y: auto;
+  }
+
+  #confirm-pane .confirm-head {
+    font-size: 0.8rem; color: var(--primary); font-weight: 600;
+    display: flex; align-items: center; gap: 5px;
+  }
+  #transcript-box {
+    border: 1.5px solid #0F9E7A; border-radius: 10px;
+    padding: 10px 14px;
+    font-family: var(--font); font-size: 16px; line-height: 1.6;
+    resize: none; overflow-y: auto; max-height: 160px; outline: none;
+  }
+  .confirm-actions { display: flex; gap: 8px; }
+  .confirm-actions button {
+    border-radius: 10px; padding: 11px 16px;
+    font-family: var(--font); font-size: 0.9rem; font-weight: 700;
+    cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px;
+    border: none; transition: background 0.2s;
+  }
+  #redo-btn { background: white; border: 1.5px solid var(--border); color: var(--muted); }
+  #redo-btn:hover { border-color: var(--primary); color: var(--primary); }
+  #confirm-send-btn { flex: 1; background: #0F9E7A; color: white; }
+  #confirm-send-btn:hover:not(:disabled) { background: #0a7a60; }
+  #confirm-send-btn:disabled { background: var(--border); cursor: default; }
+
+  #voice-note { font-size: 0.78rem; color: var(--muted); line-height: 1.5; }
+  #voice-note.warn { color: #b45309; }
+
+  /* 作答方式標記（貼在使用者泡泡下面，讓人看得出這題是講的還是打的） */
+  .msg.user .meta {
+    display: block; margin-top: 5px;
+    font-size: 0.72rem; opacity: 0.75;
+  }
+
   /* 開始按鈕 */
   #start-area {
     padding: 16px; display: flex; flex-direction: column; align-items: center; gap: 10px;
@@ -253,7 +332,7 @@
 
 <div id="info-card">
   <i class="ti ti-info-circle"></i>
-  <span>AI 將扮演犀利記者向您提問，請盡量以發言人角色回答。每題回答後 AI 會評分並給出建議，共進行 <strong>5 題</strong>。</span>
+  <span>AI 將扮演犀利記者向您提問，<strong>直接用講的回答就好</strong>，不用打字。每題回答後 AI 會就您講的內容評分並給出建議，共進行 <strong>5 題</strong>。</span>
 </div>
 
 <div id="progress-bar">
@@ -274,9 +353,42 @@
   </button>
 </div>
 
-<div id="input-area" style="display:none">
-  <textarea id="user-input" rows="1" placeholder="輸入您的回答…（Enter 送出，Shift+Enter 換行）" disabled></textarea>
-  <button id="send-btn" disabled><i class="ti ti-send"></i></button>
+<div id="input-area" class="voice" style="display:none">
+  <!-- ① 語音作答（預設）：按一下開始講，再按一下停止 -->
+  <div id="voice-pane">
+    <div id="mic-row">
+      <button id="mic-btn" type="button" disabled>
+        <i class="ti ti-microphone"></i><span id="mic-label">按一下開始講</span>
+      </button>
+      <button id="switch-to-type" class="link-btn" type="button">改用打字</button>
+    </div>
+    <div id="rec-status" style="display:none">
+      <span id="rec-dot"></span>
+      <span id="rec-time">0:00</span>
+      <div id="level-track"><div id="level-fill"></div></div>
+      <span id="rec-hint">收音中</span>
+    </div>
+    <div id="live-caption" style="display:none"></div>
+    <div id="voice-note"></div>
+  </div>
+
+  <!-- ② 逐字稿確認：辨識一定會有錯字，送出前一定要讓主管自己改 -->
+  <div id="confirm-pane" style="display:none">
+    <div class="confirm-head"><i class="ti ti-ear"></i> <span id="confirm-head-text">聽到的是這樣，送出前可以直接改</span></div>
+    <textarea id="transcript-box" rows="3"></textarea>
+    <div class="confirm-actions">
+      <button id="redo-btn" type="button"><i class="ti ti-refresh"></i> 重錄</button>
+      <button id="confirm-send-btn" type="button"><i class="ti ti-send"></i> 送出作答</button>
+    </div>
+  </div>
+
+  <!-- ③ 打字作答：永遠留著這條路。麥克風壞了、在開放空間不方便講、辨識一直失敗，
+       都得有辦法把這場練完。 -->
+  <div id="type-pane" style="display:none">
+    <textarea id="user-input" rows="1" placeholder="輸入您的回答…（Enter 送出，Shift+Enter 換行）" disabled></textarea>
+    <button id="send-btn" disabled><i class="ti ti-send"></i></button>
+    <button id="switch-to-voice" class="link-btn" type="button">改用講的</button>
+  </div>
 </div>
 
 <div id="end-screen">
@@ -305,6 +417,26 @@ let eventName = '工研院活動';
 // 中途離開的不算一場，見 startTraining()／submitAnswer() 裡的說明。
 let sessionScores = [];
 
+// ── 語音作答狀態 ─────────────────────────────────────────────────────
+// 'voice' | 'type'。記在瀏覽器裡，下次進來維持上次的選擇——在開放空間不方便
+// 講話的人，不該每一題都要重按一次「改用打字」。
+const ANSWER_MODE_LS_KEY = 'itri_training_answer_mode';
+let answerMode = 'voice';
+let recording = false;
+let mediaRecorder = null, mediaStream = null, audioCtx = null, analyser = null;
+let recChunks = [], recStartedAt = 0, recTimer = null, levelRaf = null, autoStopTimer = null;
+// 整段錄音看到的最大音量。麥克風被系統靜音時，MediaRecorder 一樣會乖乖產出一個
+// 「有長度但整段是無聲」的檔案，不會報錯——只能自己量。
+let peakLevel = 0;
+let speechRec = null, liveFinal = '', liveInterim = '';
+let abandonRecording = false; // 錄到一半改用打字／重新開始：停下來就好，不要跳確認畫面
+let pendingSeconds = 0;     // 待送出的這段講了幾秒
+let voiceAnswerCount = 0;   // 這場有幾題是用講的（寫進演練紀錄）
+
+const MAX_REC_SECONDS = 150;   // 單題上限 2 分半：再長音檔會逼近 Vercel 的請求上限，
+                               // 而且一個超過兩分半的回答，記者早就不會用了
+const SILENT_PEAK = 0.02;      // 低於這個音量＝這段大概沒收到人聲
+
 // 受訓者姓名/職稱記在瀏覽器裡，下次直接帶出來——跟 event.html 記住記者媒體名稱
 // 同一招。純粹方便，不是必填；localStorage 讀不到就當作沒填過，不影響流程。
 const TRAINEE_LS_KEY = 'itri_trainee_name';
@@ -318,6 +450,17 @@ function rememberTrainee(v) {
 async function init() {
   // 設定返回連結
   document.getElementById('back-link').href = '/';
+
+  // 作答方式：沿用上次的選擇；這台機器根本錄不了音就直接退回打字，不要讓人
+  // 按了麥克風才發現不能用。
+  let saved = 'voice';
+  try { saved = localStorage.getItem(ANSWER_MODE_LS_KEY) || 'voice'; } catch (e) {}
+  if (!canRecord()) {
+    setAnswerMode('type', false);
+    setVoiceNote('這個瀏覽器（或非 HTTPS 連線）不支援錄音，已改用打字。', true);
+  } else {
+    setAnswerMode(saved, false);
+  }
 
   const prevTrainee = rememberedTrainee();
   if (prevTrainee) document.getElementById('trainee-input').value = prevTrainee;
@@ -428,6 +571,8 @@ document.getElementById('restart-btn').addEventListener('click', () => {
   reporterHist = [];
   questionCount = 0;
   sessionScores = [];
+  voiceAnswerCount = 0;
+  if (recording) stopRecording(true); else cleanupRecording();
   document.getElementById('messages').innerHTML = '';
   document.getElementById('end-avg').textContent = '';
   document.getElementById('end-screen').style.display = 'none';
@@ -438,6 +583,7 @@ document.getElementById('restart-btn').addEventListener('click', () => {
 
 async function startTraining() {
   sessionScores = [];
+  voiceAnswerCount = 0;
   rememberTrainee(document.getElementById('trainee-input').value.trim());
   document.getElementById('start-area').style.display = 'none';
   document.getElementById('input-area').style.display = 'flex';
@@ -447,8 +593,7 @@ async function startTraining() {
 async function askNextQuestion() {
   isWaiting = true;
   awaitingAnswer = false;
-  document.getElementById('user-input').disabled = true;
-  document.getElementById('send-btn').disabled = true;
+  lockAnswering();
 
   showTyping('reporter');
 
@@ -460,6 +605,7 @@ async function askNextQuestion() {
         messages: reporterHist,
         event_id: eventId,
         mode: 'reporter',
+        spoken: answerMode === 'voice',
         code: TRAINING_CODE || undefined,
         password: TRAINING_PWD || undefined
       })
@@ -474,11 +620,7 @@ async function askNextQuestion() {
     questionCount++;
     updateProgress();
 
-    // 開放使用者回答
-    document.getElementById('user-input').disabled = false;
-    document.getElementById('user-input').focus();
-    document.getElementById('send-btn').disabled = false;
-    awaitingAnswer = true;
+    enableAnswering();
   } catch(e) {
     removeTyping();
     addSystemMsg('連線錯誤，請重新整理後再試。');
@@ -487,19 +629,26 @@ async function askNextQuestion() {
   isWaiting = false;
 }
 
-async function submitAnswer() {
+/**
+ * 送出一題的回答。
+ * @param {string} [rawText] 回答內容；省略就從打字框拿（打字模式）
+ * @param {number} [seconds] 用講的時候，這段講了幾秒——評分要用
+ * @param {boolean} [viaVoice] 這題是不是用講的
+ */
+async function submitAnswer(rawText, seconds = 0, viaVoice = false) {
   if (isWaiting || !awaitingAnswer) return;
-  const ans = document.getElementById('user-input').value.trim();
+  const typeBox = document.getElementById('user-input');
+  const ans = String(rawText ?? typeBox.value).trim();
   if (!ans) return;
 
-  document.getElementById('user-input').value = '';
-  document.getElementById('user-input').style.height = 'auto';
-  document.getElementById('user-input').disabled = true;
-  document.getElementById('send-btn').disabled = true;
+  typeBox.value = '';
+  typeBox.style.height = 'auto';
+  lockAnswering();
   awaitingAnswer = false;
   isWaiting = true;
+  if (viaVoice) voiceAnswerCount++;
 
-  addUserMsg(ans);
+  addUserMsg(ans, viaVoice ? seconds : 0);
   reporterHist.push({ role: 'user', content: ans });
 
   // 評分
@@ -513,6 +662,8 @@ async function submitAnswer() {
         messages: reporterHist,
         event_id: eventId,
         mode: 'evaluate',
+        spoken: viaVoice,
+        duration: viaVoice ? seconds : undefined,
         code: TRAINING_CODE || undefined,
         password: TRAINING_PWD || undefined
       })
@@ -560,10 +711,7 @@ async function submitAnswer() {
       questionCount++;
       updateProgress();
 
-      document.getElementById('user-input').disabled = false;
-      document.getElementById('user-input').focus();
-      document.getElementById('send-btn').disabled = false;
-      awaitingAnswer = true;
+      enableAnswering();
     }
   } catch(e) {
     removeTyping();
@@ -571,6 +719,342 @@ async function submitAnswer() {
   }
 
   isWaiting = false;
+}
+
+// ── 語音作答 ─────────────────────────────────────────────────────────
+// 主管的原話：「真實記者會上沒有人在打字」。這一段負責把「按一下講、再按一下停」
+// 變成一份逐字稿，交給 submitAnswer() 送去評分。
+//
+// 三層退路，任何一層垮掉都還練得完這一場：
+//   ① 錄音上傳後端轉寫（品質最好，專有名詞會用活動知識庫當提示）
+//   ② 後端沒設定 STT／轉寫失敗 → 用瀏覽器邊講邊出的即時辨識結果頂上
+//   ③ 麥克風根本拿不到（沒權限、沒裝置、不是 HTTPS）→ 退回打字，並說清楚原因
+//
+// ⚠️ 不管哪一層，逐字稿都會先攤在主管眼前讓他改過再送出。辨識一定會有錯字，
+// 尤其是專有名詞；沒得改的話，他會看到 AI 在評一段他沒講過的話。
+
+function fmtTime(sec) {
+  const s = Math.max(0, Math.round(sec));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
+
+function showPane(name) {
+  document.getElementById('voice-pane').style.display = name === 'voice' ? 'flex' : 'none';
+  document.getElementById('confirm-pane').style.display = name === 'confirm' ? 'flex' : 'none';
+  document.getElementById('type-pane').style.display = name === 'type' ? 'flex' : 'none';
+}
+
+function setVoiceNote(text, warn) {
+  const el = document.getElementById('voice-note');
+  el.textContent = text || '';
+  el.className = warn ? 'warn' : '';
+}
+
+/** 瀏覽器到底能不能錄音。非 HTTPS 時 navigator.mediaDevices 根本不存在。 */
+function canRecord() {
+  return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.MediaRecorder);
+}
+
+// MediaRecorder 各家吃的格式不一樣：Chrome／Edge／Android 給 webm（opus），
+// Safari／iOS 給 mp4（aac）。挑第一個這台機器真的支援的，挑不到就讓瀏覽器自己決定。
+function pickRecMime() {
+  const prefer = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg;codecs=opus'];
+  for (const t of prefer) {
+    try { if (window.MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(t)) return t; } catch (e) {}
+  }
+  return '';
+}
+
+function setAnswerMode(mode, remember = true) {
+  answerMode = mode === 'type' ? 'type' : 'voice';
+  if (remember) { try { localStorage.setItem(ANSWER_MODE_LS_KEY, answerMode); } catch (e) {} }
+  showPane(answerMode === 'voice' ? 'voice' : 'type');
+  if (awaitingAnswer) enableAnswering();
+}
+
+/** 這一題可以作答了：依目前模式打開麥克風按鈕或打字框。 */
+function enableAnswering() {
+  awaitingAnswer = true;
+  if (answerMode === 'voice') {
+    showPane('voice');
+    const btn = document.getElementById('mic-btn');
+    btn.disabled = false;
+    btn.classList.remove('recording');
+    document.getElementById('mic-label').textContent = '按一下開始講';
+    document.getElementById('rec-status').style.display = 'none';
+    document.getElementById('live-caption').style.display = 'none';
+  } else {
+    showPane('type');
+    const box = document.getElementById('user-input');
+    box.disabled = false;
+    box.focus();
+    document.getElementById('send-btn').disabled = false;
+  }
+}
+
+/** 送出之後、AI 還在想的時候：把所有作答入口關起來，免得重複送出。 */
+function lockAnswering() {
+  document.getElementById('mic-btn').disabled = true;
+  document.getElementById('mic-btn').classList.remove('recording');
+  document.getElementById('user-input').disabled = true;
+  document.getElementById('send-btn').disabled = true;
+  document.getElementById('rec-status').style.display = 'none';
+  document.getElementById('live-caption').style.display = 'none';
+  setVoiceNote('');
+  showPane(answerMode === 'voice' ? 'voice' : 'type');
+}
+
+// ── 瀏覽器即時辨識（只當作視覺回饋＋後端轉寫失敗時的備胎）────────────
+function setupSpeechRecognition() {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) return null;
+  try {
+    const rec = new SR();
+    rec.lang = 'zh-TW';
+    rec.continuous = true;
+    rec.interimResults = true;
+    rec.onresult = (e) => {
+      liveInterim = '';
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const t = e.results[i][0].transcript;
+        if (e.results[i].isFinal) liveFinal += t;
+        else liveInterim += t;
+      }
+      const cap = document.getElementById('live-caption');
+      cap.style.display = 'block';
+      cap.textContent = (liveFinal + liveInterim) || '（聽著…）';
+      cap.scrollTop = cap.scrollHeight;
+    };
+    // ⚠️ Chrome 講到一半停頓幾秒就會自己 onend，continuous=true 也擋不住。
+    // 還在錄音的話要馬上接回去，不然後半段整個不見。
+    rec.onend = () => { if (recording) { try { rec.start(); } catch (e) {} } };
+    rec.onerror = () => {}; // 辨識掛掉不影響錄音，後端轉寫才是主力
+    return rec;
+  } catch (e) { return null; }
+}
+
+// ── 音量監測 ─────────────────────────────────────────────────────────
+// 「按了錄音但其實沒收到聲音」是這種介面最典型的失敗：系統把麥克風靜音了、
+// 選到一支沒接的裝置，MediaRecorder 照樣產出一個有長度、內容全空的檔案，
+// 完全不會報錯。畫面上那條會動的量表，就是唯一的徵兆。
+function monitorLevel(stream) {
+  try {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    audioCtx = new Ctx();
+    const src = audioCtx.createMediaStreamSource(stream);
+    analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 512;
+    src.connect(analyser);
+    const buf = new Uint8Array(analyser.fftSize);
+
+    const tick = () => {
+      if (!recording || !analyser) return;
+      analyser.getByteTimeDomainData(buf);
+      let sum = 0;
+      for (let i = 0; i < buf.length; i++) { const v = (buf[i] - 128) / 128; sum += v * v; }
+      const rms = Math.sqrt(sum / buf.length);
+      if (rms > peakLevel) peakLevel = rms;
+      document.getElementById('level-fill').style.width = Math.min(100, rms * 320) + '%';
+      levelRaf = requestAnimationFrame(tick);
+    };
+    tick();
+  } catch (e) { /* 量不到就算了，不影響錄音本身 */ }
+}
+
+async function startRecording() {
+  if (recording || isWaiting || !awaitingAnswer) return;
+
+  if (!canRecord()) {
+    setAnswerMode('type');
+    addSystemMsg(location.protocol === 'https:' || location.hostname === 'localhost'
+      ? '這個瀏覽器不支援錄音，已改用打字作答。'
+      : '錄音需要 HTTPS 才能使用，已改用打字作答。');
+    return;
+  }
+
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+    });
+  } catch (err) {
+    const denied = err && (err.name === 'NotAllowedError' || err.name === 'SecurityError');
+    setAnswerMode('type');
+    addSystemMsg(denied
+      ? '瀏覽器擋住了麥克風權限。請在網址列左邊的圖示允許麥克風後重試，先用打字也可以。'
+      : '找不到可以用的麥克風，已改用打字作答。');
+    return;
+  }
+
+  mediaStream = stream;
+  recChunks = [];
+  peakLevel = 0;
+  liveFinal = '';
+  liveInterim = '';
+  recStartedAt = Date.now();
+  recording = true;
+
+  const mime = pickRecMime();
+  try {
+    mediaRecorder = new MediaRecorder(stream, mime ? { mimeType: mime, audioBitsPerSecond: 32000 } : undefined);
+  } catch (e) {
+    mediaRecorder = new MediaRecorder(stream);
+  }
+  mediaRecorder.ondataavailable = (e) => { if (e.data && e.data.size) recChunks.push(e.data); };
+  mediaRecorder.onstop = () => {
+    const seconds = (Date.now() - recStartedAt) / 1000;
+    const type = (mediaRecorder && mediaRecorder.mimeType) || mime || 'audio/webm';
+    const blob = recChunks.length ? new Blob(recChunks, { type }) : null;
+    cleanupRecording();
+    finishRecording(blob, type, seconds);
+  };
+  mediaRecorder.start(1000); // 每秒切一塊，長回答也不會整段卡在記憶體裡
+
+  speechRec = setupSpeechRecognition();
+  if (speechRec) { try { speechRec.start(); } catch (e) {} }
+  monitorLevel(stream);
+
+  // UI：進入錄音中
+  const btn = document.getElementById('mic-btn');
+  btn.classList.add('recording');
+  document.getElementById('mic-label').textContent = '講完了，按這裡停止';
+  const status = document.getElementById('rec-status');
+  status.style.display = 'flex';
+  status.classList.remove('silent');
+  document.getElementById('rec-time').textContent = '0:00';
+  document.getElementById('rec-hint').textContent = '收音中';
+  document.getElementById('level-fill').style.width = '0%';
+  setVoiceNote('');
+
+  recTimer = setInterval(() => {
+    const sec = (Date.now() - recStartedAt) / 1000;
+    document.getElementById('rec-time').textContent = fmtTime(sec);
+    // 講了 5 秒還完全沒有音量＝十之八九麥克風沒收到，當下就要講，不要等他講完
+    if (sec > 5 && peakLevel < SILENT_PEAK) {
+      status.classList.add('silent');
+      document.getElementById('rec-hint').textContent = '幾乎沒收到聲音，請確認麥克風';
+    }
+  }, 250);
+
+  autoStopTimer = setTimeout(() => {
+    if (recording) {
+      setVoiceNote(`單題錄音上限 ${Math.round(MAX_REC_SECONDS / 60 * 10) / 10} 分鐘，已自動停止。`, true);
+      stopRecording();
+    }
+  }, MAX_REC_SECONDS * 1000);
+}
+
+function stopRecording(abandon = false) {
+  if (!recording) return;
+  abandonRecording = !!abandon;
+  recording = false;
+  try { if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop(); } catch (e) {}
+  document.getElementById('mic-btn').classList.remove('recording');
+  document.getElementById('mic-btn').disabled = true;
+  document.getElementById('mic-label').textContent = '辨識中…';
+}
+
+/** 錄音相關資源一律收乾淨——麥克風沒關掉，分頁上的紅點會一直亮著。 */
+function cleanupRecording() {
+  clearInterval(recTimer); recTimer = null;
+  clearTimeout(autoStopTimer); autoStopTimer = null;
+  if (levelRaf) { cancelAnimationFrame(levelRaf); levelRaf = null; }
+  if (speechRec) { try { speechRec.stop(); } catch (e) {} speechRec = null; }
+  if (analyser) { try { analyser.disconnect(); } catch (e) {} analyser = null; }
+  if (audioCtx) { try { audioCtx.close(); } catch (e) {} audioCtx = null; }
+  if (mediaStream) { mediaStream.getTracks().forEach((t) => { try { t.stop(); } catch (e) {} }); mediaStream = null; }
+  document.getElementById('rec-status').style.display = 'none';
+}
+
+function blobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => resolve(String(fr.result).split(',')[1] || '');
+    fr.onerror = reject;
+    fr.readAsDataURL(blob);
+  });
+}
+
+/** 把音檔丟給後端轉寫。回 { text, note } —— note 是要讓主管知道的狀況說明。 */
+async function transcribeBlob(blob, mime) {
+  const audio = await blobToBase64(blob);
+  const res = await fetch('/api/training', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      mode: 'transcribe',
+      event_id: eventId,
+      audio,
+      mime,
+      code: TRAINING_CODE || undefined,
+      password: TRAINING_PWD || undefined,
+    }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (res.ok && data.text) return { text: data.text };
+  if (res.ok && data.empty) return { text: '', note: '這段錄音裡沒有聽到說話的內容。' };
+  // fallback 代表後端沒設定轉寫服務或轉寫壞了——瀏覽器邊講邊出的那份頂上來，
+  // 讓主管不用重講一次。品質會差一點，所以要講清楚為什麼。
+  if (data.fallback === 'browser') return { text: '', note: '伺服器的語音辨識沒有啟用，以下是瀏覽器聽到的版本，請確認一下。' };
+  return { text: '', note: data.error || '語音辨識失敗，請確認內容或改用打字。' };
+}
+
+async function finishRecording(blob, mime, seconds) {
+  // 使用者自己中斷的（改用打字、重新開始一場），就到此為止——這段錄音不送去
+  // 辨識，也不要跳出確認畫面蓋掉他剛切過去的介面。
+  if (abandonRecording) { abandonRecording = false; return; }
+  pendingSeconds = seconds;
+  const live = (liveFinal + liveInterim).trim();
+
+  let text = '';
+  let note = '';
+
+  if (seconds < 1.2) {
+    note = '這段太短了（不到 1 秒），請按「重錄」再講一次。';
+  } else if (blob && blob.size > 2000) {
+    try {
+      const r = await transcribeBlob(blob, mime);
+      text = r.text || '';
+      note = r.note || '';
+    } catch (e) {
+      note = '語音辨識連線失敗，以下是瀏覽器聽到的版本，請確認一下。';
+    }
+  } else {
+    note = '沒有錄到聲音，請確認麥克風後重錄。';
+  }
+
+  // 後端沒給逐字稿就用瀏覽器那份；兩份都沒有就留空框讓他自己補或重錄——
+  // 卡在這裡不給任何出路，才是最糟的情況。
+  if (!text && live) { text = live; if (!note) note = '以下是瀏覽器聽到的版本，請確認一下。'; }
+  if (!text && peakLevel < SILENT_PEAK && seconds >= 1.2) {
+    note = '整段幾乎沒有音量，麥克風可能沒有開。請按「重錄」，或直接在下面打字。';
+  }
+  showTranscript(text, note);
+}
+
+function showTranscript(text, note) {
+  showPane('confirm');
+  const box = document.getElementById('transcript-box');
+  box.value = text || '';
+  box.style.height = 'auto';
+  box.style.height = Math.min(box.scrollHeight, 160) + 'px';
+  document.getElementById('confirm-head-text').textContent = note
+    ? note
+    : `聽到的是這樣（講了 ${fmtTime(pendingSeconds)}），送出前可以直接改`;
+  document.getElementById('confirm-send-btn').disabled = !String(box.value).trim();
+  box.focus();
+}
+
+function sendTranscript() {
+  const text = document.getElementById('transcript-box').value.trim();
+  if (!text) return;
+  submitAnswer(text, pendingSeconds, true);
+}
+
+function redoRecording() {
+  document.getElementById('transcript-box').value = '';
+  pendingSeconds = 0;
+  enableAnswering();
 }
 
 // 訓練走到終畫面才呼叫（見 submitAnswer() 裡 questionCount >= MAX_Q 那段）——中途
@@ -588,13 +1072,15 @@ async function logSession() {
         event_id: eventId,
         trainee: document.getElementById('trainee-input').value.trim(),
         scores: sessionScores,
+        voice_answers: voiceAnswerCount,
         code: TRAINING_CODE || undefined,
         password: TRAINING_PWD || undefined
       })
     });
     const data = await res.json();
     if (data.success && data.avg_score !== '' && data.avg_score != null) {
-      document.getElementById('end-avg').textContent = `本次平均分：${data.avg_score} / 10`;
+      const via = voiceAnswerCount ? `（${voiceAnswerCount} / ${sessionScores.length} 題用講的）` : '';
+      document.getElementById('end-avg').textContent = `本次平均分：${data.avg_score} / 10 ${via}`.trim();
     }
   } catch(e) {
     console.error('訓練紀錄寫入失敗（不影響剛剛的訓練結果）:', e);
@@ -621,12 +1107,15 @@ function addReporterMsg(text) {
   el.scrollIntoView({ behavior: 'smooth', block: 'end' });
 }
 
-function addUserMsg(text) {
+function addUserMsg(text, seconds) {
   const el = document.createElement('div');
   el.className = 'msg user';
+  // 講了多久是真實媒體訓練會看的數字（電視新聞一則受訪片段大約 8–15 秒），
+  // 貼在自己的回答下面，比只寫在評語裡更有感。
+  const meta = seconds ? `<span class="meta"><i class="ti ti-microphone"></i> 用講的 · ${fmtTime(seconds)}</span>` : '';
   el.innerHTML = `
     <div class="avatar"><i class="ti ti-user"></i></div>
-    <div class="bubble">${escHtml(text)}</div>`;
+    <div class="bubble">${escHtml(text)}${meta}</div>`;
   document.getElementById('messages').appendChild(el);
   el.scrollIntoView({ behavior: 'smooth', block: 'end' });
 }
@@ -671,6 +1160,29 @@ function showTyping(type) {
 function removeTyping() {
   document.getElementById('typing')?.remove();
 }
+
+// ── 語音作答的事件綁定 ──────────────────────────────────────────────
+document.getElementById('mic-btn').addEventListener('click', () => {
+  if (recording) stopRecording(); else startRecording();
+});
+document.getElementById('switch-to-type').addEventListener('click', () => {
+  if (recording) stopRecording(true);
+  setAnswerMode('type');
+});
+document.getElementById('switch-to-voice').addEventListener('click', () => setAnswerMode('voice'));
+document.getElementById('redo-btn').addEventListener('click', redoRecording);
+document.getElementById('confirm-send-btn').addEventListener('click', sendTranscript);
+document.getElementById('transcript-box').addEventListener('input', function () {
+  this.style.height = 'auto';
+  this.style.height = Math.min(this.scrollHeight, 160) + 'px';
+  document.getElementById('confirm-send-btn').disabled = !this.value.trim();
+});
+document.getElementById('transcript-box').addEventListener('keydown', e => {
+  if (e.isComposing || e.keyCode === 229) return;
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendTranscript(); }
+});
+// 離開頁面時把麥克風關掉，不然分頁上的錄音紅點會一直亮著
+window.addEventListener('pagehide', () => { recording = false; cleanupRecording(); });
 
 // 輸入事件
 document.getElementById('user-input').addEventListener('keydown', e => {
