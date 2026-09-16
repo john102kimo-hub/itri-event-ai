@@ -2717,15 +2717,22 @@ await sendGroup('@我 這場的技術突破是什麼？', { mentionSelf: true, m
 check('★ 群組不跑動畫（LINE 只支援一對一，傳了必定失敗）', loadingCount() === 0,
   JSON.stringify(state.loadingCalls));
 
-// ── 情境 26：風趣兜底——天氣／告白這種閒聊改用寫死的俏皮話，不呼叫模型（批次 62）──
+// ── 情境 26：風趣兜底——天氣／告白／問個性這種閒聊改用寫死的俏皮話，不呼叫模型
+// （批次 62、批次 63）──────────────────────────────────────────────────────
 // 回報：「有可能加入一些有趣風趣回答，讓他更有生命力嗎，不適合會造成混淆就算了」，
 // 附的兩張截圖正是「天氣如何」「我喜歡你」——這兩句原本都會呼叫 Haiku 現場生成一句
-// 貼題的話（composeFallbackReply()，見情境 8）。這裡驗的是：這兩類閒聊改成直接送出
+// 貼題的話（composeFallbackReply()，見情境 8）。這裡驗的是：這幾類閒聊改成直接送出
 // 我們寫死、審過的文案，連模型都不呼叫（見 api/line.js detectChitchat()／
 // CHITCHAT_FIXED_REPLIES 的說明——風趣的部分故意不留給模型現場發揮）。
+//
+// 批次 63：主管實測回饋天氣／告白那兩句「有點太戲謔」（原文用了「槓龜」「問對棚的
+// 人」這類賭博／演藝圈黑話），改成拿掉俚語、保留一點溫度但更莊重；同時新增「問個性」
+// 一類——原本這題會被智慧兜底答成「這題我沒有設定資料可以查」，問個性、答成查無
+// 資料，比戲謔還尷尬，改成跟語音（CLAUDE.md 第 3 節）同一個道理，寫死一份人設。
 for (const [label, text, mustInclude] of [
-  ['天氣', '天氣如何', '槓龜'],
-  ['告白', '我喜歡你', '厚愛']
+  ['天氣', '天氣如何', '守備範圍'],
+  ['告白', '我喜歡你', '厚愛'],
+  ['問個性', '米亞 介紹一下你自己的個性', '阿沙力']
 ]) {
   reset(); await freshModule();
   out = await send(text);
@@ -2746,9 +2753,19 @@ for (const text of ['隨便問一句跟任何主題都不相關的話，我很�
   reset(); await freshModule();
   out = await send(text);
   check(`「${text}」不會被寬鬆的關鍵字誤判成閒聊，照樣走原本的路`,
-    !(out.at(-1)?.text || '').includes('槓龜') && !(out.at(-1)?.text || '').includes('厚愛'),
+    !(out.at(-1)?.text || '').includes('守備範圍') && !(out.at(-1)?.text || '').includes('厚愛') &&
+    !(out.at(-1)?.text || '').includes('阿沙力'),
     JSON.stringify(out));
 }
+
+// 反面：「你是誰」已經有自己的路（lib/menu.js HELP_WHOAMI_RE → 使用說明，見情境 20
+// 之前那條「1 對 1 問『你是誰』→ 回使用說明」），CHITCHAT_PERSONA_RE 刻意不收，
+// 兩邊才不會打架。
+reset(); await freshModule();
+out = await send('你是誰');
+check('「你是誰」還是走 HELP_WHOAMI_RE → 使用說明，不會被問個性那組寫死文案接走',
+  /直接問就好/.test(out[0]?.text || '') && !(out[0]?.text || '').includes('阿沙力'),
+  JSON.stringify(out));
 
 console.log(`\n${fail === 0 ? '✅' : '❌'} 流程測試通過 ${pass}／失敗 ${fail}`);
 process.exit(fail === 0 ? 0 : 1);
