@@ -282,7 +282,13 @@
     width: 100%; max-width: 320px;
     border: 1.5px solid var(--border); border-radius: 10px;
     padding: 10px 14px;
-    font-family: var(--font); font-size: 0.9rem;
+    /* ⚠️ 16px 是下限，不是美感選擇。iOS Safari 對 font-size 小於 16px 的輸入框，
+       一 focus 就會自動放大整個頁面——而且**放大後不會自己縮回來**。這一欄原本是
+       0.9rem（14.4px），主管在開始畫面點一下姓名，整場訓練就都在放大狀態下進行：
+       header 被狀態列蓋住、進度條左右被裁掉。回報的截圖就是這個症狀。
+       正解是把字級拉到 16px，不是用 maximum-scale=1 禁止縮放（那會害到真的需要
+       放大來看的人）。 */
+    font-family: var(--font); font-size: 16px;
     text-align: center; outline: none;
     transition: border-color 0.2s;
   }
@@ -450,6 +456,9 @@ let recChunks = [], recStartedAt = 0, recTimer = null, levelRaf = null, autoStop
 let peakLevel = 0;
 let speechRec = null, liveFinal = '', liveInterim = '';
 let abandonRecording = false; // 錄到一半改用打字／重新開始：停下來就好，不要跳確認畫面
+// 「伺服器的語音辨識沒有啟用」這件事，整場只需要講一次。實測（主管的 iPhone）每一題
+// 都跳同一段字，佔掉兩行、把「講了幾秒」整個擠掉——而那正是這場在練的東西。
+let sttFallbackNoticed = false;
 let pendingSeconds = 0;     // 待送出的這段講了幾秒
 let voiceAnswerCount = 0;   // 這場有幾題是用講的（寫進演練紀錄）
 
@@ -601,6 +610,7 @@ document.getElementById('restart-btn').addEventListener('click', () => {
   questionCount = 0;
   sessionScores = [];
   voiceAnswerCount = 0;
+  sttFallbackNoticed = false;
   if (recording) stopRecording(true); else cleanupRecording();
   document.getElementById('messages').innerHTML = '';
   document.getElementById('end-avg').textContent = '';
@@ -1061,7 +1071,11 @@ async function transcribeBlob(blob, mime) {
   if (res.ok && data.empty) return { text: '', note: '這段錄音裡沒有聽到說話的內容。' };
   // fallback 代表後端沒設定轉寫服務或轉寫壞了——瀏覽器邊講邊出的那份頂上來，
   // 讓主管不用重講一次。品質會差一點，所以要講清楚為什麼。
-  if (data.fallback === 'browser') return { text: '', note: '伺服器的語音辨識沒有啟用，以下是瀏覽器聽到的版本，請確認一下。' };
+  if (data.fallback === 'browser') {
+    if (sttFallbackNoticed) return { text: '' };   // 講過了，後面幾題不用再佔版面
+    sttFallbackNoticed = true;
+    return { text: '', note: '伺服器的語音辨識還沒啟用，先用瀏覽器聽到的版本（專有名詞可能有錯字，送出前確認一下）' };
+  }
   return { text: '', note: data.error || '語音辨識失敗，請確認內容或改用打字。' };
 }
 
@@ -1104,6 +1118,9 @@ function showTranscript(text, note) {
   box.value = text || '';
   box.style.height = 'auto';
   box.style.height = Math.min(box.scrollHeight, 160) + 'px';
+  // ⚠️ 秒數跟長度評語永遠要顯示，不能被 note 蓋掉——這場演練練的就是長度。
+  // 舊版寫成 `note ? note : 秒數`，結果只要出現任何提示訊息（例如伺服器辨識沒啟用），
+  // 主管整題都看不到自己講了多久。
   const zone = zoneOf(pendingSeconds);
   const ZONE_TAIL = {
     short: '，比目標短——重點講完就好，短不是問題',
@@ -1111,9 +1128,10 @@ function showTranscript(text, note) {
     long: `，超過目標的 ${TARGET_MAX_SEC} 秒`,
     toolong: `，比目標的 ${TARGET_MAX_SEC} 秒久了不少`,
   };
-  document.getElementById('confirm-head-text').textContent = note
-    ? note
-    : `聽到的是這樣（講了 ${fmtTime(pendingSeconds)}${ZONE_TAIL[zone] || ''}），送出前可以直接改`;
+  const head = [];
+  if (pendingSeconds >= 1.2) head.push(`講了 ${fmtTime(pendingSeconds)}${ZONE_TAIL[zone] || ''}`);
+  head.push(note || '聽到的是這樣，送出前可以直接改');
+  document.getElementById('confirm-head-text').textContent = head.join('｜');
   document.getElementById('confirm-send-btn').disabled = !String(box.value).trim();
   box.focus();
 }
