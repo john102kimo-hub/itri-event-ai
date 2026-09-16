@@ -2868,26 +2868,46 @@ function looksLikeBareTopic(text) {
 // 不會有「這次生成得比較尷尬」的變數。認不出來的（絕大多數）維持原本流程，退回
 // composeFallbackReply()。
 //
-// ⚠️ 判準刻意收得很窄，只收「不可能是真的在問工研院四條路任何一條」的兩類：天氣、
-// 告白／搭訕。範圍不能寫寬——寫寬了會有把真的技術題誤判成閒聊的風險，例如「溫度
-// 感測技術」不能被關鍵字誤中，所以這裡只收「天氣」本身，不收單獨的「溫度」。跟
-// looksLikeBareTopic() 同一個原則：寧可漏判、退回下面的智慧兜底，也不要誤判。
+// ⚠️ 判準刻意收得很窄，只收「不可能是真的在問工研院四條路任何一條」的三類：天氣、
+// 告白／搭訕、問米亞的個性／自我介紹。範圍不能寫寬——寫寬了會有把真的技術題誤判成
+// 閒聊的風險，例如「溫度感測技術」不能被關鍵字誤中，所以這裡只收「天氣」本身，不收
+// 單獨的「溫度」。跟 looksLikeBareTopic() 同一個原則：寧可漏判、退回下面的智慧兜底，
+// 也不要誤判。
 const CHITCHAT_WEATHER_RE = /(天氣|會不會下雨|會下雨嗎|放晴|颱風|會冷嗎|會熱嗎|會不會冷|會不會熱)/;
 const CHITCHAT_FLIRT_RE = /(我喜歡你|我喜歡妳|喜歡你|喜歡妳|愛你|愛妳|妳好可愛|你好可愛|妳好正|妳好漂亮|妳好美|嫁給我|娶我|妳單身嗎|你單身嗎|要不要交往|當我女朋友|當我男朋友)/;
+// 批次 63 新增：問個性／自我介紹。跟天氣、告白同一個道理——這種問題現在會被丟給
+// composeFallbackReply()，實測答出來的是「這題我沒有設定資料可以查」，把自己講成
+// 資料庫查詢系統，問個性、答成查無資料，比戲謔還尷尬。CLAUDE.md 第 3 節「米亞只有
+// 一種聲音」對語音講的道理，個性介紹也適用：不該每次現場生成、每次講法都不一樣，
+// 應該寫死一份、審過、固定下來。
+//
+// ⚠️ 刻意不收「你是誰」「妳是誰」：`lib/menu.js` 的 `HELP_WHOAMI_RE` 早就把這句
+// （整則訊息就是「你是誰／你是什麼」這種問法）接去 `detectMetaIntent()` 回使用說明，
+// 走在 routeIntent() 之前，這支根本輪不到。兩邊刻意分工：問「你是誰」是在問這個帳號
+// 是什麼、該怎麼用，回使用說明是對的；問「你的個性」「介紹一下你自己」是在問米亞這個
+// 角色本身，才是這次回報真正要接住的問題。
+const CHITCHAT_PERSONA_RE = /(你的個性|妳的個性|你是什麼個性|妳是什麼個性|自我介紹|介紹.{0,4}你自己|介紹.{0,4}妳自己)/;
 
 function detectChitchat(text) {
   const s = String(text || '').trim();
   if (!s) return null;
   if (CHITCHAT_FLIRT_RE.test(s)) return 'flirt';
+  if (CHITCHAT_PERSONA_RE.test(s)) return 'persona';
   if (CHITCHAT_WEATHER_RE.test(s)) return 'weather';
   return null;
 }
 
-// 兩句都經過人審——風趣但不離題，收尾都帶回這個帳號真的能幫上忙的事。這份文案就是
+// 三句都經過人審——風趣但不離題，收尾都帶回這個帳號真的能幫上忙的事。這份文案就是
 // 「風趣」這件事唯一被允許存在的地方，不留給模型現場發揮（理由見上）。
+//
+// 批次 63：天氣／告白這兩句原本用了「槓龜」「問對棚的人」這類俚語，主管實測回饋
+// 「有點太戲謔」——這個帳號掛工研院名義，記者可能截圖引用，俚語的分寸比一般聊天
+// 帳號更緊。改成拿掉賭博／演藝圈黑話，保留一點溫度（表情符號、口語連接詞）但用字
+// 更接近正式場合會講的話：盡可能有趣，但不失莊重。
 const CHITCHAT_FIXED_REPLIES = {
-  weather: '天氣這題我真的槓龜 🌤️ 我腦子裡裝的是記者會、產業趨勢跟工研院技術，氣象台的活還是要問對棚的人。要不要換個我答得出來的？',
-  flirt: '謝謝厚愛，不過我心裡只有記者會、產業趨勢跟工研院技術 😄 感情的事我幫不上忙，這幾題我可拿手多了。'
+  weather: '天氣預報不在我的守備範圍內 🌤️ 我專門處理記者會內容、產業趨勢跟工研院技術，這幾類的問題我很樂意幫忙，要不要換個方向問問看？',
+  flirt: '謝謝厚愛，不過我還是專心做好記者會、產業趨勢跟工研院技術這幾件事 😊 這幾類的問題歡迎隨時問我。',
+  persona: '我是米亞，工研院的公關小特派 🙂 個性算阿沙力——重點抓得到就直接講，不拖泥帶水。專長是記者會內容、產業趨勢、工研院技術、媒體邀訪窗口，這幾件事問我最快，其他的可能要請你問別人囉。'
 };
 
 // 任何 routeIntent() 判不出來的訊息最後都會走到這裡（1 對 1 的 handleUnbound()、
@@ -2972,8 +2992,9 @@ async function sendFallbackGuide(replyToken, targetId, text, { staff = false } =
   const chips = staff ? STAFF_QUICK_REPLIES : ['最近有哪些活動', '產業趨勢分析', '想問什麼技術', CONTACT_MENU_LABEL, '使用說明'];
   const staffTail = staff ? '\n\n（您在職員模式，打「使用說明」可以看內部功能。）' : '';
 
-  // 天氣／告白這種閒聊：不呼叫 Haiku，直接送寫死的俏皮話（見上方 CHITCHAT_FIXED_REPLIES
-  // 的說明）。放在 looksLikeBareTopic 之前，因為裸主題詞判斷同樣會誤收「天氣」兩個字。
+  // 天氣／告白／問個性這種閒聊：不呼叫 Haiku，直接送寫死的俏皮話（見上方
+  // CHITCHAT_FIXED_REPLIES 的說明）。放在 looksLikeBareTopic 之前，因為裸主題詞判斷
+  // 同樣會誤收「天氣」兩個字。
   const chitchat = detectChitchat(text);
   if (chitchat) {
     await replyOrPush(replyToken, targetId, CHITCHAT_FIXED_REPLIES[chitchat] + staffTail, chips);
