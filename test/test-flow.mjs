@@ -2717,5 +2717,38 @@ await sendGroup('@我 這場的技術突破是什麼？', { mentionSelf: true, m
 check('★ 群組不跑動畫（LINE 只支援一對一，傳了必定失敗）', loadingCount() === 0,
   JSON.stringify(state.loadingCalls));
 
+// ── 情境 26：風趣兜底——天氣／告白這種閒聊改用寫死的俏皮話，不呼叫模型（批次 62）──
+// 回報：「有可能加入一些有趣風趣回答，讓他更有生命力嗎，不適合會造成混淆就算了」，
+// 附的兩張截圖正是「天氣如何」「我喜歡你」——這兩句原本都會呼叫 Haiku 現場生成一句
+// 貼題的話（composeFallbackReply()，見情境 8）。這裡驗的是：這兩類閒聊改成直接送出
+// 我們寫死、審過的文案，連模型都不呼叫（見 api/line.js detectChitchat()／
+// CHITCHAT_FIXED_REPLIES 的說明——風趣的部分故意不留給模型現場發揮）。
+for (const [label, text, mustInclude] of [
+  ['天氣', '天氣如何', '槓龜'],
+  ['告白', '我喜歡你', '厚愛']
+]) {
+  reset(); await freshModule();
+  out = await send(text);
+  check(`閒聊「${text}」（${label}）→ 直接送出寫死的俏皮話`,
+    out.at(-1)?.kind === 'text' && out.at(-1).text.includes(mustInclude), JSON.stringify(out));
+  check(`閒聊「${text}」（${label}）→ 不呼叫模型（沒有 kind:'fallback' 這個節點）`,
+    !out.some(o => o.kind === 'fallback'), JSON.stringify(out.map(o => o.kind)));
+  check(`閒聊「${text}」（${label}）→ 照樣附上四條路的入口按鈕，不是丟一句話就沒了`,
+    JSON.stringify(out.at(-1)?.quickReply) === JSON.stringify(['最近有哪些活動', '產業趨勢分析', '想問什麼技術', '媒體邀訪需求', '使用說明']),
+    JSON.stringify(out.at(-1)?.quickReply));
+}
+
+// 反面：判準要收得夠窄，不能把真的提問誤判成閒聊。「喜歡」後面沒接「你」／「妳」
+// 不算告白（例如記者說自己很喜歡某個研究題目），「溫度」單獨出現也不算天氣（真的
+// 技術題常見「溫度感測」這種組合）——兩種都要維持原本的智慧兜底，不能被寫死文案
+// 攔截掉。見 api/line.js CHITCHAT_WEATHER_RE／CHITCHAT_FLIRT_RE 的說明。
+for (const text of ['隨便問一句跟任何主題都不相關的話，我很喜歡研究這個', '溫度感測技術是不是很厲害']) {
+  reset(); await freshModule();
+  out = await send(text);
+  check(`「${text}」不會被寬鬆的關鍵字誤判成閒聊，照樣走原本的路`,
+    !(out.at(-1)?.text || '').includes('槓龜') && !(out.at(-1)?.text || '').includes('厚愛'),
+    JSON.stringify(out));
+}
+
 console.log(`\n${fail === 0 ? '✅' : '❌'} 流程測試通過 ${pass}／失敗 ${fail}`);
 process.exit(fail === 0 ? 0 : 1);
