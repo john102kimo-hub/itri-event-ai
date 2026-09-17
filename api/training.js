@@ -20,6 +20,7 @@
 
 import { readRange, appendRows, ensureSheets } from '../lib/sheets.js';
 import { toTraditionalTW } from '../lib/zh-tw.js';
+import { resolveOutlet, resolveRole, buildPersonaBlock } from '../lib/training-persona.js';
 
 const CACHE_TTL_MS = 60 * 1000; // 60 秒；同仁改完知識庫應該很快能在訓練模式看到新版
 
@@ -294,11 +295,16 @@ export function buildTranscriptionHint(event) {
   return hint.slice(0, 500);
 }
 
-/** 有哪一家可以轉寫？順序固定：OpenAI 格式全吃，Gemini 只在它支援的格式時當備援。 */
+/**
+ * 有哪一家可以轉寫？順序固定：OpenAI 格式全吃，Gemini 只在它支援的格式時頂上。
+ *
+ * Gemini 吃不下 webm。這件事前端也知道——public/training.html 的 pickRecMime()
+ * 因此把 mp4／ogg 排在 webm 前面，讓「沒設 OPENAI_API_KEY、只有免費的 Gemini」
+ * 這個組合在 Chrome／Android 上也用得到伺服器辨識，而不是永遠退到瀏覽器辨識。
+ * 兩邊要一起看才成立，改任何一邊之前先看另一邊。
+ */
 export function pickTranscribeEngine(mime, env = process.env) {
   if (env.OPENAI_API_KEY) return 'openai';
-  // Gemini 吃不下 webm——Chrome 的 MediaRecorder 預設就是 webm，所以它只能當
-  // Safari／iOS（mp4/aac）那條路的備援，不能當主力。
   if (env.GEMINI_API_KEY && mime !== 'audio/webm') return 'gemini';
   return null;
 }
@@ -500,7 +506,11 @@ function realQuestionBlock(rq) {
  * AI 記者出題的 system prompt。
  * spoken=true 是語音作答場次：問題會被主管「聽」而不是「讀」，所以要短、要口語。
  */
-export function buildReporterPrompt({ eventName, knowledgeBase, realQ = '', spoken = false }) {
+export function buildReporterPrompt({ eventName, knowledgeBase, realQ = '', spoken = false,
+  outlet = null, role = null, trainee = '', focus = '' }) {
+  // 媒體名稱與受訪者身分由程式決定（見 lib/training-persona.js 開頭）——
+  // 這裡拿到的是已經收斂過的物件，模型沒有「自己挑一家媒體」的餘地。
+  const persona = buildPersonaBlock({ outlet, role, trainee, focus });
   // 語音場次的問題長度是有理由的：現場記者提問就是一兩句話，沒有人會唸一段
   // 落落長的書面題目。問題一長，主管要先在腦中整理題目才能作答，練到的是閱讀
   // 理解，不是臨場反應。
@@ -516,11 +526,13 @@ export function buildReporterPrompt({ eventName, knowledgeBase, realQ = '', spok
   // 提問」三件事——兩條規則直接打架，模型選了比較具體的那一條（開場），於是吐出
   // 兩大段。語音演練要練的是臨場反應，題目一長，主管得先讀完一整段才開得了口。
   const opening = spoken
-    ? `開場：一句話自我介紹（虛構媒體名稱＋你的名字），接著直接問第一個問題。
+    ? `開場：一句話自我介紹（報上面指定的媒體名稱＋你的名字），接著直接問第一個問題。
 不要說明你的採訪角度、不要鋪陳背景、不要分段——現場記者搶到麥克風時不會這樣做。`
-    : `開場：先自我介紹（虛構媒體名稱與你的名字），說明今天想深入了解的角度，然後提出第一個問題。`;
+    : `開場：先自我介紹（報上面指定的媒體名稱與你的名字），說明今天想深入了解的角度，然後提出第一個問題。`;
 
-  return `你是一位來自台灣知名財經媒體的資深記者，正在對「${eventName}」的發言人進行專訪。
+  return `你正在對「${eventName}」的發言人進行專訪。
+
+${persona}
 
 【語言 —— 最優先】
 全程使用繁體中文、台灣用語，不得出現任何簡體字。
@@ -566,7 +578,11 @@ ${opening}
  * （「工研院」聽成「工業院」）。那是辨識的問題，不是主管講錯——不特別講清楚，
  * 訓練師會把它當成口誤扣分，主管看到評語會一頭霧水。
  */
-export function buildEvaluatePrompt({ eventName, knowledgeBase, realQ = '', speech = null }) {
+export function buildEvaluatePrompt({ eventName, knowledgeBase, realQ = '', speech = null,
+  outlet = null, role = null, trainee = '', focus = '' }) {
+  // 評分完要接著問下一題——那一題還是同一家媒體、同一個記者在問。
+  // 不把身分帶進來的話，五題會像五個不同的人輪流上來，練不到「被同一個記者追著打」。
+  const persona = buildPersonaBlock({ outlet, role, trainee, focus });
   const spokenBlock = speech ? `
 
 【這一題是「用講的」，請用口說的標準評 —— 不要用寫文章的標準】
@@ -639,7 +655,10 @@ ${knowledgeBase}${realQ}
 （簡短示範）${quoteLine}
 
 ---下一題---
-（繼續扮演記者，提出下一個更尖銳的問題，不加任何前綴說明）`;
+（繼續扮演下面這位記者，提出下一個更尖銳的問題，不加任何前綴說明。
+下一題不要再自我介紹一次——你在同一場專訪裡，已經報過名字了）
+
+${persona}`;
 }
 
 export default async function handler(req, res) {
@@ -667,6 +686,7 @@ export default async function handler(req, res) {
   const {
     messages, event_id, mode = 'reporter', code, password, trainee, scores,
     spoken, duration, voice_answers: voiceAnswers,
+    outlet: outletId, role: roleId, focus,
   } = req.body || {};
 
   // 只有 reporter／evaluate 是「對話」，要帶 messages、也要呼叫 Anthropic。
@@ -708,9 +728,15 @@ export default async function handler(req, res) {
     const lastAnswer = [...(messages || [])].reverse().find((m) => m?.role === 'user')?.content || '';
     const speech = (mode === 'evaluate' && spoken) ? describeSpeech(lastAnswer, duration) : null;
 
+    // 第一題前端不會帶 outlet，這裡隨機挑一家真的存在的台灣媒體並回傳；
+    // 之後幾題前端把同一個 id 帶回來，整場專訪才是同一位記者。
+    // 前端帶了名單外的 id（舊版、有人手改網址），resolveOutlet() 一樣只會回名單內的一家。
+    const outlet = resolveOutlet(outletId);
+    const role = resolveRole(roleId);
+
     const systemPrompt = mode === 'evaluate'
-      ? buildEvaluatePrompt({ eventName, knowledgeBase, realQ, speech })
-      : buildReporterPrompt({ eventName, knowledgeBase, realQ, spoken: !!spoken });
+      ? buildEvaluatePrompt({ eventName, knowledgeBase, realQ, speech, outlet, role, trainee, focus })
+      : buildReporterPrompt({ eventName, knowledgeBase, realQ, spoken: !!spoken, outlet, role, trainee, focus });
 
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -741,7 +767,13 @@ export default async function handler(req, res) {
     const textBlock = (data.content || []).find((b) => b.type === 'text');
     // ⚠️ 出口一律轉繁體。prompt 裡那條「不得出現簡體字」是請求，這一行才是保證——
     // 這支 API 以前只有 prompt 那一層，是 CLAUDE.md 第 2 條點名踩過四次的同一個形狀。
-    return res.status(200).json({ reply: toTraditionalTW(textBlock?.text || '') || '無法取得回應。' });
+    return res.status(200).json({
+      reply: toTraditionalTW(textBlock?.text || '') || '無法取得回應。',
+      // 回傳這場是哪一家媒體：前端要顯示給主管看（真實的媒體訓練一開始就會說今天誰來），
+      // 也要在後面幾題把同一個 id 帶回來，維持同一位記者。
+      outlet: { id: outlet.id, name: outlet.name, beat: outlet.beat },
+      role: role.id,
+    });
   } catch (err) {
     console.error(err);
     return res.status(500).json({ error: '伺服器錯誤' });

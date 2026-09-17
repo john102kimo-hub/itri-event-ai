@@ -267,15 +267,72 @@ console.log('\n[9] training.html — 前端結構（不會報錯的那種錯）'
   // 而且**放大後不會自己縮回來**。主管回報的截圖就是這個：他在開始畫面點了一下
   // 姓名欄（當時 0.9rem），整場訓練都在放大狀態下跑，header 被狀態列蓋住、進度條
   // 左右被裁掉。CSS 上完全合法、桌面瀏覽器完全正常——又是一個不會報錯的錯。
-  const css = html.split('<style>')[1].split('</style>')[0];
-  for (const sel of ['#user-input', '#trainee-input', '#transcript-box']) {
-    const block = css.match(new RegExp(sel.replace('#', '#') + '\\s*\\{[^}]*\\}'));
-    const raw = block && block[0].match(/font-size:\s*([^;]+);/);
-    const val = raw ? raw[1].trim() : '';
+  //
+  // 這一條刻意**不寫死要檢查哪幾個欄位**，而是把畫面上所有會打字的欄位掃出來逐一檢查。
+  // 寫死清單的話，下次有人加一個新欄位、忘了加進清單，這個洞就原封不動回來一次——
+  // 而它在桌面瀏覽器與模擬器上都完全正常，只有主管的 iPhone 會壞。
+  // 註解要先拿掉再切規則：`/* 說明 */\n#focus-input {` 這種寫法，選擇器會連註解一起被
+  // 捕捉進去，比對就永遠對不上——結果是「明明寫了 16px 卻報未指定」的假警報。
+  const css = html.split('<style>')[1].split('</style>')[0].replace(/\/\*[\s\S]*?\*\//g, '');
+  const rules = [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)].map((m) => ({ sel: m[1].trim(), body: m[2] }));
+  const typableIds = [...html.matchAll(/<(input|textarea)\b[^>]*\bid="([^"]+)"[^>]*>/g)]
+    .filter((m) => !/type="(checkbox|radio|file|range|hidden|submit|button|color)"/.test(m[0]))
+    .map((m) => m[2]);
+  const fontSizeOf = (id) => {
+    let val = '';
+    for (const r of rules) {
+      if (!r.sel.split(',').some((x) => x.trim() === '#' + id)) continue;   // 群組選擇器也算
+      const m = r.body.match(/font-size:\s*([^;]+)/);
+      if (m) val = m[1].trim();                                            // 後面的蓋前面的
+    }
+    return val;
+  };
+  ok(typableIds.length >= 3, `掃到 ${typableIds.length} 個可輸入欄位（少於 3 個表示這條掃錯了）`);
+  for (const id of typableIds) {
+    const val = fontSizeOf(id);
     const px = val.endsWith('rem') ? parseFloat(val) * 16 : parseFloat(val);
     ok(Number.isFinite(px) && px >= 16,
-      `${sel} 的字級 ${val || '（未指定）'} 不小於 16px（小於就會觸發 iOS 自動放大，且縮不回來）`);
+      `#${id} 的字級 ${val || '（未指定）'} 不小於 16px（小於就會觸發 iOS 自動放大，且縮不回來）`);
   }
+}
+
+console.log('\n[10] training.html — 開場先問受訪者是誰，以及連線出錯不能毀掉整場');
+{
+  const html = fs.readFileSync(new URL('../public/training.html', import.meta.url), 'utf8');
+  const js = html.split('<script>')[1].split('</script>')[0];
+  // 「舊寫法不能再出現」這類比對要對「真的會執行的程式」做，不能連註解一起比——
+  // 註解裡本來就會引用舊寫法來說明當初錯在哪，那段說明有價值，不該為了讓測試過而刪掉。
+  const code = js.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+
+  ok(html.includes('id="role-picker"') && js.includes('renderRolePicker'),
+    '開始畫面有身分選擇——院長被問的跟計畫主持人被問的不是同一批問題');
+  ok(html.includes('id="focus-input"'), '可以填自己負責的題目，讓記者問得更準');
+  ok(/role: traineeRole/.test(js) && /focus:/.test(js) && /trainee:/.test(js),
+    '身分資料真的有送去後端（只做了畫面等於沒做）');
+  ok(js.includes('personaPayload'), '身分資料集中在一個地方組，免得某一支請求漏帶');
+
+  // 每次演練換一家媒體，是這一版最主要的「像真的」來源
+  ok(html.includes('id="outlet-banner"') && js.includes('showOutletBanner'),
+    '開場就告訴主管今天是哪一家媒體來訪（真實的媒體訓練第一件事就是這個）');
+  ok(js.includes('adoptOutlet') && /outlet: sessionOutlet \? sessionOutlet\.id : undefined/.test(js),
+    '後面幾題把同一家帶回去——不然五題會變成五個不同的記者輪流上來');
+  ok((js.match(/sessionOutlet = null/g) || []).length >= 2,
+    '開始一場、再練一次，都要重抽媒體（否則第二次演練還是同一家）');
+  ok(html.includes('非該媒體實際採訪'), '畫面上寫明這是模擬，不是該媒體真的來採訪');
+
+  // ⚠️ 這兩條是這批修掉的 bug，兩個都屬於「不會報錯的錯」
+  ok(!/data\.reply \|\| data\.error/.test(code) && !/evalData\.reply \|\| evalData\.error/.test(code),
+    '錯誤訊息不會被當成記者的問題／訓練師的評分顯示出來，也不會被 push 進對話歷程');
+  ok(/if \(!res\.ok \|\| !data\.reply\)/.test(code) && /if \(!evalRes\.ok \|\| !evalData\.reply\)/.test(code),
+    'HTTP 狀態有看——401／500 的 JSON 內文不會一路流進畫面');
+  ok(js.includes('function showRetry') && js.includes('再試一次'),
+    '連線中斷時給得出重試，不是叫人重新整理（重新整理＝從第一題重來）');
+  ok((js.match(/showRetry\(/g) || []).length >= 4,
+    '出題與評分、各自的 HTTP 失敗與連線中斷，四條路都有重試');
+  ok(js.includes('evaluateAnswer'),
+    '評分拆成可重試的函式——重試不必叫主管把話重講一遍');
+  ok(!code.includes("addSystemMsg('評分失敗，請稍後再試。')"),
+    '舊的死路訊息已移除（它叫人「稍後再試」，但畫面上根本沒有再試的方法）');
 }
 
 console.log(fails === 0 ? '\n全部通過 ✅' : `\n失敗 ${fails} 項 ❌`);

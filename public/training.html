@@ -293,6 +293,45 @@
     transition: border-color 0.2s;
   }
   #trainee-input:focus { border-color: var(--primary); }
+  /* 負責主題。跟姓名欄同一套樣式，字級一樣不得低於 16px（見上面那段 iOS 說明）。 */
+  #focus-input {
+    width: 100%; max-width: 320px;
+    border: 1.5px solid var(--border); border-radius: 10px;
+    padding: 10px 14px;
+    font-family: var(--font); font-size: 16px;
+    text-align: center; outline: none;
+    transition: border-color 0.2s;
+  }
+  #focus-input:focus { border-color: var(--primary); }
+
+  /* 開場先問「今天受訪的是誰」——題目會跟著職務換一批。 */
+  #who-ask { font-size: .82rem; color: var(--muted); text-align: center; max-width: 340px; line-height: 1.6; }
+  #role-picker { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; max-width: 380px; }
+  .role-chip {
+    border: 1.5px solid var(--border); background: #fff; border-radius: 10px;
+    padding: 8px 12px; cursor: pointer; font-family: var(--font);
+    text-align: left; line-height: 1.35; color: var(--text);
+  }
+  .role-chip b { display: block; font-size: .88rem; font-weight: 700; }
+  .role-chip span { font-size: .72rem; color: var(--muted); }
+  .role-chip.on { border-color: var(--primary); background: var(--primary-light, #e7f6f2); }
+  .role-chip.on b { color: var(--primary); }
+
+  /* 今天是哪一家媒體來訪。真實的媒體訓練，第一件事就是告訴受訓者今天誰來。 */
+  #outlet-banner {
+    display: none; margin: 0 16px 10px; padding: 10px 14px;
+    border: 1px solid var(--border); border-left: 3px solid var(--primary);
+    border-radius: 8px; background: #fff; font-size: .8rem; line-height: 1.55; color: var(--muted);
+  }
+  #outlet-banner b { color: var(--text); }
+  #outlet-banner .sim { display: block; margin-top: 4px; font-size: .7rem; color: #9ca3af; }
+
+  /* 連線失敗時的重試。沒有這顆按鈕，一次網路中斷就毀掉整場五題的演練。 */
+  .retry-btn {
+    margin-top: 8px; border: 1.5px solid var(--primary); background: #fff; color: var(--primary);
+    border-radius: 8px; padding: 6px 14px; font-family: var(--font); font-size: .82rem;
+    font-weight: 700; cursor: pointer;
+  }
   #start-btn {
     background: var(--primary); color: white;
     border: none; border-radius: 10px;
@@ -366,11 +405,18 @@
   <div id="progress-track"><div id="progress-fill"></div></div>
 </div>
 
+<div id="outlet-banner"></div>
+
 <div id="messages"></div>
 
 <div id="start-area">
+  <div id="who-ask">開始前先告訴 AI 記者，今天受訪的是誰——<b>題目會跟著您的職務換一批</b>。
+    院長被問的跟計畫主持人被問的，本來就不是同一批問題。</div>
+  <div id="role-picker"></div>
   <input id="trainee-input" type="text" maxlength="40"
          placeholder="您的姓名／職稱（選填，方便主管追蹤訓練紀錄）">
+  <input id="focus-input" type="text" maxlength="60"
+         placeholder="您負責的題目／領域（選填，例如：固態電池）">
   <button id="start-btn">
     <i class="ti ti-player-play"></i> 開始媒體訓練
   </button>
@@ -475,14 +521,62 @@ const MAX_REC_SECONDS = 150;   // 硬上限 2 分半：再長音檔會逼近 Ver
                                // 而不是一到 60 秒就被切掉、練不到自己收尾
 const SILENT_PEAK = 0.02;      // 低於這個音量＝這段大概沒收到人聲
 
+// ── 今天受訪的是誰 ───────────────────────────────────────────────────
+// 同一場記者會，院長被問的跟計畫主持人被問的不是同一批問題：院長要答資源配置
+// 與政策，計畫主持人要答技術做不到什麼。舊版不分身分，出來的題目對誰都只有七分準。
+//
+// ⚠️ 這份清單要跟 lib/training-persona.js 的 TRAINEE_ROLES 一模一樣（id 與 label）。
+// 這裡是畫面用的副本，真正決定題目的是後端那一份；兩邊對不起來的話，主管會選了
+// 一個身分、卻拿到通用題目，而且畫面上完全看不出哪裡不對。
+// test/training.test.mjs 有一條在比對兩份清單（同 TARGET_MIN_SEC 的做法）。
+const ROLES = [
+  { id: 'exec',      label: '院長／副院長',          hint: '全院策略、資源、對外代表' },
+  { id: 'director',  label: '所長／中心主任',        hint: '單一領域的技術路線與團隊' },
+  { id: 'pi',        label: '計畫主持人／技術負責人', hint: '單一技術或計畫的第一線負責人' },
+  { id: 'bd',        label: '產業服務／推廣單位主管', hint: '對接廠商、技轉與合作' },
+  { id: 'other',     label: '其他／不特別指定',      hint: '用通用的受訪主管題目' },
+];
+const ROLE_LS_KEY = 'itri_trainee_role';
+let traineeRole = 'other';
+// 這場專訪是哪一家媒體。第一題由後端隨機挑一家真的存在的台灣媒體並回傳，
+// 之後幾題把同一個 id 帶回去——不帶的話每一題都會換一家，五題變成五個不同的記者
+// 輪流上來，練不到「被同一個記者追著打」。
+let sessionOutlet = null;
+
 // 受訓者姓名/職稱記在瀏覽器裡，下次直接帶出來——跟 event.html 記住記者媒體名稱
 // 同一招。純粹方便，不是必填；localStorage 讀不到就當作沒填過，不影響流程。
 const TRAINEE_LS_KEY = 'itri_trainee_name';
+const FOCUS_LS_KEY = 'itri_trainee_focus';
 function rememberedTrainee() {
   try { return localStorage.getItem(TRAINEE_LS_KEY) || ''; } catch (e) { return ''; }
 }
 function rememberTrainee(v) {
   try { if (v) localStorage.setItem(TRAINEE_LS_KEY, v); } catch (e) { /* 存不了就算了 */ }
+}
+const lsGet = (k) => { try { return localStorage.getItem(k) || ''; } catch (e) { return ''; } };
+const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch (e) { /* 存不了就算了 */ } };
+
+function renderRolePicker() {
+  document.getElementById('role-picker').innerHTML = ROLES.map((r, i) =>
+    `<button type="button" class="role-chip${r.id === traineeRole ? ' on' : ''}" data-i="${i}">`
+    + `<b>${escHtml(r.label)}</b><span>${escHtml(r.hint)}</span></button>`).join('');
+}
+function pickRole(i) {
+  const r = ROLES[i];
+  if (!r) return;
+  traineeRole = r.id;
+  lsSet(ROLE_LS_KEY, r.id);
+  renderRolePicker();
+}
+
+/** 今天由哪一家媒體來訪。真實的媒體訓練，第一件事就是告訴受訓者今天誰來。 */
+function showOutletBanner(outlet) {
+  if (!outlet || !outlet.name) return;
+  const el = document.getElementById('outlet-banner');
+  el.innerHTML = `<b>今天來訪的是《${escHtml(outlet.name)}》的記者。</b>`
+    + (outlet.beat ? `<br>${escHtml(outlet.beat)}` : '')
+    + `<span class="sim">本場為媒體訓練模擬，非該媒體實際採訪。每次演練會換一家，題目也會跟著換。</span>`;
+  el.style.display = 'block';
 }
 
 async function init() {
@@ -502,6 +596,16 @@ async function init() {
 
   const prevTrainee = rememberedTrainee();
   if (prevTrainee) document.getElementById('trainee-input').value = prevTrainee;
+  const prevFocus = lsGet(FOCUS_LS_KEY);
+  if (prevFocus) document.getElementById('focus-input').value = prevFocus;
+  const prevRole = lsGet(ROLE_LS_KEY);
+  if (ROLES.some((r) => r.id === prevRole)) traineeRole = prevRole;
+  renderRolePicker();
+  // 委派：身分按鈕是動態畫出來的，綁在容器上才不用每次重畫都重綁
+  document.getElementById('role-picker').addEventListener('click', (e) => {
+    const chip = e.target.closest('.role-chip');
+    if (chip) pickRole(Number(chip.dataset.i));
+  });
 
   if (!TRAINING_CODE && !TRAINING_PWD) {
     document.getElementById('loading').style.display = 'none';
@@ -611,7 +715,9 @@ document.getElementById('restart-btn').addEventListener('click', () => {
   sessionScores = [];
   voiceAnswerCount = 0;
   sttFallbackNoticed = false;
+  sessionOutlet = null;   // 下一場換一家媒體來訪，題目才不會每次都一樣
   if (recording) stopRecording(true); else cleanupRecording();
+  document.getElementById('outlet-banner').style.display = 'none';
   document.getElementById('messages').innerHTML = '';
   document.getElementById('end-avg').textContent = '';
   document.getElementById('end-screen').style.display = 'none';
@@ -623,10 +729,52 @@ document.getElementById('restart-btn').addEventListener('click', () => {
 async function startTraining() {
   sessionScores = [];
   voiceAnswerCount = 0;
+  sessionOutlet = null;   // 每一場重新抽一家媒體，不然練第二次還是同一家
   rememberTrainee(document.getElementById('trainee-input').value.trim());
+  lsSet(FOCUS_LS_KEY, document.getElementById('focus-input').value.trim());
   document.getElementById('start-area').style.display = 'none';
   document.getElementById('input-area').style.display = 'flex';
   await askNextQuestion();
+}
+
+/** 每次呼叫 /api/training 都要帶的身分資料。集中一處，免得哪一支漏帶。 */
+function personaPayload() {
+  return {
+    role: traineeRole,
+    trainee: document.getElementById('trainee-input').value.trim(),
+    focus: document.getElementById('focus-input').value.trim(),
+    outlet: sessionOutlet ? sessionOutlet.id : undefined,
+  };
+}
+
+/** 後端回來的媒體資料：記下來，之後幾題帶同一家，並且顯示給主管看。 */
+function adoptOutlet(data) {
+  if (data && data.outlet && data.outlet.name && !sessionOutlet) {
+    sessionOutlet = data.outlet;
+    showOutletBanner(sessionOutlet);
+  }
+}
+
+/**
+ * 連線或伺服器出問題時的收尾。
+ *
+ * ⚠️ 舊版這裡只印一句「請重新整理後再試」就結束，答題介面仍然是鎖住的——
+ * 主管講了三題，網路抖一下，整場就沒了，而且畫面上唯一的出路是重新整理
+ * （重新整理＝從第一題開始）。一次網路中斷不該毀掉整場演練，所以給一顆重試鍵，
+ * 對話歷程還在記憶體裡，按下去就從剛才那一步接著走。
+ */
+function showRetry(text, onRetry) {
+  const el = document.createElement('div');
+  el.style.cssText = 'text-align:center;color:#9ca3af;font-size:0.82rem;padding:8px';
+  el.textContent = text;
+  const btn = document.createElement('button');
+  btn.className = 'retry-btn';
+  btn.innerHTML = '<i class="ti ti-refresh"></i> 再試一次';
+  btn.addEventListener('click', () => { el.remove(); onRetry(); });
+  el.appendChild(document.createElement('br'));
+  el.appendChild(btn);
+  document.getElementById('messages').appendChild(el);
+  el.scrollIntoView({ behavior: 'smooth', block: 'end' });
 }
 
 async function askNextQuestion() {
@@ -646,15 +794,26 @@ async function askNextQuestion() {
         mode: 'reporter',
         spoken: answerMode === 'voice',
         code: TRAINING_CODE || undefined,
-        password: TRAINING_PWD || undefined
+        password: TRAINING_PWD || undefined,
+        ...personaPayload()
       })
     });
-    const data = await res.json();
+    const data = await res.json().catch(() => ({}));
     removeTyping();
 
-    const reply = data.reply || data.error || '（無法取得問題）';
-    reporterHist.push({ role: 'assistant', content: reply });
-    addReporterMsg(reply);
+    // ⚠️ HTTP 狀態要看，錯誤訊息**絕對不能**當成記者的問題。
+    // 舊版寫成 `data.reply || data.error`，於是「密碼錯誤」「ANTHROPIC_API_KEY 未設定」
+    // 會以 AI 記者的口吻出現在畫面上，還被 push 進 reporterHist——之後每一題都帶著
+    // 這句錯誤當上下文，整場演練從那一刻起就歪了，而且看起來完全正常。
+    if (!res.ok || !data.reply) {
+      isWaiting = false;
+      showRetry(data.error || '沒有取得問題，可能是連線或伺服器忙碌。', askNextQuestion);
+      return;
+    }
+
+    adoptOutlet(data);
+    reporterHist.push({ role: 'assistant', content: data.reply });
+    addReporterMsg(data.reply);
 
     questionCount++;
     updateProgress();
@@ -662,7 +821,9 @@ async function askNextQuestion() {
     enableAnswering();
   } catch(e) {
     removeTyping();
-    addSystemMsg('連線錯誤，請重新整理後再試。');
+    isWaiting = false;
+    showRetry('連線中斷了。您剛才的進度還在，按下面重試就接著走。', askNextQuestion);
+    return;
   }
 
   isWaiting = false;
@@ -690,7 +851,18 @@ async function submitAnswer(rawText, seconds = 0, viaVoice = false) {
   addUserMsg(ans, viaVoice ? seconds : 0);
   reporterHist.push({ role: 'user', content: ans });
 
-  // 評分
+  await evaluateAnswer(seconds, viaVoice);
+}
+
+/**
+ * 評分這一題，並接上下一題。
+ *
+ * 從 submitAnswer() 拆出來是為了「可以重試」：評分失敗時，回答已經在 reporterHist
+ * 裡了，重試只要再送一次評分就好，不必叫主管重講一遍。
+ * voiceAnswerCount 在 submitAnswer() 裡就加過，所以重試不會重複計數。
+ */
+async function evaluateAnswer(seconds, viaVoice) {
+  isWaiting = true;
   showTyping('eval');
 
   try {
@@ -704,13 +876,25 @@ async function submitAnswer(rawText, seconds = 0, viaVoice = false) {
         spoken: viaVoice,
         duration: viaVoice ? seconds : undefined,
         code: TRAINING_CODE || undefined,
-        password: TRAINING_PWD || undefined
+        password: TRAINING_PWD || undefined,
+        ...personaPayload()
       })
     });
-    const evalData = await evalRes.json();
+    const evalData = await evalRes.json().catch(() => ({}));
     removeTyping();
 
-    const evalText = evalData.reply || evalData.error || '（無法取得評分）';
+    // 跟 askNextQuestion() 同一個道理：錯誤訊息不能當成評分顯示，更不能推進
+    // 對話歷程。這裡還多一層——被當成「訓練師的話」推進去之後，後面的評分會
+    // 開始針對那句錯誤訊息講評。
+    if (!evalRes.ok || !evalData.reply) {
+      isWaiting = false;
+      showRetry(evalData.error || '沒有取得評分，可能是連線或伺服器忙碌。您剛才的回答還在。',
+        () => evaluateAnswer(seconds, viaVoice));
+      return;
+    }
+
+    adoptOutlet(evalData);
+    const evalText = evalData.reply;
     reporterHist.push({ role: 'assistant', content: evalText });
 
     // 解析評分中的下一題（分隔線後的內容）。
@@ -754,7 +938,10 @@ async function submitAnswer(rawText, seconds = 0, viaVoice = false) {
     }
   } catch(e) {
     removeTyping();
-    addSystemMsg('評分失敗，請稍後再試。');
+    isWaiting = false;
+    showRetry('連線中斷了。您剛才的回答還在，按下面重試就接著走。',
+      () => evaluateAnswer(seconds, viaVoice));
+    return;
   }
 
   isWaiting = false;
@@ -827,8 +1014,28 @@ function canRecord() {
 
 // MediaRecorder 各家吃的格式不一樣：Chrome／Edge／Android 給 webm（opus），
 // Safari／iOS 給 mp4（aac）。挑第一個這台機器真的支援的，挑不到就讓瀏覽器自己決定。
+/**
+ * 錄音要用哪個容器。
+ *
+ * ⚠️ 順序不是隨便排的，它決定「這段錄音在伺服器上轉不轉得成逐字稿」：
+ * Gemini 吃得下 mp4/aac 與 ogg/opus，**吃不下 webm**（見 api/training.js 的
+ * pickTranscribeEngine）。舊版第一順位是 webm，也就是偏偏挑了那個免費引擎讀不了的格式——
+ * 結果在 Chrome／Android 上，就算 GEMINI_API_KEY 設好了也永遠用不到伺服器辨識，
+ * 一路退到瀏覽器的即時辨識。這件事不會報錯，只會讓逐字稿品質莫名其妙比 iPhone 差。
+ *
+ * 實測 Chromium 141 支援 audio/mp4（裡面裝的是 Opus，不是 AAC——
+ * `audio/mp4;codecs=mp4a.40.2` 在同一版是不支援的）；Safari／iOS 本來就給 mp4／AAC，
+ * Firefox 給 ogg。所以先問這幾個，都不支援才退回 webm。
+ *
+ * ⚠️ 還沒實測的一件事：Gemini 收不收「MP4 容器裝 Opus」這個組合（它的文件列的是
+ * aac／ogg／wav／mp3／flac）。**不確定也值得換**，因為換了只有上檔沒有下檔——
+ * Gemini 讀不懂的話後端回 502 帶 fallback:'browser'，前端照樣用瀏覽器那份逐字稿，
+ * 就跟現在的 webm 一模一樣；讀得懂就白賺一份品質更好的辨識。
+ * 要確認的話：設好 GEMINI_API_KEY，用 Chrome 錄一題，看逐字稿確認畫面還會不會
+ * 跳「伺服器的語音辨識還沒啟用」——不跳就是成功走到 Gemini 了。
+ */
 function pickRecMime() {
-  const prefer = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg;codecs=opus'];
+  const prefer = ['audio/mp4', 'audio/ogg;codecs=opus', 'audio/webm;codecs=opus', 'audio/webm'];
   for (const t of prefer) {
     try { if (window.MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(t)) return t; } catch (e) {}
   }
@@ -965,8 +1172,12 @@ async function startRecording() {
   recording = true;
 
   const mime = pickRecMime();
+  // 位元率看容器：Opus 在 32 kbps 講話已經很清楚，AAC（mp4）在同樣的 32 kbps 會糊掉，
+  // 而糊掉的代價是逐字稿錯字變多。64 kbps × 上限 150 秒約 1.2 MB，base64 後仍在
+  // MAX_AUDIO_BASE64（3.5 MB）之內，付得起。
+  const bitrate = /mp4|aac/.test(mime) ? 64000 : 32000;
   try {
-    mediaRecorder = new MediaRecorder(stream, mime ? { mimeType: mime, audioBitsPerSecond: 32000 } : undefined);
+    mediaRecorder = new MediaRecorder(stream, mime ? { mimeType: mime, audioBitsPerSecond: bitrate } : undefined);
   } catch (e) {
     mediaRecorder = new MediaRecorder(stream);
   }
@@ -1108,6 +1319,12 @@ async function finishRecording(blob, mime, seconds) {
   if (!text && live) { text = live; if (!note) note = '以下是瀏覽器聽到的版本，請確認一下。'; }
   if (!text && peakLevel < SILENT_PEAK && seconds >= 1.2) {
     note = '整段幾乎沒有音量，麥克風可能沒有開。請按「重錄」，或直接在下面打字。';
+  }
+  // 有收到聲音、但兩層辨識都交不出字（例如這個瀏覽器沒有即時辨識、伺服器也還沒設定）。
+  // 舊版這時會顯示一個空白框配一句「聽到的是這樣，送出前可以直接改」——聽到的是空的，
+  // 這句話只會讓人以為系統壞了。講清楚發生什麼事，並指出還走得通的那條路。
+  if (!text && !note) {
+    note = '這個瀏覽器沒有辨識出文字。可以按「重錄」再講一次，或直接在下面打字送出。';
   }
   showTranscript(text, note);
 }
