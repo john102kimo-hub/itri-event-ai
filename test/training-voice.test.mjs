@@ -236,8 +236,8 @@ console.log('\n[9] training.html — 前端結構（不會報錯的那種錯）'
 
   // 實測回報：「伺服器的語音辨識沒有啟用」每一題都跳一次，佔兩行、把秒數擠掉
   ok(js.includes('sttFallbackNoticed'), '「伺服器辨識沒啟用」整場只講一次');
-  ok(/head\.push\(note \|\|/.test(js) && /if \(pendingSeconds >= 1\.2\) head\.push/.test(js),
-    '秒數與長度評語不會被提示訊息蓋掉——那正是這場演練在練的東西');
+  // 「秒數會不會被蓋掉」原本用正規表示式比對程式碼長相，改動一次寫法就失準。
+  // 改成把 showTranscript() 真的跑起來驗畫面文字，見第 11 節。
 
   // ⚠️ 畫面上催他收尾的秒數，跟評分時用的標準必須是同一個數字。不一致的話，
   // 主管會看到自己「照著畫面準時收尾，卻被評語說超時」——而且兩邊都不會報錯。
@@ -333,6 +333,130 @@ console.log('\n[10] training.html — 開場先問受訪者是誰，以及連線
     '評分拆成可重試的函式——重試不必叫主管把話重講一遍');
   ok(!code.includes("addSystemMsg('評分失敗，請稍後再試。')"),
     '舊的死路訊息已移除（它叫人「稍後再試」，但畫面上根本沒有再試的方法）');
+}
+
+
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * [11] showTranscript()：逐字稿確認畫面那一行字，真的跑起來驗
+ *
+ * 這一節取代原本「用正規表示式檢查程式碼長相」的那條——那種寫法只要換個判斷式就失準，
+ * 而它守的是批次 68 的教訓（秒數被提示訊息蓋掉，主管整題看不到自己講了多久），
+ * 不能讓它在一次改寫裡安靜地失效。
+ *
+ * 這裡同時釘住兩個**方向相反**的規則，因為它們很容易在改動時互相弄壞：
+ *   ① 有逐字稿 → 秒數與長度評語一定要在（批次 68）
+ *   ② 沒有逐字稿 → 長度評語一定不能在（實測截圖：「講了 0:04，比目標短——重點講完
+ *      就好，短不是問題｜這段錄音裡沒有聽到說話的內容。」前半在評論一段不存在的回答）
+ * ──────────────────────────────────────────────────────────────────────── */
+console.log('\n[11] showTranscript — 空逐字稿不評論長度，有逐字稿一定看得到長度');
+{
+  const { runInNewContext } = await import('node:vm');
+  const html = fs.readFileSync(new URL('../public/training.html', import.meta.url), 'utf8');
+  const code = [...html.matchAll(/<script(?![^>]*src=)([^>]*)>([\s\S]*?)<\/script>/g)]
+    .filter((m) => !/module/.test(m[1])).map((m) => m[2])
+    .sort((a, b) => b.length - a.length)[0];
+
+  const els = new Map();
+  const makeEl = (id) => ({
+    id, value: '', textContent: '', innerHTML: '', disabled: false, scrollHeight: 40,
+    style: {}, dataset: {}, addEventListener() {}, removeEventListener() {}, click() {}, focus() {},
+    classList: { add() {}, remove() {}, toggle() {}, contains: () => false },
+    getBoundingClientRect: () => ({ left: 0, top: 0, width: 390, height: 40 }),
+    setAttribute() {}, getAttribute: () => null, closest: () => null,
+    querySelector: () => null, querySelectorAll: () => [], appendChild() {}, remove() {},
+  });
+  const sandbox = {
+    console: { log() {}, warn() {}, error() {} },
+    setTimeout, clearTimeout, setInterval, clearInterval,
+    localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
+    sessionStorage: { getItem: () => null, setItem() {}, removeItem() {} },
+    location: { reload() {}, href: '', search: '', protocol: 'https:', hostname: 'localhost' },
+    confirm: () => true, alert() {}, addEventListener() {}, removeEventListener() {},
+    fetch: async () => ({ ok: true, status: 200, json: async () => ({}) }),
+    navigator: { mediaDevices: {} },
+    URLSearchParams, URL, requestAnimationFrame: () => 0, cancelAnimationFrame() {},
+    // blobToBase64() 會用到。少了它，transcribeBlob() 會丟 ReferenceError 被 catch 接走，
+    // 測試看起來過了、其實根本沒走到要測的那條路——第一版就是這樣差點矇混過去。
+    FileReader: class {
+      readAsDataURL() {
+        this.result = 'data:audio/mp4;base64,QUFBQQ==';
+        setTimeout(() => this.onload && this.onload(), 0);
+      }
+    },
+    document: {
+      getElementById(id) { if (!els.has(id)) els.set(id, makeEl(id)); return els.get(id); },
+      querySelector: () => null, querySelectorAll: () => [],
+      addEventListener() {}, createElement: makeEl,
+    },
+  };
+  sandbox.window = sandbox;
+  sandbox.globalThis = sandbox;
+  // 頂層的 let／const 不會掛到 global，補一小段尾巴把要用的接出來
+  runInNewContext(code + `
+;globalThis.__setSeconds = (v) => { pendingSeconds = v; };
+;globalThis.__EMPTY_NOTE = EMPTY_NOTE;
+;globalThis.__setLive = (v) => { liveFinal = v; liveInterim = ''; };
+;globalThis.__setPeak = (v) => { peakLevel = v; };
+;globalThis.__resetFallbackNotice = () => { sttFallbackNoticed = false; };
+`, sandbox);
+
+  const headText = () => sandbox.document.getElementById('confirm-head-text').textContent;
+  const sendDisabled = () => sandbox.document.getElementById('confirm-send-btn').disabled;
+
+  // ① 有逐字稿：批次 68 的規則——秒數與長度評語一定要在，就算同時有提示訊息
+  sandbox.__setSeconds(75);
+  sandbox.showTranscript('我們今年投入三十億元。', '伺服器的語音辨識還沒啟用，先用瀏覽器聽到的版本');
+  ok(/講了 1:15/.test(headText()), `有逐字稿時看得到秒數（實際：${headText()}）`);
+  ok(/超過目標的 60 秒/.test(headText()), '有逐字稿時看得到長度評語');
+  ok(/伺服器的語音辨識還沒啟用/.test(headText()), '提示訊息也還在，兩者並存不互相蓋掉');
+  ok(sendDisabled() === false, '有內容時送出鈕可按');
+
+  // ② 沒有逐字稿：不能評論一段不存在的回答
+  sandbox.__setSeconds(4);
+  sandbox.showTranscript('', sandbox.__EMPTY_NOTE);
+  ok(!/講了/.test(headText()), `空逐字稿不顯示秒數（實際：${headText()}）`);
+  ok(!/短不是問題/.test(headText()), '空逐字稿不顯示「短不是問題」這種長度評語');
+  ok(/沒有聽到說話的內容/.test(headText()), '仍然說清楚發生了什麼事');
+  ok(/重錄|打字/.test(headText()), '並且給出下一步，不是只丟一句話就結束');
+  ok(sendDisabled() === true, '沒有內容時送出鈕不能按');
+
+  // ③ 空逐字稿又沒有 note（理論上不該發生）也不能冒出「聽到的是這樣」
+  sandbox.__setSeconds(4);
+  sandbox.showTranscript('', '');
+  ok(!/聽到的是這樣/.test(headText()),
+    `框是空的就不能說「聽到的是這樣」（實際：${headText()}）`);
+  ok(/重錄|打字/.test(headText()), '沒有 note 時仍給得出下一步');
+
+  // ④ 只有空白字元一樣算空
+  sandbox.__setSeconds(30);
+  sandbox.showTranscript('   ', '');
+  ok(!/講了/.test(headText()), '只有空白字元視同沒有內容，不評論長度');
+
+  /* ⑤ 後端說「沒聽到」，但瀏覽器其實聽到了。
+   * 這兩句話會同時出現在畫面上：框裡明明有字，上面卻寫著沒聽到說話的內容——
+   * 主管只會以為系統壞了。頂上來之後，那句話就不再成立，要換掉。 */
+  const bigBlob = { size: 50000 };
+  sandbox.__setPeak(1);                 // 有收到音量，排除「麥克風沒開」那條路
+  sandbox.__resetFallbackNotice();
+  sandbox.fetch = async () => ({ ok: true, status: 200, json: async () => ({ text: '', empty: true }) });
+  sandbox.__setLive('這個題目我們分成三個階段來看');
+  await sandbox.finishRecording(bigBlob, 'audio/mp4', 30);
+  const box = sandbox.document.getElementById('transcript-box');
+  ok(box.value === '這個題目我們分成三個階段來看', `瀏覽器那份有頂上來（實際：「${box.value}」）`);
+  ok(!/沒有聽到說話的內容/.test(headText()),
+    `框裡有字就不能說沒聽到（實際：${headText()}）`);
+  ok(/瀏覽器聽到的版本/.test(headText()), '並且說清楚這份是哪來的，提醒他確認');
+  ok(/講了 0:30/.test(headText()), '這時有內容，所以秒數要回來（批次 68 的規則）');
+
+  // ⑥ 同樣的情況，但瀏覽器也沒聽到 → 那句話成立，要留著
+  sandbox.__setPeak(1);
+  sandbox.__resetFallbackNotice();
+  sandbox.__setLive('');
+  await sandbox.finishRecording(bigBlob, 'audio/mp4', 4);
+  ok(sandbox.document.getElementById('transcript-box').value === '', '兩邊都沒聽到，框是空的');
+  ok(/沒有聽到說話的內容/.test(headText()), `這時那句話成立，要留著（實際：${headText()}）`);
+  ok(!/講了/.test(headText()), '而且不評論長度');
 }
 
 console.log(fails === 0 ? '\n全部通過 ✅' : `\n失敗 ${fails} 項 ❌`);
