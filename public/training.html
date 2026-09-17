@@ -1262,6 +1262,10 @@ function blobToBase64(blob) {
   });
 }
 
+// 伺服器成功轉寫、但一個字都沒聽到（主管按了錄音卻沒開口，或麥克風沒收到人聲）。
+// 抽成常數是因為下面 finishRecording() 要認得它：瀏覽器那份頂上來之後，這句話就不再成立了。
+const EMPTY_NOTE = '這段錄音裡沒有聽到說話的內容。請按「重錄」再講一次，或直接在下面打字。';
+
 /** 把音檔丟給後端轉寫。回 { text, note } —— note 是要讓主管知道的狀況說明。 */
 async function transcribeBlob(blob, mime) {
   const audio = await blobToBase64(blob);
@@ -1279,7 +1283,7 @@ async function transcribeBlob(blob, mime) {
   });
   const data = await res.json().catch(() => ({}));
   if (res.ok && data.text) return { text: data.text };
-  if (res.ok && data.empty) return { text: '', note: '這段錄音裡沒有聽到說話的內容。' };
+  if (res.ok && data.empty) return { text: '', note: EMPTY_NOTE };
   // fallback 代表後端沒設定轉寫服務或轉寫壞了——瀏覽器邊講邊出的那份頂上來，
   // 讓主管不用重講一次。品質會差一點，所以要講清楚為什麼。
   if (data.fallback === 'browser') {
@@ -1316,7 +1320,14 @@ async function finishRecording(blob, mime, seconds) {
 
   // 後端沒給逐字稿就用瀏覽器那份；兩份都沒有就留空框讓他自己補或重錄——
   // 卡在這裡不給任何出路，才是最糟的情況。
-  if (!text && live) { text = live; if (!note) note = '以下是瀏覽器聽到的版本，請確認一下。'; }
+  // ⚠️ 換成瀏覽器那份時，note 也要跟著換掉，不能只在 note 是空的時候才補。
+  // 後端回「沒有聽到說話的內容」而瀏覽器其實聽到了，兩句話會同時出現在畫面上——
+  // 框裡明明有字，上面卻寫著沒聽到，主管只會以為系統壞了。
+  // 「伺服器辨識還沒啟用」那句要留著（它講的是另一件事，而且比較有資訊）。
+  if (!text && live) {
+    text = live;
+    if (!note || note === EMPTY_NOTE) note = '以下是瀏覽器聽到的版本，請確認一下。';
+  }
   if (!text && peakLevel < SILENT_PEAK && seconds >= 1.2) {
     note = '整段幾乎沒有音量，麥克風可能沒有開。請按「重錄」，或直接在下面打字。';
   }
@@ -1335,9 +1346,14 @@ function showTranscript(text, note) {
   box.value = text || '';
   box.style.height = 'auto';
   box.style.height = Math.min(box.scrollHeight, 160) + 'px';
-  // ⚠️ 秒數跟長度評語永遠要顯示，不能被 note 蓋掉——這場演練練的就是長度。
+  // ⚠️ **有逐字稿的時候**，秒數跟長度評語永遠要顯示，不能被 note 蓋掉——這場演練練的就是長度。
   // 舊版寫成 `note ? note : 秒數`，結果只要出現任何提示訊息（例如伺服器辨識沒啟用），
-  // 主管整題都看不到自己講了多久。
+  // 主管整題都看不到自己講了多久。這條規則不能弄丟。
+  //
+  // 但**逐字稿是空的**時候相反：「講了 0:04，比目標短——重點講完就好，短不是問題」
+  // 是在評論一段根本不存在的回答，還跟後面那句「沒有聽到說話的內容」自相矛盾。
+  // 空的時候只講兩件事：發生了什麼，以及下一步怎麼辦。
+  const hasText = !!String(box.value).trim();
   const zone = zoneOf(pendingSeconds);
   const ZONE_TAIL = {
     short: '，比目標短——重點講完就好，短不是問題',
@@ -1346,8 +1362,10 @@ function showTranscript(text, note) {
     toolong: `，比目標的 ${TARGET_MAX_SEC} 秒久了不少`,
   };
   const head = [];
-  if (pendingSeconds >= 1.2) head.push(`講了 ${fmtTime(pendingSeconds)}${ZONE_TAIL[zone] || ''}`);
-  head.push(note || '聽到的是這樣，送出前可以直接改');
+  if (hasText && pendingSeconds >= 1.2) head.push(`講了 ${fmtTime(pendingSeconds)}${ZONE_TAIL[zone] || ''}`);
+  head.push(note || (hasText
+    ? '聽到的是這樣，送出前可以直接改'
+    : '沒有辨識到內容。請按「重錄」再講一次，或直接在下面打字。'));
   document.getElementById('confirm-head-text').textContent = head.join('｜');
   document.getElementById('confirm-send-btn').disabled = !String(box.value).trim();
   box.focus();
