@@ -44,6 +44,15 @@
   .kpi .num{font-size:1.9rem;font-weight:800;color:var(--primary);line-height:1.15}
   .kpi .lab{font-size:.8rem;color:var(--muted);margin-top:4px}
   .kpi .hint{font-size:.7rem;color:#9ca3af;margin-top:3px}
+  /* 相對於自己過去的漲跌標記。none＝樣本不夠，故意長得不像結論（灰底、無箭頭） */
+  .trend{display:inline-flex;align-items:center;gap:4px;font-size:.74rem;font-weight:700;
+         border-radius:20px;padding:3px 9px;margin-top:7px;line-height:1.3}
+  .trend.up{background:#dcfce7;color:#15803d}
+  .trend.down{background:#fee2e2;color:#b91c1c}
+  .trend.flat{background:#f1f5f9;color:#475569}
+  .trend.none{background:#f8fafc;color:#94a3b8;font-weight:600;border:1px dashed #e2e8f0}
+  #peer-chart{width:100%;display:block;touch-action:pan-y}
+  #peer-chart text{font-family:var(--font);fill:var(--muted)}
 
   .card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin-bottom:18px}
   .card h2{font-size:1.02rem;margin-bottom:4px;display:flex;align-items:center;gap:7px}
@@ -332,6 +341,24 @@
   </div>
 
   <div class="card">
+    <h2><i class="ti ti-users-group" style="color:var(--primary)"></i> 同業基準線：同一批問題，AI 提到誰</h2>
+    <div class="desc">把工研院的數字放進可比較的脈絡——<b>52 分是好是壞，要看旁邊那幾條線在哪裡。</b>
+      這裡的資料不是另外去查的：判官每判一題，本來就會記下「這段回答裡除了工研院還點名了哪些機構」，
+      所以對照機構跟我們是<b>同一題、同一天、同一個引擎、同一次回答</b>算出來的。
+      <br>
+      ⚠️ 這條線是<b>提及率（%）</b>，不是上面那張的能見度指數——位置、自家網域被引、有沒有具體內容，
+      判官只對工研院判，對照機構只有「有沒有被點名」這一個事實。硬湊一個分數給對手，是拿自己編的數字跟自己比。
+      兩張圖的縱軸意義不同，<b>不要疊在一起看</b>。滾動七日計算，窗內樣本不足的日子會斷線。
+      要看單一議題誰贏，用上面的「一頁報告」。</div>
+    <div class="chips" id="peer-chips"></div>
+    <div class="chart-box">
+      <svg id="peer-chart" viewBox="0 0 920 300" preserveAspectRatio="none"></svg>
+      <div class="tip" id="peer-tip"></div>
+    </div>
+    <div id="peer-note"></div>
+  </div>
+
+  <div class="card">
     <h2><i class="ti ti-flag" style="color:var(--event)"></i> 事件效應：這一場替你留下幾天記憶</h2>
     <div class="desc">半衰期＝峰值掉回「峰值與基線的中點」要幾天；首次引用＝事件日起自家網域第一次被 AI 引用隔了幾天（每天一次取樣，精度只到天，不是新聞稿本身的引用時間，只看相對快慢）；基線抬升＝事件後第 15–30 天的均分減掉事前 14 天基線。抬升是真正能寫進績效的數字。<b>點任一列看這場的診斷與下一步。</b>
       這幾個數字<b>做不到回溯</b>：要在活動前兩週就開始追蹤，才算得出基線。</div>
@@ -404,7 +431,9 @@
 <script>
 const PALETTE = ['#0F9E7A','#3b82f6','#8b5cf6','#ec4899','#f97316','#14b8a6','#6366f1','#84cc16'];
 let S = { pwd:'', code:'', role:'admin', data:null, status:null,
-          on:new Set(['__overall__']), prompts:[], events:[] };
+          on:new Set(['__overall__']), prompts:[], events:[],
+          // 同業圖的線要顯示哪幾條。null＝使用者還沒手動點過，預設開「工研院＋被提到最多的三家」
+          peerOn:null };
 
 /* ── 登入 ── */
 function toast(m){const t=document.getElementById('toast');t.textContent=m;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2600);}
@@ -1036,6 +1065,7 @@ async function loadSeries(){
   if(d.error) return toast(d.error);
   S.data = d;
   renderKpis(d.summary); renderChips(d.series); renderChart(); renderEvents(d.events); renderBoard(d.board);
+  renderPeerChips(); renderPeerChart();
   renderAdviseKeywords(d.series?.keywords || []);
 }
 
@@ -1108,10 +1138,27 @@ async function runAdvise(){
   }
 }
 
+/* ── 相對於自己過去：上升／持平／下降 ──
+ * 後端樣本不夠時 current／baseline／delta 一律是 null，這裡連要畫的數字都拿不到——
+ * 這是故意的。「資料才四天卻顯示一個向上箭頭」只要出現一次，就是被截圖傳出去的那一次，
+ * 而且錯在我們自己。所以擋在資料出口，不是擋在這段畫面邏輯裡。
+ * 這個標記是「一眼看個大概」，不是統計檢定：要對外宣稱某場活動真的把數字推上去，
+ * 看事件效應那張表與一頁報告的信賴區間。 */
+function trendBadge(t){
+  if(!t) return '';
+  if(!t.dir){
+    return `<div class="trend none"><i class="ti ti-hourglass-low"></i>${esc(t.reason || '資料還不夠，先不下結論')}</div>`;
+  }
+  const icon = t.dir === 'up' ? 'ti-arrow-up-right' : t.dir === 'down' ? 'ti-arrow-down-right' : 'ti-arrow-right';
+  const sign = t.delta > 0 ? '+' : '';
+  return `<div class="trend ${t.dir}"><i class="ti ${icon}"></i>本週${t.label} ${sign}${t.delta}
+    <span style="font-weight:600;opacity:.75">（vs 近 ${t.baseDays} 天 ${t.baseline} 分）</span></div>`;
+}
+
 function renderKpis(s){
   const v = (x,suf='') => x===null||x===undefined ? '—' : x+suf;
   document.getElementById('kpis').innerHTML = `
-    <div class="kpi"><div class="num">${v(s.score14)}</div><div class="lab">近 14 天能見度指數</div><div class="hint">滿分 100</div></div>
+    <div class="kpi"><div class="num">${v(s.score14)}</div><div class="lab">近 14 天能見度指數</div><div class="hint">滿分 100</div>${trendBadge(s.trend)}</div>
     <div class="kpi"><div class="num">${v(s.mentionRate14,'%')}</div><div class="lab">提及率</div><div class="hint">不指名問法下有被提到</div></div>
     <div class="kpi"><div class="num">${v(s.citedRate14,'%')}</div><div class="lab">自家網域引用率</div><div class="hint">itri.org.tw 被列為來源</div></div>
     <div class="kpi"><div class="num">${s.samples}</div><div class="lab">累計樣本</div><div class="hint">最後掃描 ${s.lastScan||'—'}${s.failed14?`｜近期失敗 ${s.failed14}`:''}</div></div>`;
@@ -1136,11 +1183,12 @@ const W=920, H=340, PL=44, PR=14, PT=18, PB=30;
 const px = (i,n) => PL + (n<=1 ? 0 : (W-PL-PR) * i/(n-1));
 const py = (v) => PT + (H-PT-PB) * (1 - v/100);
 
-function pathOf(vals){
+// fx／fy 有預設值，能見度走勢那張的呼叫方式完全不用改；同業圖傳自己的座標函式進來。
+function pathOf(vals, fx = px, fy = py){
   let d='', pen=false;
   vals.forEach((v,i)=>{
     if(v===null){ pen=false; return; }
-    d += (pen?'L':'M') + px(i,vals.length).toFixed(1) + ' ' + py(v).toFixed(1) + ' ';
+    d += (pen?'L':'M') + fx(i,vals.length).toFixed(1) + ' ' + fy(v).toFixed(1) + ' ';
     pen = true;
   });
   return d.trim();
@@ -1215,6 +1263,134 @@ function renderChart(){
   svg.addEventListener('mousemove', e=>move(e.clientX, e.clientY));
   svg.addEventListener('touchmove', e=>{ const t=e.touches[0]; if(t) move(t.clientX, t.clientY); });
   svg.addEventListener('mouseleave', ()=>{ tip.style.opacity=0; const c=svg.querySelector('#cross'); if(c) c.setAttribute('opacity','0'); });
+})();
+
+/* ── 同業基準線 ──────────────────────────────────────────────────
+ * 縱軸是提及率（%），不是能見度指數——後端 lib/geo-benchmark.js 開頭寫了為什麼。
+ * 工研院畫成粗實線（我們是主角），對照機構畫成細虛線（它們是參考線），
+ * 用線型而不是只靠顏色區分，列印成黑白的一頁報告時才分得出來。 */
+const QW=920, QH=300, QL=44, QR=14, QT=18, QB=30;
+const qx = (i,n) => QL + (n<=1 ? 0 : (QW-QL-QR) * i/(n-1));
+const qy = (v) => QT + (QH-QT-QB) * (1 - v/100);
+const PEER_PALETTE = ['#64748b','#3b82f6','#8b5cf6','#f97316','#0891b2'];
+
+function peerLines(){
+  const p = S.data?.peers;
+  if(!p) return [];
+  return [{ key:p.self.key, name:p.self.name, rate:p.self.rate, self:true, color:PALETTE[0], mentions:p.self.mentions },
+    ...p.peers.map((x,i)=>({ key:x.key, name:x.name, rate:x.rate, self:false,
+                             color:PEER_PALETTE[i % PEER_PALETTE.length], mentions:x.mentions }))];
+}
+
+// 還沒手動點過時的預設：自己＋被提到最多的三家。規格要的就是「2-3 個對照機構」，
+// 五條以上一起畫會變成一團毛線，剩下的留在 chip 上讓人自己開。
+function peerDefaultOn(key){
+  const p = S.data?.peers;
+  if(!p) return false;
+  return key === p.self.key || p.peers.slice(0,3).some(x=>x.key===key);
+}
+const peerIsOn = (key) => (S.peerOn ? S.peerOn.has(key) : peerDefaultOn(key));
+
+// 用索引而不是把 key 直接塞進 onclick：未登記的機構名稱是 AI 寫什麼就存什麼，
+// 裡面可能有引號或角括號，塞進屬性就是一個 XSS 缺口。
+function togglePeer(i){
+  const lines = peerLines();
+  const key = lines[i]?.key;
+  if(!key) return;
+  if(!S.peerOn) S.peerOn = new Set(lines.filter(L=>peerDefaultOn(L.key)).map(L=>L.key));
+  S.peerOn.has(key) ? S.peerOn.delete(key) : S.peerOn.add(key);
+  renderPeerChips(); renderPeerChart();
+}
+
+function renderPeerChips(){
+  const box = document.getElementById('peer-chips');
+  const p = S.data?.peers;
+  if(!p || !p.ready){ box.innerHTML=''; return; }
+  box.innerHTML = peerLines().map((L,i)=>{
+    const on = peerIsOn(L.key);
+    return `<button class="chip ${on?'on':''}" style="${on?`background:${L.color}`:`color:${L.color}`}"
+      onclick="togglePeer(${i})" title="近期被提到 ${L.mentions} 次"><span class="dot"></span>${esc(L.name)}${L.self?'（我們）':''}</button>`;
+  }).join('');
+}
+
+function renderPeerChart(){
+  const svg = document.getElementById('peer-chart');
+  const note = document.getElementById('peer-note');
+  const p = S.data?.peers;
+  if(!p || !p.ready){
+    svg.innerHTML = '';
+    note.innerHTML = `<div class="empty">同業對照還在累積。目前有效掃描 ${p?.samples ?? 0} 筆——
+      滾動七日窗內至少要 3 筆才畫得出一個點，不然一題就能畫出 100% 的假尖峰。讓排程再跑幾天。</div>`;
+    svg._dates = [];
+    return;
+  }
+
+  const { dates } = p;
+  const n = dates.length;
+  let g = '';
+  [0,25,50,75,100].forEach(v=>{
+    g += `<line x1="${QL}" y1="${qy(v)}" x2="${QW-QR}" y2="${qy(v)}" stroke="#eef0f2" stroke-width="1"/>`;
+    g += `<text x="${QL-8}" y="${qy(v)+4}" text-anchor="end" font-size="11">${v}%</text>`;
+  });
+  const step = Math.max(1, Math.ceil(n/6));
+  for(let i=0;i<n;i+=step){
+    g += `<text x="${qx(i,n)}" y="${QH-8}" text-anchor="middle" font-size="10.5">${dates[i].slice(5)}</text>`;
+  }
+  // 活動日也標在同業圖上：發稿那天有沒有把別人擠下去，就是看這條線的相對位置
+  (S.data.events||[]).forEach((ev,k)=>{
+    const i = dates.indexOf(ev.date);
+    if(i<0) return;
+    const x = qx(i,n);
+    g += `<line x1="${x}" y1="${QT}" x2="${x}" y2="${QH-QB}" stroke="var(--event)" stroke-width="1.2" stroke-dasharray="4 4" opacity=".6"/>`;
+  });
+
+  const shown = peerLines().filter(L=>peerIsOn(L.key));
+  shown.forEach(L=>{
+    g += `<path d="${pathOf(L.rate, qx, qy)}" fill="none" stroke="${L.color}"
+      stroke-width="${L.self?2.8:1.8}" ${L.self?'':'stroke-dasharray="6 4"'}
+      stroke-linejoin="round" stroke-linecap="round" opacity="${L.self?1:.85}"/>`;
+  });
+  g += `<line id="peer-cross" x1="0" y1="${QT}" x2="0" y2="${QH-QB}" stroke="#94a3b8" stroke-width="1" opacity="0"/>`;
+  svg.innerHTML = g;
+  svg._dates = dates; svg._lines = shown; svg._samples = p.windowSamples || [];
+
+  const missing = peerLines().length - 1;
+  note.innerHTML = `<div style="font-size:.74rem;color:var(--muted);margin-top:8px">
+    區間內有效掃描 ${p.samples} 筆，滾動 ${p.window} 日計算。` +
+    (missing ? `找到 ${missing} 家被穩定提到的對照機構（至少 3 次），依被提到次數排序。`
+             : `目前還沒有任何對照機構被穩定提到（門檻：區間內至少 3 次），所以只有我們自己這條線。`) +
+    `對照機構是<b>依實際同框次數自動挑的</b>，不是人工指定，所以名單會隨議題變動。</div>`;
+}
+
+// 另外寫一個游標處理，不跟上面那張共用：能見度走勢那張一條線有「七日均線＋當日原始值」
+// 兩個數字，這張只有一個提及率，硬要合成一個泛用版只會多一層看不懂的參數。
+(function bindPeerHover(){
+  const svg = document.getElementById('peer-chart'), tip = document.getElementById('peer-tip');
+  if(!svg || !tip) return;
+  const move = (clientX, clientY) => {
+    if(!svg._dates || !svg._dates.length) return;
+    const r = svg.getBoundingClientRect();
+    const n = svg._dates.length;
+    let i = Math.round(((clientX - r.left) / r.width * QW - QL) / Math.max(1,(QW-QL-QR)) * (n-1));
+    i = Math.max(0, Math.min(n-1, i));
+    const cross = svg.querySelector('#peer-cross');
+    if(cross){ cross.setAttribute('x1',qx(i,n)); cross.setAttribute('x2',qx(i,n)); cross.setAttribute('opacity','.5'); }
+    const date = svg._dates[i];
+    const rows = (svg._lines||[])
+      .map(L=>({ L, v:L.rate[i] })).filter(x=>x.v!==null)
+      .sort((a,b)=>b.v-a.v)
+      .map(({L,v})=>`<div><span style="color:${L.color}">${L.self?'●':'○'}</span> ${esc(L.name)}：<b>${v}%</b></div>`)
+      .join('');
+    const smp = (svg._samples||[])[i];
+    tip.innerHTML = `<b>${date}</b>${rows || '<div style="opacity:.7">窗內樣本不足</div>'}` +
+      (smp ? `<div style="opacity:.6;margin-top:2px">窗內 ${smp} 筆</div>` : '');
+    tip.style.opacity = 1;
+    tip.style.left = Math.min(r.width - 200, Math.max(0, (qx(i,n)/QW)*r.width - 60)) + 'px';
+    tip.style.top = Math.max(0, clientY - r.top - 70) + 'px';
+  };
+  svg.addEventListener('mousemove', e=>move(e.clientX, e.clientY));
+  svg.addEventListener('touchmove', e=>{ const t=e.touches[0]; if(t) move(t.clientX, t.clientY); });
+  svg.addEventListener('mouseleave', ()=>{ tip.style.opacity=0; const c=svg.querySelector('#peer-cross'); if(c) c.setAttribute('opacity','0'); });
 })();
 
 /* ── 事件效應 ── */
