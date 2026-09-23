@@ -102,6 +102,8 @@ export function reset() {
   state.newsDigestText = ''; // 非空＝模擬「官網補查那支模型」吐出這段話（批次 44）
   state.memories = [];       // bot_memory 的列（批次 46）：[時間, 範圍, 類型, 內容, 建立者, 狀態]
   state.changes = [];
+  state.sheetLatencyMs = 0;  // 批次 80：>0 時每次讀寫都延遲，讓同時進來的兩個請求真的交錯（測競態用）
+  state.photoInbox = [];     // 批次 80：line_photo_inbox 的列 [LINE ID, messageId, 時戳, 已用]
   state.photoUploads = [];   // 批次 79：saveEventPhoto() 被呼叫的紀錄 [eventId, messageId]
   state.photoFailIds = [];   // 這些 messageId 模擬下載失敗        // event_changes 的列（批次 78）：[時間, LINE ID, 姓名, 活動 id, 活動名稱, 欄位, 改前, 改後, 來源]
   state.answerText = ''; // 非空＝模擬模型吐出這段原始文字，見 installFetchStub() 的問答分支
@@ -123,17 +125,21 @@ function bindingRows() {
 }
 
 // ── lib/sheets.js ────────────────────────────────────────────────────
+const lag = () => (state.sheetLatencyMs ? new Promise(r => setTimeout(r, state.sheetLatencyMs)) : null);
 export const sheets = {
   async readRange(range) {
+    await lag();
     if (range.startsWith('events!')) return state.events.map(r => [...r]);
     if (range.startsWith('line_users!')) return bindingRows();
     if (range.startsWith('line_staff!')) return state.staff.map(r => [...r]);
     if (range.startsWith('contacts_directory!')) return state.contactsDirectory ? [[state.contactsDirectory]] : [];
     if (range.startsWith('bot_memory!')) return state.memories.map(r => [...r]);
     if (range.startsWith('event_changes!')) return (state.changes || []).map(r => [...r]);
+    if (range.startsWith('line_photo_inbox!')) return (state.photoInbox || []).map(r => [...r]);
     return [];
   },
   async appendRows(range, rows) {
+    await lag();
     if (range.startsWith('line_users!')) {
       for (const r of rows) state.bindings.set(r[0], {
         event_id: r[1], media_name: r[2], bound_at: Number(r[3]), note: r[5],
@@ -146,14 +152,22 @@ export const sheets = {
     if (range.startsWith('bot_memory!')) state.memories.push(...rows.map(r => [...r]));
     if (range.startsWith('events!')) state.events.push(...rows.map(r => [...r]));
     if (range.startsWith('event_changes!')) (state.changes ||= []).push(...rows.map(r => [...r]));
+    if (range.startsWith('line_photo_inbox!')) (state.photoInbox ||= []).push(...rows.map(r => [...r]));
   },
   async updateRange(range, values) {
+    await lag();
     if (range === 'contacts_directory!A2') { state.contactsDirectory = values[0][0]; return; }
     // events!K12 這種單欄寫入（補編輯碼）。A=0 起算，K 是索引 10。
     const evM = range.match(/^events!([A-R])(\d+)(?::([A-R])(\d+))?$/);
     if (evM) {
       const row = state.events[Number(evM[2]) - 2];
       if (row) values[0].forEach((v, i) => { row[evM[1].charCodeAt(0) - 65 + i] = v; });
+      return;
+    }
+    const inM = range.match(/^line_photo_inbox!([A-D])(\d+)$/);
+    if (inM) {
+      const row = (state.photoInbox || [])[Number(inM[2]) - 2];
+      if (row) row[inM[1].charCodeAt(0) - 65] = values[0][0];
       return;
     }
     const memM = range.match(/^bot_memory!([A-F])(\d+)$/);
