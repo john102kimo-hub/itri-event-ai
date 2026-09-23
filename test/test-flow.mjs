@@ -545,7 +545,7 @@ check('智慧兜底的 system prompt 明確禁止生成事實內容（這條是�
   /不要提供任何事實內容/.test(out.find(o => o.kind === 'fallback')?.sys || ''),
   (out.find(o => o.kind === 'fallback')?.sys || '').slice(0, 120));
 check('智慧兜底照樣附上四條路的入口按鈕，記者不用自己打字',
-  JSON.stringify(out.at(-1)?.quickReply) === JSON.stringify(['最近有哪些活動', '產業趨勢分析', '想問什麼技術', '媒體邀訪需求', '使用說明']),
+  JSON.stringify(out.at(-1)?.quickReply) === JSON.stringify(['最近有哪些活動', '產業趨勢分析', '想問什麼技術', '媒體邀訪需求', '找真人', '使用說明']) /* 批次 81 加了「找真人」 */,
   JSON.stringify(out.at(-1)?.quickReply));
 
 // 輸出守門：模型講太多、或吐回來的其實是 askAnthropic() 自己的失敗訊息時，一律退回
@@ -2753,7 +2753,7 @@ for (const [label, text, mustInclude] of [
   check(`閒聊「${text}」（${label}）→ 不呼叫模型（沒有 kind:'fallback' 這個節點）`,
     !out.some(o => o.kind === 'fallback'), JSON.stringify(out.map(o => o.kind)));
   check(`閒聊「${text}」（${label}）→ 照樣附上四條路的入口按鈕，不是丟一句話就沒了`,
-    JSON.stringify(out.at(-1)?.quickReply) === JSON.stringify(['最近有哪些活動', '產業趨勢分析', '想問什麼技術', '媒體邀訪需求', '使用說明']),
+    JSON.stringify(out.at(-1)?.quickReply) === JSON.stringify(['最近有哪些活動', '產業趨勢分析', '想問什麼技術', '媒體邀訪需求', '找真人', '使用說明']) /* 批次 81 加了「找真人」 */,
     JSON.stringify(out.at(-1)?.quickReply));
 }
 
@@ -3374,6 +3374,66 @@ check('　 同一視窗內真的在問活動 → 照樣回', out.length > 0, JSO
     state.photoUploads.map(x => x[1]).sort().join() === 'p1,p2', JSON.stringify(state.photoUploads));
   out = await send('智慧醫療解決方案記者會', 'U_staff');
   check('　 加過的照片不會再被加一次', state.photoUploads.length === 2 && out[0]?.kind === 'flex', JSON.stringify(state.photoUploads));
+}
+
+// ── 情境 81：找得到真人（批次 81，世新大學事件後的檢查）──────────────────────────
+// 世新砍系辦改問 AI 被批評的核心是「找不到人」。這一組確保記者任何時候都拿得到真人。
+{
+  reset(); await freshModule();
+  process.env.LINE_ADMIN_USER_ID = 'U_owner';
+  for (const t of ['我要找真人', '轉人工', '可以跟承辦人講話嗎', '這個AI沒用，給我電話', '有人在嗎', '你們公關是誰']) {
+    out = await send(t, 'U_rep_' + t.length);
+    check(`★ 沒選活動時打「${t}」→ 給真人的名字和電話（不是「查不到」、不是被當成主題詞）`,
+      /想直接找人/.test(out.at(-1)?.text || '') && /朱則瑋 03-9999999/.test(out.at(-1)?.text || '') && !/產業趨勢/.test(out.at(-1)?.text || ''), JSON.stringify(out));
+  }
+  check('　 找真人不經過模型（聯絡方式不能是模型生的）', !sent.some(o => o.kind === 'answer' || o.kind === 'fallback'));
+
+  // 綁定中：先給這一場的新聞聯絡人
+  reset(); await freshModule();
+  state.bindings.set('U_r', { event_id: 'semi', media_name: 'X報', note: '', bound_at: Date.now() });
+  out = await send('我要找真人', 'U_r');
+  check('★ 綁定中找真人 → 先給這一場的新聞聯絡人，再給綜合窗口',
+    /《半導體先進封裝技術發表會》新聞聯絡人：陳大文/.test(out.at(-1)?.text || '') && /綜合窗口/.test(out.at(-1)?.text || ''), out.at(-1)?.text);
+  check('　 綁定中也不會被那一場的 AI 拿去回答', !sent.some(o => o.kind === 'answer'));
+
+  // 通知公關同仁：同一個人 30 分鐘內只通知一次
+  reset(); await freshModule();
+  process.env.LINE_ADMIN_USER_ID = 'U_owner';
+  await send('我要找真人', 'U_r2');
+  const n1 = sent.filter(o => o.push && o.to === 'U_owner').length;
+  check('★ 通知 LINE_ADMIN_USER_ID，可以到官方帳號後台直接回', n1 === 1 && sent.some(o => o.to === 'U_owner' && /直接回覆他/.test(o.text)), JSON.stringify(sent));
+  check('　 回覆告訴記者已經轉告，但不承諾回覆時間', /我也轉告公關同仁了/.test(sent.find(o => !o.push)?.text || '') && !/分鐘內|小時內|馬上回/.test(sent.find(o => !o.push)?.text || ''));
+  await send('轉人工', 'U_r2');
+  check('　 同一個人連打兩次 → 不重複通知（不洗管理員的版）', sent.filter(o => o.push && o.to === 'U_owner').length === 0, JSON.stringify(sent));
+  delete process.env.LINE_ADMIN_USER_ID;
+  reset(); await freshModule();
+  out = await send('我要找真人', 'U_r3');
+  check('沒設 LINE_ADMIN_USER_ID → 照樣給聯絡方式，只是不說「已轉告」', /朱則瑋/.test(out.at(-1)?.text || '') && !/轉告/.test(out.at(-1)?.text || ''), out.at(-1)?.text);
+
+  // 名單的「其他」沒填電話 → 從名單裡找同一個人的電話
+  reset(); await freshModule();
+  state.contactsDirectory = '產業趨勢分析｜產科國際所｜朱則瑋｜0934-266-766｜｜產業趨勢\n其他｜｜朱則瑋｜｜｜綜合聯絡人';
+  out = await send('我要找真人', 'U_r4');
+  check('★ 「其他」那行沒填電話 → 補上同一個人在名單裡的電話（只給名字等於沒給）', /朱則瑋 0934-266-766/.test(out.at(-1)?.text || ''), out.at(-1)?.text);
+
+  // 群組裡 @ 米亞要找人
+  reset(); await freshModule();
+  out = await sendGroup('@我 我要找真人');
+  check('群組裡 @ 米亞找真人 → 一樣給聯絡方式', /想直接找人/.test(out.at(-1)?.text || ''), JSON.stringify(out));
+
+  // 不能誤攔的
+  const menu = await import(new URL(`../lib/menu.js?v=${modSeq}`, import.meta.url).href);
+  for (const t of ['這項技術需要多少工作人員', '受訪者的電話', '這個技術跟人工智慧有關嗎', '人工智慧的趨勢', '所長的電話給我', '新聞聯絡人是誰']) {
+    check(`「${t}」不是在找真人，不攔`, menu.detectMetaIntent(t) !== 'human', menu.detectMetaIntent(t));
+  }
+
+  // 每一條死路都留真人的出口
+  reset(); await freshModule();
+  out = await send('欸你這樣不太行喔');
+  check('★ 兜底（答不出來）的最後一行留「找真人」', /想直接找人，打「找真人」/.test(out.at(-1)?.text || ''), out.at(-1)?.text);
+  check('　 使用說明寫著可以找真人', /【找人】打「找真人」/.test(menu.HELP_TEXT));
+  const { readFileSync } = await import('node:fs');
+  check('　 出錯道歉的那一句也給「找真人」', /連續幾次都這樣，打「找真人」/.test(readFileSync(new URL('../api/line.js', import.meta.url), 'utf8')));
 }
 
 console.log(`\n${fail === 0 ? '✅' : '❌'} 流程測試通過 ${pass}／失敗 ${fail}`);

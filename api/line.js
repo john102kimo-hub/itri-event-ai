@@ -2849,6 +2849,56 @@ async function sendStaffMenu(replyToken, userId) {
 //
 // 放在綁定判斷「之前」是刻意的：沒綁定的記者問「使用說明」一樣要拿到說明，而不是
 // 掉進 routeIntent() 被判成 other、只拿到「不確定您想問哪一場」。
+// ── 找真人（批次 81）──────────────────────────────────────────────────────
+// 世新大學事件的教訓：AI 最傷人的不是答錯，是「答不出來、又找不到人」。所以這一則：
+//   ① 一定給得出真人：目前這場的新聞聯絡人 → 全站綜合窗口（contacts_directory 的「其他」）
+//      → 都沒有時，退到程式裡寫死的綜合聯絡人（跟產業趨勢那條同一位）
+//   ② 通知公關同仁（LINE_ADMIN_USER_ID）：記者可以在 LINE 官方帳號後台的聊天室被真人直接回覆
+//   ③ 不承諾回覆時間（LINE-PLAN.md 第 9 節：收了單沒回，比沒有這個功能更傷）
+// 全部寫死、不經過模型：聯絡方式不能是模型生出來的。
+const HUMAN_NOTIFY_GAP_MS = 30 * 60 * 1000; // 同一個對話 30 分鐘內只通知一次，避免記者連打幾次就洗管理員的版
+const humanNotified = new Map();
+
+async function sendHumanContact(replyToken, targetId, text, binding, { speakerId = '', group = false } = {}) {
+  const lines = ['我是米亞，工研院的 AI 小幫手 🙂 想直接找人的話：'];
+  const event = binding?.event_id ? await getEventById(binding.event_id) : null;
+  if (isUsable(event) && event.press_contact) {
+    lines.push(`・《${event.name}》新聞聯絡人：${event.press_contact}`);
+  }
+  let dir = [];
+  try { dir = await getContactsDirectory(); } catch { dir = []; }
+  const general = dir.find(c => c.topic === '其他');
+  const g = general?.name ? { ...general } : { ...FALLBACK_INDUSTRY_TREND_CONTACT };
+  // 預設名單的「其他」那行沒填電話（同一個人在「產業趨勢分析」那行有）。只給名字等於沒給，
+  // 從名單裡找同一個人的電話補上；再沒有就用程式裡寫死的那支。
+  if (!g.phone) {
+    g.phone = dir.find(c => c.name === g.name && c.phone)?.phone
+      || (g.name === FALLBACK_INDUSTRY_TREND_CONTACT.name ? FALLBACK_INDUSTRY_TREND_CONTACT.phone : '');
+  }
+  lines.push(`・工研院新聞綜合窗口：${g.name}${g.phone ? ` ${g.phone}` : ''}${g.lineId ? `（LINE：${g.lineId}）` : ''}`);
+  lines.push('・各技術領域的窗口：打「媒體邀訪需求」');
+
+  const ownerId = process.env.LINE_ADMIN_USER_ID;
+  const key = group ? `${targetId}` : targetId;
+  const last = humanNotified.get(key) || 0;
+  let notified = false;
+  if (ownerId && ownerId !== (speakerId || targetId) && Date.now() - last > HUMAN_NOTIFY_GAP_MS) {
+    try {
+      const res = await pushMessage(ownerId,
+        `🙋 有人在 LINE 要找真人\n${group ? '（在群組裡）' : ''}${isUsable(event) ? `目前在問：《${event.name}》\n` : ''}原話：「${sanitize(text, 100)}」\n\n` +
+        '可以到 LINE 官方帳號管理後台的「聊天」直接回覆他。');
+      notified = !res || res.ok !== false;
+      if (notified) humanNotified.set(key, Date.now());
+    } catch (e) { console.error('找真人通知失敗:', e.message); }
+  } else if (ownerId && Date.now() - last <= HUMAN_NOTIFY_GAP_MS) {
+    notified = true; // 剛剛已經通知過了
+  }
+  if (notified) lines.push('\n我也轉告公關同仁了，他們看到會在這個對話直接回你；急的話直接打電話比較快。');
+  console.log(`[line] 找真人 target=${targetId} group=${group} notified=${notified}`);
+  await replyOrPush(replyToken, targetId, lines.join('\n'),
+    group ? undefined : ['媒體邀訪需求', '最近有哪些活動', '使用說明']);
+}
+
 async function handleMetaIntent(replyToken, userId, text, metaIntent, binding, { speakerId = '', group = false } = {}) {
   // ask_name 是「#代碼綁定後問了媒體名稱，下一則要試著擷取」的一次性旗標。
   // 記者在那個視窗裡改按了選單按鈕，代表他跳過了報名字這件事，旗標要當場作廢——
@@ -2977,6 +3027,12 @@ async function handleMetaIntent(replyToken, userId, text, metaIntent, binding, {
     // 按鈕，記者問完機構簡介不會卡在死巷子裡，跟 sendFallbackGuide() 同一個道理。
     await replyOrPush(replyToken, userId, ORG_INTRO_TEXT,
       ['最近有哪些活動', '產業趨勢分析', '想問什麼技術', CONTACT_MENU_LABEL, '使用說明']);
+    return;
+  }
+
+  // ── 批次 81：「我要找真人」——米亞是幫手，不是取代真人（見 lib/menu.js isHumanRequest()）──
+  if (metaIntent === 'human') {
+    await sendHumanContact(replyToken, userId, text, binding, { speakerId, group });
     return;
   }
 
@@ -3360,8 +3416,11 @@ async function composeFallbackReply(text) {
 // 那組，並且補一句「這裡是職員模式」——同仁在職員模式裡拿到一整排記者按鈕會以為
 // 自己被踢出去了。
 async function sendFallbackGuide(replyToken, targetId, text, { staff = false } = {}) {
-  const chips = staff ? STAFF_QUICK_REPLIES : ['最近有哪些活動', '產業趨勢分析', '想問什麼技術', CONTACT_MENU_LABEL, '使用說明'];
+  const chips = staff ? STAFF_QUICK_REPLIES : ['最近有哪些活動', '產業趨勢分析', '想問什麼技術', CONTACT_MENU_LABEL, '找真人', '使用說明'];
+  // 批次 81：每一條兜底都要留一條通往真人的路（世新事件的教訓：AI 答不出來又找不到人）。
+  // 寫死在程式裡接在最後，不交給模型——兜底那支本來就禁止模型講聯絡方式。
   const staffTail = staff ? '\n\n（您在職員模式，打「使用說明」可以看內部功能。）' : '';
+  const deadEndTail = staff ? staffTail : '\n\n（想直接找人，打「找真人」。）';
 
   // 天氣／告白／問個性這種閒聊：不呼叫 Haiku，直接送寫死的俏皮話（見上方
   // CHITCHAT_FIXED_REPLIES 的說明）。放在 looksLikeBareTopic 之前，因為裸主題詞判斷
@@ -3394,7 +3453,7 @@ async function sendFallbackGuide(replyToken, targetId, text, { staff = false } =
   // 先試著用米亞的口吻，針對記者「這一句」講一段真的貼題的話（見
   // composeFallbackReply()）；組不出來就退回下面這份固定文案。
   const smart = await composeFallbackReply(text);
-  await replyOrPush(replyToken, targetId, (smart || FALLBACK_GUIDE_TEXT) + staffTail, chips);
+  await replyOrPush(replyToken, targetId, (smart || FALLBACK_GUIDE_TEXT) + deadEndTail, chips);
 }
 
 // ── 群組續問視窗的「這句話是在跟我講嗎」守門（批次 28）─────────────────────
@@ -4291,7 +4350,7 @@ async function apologise(ev, cause) {
     // reply token 60 秒只能用一次，走到這裡多半還沒被用掉（例外通常發生在送出回覆
     // 之前）；真的用掉了 replyOrPush() 會自動退回 push，記者一樣收得到。
     await replyOrPush(ev.replyToken, targetId,
-      '不好意思，我這邊剛剛卡住了，這一題沒能查出來 🙏\n麻煩再問我一次；如果連續幾次都這樣，請直接洽現場新聞聯絡人，不要等我。');
+      '不好意思，我這邊剛剛卡住了，這一題沒能查出來 🙏\n麻煩再問我一次；如果連續幾次都這樣，打「找真人」或直接洽現場新聞聯絡人，不要等我。');
   } catch (e) {
     console.error('道歉訊息也送不出去:', e.message);
   }
