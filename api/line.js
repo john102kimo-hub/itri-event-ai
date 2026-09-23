@@ -50,8 +50,12 @@ import {
   createDraftEvent, editLink, trainingLink, ensureEventEditCode, getEventRawById,
   getEventAnalyticsSummary, formatEventAnalyticsReply, getGeoStatusSummary, getGeoTrendSeries,
   isExitStaffCommand, revokeStaff, listActiveStaffIds, getStaffPending, setStaffPending,
-  isCancelReply, staffPickList, dateWithWeekday
+  isCancelReply, staffPickList, dateWithWeekday, todayTaipei, getEventStats
 } from '../lib/staff.js';
+import {
+  eventChecklist, formatProgressOverview, buildEventCardFlex, formatEventCardText,
+  formatNudgeMessage, previewLink
+} from '../lib/event-status.js';
 import { buildGeoBriefFlex, formatGeoBriefText } from '../lib/geo-brief.js';
 import {
   getMemories, addMemory, setMemoryStatus, parseMemoryCommand,
@@ -1987,10 +1991,12 @@ const SITE = 'https://itri-event-ai.vercel.app';
 //
 // 「使用說明」也在這裡：sendFallbackGuide() 的職員版尾巴一直叫同仁「打『使用說明』
 // 可以看內部功能」，卻沒有任何一顆按鈕點得到——功能有、入口沒有，又是同一個形狀。
-const STAFF_QUICK_REPLIES = [
-  ...STAFF_MENU.buttons.map(b => b.text), '設定圖文選單',
-  '最近有哪些新聞', '記憶清單', '使用說明'
-];
+// 批次 77：選單重排後「要媒體訓練連結」「退出職員模式」不在六格裡了，補回按鈕列——
+// 換掉的入口不會真的消失，只是不再佔選單的一格（批次 21 的原則）。
+const STAFF_QUICK_REPLIES = [...new Set([
+  ...STAFF_MENU.buttons.map(b => b.text), '要媒體訓練連結', '設定圖文選單',
+  '最近有哪些新聞', '記憶清單', '使用說明', '退出職員模式'
+])];
 
 // 職員的按鈕列：把當下最相關的幾顆排到最前面，後面一律接上整套入口。
 //
@@ -2199,6 +2205,96 @@ async function handleTeachMessage(replyToken, userId, text) {
   return true;
 }
 
+// ── 活動卡／填寫進度／催填（批次 77）──────────────────────────────────────
+// 按鈕與卡片送出的固定句型。用字面比對、不交給模型：這些字串都是我們自己按鈕送出的，
+// 100% 認得出來，還省一次模型呼叫（lib/menu.js 開頭同一個道理）。
+const PROGRESS_RE = /^(活動與進度|活動進度|填寫進度|看填寫進度|查填寫進度|填寫狀況|活動填寫狀況|哪幾場還沒填完)[?？。!！]?$/;
+const UPDATE_ENTRY_RE = /^(更新活動|修改活動|更新活動資訊|修改活動資訊|改活動資料)[?？。!！]?$/;
+const CARD_CMD_RE = /^(催填|數據|活動卡)\s*[:：]\s*(.+)$/;
+
+// Flex 訊息要自己帶快速回覆（replyOrPushMessages 收的是原始物件，不會幫忙轉）。
+// 格式跟 lib/line.js buildQuickReply() 一樣：最多 13 顆、label 最長 20 字。
+function quickReplyOf(items) {
+  const list = (items || []).filter(Boolean).slice(0, 13);
+  if (!list.length) return undefined;
+  return {
+    items: list.map(item => {
+      const label = String(typeof item === 'object' ? item.label : item);
+      const text = String(typeof item === 'object' ? (item.text ?? item.label) : item);
+      return { type: 'action', action: { type: 'message', label: label.length > 20 ? label.slice(0, 19) + '…' : label, text: text.slice(0, 300) } };
+    })
+  };
+}
+
+// 卡片上的字有一部分是同仁在後台打的（活動名稱、地點）。新的出口一律接上繁體防線
+// （CLAUDE.md 第 1 條）——只轉顯示用的 text／altText／label，不動網址與送出的指令字串。
+function twFlex(node) {
+  if (Array.isArray(node)) return node.map(twFlex);
+  if (!node || typeof node !== 'object') return node;
+  const out = {};
+  for (const [k, v] of Object.entries(node)) {
+    out[k] = (k === 'text' && node.type !== 'message') || k === 'altText' || k === 'label'
+      ? (typeof v === 'string' ? toTraditionalTW(v) : v)
+      : twFlex(v);
+  }
+  return out;
+}
+
+async function sendProgressOverview(replyToken, userId) {
+  const { text, names } = formatProgressOverview(await getAllEventRows(), todayTaipei());
+  await replyOrPush(replyToken, userId, text, staffChips(...names));
+}
+
+// 活動卡：同仁點了活動名稱、或卡片上的按鈕指回這一場時看到的那張。
+async function sendEventCard(replyToken, userId, eventId) {
+  const rows = await getAllEventRows();
+  const row = rows.find(r => r[0] === eventId);
+  if (!row) {
+    await replyOrPush(replyToken, userId, '找不到這場活動，可能剛被改名或封存了。', staffChips('活動與進度'));
+    return;
+  }
+  const c = eventChecklist(row, todayTaipei());
+  const [editCode, stats] = await Promise.all([ensureEventEditCode(eventId), getEventStats(eventId)]);
+  const links = {
+    edit: editCode ? editLink(eventId, editCode) : '',
+    training: editCode ? trainingLink(eventId, editCode) : '',
+    preview: previewLink(eventId)
+  };
+  const chips = staffChips({ label: '問米亞這場', text: `${c.name}的重點是什麼` }, '活動與進度');
+  const flex = twFlex(buildEventCardFlex(c, stats, links));
+  flex.quickReply = quickReplyOf(chips);
+  const ok = await replyOrPushMessages(replyToken, userId, [flex]);
+  // Flex 送不出去（舊版 LINE、格式被拒）退回純文字，跟 GEO 簡報卡同一套降級
+  if (!ok) await replyOrPush(replyToken, userId, formatEventCardText(c, stats, links), chips);
+}
+
+// 催填訊息：兩則。第二則單獨成一個泡泡，同仁長按「轉傳」只會轉那一則。
+async function sendNudge(replyToken, userId, eventId) {
+  const rows = await getAllEventRows();
+  const row = rows.find(r => r[0] === eventId);
+  const editCode = row ? await ensureEventEditCode(eventId) : null;
+  if (!row || !editCode) {
+    await replyOrPush(replyToken, userId, '這場活動的編輯連結產生失敗，請稍後再試。', staffChips('活動與進度'));
+    return;
+  }
+  const c = eventChecklist(row, todayTaipei());
+  const nudge = { type: 'text', text: toTraditionalTW(formatNudgeMessage(c, editLink(eventId, editCode))) };
+  nudge.quickReply = quickReplyOf(staffChips('活動與進度'));
+  const ok = await replyOrPushMessages(replyToken, userId, [
+    { type: 'text', text: '下面這則可以直接長按「轉傳」給負責填寫的同仁 👇' },
+    nudge
+  ]);
+  if (!ok) await replyOrPush(replyToken, userId, nudge.text, staffChips('活動與進度'));
+}
+
+// 卡片按鈕送出的「催填：活動名稱」要找回是哪一場。只收名稱完全相同（正規化後）的
+// 那一場——那是我們自己的按鈕送出來的，對不上就代表活動剛被改名，不猜。
+function findCardByExactName(name, cards) {
+  const norm = s => String(s || '').replace(/[\s　《》「」]/g, '');
+  const hits = cards.filter(c => norm(c.name) === norm(name));
+  return hits.length === 1 ? hits[0] : null;
+}
+
 async function handleStaffMessage(replyToken, userId, text) {
   // ⚠️ 退出一定要在 routeStaffIntent() 之前用字面比對攔下來。交給 AI 判意圖會被歸到
   // 'other'，使用者只會拿到一份能力清單、永遠退不出去（實際回報過的狀況）。
@@ -2253,6 +2349,11 @@ async function handleStaffMessage(replyToken, userId, text) {
   // event_id 會被 routeStaffIntent() 自己的白名單過濾掉，變成「查得到內容、卻永遠
   // 比對不到活動」。見 lib/router.js 的註解。
   const cards = buildAllCalendarCards(rows);
+  const cardName = id => cards.find(c => c.id === id)?.name || id;
+  // 批次 76：沒指定候選時用 staffPickList()（接下來要辦的在前、封存的不列）。舊版拿
+  // 試算表前 8 列＝最舊的 8 場。後面一律接上整套職員入口（批次 54 的規則）。
+  const eventQuickReplies = (ids) =>
+    staffChips(...(ids && ids.length ? ids.map(cardName) : staffPickList(cards).map(c => c.name)));
 
   // ⚠️ 承接上一則的追問。實際回報的 bug：打「查活動後台數據」→ 系統問「哪一場？」→
   // 打「四足」→ 卻跑去回答四足那場的活動內容。
@@ -2263,6 +2364,43 @@ async function handleStaffMessage(replyToken, userId, text) {
   // 本來就要讀同一批列），再用它覆寫這次的意圖。
   const pending = await getStaffPending(userId);
   if (pending) await setStaffPending(userId, ''); // 一次性，用掉就清
+
+  // ── 批次 77：選單與活動卡按鈕送出的固定句型，字面比對直接處理 ─────────────
+  if (PROGRESS_RE.test(text)) {
+    await sendProgressOverview(replyToken, userId);
+    return;
+  }
+  if (UPDATE_ENTRY_RE.test(text)) {
+    await replyOrPush(replyToken, userId,
+      '要更新哪一場？點下面的活動，會出現那場的活動卡：\n・按「✏️ 開啟編輯頁」直接改\n・按「📨 催填訊息」產生一則可以轉傳給負責同仁的提醒',
+      eventQuickReplies());
+    return;
+  }
+  const cardCmd = text.match(CARD_CMD_RE);
+  if (cardCmd) {
+    const target = findCardByExactName(cardCmd[2], cards);
+    if (!target) {
+      await replyOrPush(replyToken, userId, `找不到《${cardCmd[2].slice(0, 40)}》這場，可能剛被改名了。從清單再點一次：`, eventQuickReplies());
+      return;
+    }
+    if (cardCmd[1] === '催填') return sendNudge(replyToken, userId, target.id);
+    if (cardCmd[1] === '數據') {
+      const summary = await getEventAnalyticsSummary(target.id, target.name);
+      await replyOrPush(replyToken, userId, formatEventAnalyticsReply(summary), staffChips('活動與進度'));
+      return;
+    }
+    return sendEventCard(replyToken, userId, target.id);
+  }
+  // 點了清單上的活動名稱（整句就是某一場的名稱）→ 活動卡。帶著問題的（「某某那場的
+  // 重點」）不會命中 matchEventByName()，照舊交給下面的路由讓米亞回答。
+  // ⚠️ 等「哪一場」答案的時候（pending 查數據／要訓練連結）不攔：那時候點名稱是在回答問題。
+  if (pending !== 'event_analytics' && pending !== 'training_link' && pending !== 'create_event') {
+    const tapped = matchEventByName(text, cards);
+    if (tapped) {
+      await sendEventCard(replyToken, userId, tapped.id);
+      return;
+    }
+  }
 
   const routed = await routeStaffIntent(text, cards);
 
@@ -2292,19 +2430,14 @@ async function handleStaffMessage(replyToken, userId, text) {
   }
 
   console.log(`[line] staff route user=${userId} q="${text.slice(0, 60)}" → ${JSON.stringify(routed)}`);
-  const cardName = id => cards.find(c => c.id === id)?.name || id;
 
   // 追問時附上活動名稱按鈕：點按鈕送出的是完整活動名稱，模型比對得到、pending 也
   // 還在，兩條路都通。只列有意義的前幾場，LINE 上限 13 顆。
-  // 批次 76：沒指定候選時用 staffPickList()（接下來要辦的在前、封存的不列）。舊版拿
-  // 試算表前 8 列＝最舊的 8 場。後面一律接上整套職員入口（批次 54 的規則）。
-  const eventQuickReplies = (ids) =>
-    staffChips(...(ids && ids.length ? ids.map(cardName) : staffPickList(cards).map(c => c.name)));
 
-  if (routed.intent === 'calendar') {
-    // 批次 76：按鈕不再只列「有知識庫」的場次——剛建好、最需要處理的草稿反而點不到。
-    // 後面接上整套職員入口（批次 54）。
-    await replyOrPush(replyToken, userId, formatCalendarReply(cards), eventQuickReplies());
+  // 批次 77：職員的「活動列表」就是「活動與進度」——同一份清單，每場多寫一行還缺什麼。
+  // 同仁看清單本來就是為了知道「接下來要處理哪一場」。
+  if (routed.intent === 'calendar' || routed.intent === 'progress') {
+    await sendProgressOverview(replyToken, userId);
     return;
   }
 
@@ -2347,7 +2480,7 @@ async function handleStaffMessage(replyToken, userId, text) {
       `已建立《${created.name}》✅\n日期：${dateLine || '未定（在編輯頁補上）'}\n狀態：未發布，記者還看不到\n\n` +
       `同仁編輯連結（轉給負責的同仁，不需要後台密碼）：\n${editLink(created.id, created.editCode)}\n\n` +
       '內容填好後，在編輯頁把「活動狀態」改成「進行中」，記者就問得到了。',
-      staffChips('最近有哪些活動'));
+      staffChips({ label: '看這場的活動卡', text: created.name }, '活動與進度'));
     return;
   }
 
@@ -2383,20 +2516,6 @@ async function handleStaffMessage(replyToken, userId, text) {
         `《${cardName(eventId)}》\n\n媒體訓練（發言練習）：\n${trainingLink(eventId, editCode)}\n\n同仁編輯連結（改內容用，不需後台密碼）：\n${editLink(eventId, editCode)}`,
         staffChips());
     }
-    return;
-  }
-
-  // 批次 76：職員點了清單上一場「還沒有新聞稿」的活動（多半是剛建好的草稿）。交給
-  // answerQuestion() 只會拿到一句「這部分我沒有資料」——給他這場的狀態與編輯連結才有用。
-  // 只認「整句就是活動名稱」（按清單按鈕送出的就是這個），帶著問題的照舊走問答。
-  const tapped = matchEventByName(text, cards);
-  if (tapped && !tapped.has_kb) {
-    const editCode = await ensureEventEditCode(tapped.id);
-    const statusLabel = { draft: '未發布，記者還看不到', active: '進行中', ended: '已結束', archived: '已封存' }[tapped.status] || tapped.status;
-    await replyOrPush(replyToken, userId,
-      `《${tapped.name}》\n狀態：${statusLabel}\n還沒有新聞稿內容，米亞現在答不出這場的問題。` +
-      (editCode ? `\n\n同仁編輯連結（轉給負責的同仁，不需要後台密碼）：\n${editLink(tapped.id, editCode)}` : ''),
-      staffChips());
     return;
   }
 
@@ -2454,9 +2573,12 @@ async function sendStaffMenu(replyToken, userId) {
   await replyOrPush(replyToken, userId,
     '職員模式 🔧 下面按鈕直接點，或用講的都可以。\n\n' +
     '【管理】\n' +
-    STAFF_MENU.buttons.filter(b => b.text !== '退出職員模式').map(b => `・${b.label}——${b.sub}`).join('\n') +
+    // 「更多功能」這一格送出的就是「使用說明」＝這一則本身，不列自己
+    STAFF_MENU.buttons.filter(b => b.text !== '退出職員模式' && b.text !== '使用說明').map(b => `・${b.label}——${b.sub}`).join('\n') +
+    '\n・要媒體訓練連結——發言練習（每張活動卡上也有）' +
     '\n・設定圖文選單——重設下方選單\n' +
-    '・直接打活動名稱——問那一場的內容（含未發布）\n\n' +
+    '・點活動名稱——看那一場的活動卡：填寫進度、編輯頁、催填訊息、媒體訓練\n' +
+    '・帶著問題問（「某某那場的重點是什麼」）——米亞照那場的內容回答（含未發布）\n\n' +
     '【教米亞】\n' +
     '・「記住：這場的技術還在實驗階段，不要說已經量產」——只記這一場\n' +
     '・「語氣：回答再短一點」——全站通用\n' +

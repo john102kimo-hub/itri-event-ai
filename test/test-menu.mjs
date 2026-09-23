@@ -312,7 +312,8 @@ for (const t of [
 console.log('── 職員按鈕不可以被記者端意圖攔走 ──');
 for (const b of STAFF_MENU.buttons) {
   const got = detectMetaIntent(b.text);
-  eq(got === null || got === 'calendar', true,
+  // 批次 77：「更多功能」送出的就是「使用說明」，在職員模式裡 help 會給職員功能表，是預期的
+  eq(got === null || got === 'calendar' || (b.text === '使用說明' && got === 'help'), true,
     `職員按鈕「${b.text}」不該被記者端意圖攔走（實得 ${got}）`);
 }
 eq(detectMetaIntent('設定圖文選單'), null, '「設定圖文選單」不該被記者端意圖攔走');
