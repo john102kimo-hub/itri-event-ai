@@ -531,7 +531,14 @@ async function save() {
   const name = document.getElementById('input-name').value.trim();
   const knowledge_base = document.getElementById('input-kb').value.trim();
   if (!name) { toast('請填寫活動名稱'); return; }
-  if (!knowledge_base) { toast('知識庫不可為空'); return; }
+  // 批次 76：未發布（草稿）時可以先不填知識庫——同仁常常是先拿到日期、地點，新聞稿
+  // 最後才定稿。舊版一律擋「知識庫不可為空」，想先存日期地點都存不了。
+  // 要對外（進行中／已結束）時才要求：記者問得到卻什麼都答不出來，比晚一點發布更糟。
+  const statusForCheck = document.getElementById('input-status').value;
+  if (!knowledge_base && statusForCheck !== 'draft') {
+    toast('要發布（進行中／已結束）之前，知識庫不可為空；還沒定稿的話先維持「未發布」存檔即可');
+    return;
+  }
 
   let color = document.getElementById('input-color').value.trim() || '#0F9E7A';
   if (!/^#[0-9A-Fa-f]{6}$/.test(color)) {

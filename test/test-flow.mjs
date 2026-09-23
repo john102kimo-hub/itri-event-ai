@@ -2972,5 +2972,87 @@ check('續問視窗內問「大家晚上吃什麼」→ 米亞不回', out.lengt
 out = await sendGroup('這場幾點開始？', { groupId: 'Cteam', mentionSelf: false });
 check('　 同一視窗內真的在問活動 → 照樣回', out.length > 0, JSON.stringify(out));
 
+// ── 情境 76：職員模式第一批小修（批次 76，盤點實測到的十個問題）──────────────
+{
+  const labelsOf = o => (o?.quickReply || []).map(c => (typeof c === 'object' && c ? c.text : c));
+  const hasStaffEntries = o => ['新增活動', '查活動後台數據', '最近有哪些活動'].every(t => labelsOf(o).includes(t));
+
+  // (1) 米亞問名稱之後回「算了」之類 → 不建活動
+  for (const phrase of ['算了', '不用了', '取消', '謝謝', '先不要', '等一下', '我還沒想好名字']) {
+    reset(); await freshModule();
+    state.staff.push(['U_staff', '', '2026-08-27', '', '']);
+    await send('新增活動', 'U_staff');
+    const n = state.events.length;
+    out = await send(phrase, 'U_staff');
+    check(`★ 新增活動 → 回「${phrase}」不會建出同名活動`, state.events.length === n, JSON.stringify(state.events.at(-1)));
+    check(`　 回「${phrase}」→ 說先不建立，並帶整套職員入口`, /先不建立/.test(out[0]?.text || '') && hasStaffEntries(out[0]), JSON.stringify(out));
+  }
+
+  // (2) 「改成下午兩點開始」不能變成全站語氣規則
+  reset(); await freshModule();
+  state.staff.push(['U_staff', '', '2026-08-27', '', '']);
+  out = await send('改成下午兩點開始', 'U_staff');
+  check('★ 「改成下午兩點開始」不會記成任何規則', state.memories.length === 0, JSON.stringify(state.memories));
+  check('　 並說明為什麼沒記、要去哪裡改', /不然會套用到所有場次/.test(out[0]?.text || '') && hasStaffEntries(out[0]), JSON.stringify(out));
+  out = await send('請改一下智慧醫療的地點，改到南港展覽館', 'U_staff');
+  check('「請改一下⋯地點」也不會記成規則', state.memories.length === 0, JSON.stringify(state.memories));
+  out = await send('以後回答短一點', 'U_staff');
+  check('真的在講說話方式 → 照舊先問確認，而且講明會套用到所有場次',
+    /以後都照做/.test(out[0]?.text || '') && /所有場次/.test(out[0]?.text || ''), JSON.stringify(out));
+
+  // (3)(4) 問「哪一場」的按鈕：新的在前、封存不列，後面接整套職員入口
+  reset(); await freshModule();
+  const olds = [];
+  for (let i = 1; i <= 10; i++) olds.push([`old${i}`, `2025年舊活動第${i}場`, '#0F9E7A', 'kb', i % 3 ? 'ended' : 'archived', `2025-0${(i % 9) + 1}-10`, '', '', '', '工研院', 'c' + i, '', '', '', '', '', '', '']);
+  state.events.unshift(...olds);
+  state.staff.push(['U_staff', '', '2026-08-27', '', '']);
+  out = await send('查活動後台數據', 'U_staff');
+  let labels = labelsOf(out[0]);
+  check('★ 「哪一場」的按鈕有接下來要辦的場次（不是試算表最上面最舊的 8 場）',
+    labels.includes('智慧醫療解決方案記者會') && labels.includes('奈米材料前瞻應用發表會'), JSON.stringify(labels));
+  check('　 已封存的不列', !olds.filter(r => r[4] === 'archived').some(r => labels.includes(r[1])), JSON.stringify(labels));
+  check('　 後面接上整套職員入口、不超過 13 顆', hasStaffEntries(out[0]) && labels.length <= 13, JSON.stringify(labels));
+  out = await send('智慧醫療解決方案記者會', 'U_staff');
+  check('後台數據結果也帶整套職員入口', /後台數據/.test(out[0]?.text || '') && hasStaffEntries(out[0]), JSON.stringify(out));
+  out = await send('要媒體訓練連結', 'U_staff');
+  out = await send('半導體先進封裝技術發表會', 'U_staff');
+  check('媒體訓練連結結果也帶整套職員入口', /\/training\?id=semi/.test(out[0]?.text || '') && hasStaffEntries(out[0]), JSON.stringify(out));
+
+  // (4)(5)(6)(7)(9) 新增 → 說明正確、帶按鈕、馬上查得到、沒日期寫「日期未定」、清單按鈕點得到
+  reset(); await freshModule();
+  state.staff.push(['U_staff', '', '2026-08-27', '', '']);
+  out = await send('新增活動', 'U_staff');
+  check('問新活動名稱時也帶整套職員入口', hasStaffEntries(out[0]), JSON.stringify(out));
+  out = await send('眺望2027產業發展趨勢研討會', 'U_staff');
+  const created = out[0]?.text || '';
+  check('建立完成帶整套職員入口', hasStaffEntries(out[0]), JSON.stringify(out));
+  check('★ 建立完成不再叫人「到後台按發布」（後台要密碼，編輯頁本來就能發布）',
+    !/到後台按/.test(created) && /改成「進行中」/.test(created), created);
+  check('　 沒給日期 → 寫「未定」', /日期：未定/.test(created), created);
+  out = await send('最近有哪些活動', 'U_staff');   // 同一個模組實例：60 秒快取還在
+  check('★ 剛建好的活動馬上就在清單上（不用等 60 秒快取過期）', /眺望2027產業發展趨勢研討會/.test(out[0]?.text || ''), out[0]?.text);
+  check('★ 沒填日期的活動顯示「日期未定」，不是建立當天', /日期未定　眺望2027/.test(out[0]?.text || ''), out[0]?.text);
+  check('★ 清單按鈕列得到還沒有新聞稿的草稿', labelsOf(out[0]).includes('眺望2027產業發展趨勢研討會'), JSON.stringify(labelsOf(out[0])));
+  check('　 清單也帶整套職員入口', hasStaffEntries(out[0]), JSON.stringify(labelsOf(out[0])));
+  out = await send('眺望2027產業發展趨勢研討會', 'U_staff');
+  check('點那場草稿 → 給狀態與編輯連結，不是一句「沒有資料」的 AI 回答',
+    out[0]?.kind !== 'answer' && /未發布/.test(out[0]?.text || '') && /\/edit\?id=.+&code=/.test(out[0]?.text || ''), JSON.stringify(out));
+  out = await send('四足機器人的重點', 'U_staff');
+  check('　 有新聞稿的場次照舊由米亞回答', out.some(o => o.kind === 'answer'), JSON.stringify(out));
+
+  // (8) 日期由程式驗格式、連星期幾一起講回去
+  const staffLib = await import(new URL(`../lib/staff.js?v=${modSeq}`, import.meta.url).href);
+  check('strictIsoDate 收合法日期', staffLib.strictIsoDate('2026-10-28') === '2026-10-28');
+  check('strictIsoDate 擋掉「10/28」「下週三」與不存在的日期',
+    ['10/28', '下週三', '2026-02-30', '2026-13-01', ''].every(x => staffLib.strictIsoDate(x) === ''));
+  check('dateWithWeekday 帶星期幾', staffLib.dateWithWeekday('2026-10-28') === '2026-10-28（三）', staffLib.dateWithWeekday('2026-10-28'));
+
+  // (10) 編輯頁：草稿可以不填知識庫
+  const { readFileSync } = await import('node:fs');
+  const editHtml = readFileSync(new URL('../public/edit.html', import.meta.url), 'utf8');
+  check('編輯頁不再無條件擋「知識庫不可為空」', !/if \(!knowledge_base\) \{ toast\('知識庫不可為空'\)/.test(editHtml));
+  check('　 只有要發布時才要求知識庫', /!knowledge_base && statusForCheck !== 'draft'/.test(editHtml));
+}
+
 console.log(`\n${fail === 0 ? '✅' : '❌'} 流程測試通過 ${pass}／失敗 ${fail}`);
 process.exit(fail === 0 ? 0 : 1);
