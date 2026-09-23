@@ -43,7 +43,7 @@ import {
 import { buildCalendarCards, buildAllCalendarCards, routeIntent, formatCalendarReply, calendarQuickReplyItems } from '../lib/router.js';
 import {
   detectMetaIntent, detectCourtesy, isOrgWideNewsAsk, matchEventByName, HELP_TEXT, ORG_INTRO_TEXT, buildWelcomeFlex,
-  buildRichMenuDefinition, ALL_MENUS, REPORTER_MENU, STAFF_MENU
+  buildRichMenuDefinition, ALL_MENUS, REPORTER_MENU, STAFF_MENU, findEventMentioned
 } from '../lib/menu.js';
 import {
   isPasscodeMatch, isStaffAuthenticated, authenticateStaff, routeStaffIntent,
@@ -550,11 +550,26 @@ const sanitize = (s, max) => String(s || '').replace(/\s+/g, ' ').trim().slice(0
 // 那一次性視窗內才會用到（見下面 handleEvent 裡的說明）。誤判的代價很小：最壞
 // 情況是這一則被錯記成媒體名稱，記者的問題就再多打一次，之後也不會再被攔——
 // 所以用簡單的啟發式即可，不需要另外呼叫 AI 判斷意圖。
+// 「我是聯合報記者」「TVBS 林記者」→ 只留媒體名稱本身；抽不出來就原樣留。
+function mediaNameOf(text) {
+  const s = String(text || '').trim()
+    .replace(/^(你好|您好|哈囉|嗨)?[，,\s]*(我是|我們是|這邊是|這裡是)\s*/, '')
+    .replace(/\s*(的)?(記者|編輯|攝影|主播|製作人|特派員)[\u4e00-\u9fff]{0,3}$/, '')
+    .replace(/\s+[\u4e00-\u9fff]$/, '') // 「TVBS 林記者」拿掉記者後剩的姓
+    .trim();
+  return s || String(text || '').trim();
+}
+
 function looksLikeNameOrSkip(text) {
   if (/^(略過|skip|跳過)$/i.test(text)) return true;
   if (text.length > 20) return false;
   if (/[?？]/.test(text)) return false;
   if (/^(請問|為什麼|什麼|怎麼|哪裡|哪一|何時|多少|是否|能不能|可以|會不會|有沒有|給我|請給|麻煩|幫我|提供|傳給我|傳送|寄送|附上|想問|想要|需要|來一份|給一份)/.test(text)) return false;
+  // 批次 75（四角色模擬）：記者沒理會「方便留個媒體名稱嗎」，直接打「這場的重點是什麼」
+  // 或按了活動清單的按鈕（送出的是完整活動名稱）——舊規則只看開頭詞跟問號，這兩句都被
+  // 存成媒體名稱、回「已記錄，謝謝」，問題本身就這樣消失了。媒體名稱裡不會出現句中的
+  // 疑問詞，也不會出現「這場」「記者會」「發表會」這種指活動的字。
+  if (/(嗎|呢|什麼|甚麼|幾點|幾號|幾時|哪|怎麼|如何|為何|是否|多少|重點|這場|這次|本場|活動|記者會|發表會|研討會|論壇|說明會)/.test(text)) return false;
   return true;
 }
 
@@ -576,7 +591,10 @@ function looksLikePhotoRequest(text) {
 function nonTextReply(messageType) {
   if (messageType === 'sticker') return '收到您的貼圖了 🙂 不過我只看得懂文字，想問什麼直接打給我就可以～';
   if (messageType === 'image') return '這張圖我這邊看不到內容耶 🙂 如果是想問某一場活動或某項技術，直接把問題打成文字給我，我再幫您查。';
-  if (messageType === 'audio' || messageType === 'video') return '語音跟影片我這邊聽不到、也看不了，麻煩直接打成文字給我，我馬上幫您查 🙂';
+  // 批次 75：電視台記者在車上最常直接傳語音。聽不到是事實，但可以教一個馬上能用的替代：
+  // 手機鍵盤上的麥克風（語音輸入）講完會直接變成文字，不必真的用打的。
+  if (messageType === 'audio') return '語音訊息我這邊聽不到 🙏 不方便打字的話，可以按手機鍵盤上的麥克風（語音輸入）直接講，會自動變成文字送出，我就能馬上幫您查 🙂';
+  if (messageType === 'video') return '影片我這邊看不了，麻煩直接把想問的打成文字給我（或用鍵盤上的麥克風講），我馬上幫您查 🙂';
   if (messageType === 'file') return '檔案我這邊打不開耶 🙂 想問的內容直接打成文字給我就可以。';
   if (messageType === 'location') return '收到您傳的位置了，不過我這邊只處理文字提問 🙂 想找某一場活動或採訪窗口，直接打字問我就可以。';
   return '我這邊只看得懂文字訊息 🙂 想問什麼直接打給我就可以。';
@@ -2122,9 +2140,17 @@ async function handleTeachMessage(replyToken, userId, text) {
   // scope 'event' 代表「記在同仁現在綁定的那一場」。沒綁定就問一下是哪一場，
   // 不要默默記成全站——那是兩件完全不同的事。
   let scope = cmd.scope;
+  let scopeName = '';
   if (scope === 'event') {
     const binding = await getBinding(userId);
-    const current = binding?.event_id ? await getEventById(binding.event_id) : null;
+    let current = binding?.event_id ? await getEventById(binding.event_id) : null;
+    // 批次 75（四角色模擬）：同事打「記住：眺望研討會的新聞聯絡人是⋯⋯」，句子裡已經講了
+    // 是哪一場，卻還被要求「先切到那一場再講一次」。沒綁定時先看句子點名了哪一場，
+    // 只認得出唯一一場才用；認不出、或同時像好幾場，照舊問。
+    if (!isUsable(current)) {
+      const named = findEventMentioned(cmd.text, buildAllCalendarCards(await getAllEventRows()));
+      if (named) current = await getEventById(named.id);
+    }
     if (!isUsable(current)) {
       await replyOrPush(replyToken, userId,
         '要記在哪一場呢？請先打活動名稱切到那一場，再跟我說一次。\n\n（如果這件事是所有場次都適用的，改打「全站記住：⋯⋯」）',
@@ -2132,6 +2158,7 @@ async function handleTeachMessage(replyToken, userId, text) {
       return true;
     }
     scope = current.id;
+    scopeName = current.name || '';
   }
 
   await addMemory({
@@ -2146,7 +2173,7 @@ async function handleTeachMessage(replyToken, userId, text) {
     await replyOrPush(replyToken, userId,
       `這句話要我以後都照做嗎？\n「${cmd.text}」`, [TEACH_YES, TEACH_NO]);
   } else {
-    const where = cmd.type === 'style' ? '所有回答' : (scope === 'global' ? '所有場次' : '這一場');
+    const where = cmd.type === 'style' ? '所有回答' : (scope === 'global' ? '所有場次' : (scopeName ? `《${scopeName}》這一場` : '這一場'));
     await replyOrPush(replyToken, userId,
       `記起來了 ✅\n「${cmd.text}」\n\n之後${where}都會照這個來。要查或取消，打「記憶清單」。`,
       staffChips('記憶清單'));
@@ -2223,7 +2250,11 @@ async function handleStaffMessage(replyToken, userId, text) {
   const routed = await routeStaffIntent(text, cards);
 
   if (pending) {
-    if (pending === 'create_event' && routed.intent !== 'create_event') {
+    // 批次 75（四角色模擬）：舊版不管這一則是什麼都當成新活動名稱。同事被問「新活動叫
+    // 什麼」之後改口要「智慧醫療那場的媒體訓練連結」，結果建出一場叫這個名字的活動。
+    // 模型已經明確判成別的管理指令（查數據、要連結、看 GEO、查清單）時，就照那個指令做。
+    const CLEAR_STAFF_INTENTS = ['calendar', 'event_analytics', 'training_link', 'geo_status', 'setup_richmenu'];
+    if (pending === 'create_event' && routed.intent !== 'create_event' && !CLEAR_STAFF_INTENTS.includes(routed.intent)) {
       // 上一則問的是「新活動叫什麼名字」，這一則整句就是答案。不能交給模型重判——
       // 「半導體技術發表會」這種輸入看起來就像在問某場活動的內容。
       routed.intent = 'create_event';
@@ -2770,6 +2801,9 @@ const CHITCHAT_CARE_RE = /(辛苦了|你會累嗎|妳會累嗎|你累不累|妳�
 // 上一輪對話一起交給 answerQuestion()，模型可以真的重答、縮短；只有「沒有上一輪可以
 // 改」的時候才需要這一句。整句錨定，後面還接著問題的（「不對，我是問成本」）不算。
 const CHITCHAT_REPAIR_RE = /^(米亞)?[\s，,]*(你|妳)?(答錯了|回答錯了|講錯了|說錯了|不對|不是這個|不是這樣|我不是問這個|不是問這個|看不懂|聽不懂|什麼意思|甚麼意思|啥意思|再說一次|再講一次|講清楚一點|說清楚一點|太長了|太長|簡短一點|短一點|講重點|說重點)(啦|喔|吧|耶|欸)?[\s\p{P}\p{S}]*$/u;
+// 批次 75（四角色模擬）：記者加好友後第一句多半是「哈囉」「你好，我是聯合報記者」，
+// 原本一路送到 AI 兜底。招呼每次都該得到同一個、把入口講清楚的回覆，不用花一次模型。
+const CHITCHAT_GREET_RE = /^(米亞)?[\s，,]*(哈囉|哈啰|嗨|hi|hello|hey|你好|您好|妳好|大家好|安安|早安|午安|晚安|早|在嗎|有人在嗎)(米亞)?[\s，,]*((我是|這邊是|這裡是)[^?？]{1,16})?[\s\p{P}\p{S}]*$|^(我是|這邊是|這裡是)[^?？]{1,12}(記者|編輯|攝影|主播|製作人)[^?？]{0,3}[\s\p{P}\p{S}]*$/iu;
 const CHITCHAT_TEST_RE = /^(米亞)?[\s，,]*(測試|test|testing)(一下|測試|中|看看|\d+)*[\s\p{P}\p{S}]*$/iu;
 
 function detectChitchat(text) {
@@ -2782,6 +2816,7 @@ function detectChitchat(text) {
   if (CHITCHAT_CARE_RE.test(s)) return 'care';
   if (CHITCHAT_REPAIR_RE.test(s)) return 'repair';
   if (CHITCHAT_TEST_RE.test(s)) return 'test';
+  if (CHITCHAT_GREET_RE.test(s)) return 'greet';
   if (CHITCHAT_WEATHER_RE.test(s)) return 'weather';
   return null;
 }
@@ -2810,6 +2845,8 @@ const CHITCHAT_FIXED_REPLIES = {
   care: '謝謝你這麼貼心 😊 我是 AI 不會累，隨時都能幫你查記者會、產業趨勢跟工研院技術這幾件事，有需要儘管找我。',
   // 批次 72 新增的兩句，同樣請朱朱審過語氣再定稿（見 LINE-PLAN.md 批次 72）
   repair: '不好意思，剛剛可能沒答到你要的 🙏 麻煩換個說法再問我一次；想問某一場記者會，直接打活動名稱最準，我會照那一場的資料重新回答。',
+  // 批次 75 新增，同樣請朱朱審語氣
+  greet: '您好，我是米亞 🙂 工研院的公關小特派。想問記者會，直接打活動名稱或點「最近有哪些活動」；也可以問產業趨勢、工研院技術，或找採訪窗口。',
   test: '收到，我在線上 🙂 想問記者會、產業趨勢、工研院技術，或要找採訪窗口，直接打給我就可以。'
 };
 
@@ -3131,6 +3168,11 @@ async function looksAddressedToBot(groupId, text, speakerId) {
   // ①（續）導流按鈕「工研院 ＸＸ」「ＸＸ產業趨勢」——只在視窗內放行，理由見
   // isOwnButtonText() 最後一段。
   if (GROUP_OWN_BUTTON_RE.test(s)) return true;
+
+  // ②-前 批次 75（四角色模擬）：同事在工作群組 @ 過米亞之後的續問視窗裡，接著問「大家
+  // 晚上吃什麼」——有「什麼」，會被 ② 當成提問放行，接下來全看模型判不判得出是閒聊。
+  // 句子明講在問「大家／各位／你們」，對象就不是米亞；沒提到米亞就安靜。
+  if (/大家|各位|你們|妳們|誰要|有人要|有沒有人/.test(s) && !/米亞/.test(s)) return false;
 
   // ② 一句提問（中文或英文，見 GROUP_QUESTION_EN_RE 的說明）
   if (GROUP_QUESTION_RE.test(s) || GROUP_QUESTION_EN_RE.test(s)) return true;
@@ -3693,7 +3735,7 @@ async function handleEvent(ev) {
     await setBindingNote(userId, ''); // 一次性：不管這則判斷結果如何，用掉就清掉
     if (looksLikeNameOrSkip(text)) {
       const isSkip = /^(略過|skip|跳過)$/i.test(text);
-      await setMediaName(userId, isSkip ? '（未提供）' : sanitize(text, 40));
+      await setMediaName(userId, isSkip ? '（未提供）' : sanitize(mediaNameOf(text), 40));
       // 這裡就是記者準備開始問問題的第一個時間點，順手把快速提問按鈕帶上——
       // 不用等他問完第一題、answerQuestion() 自己送出來的答案才第一次看到。
       await replyOrPush(replyToken, userId, '已記錄，謝謝！請直接輸入您的問題即可。', eventQuickChips(event));

@@ -1,6 +1,6 @@
 import {
   detectMetaIntent, matchEventByName, buildWelcomeFlex, buildRichMenuDefinition,
-  ALL_MENUS, REPORTER_MENU, STAFF_MENU, detectCourtesy, isOrgWideNewsAsk
+  ALL_MENUS, REPORTER_MENU, STAFF_MENU, detectCourtesy, isOrgWideNewsAsk, findEventMentioned
 } from '../lib/menu.js';
 import { isExitStaffCommand } from '../lib/staff.js';
 
@@ -398,6 +398,23 @@ for (const t of ['有新聞稿嗎', '給我新聞稿', '新聞稿呢', '新聞�
 for (const t of ['工研院最近有哪些新聞', '最新新聞稿', '最近的新聞稿', '有哪些新聞稿', '這個月的新聞', 'ITRI news']) {
   eq(isOrgWideNewsAsk(t), true, `「${t}」指向全院／一段時間 → 全站最新新聞`);
 }
+
+
+console.log('── 批次 75：句子裡點名了哪一場（職員「記住：」用）──');
+{
+  const cards = [{ id: 'a', name: '經濟部四足機器人國產研發平台發表記者會' }, { id: 'b', name: '半導體先進封裝技術發表會' },
+    { id: 'c', name: '智慧醫療解決方案記者會' }, { id: 'e', name: '眺望2027產業發展趨勢研討會' }];
+  eq(findEventMentioned('眺望研討會的新聞聯絡人是王小明', cards)?.id, 'e', '「眺望研討會」→ 眺望那場');
+  eq(findEventMentioned('智慧醫療那場地點改到南港', cards)?.id, 'c', '「智慧醫療那場」→ 智慧醫療');
+  eq(findEventMentioned('先進封裝的新聞稿更新了', cards)?.id, 'b', '「先進封裝」→ 半導體先進封裝');
+  eq(findEventMentioned('研討會改到下午', cards), null, '只有通用字「研討會」→ 不猜');
+  eq(findEventMentioned('這場地點改了', cards), null, '沒點名 → null');
+  eq(findEventMentioned('產業發展的技術記者會', cards), null, '全是通用字 → 不猜');
+}
+console.log('── 批次 75：趕時間要新聞聯絡人電話 → 直接給窗口 ──');
+for (const t of ['急！！新聞聯絡人電話', '聯絡人電話', '新聞聯絡人手機', '聯絡人']) eq(detectMetaIntent(t), 'contacts', `「${t}」→ contacts`);
+for (const t of ['可以給我受訪者的手機嗎', '所長的電話', '新聞聯絡人是誰', '工研院技術移轉的窗口是誰']) eq(detectMetaIntent(t), null, `「${t}」→ 不攔（私人電話或非新聞窗口交給模型）`);
+eq(detectMetaIntent('院長是誰'), 'org_intro', '「院長是誰」→ 工研院簡介（有院長名字）');
 
 console.log(`\n${fail === 0 ? '✅' : '❌'} 通過 ${pass}／失敗 ${fail}`);
 process.exit(fail === 0 ? 0 : 1);

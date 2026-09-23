@@ -2904,5 +2904,73 @@ check('群組續問視窗內沒 @ 的「好的謝謝」→ 安靜', out.length =
 out = await sendGroup('@我 謝謝', { mentionSelf: true, mentionText: '@我 ' });
 check('群組裡 @ 米亞說謝謝 → 回一句不客氣', /不客氣/.test(out[0]?.text || ''), JSON.stringify(out));
 
+
+// ── 批次 75：四角色模擬找到的問題 ──────────────────────────────────
+// (1) 記者不理會「方便留個媒體名稱嗎」，直接問問題或按活動名稱按鈕 → 不能被存成媒體名稱
+for (const q of ['這場的重點是什麼', '奈米材料前瞻應用發表會', '展品有哪些可以拍']) {
+  reset(); await freshModule();
+  state.bindings.set('U_reporter', { event_id: 'soon', media_name: '', note: 'ask_name', bound_at: Date.now() });
+  out = await send(q);
+  check(`ask_name 視窗內打「${q}」→ 不會被存成媒體名稱、問題有人回答`,
+    !/已記錄/.test(out.map(o => o.text).join('')) && !state.bindings.get('U_reporter')?.media_name,
+    JSON.stringify(out) + ' media=' + state.bindings.get('U_reporter')?.media_name);
+}
+reset(); await freshModule();
+state.bindings.set('U_reporter', { event_id: 'soon', media_name: '', note: 'ask_name', bound_at: Date.now() });
+out = await send('我是聯合報記者');
+check('「我是聯合報記者」→ 媒體名稱只記「聯合報」', state.bindings.get('U_reporter')?.media_name === '聯合報',
+  state.bindings.get('U_reporter')?.media_name);
+
+// (2) 職員在「新活動叫什麼」之後改口要別的東西 → 不能建出一場以那句話為名的活動
+reset(); await freshModule();
+state.staff.push(['U_col', '小美', '2026-09-01', '']);
+await send('新增活動', 'U_col');
+const nEvents = state.events.length;
+out = await send('智慧醫療那場的媒體訓練連結', 'U_col');
+check('等活動名稱時改口要媒體訓練連結 → 不會建出新活動', state.events.length === nEvents,
+  JSON.stringify(state.events.slice(nEvents).map(e => e[1])));
+check('　 而是照「要媒體訓練連結」處理', /training|練習|訓練/.test(out[0]?.text || ''), out[0]?.text);
+await send('新增活動', 'U_col');
+await send('眺望2027產業發展趨勢研討會', 'U_col');
+check('正常流程：等名稱時打名稱 → 照樣建立', state.events.some(e => e[1] === '眺望2027產業發展趨勢研討會'),
+  JSON.stringify(state.events.map(e => e[1])));
+
+// (3) 「記住：」句子裡點名了哪一場 → 記到那一場，不用先切換
+reset(); await freshModule();
+state.staff.push(['U_col', '小美', '2026-09-01', '']);
+out = await send('記住：智慧醫療那場的新聞聯絡人改成王小明 0912-345-678', 'U_col');
+check('「記住：智慧醫療那場⋯⋯」→ 直接記到智慧醫療那場', /智慧醫療解決方案記者會/.test(out[0]?.text || '') &&
+  state.memories.some(m => m[1] === 'med'), JSON.stringify(out) + JSON.stringify(state.memories));
+out = await send('記住：這場地點改了', 'U_col');
+check('沒點名、也沒綁定 → 照舊問是哪一場', /要記在哪一場/.test(out[0]?.text || ''), out[0]?.text);
+
+// (4) 電視記者傳語音 → 教他用鍵盤語音輸入
+reset(); await freshModule();
+out = await sendRaw([{ type: 'message', replyToken: 'rt_a', source: { type: 'user', userId: 'U_tv' }, message: { type: 'audio', id: 'a1', duration: 8000 } }]);
+check('傳語音 → 提示可以用鍵盤上的麥克風講', /麥克風/.test(out[0]?.text || ''), JSON.stringify(out));
+
+// (5) 趕時間打「新聞聯絡人電話」→ 直接給窗口，不經過模型
+reset(); await freshModule();
+state.bindings.set('U_tv', { event_id: 'semi', media_name: 'TVBS', note: '', bound_at: Date.now() });
+out = await send('急！！新聞聯絡人電話', 'U_tv');
+check('「急！！新聞聯絡人電話」→ 直接給這場的新聞聯絡人', /陳大文/.test(out[0]?.text || '') && out[0]?.kind !== 'answer',
+  JSON.stringify(out));
+
+// (6) 招呼語 → 固定的米亞自我介紹
+reset(); await freshModule();
+for (const g of ['哈囉', '你好，我是聯合報記者', 'hi']) {
+  out = await send(g, 'U_new');
+  check(`「${g}」→ 米亞固定自我介紹`, out.some(o => /我是米亞/.test(o.text || '')), JSON.stringify(out));
+}
+
+
+// (7) 工作群組：@ 過米亞之後，同事問「大家晚上吃什麼」→ 米亞不插話
+reset(); await freshModule();
+await sendGroup('@我 智慧醫療解決方案記者會', { groupId: 'Cteam' });
+out = await sendGroup('大家晚上吃什麼', { groupId: 'Cteam', mentionSelf: false });
+check('續問視窗內問「大家晚上吃什麼」→ 米亞不回', out.length === 0, JSON.stringify(out));
+out = await sendGroup('這場幾點開始？', { groupId: 'Cteam', mentionSelf: false });
+check('　 同一視窗內真的在問活動 → 照樣回', out.length > 0, JSON.stringify(out));
+
 console.log(`\n${fail === 0 ? '✅' : '❌'} 流程測試通過 ${pass}／失敗 ${fail}`);
 process.exit(fail === 0 ? 0 : 1);
