@@ -53,7 +53,9 @@ import {
   isCancelReply, staffPickList, dateWithWeekday, todayTaipei, getEventStats,
   getStaffPendingData, getStaffName
 } from '../lib/staff.js';
-import { proposeChange, applyChange, findLastChangeBy, fieldLabel, displayValue } from '../lib/event-edit.js';
+import { proposeChange, applyChange, findLastChangeBy, fieldLabel, displayValue, appendEventPhotos } from '../lib/event-edit.js';
+import { saveEventPhoto } from '../lib/photo-upload.js';
+import { isPreEventMode } from '../lib/prompt.js';
 import {
   eventChecklist, formatProgressOverview, buildEventCardFlex, formatEventCardText,
   formatNudgeMessage, previewLink
@@ -2360,6 +2362,55 @@ async function proposePublish(replyToken, userId, eventId) {
     [CONFIRM_PUBLISH, CANCEL_PUBLISH]);
 }
 
+// ── 傳照片給米亞（批次 79）─────────────────────────────────────────────
+// 活動現場拍完，直接在 LINE 傳給米亞，不用回電腦開編輯頁上傳。只有職員可以。
+// 一次傳好幾張時，LINE 會一張一張送 webhook：每一張都接進同一個「等著選場次」的清單，
+// 選一次就全部加進去。
+const PHOTO_BATCH_MAX = 10;
+
+async function handleStaffImage(replyToken, userId, messageId) {
+  const pd = await getStaffPendingData(userId);
+  const prev = pd?.intent === 'photo_pick' && Array.isArray(pd.payload?.ids) ? pd.payload.ids : [];
+  const ids = [...prev, messageId].slice(-PHOTO_BATCH_MAX);
+  await setStaffPending(userId, 'photo_pick', { ids });
+  const cards = buildAllCalendarCards(await getAllEventRows());
+  await replyOrPush(replyToken, userId,
+    `收到 ${ids.length} 張照片 📷 要加到哪一場？點下面的活動。\n（還有照片的話可以繼續傳，選一次就一起加；不加了就回「不用了」）`,
+    staffChips(...staffPickList(cards).map(c => c.name)));
+}
+
+async function addPhotosToEvent(replyToken, userId, eventId, messageIds) {
+  await startLoading(userId, 45);
+  const urls = [];
+  let failed = 0;
+  for (const id of messageIds) {
+    try { urls.push(await saveEventPhoto(eventId, id)); }
+    catch (e) { failed++; console.error(`存照片失敗 msg=${id}:`, e.message); }
+  }
+  if (!urls.length) {
+    await replyOrPush(replyToken, userId,
+      '照片沒能存起來 🙏 可能是 LINE 的檔案已經過期，或暫時連不上。請再傳一次，或到編輯頁用「上傳照片檔案」。',
+      staffChips('活動與進度'));
+    return;
+  }
+  const userName = await getStaffName(userId);
+  const r = await appendEventPhotos(eventId, urls, { userId, userName });
+  if (!r.ok) {
+    await replyOrPush(replyToken, userId, r.reason, staffChips('活動與進度'));
+    return;
+  }
+  invalidateEventsCache();
+  const ev = await getEventById(eventId);
+  // 活動前（有邀請函）記者拿不到照片，是設計好的（lib/prompt.js resolveEventContent），
+  // 先講清楚，不然同仁會以為沒加成功
+  const preEvent = ev && isPreEventMode(ev) ? '\n\n（這場還在活動前，記者要到活動當天才拿得到照片）' : '';
+  await replyOrPush(replyToken, userId,
+    `已把 ${urls.length} 張照片加進《${r.eventName}》✅ 現在共 ${r.total} 張。${failed ? `\n另外 ${failed} 張沒存成功，要的話請再傳一次。` : ''}${preEvent}\n\n要拿掉或加圖說，請到編輯頁的「圖片資源」。`,
+    staffChips({ label: '看這場的活動卡', text: r.eventName }, '活動與進度'));
+  await notifyAdminOfChange(userId,
+    `📷 活動照片被新增\n《${r.eventName}》加了 ${urls.length} 張\n加的人：${userName || '（沒有名字）'}\nLINE ID：${userId}`);
+}
+
 // 回傳 true＝這則訊息已經處理完。
 async function handleEditFlow(replyToken, userId, text, pendingData, cards) {
   const pending = pendingData?.intent || null;
@@ -2404,6 +2455,19 @@ async function handleEditFlow(replyToken, userId, text, pendingData, cards) {
     }
     await proposeUpdate(replyToken, userId, last.eventId, last.field, last.before, { raw: true, undo: true });
     return true;
+  }
+
+  // 批次 79：同仁剛傳了照片，這一則是「要加到哪一場」
+  if (pending === 'photo_pick' && Array.isArray(payload?.ids) && payload.ids.length) {
+    if (isCancelReply(s)) {
+      await replyOrPush(replyToken, userId, '好，照片沒有加 👌', staffChips('活動與進度'));
+      return true;
+    }
+    const target = matchEventByName(s, cards) || findCardByExactName(s, cards);
+    if (target) {
+      await addPhotosToEvent(replyToken, userId, target.id, payload.ids);
+      return true;
+    }
   }
 
   // 上一則問了「要改／發布哪一場」，這一則是場次名稱
@@ -2530,7 +2594,7 @@ async function handleStaffMessage(replyToken, userId, text) {
   // 點了清單上的活動名稱（整句就是某一場的名稱）→ 活動卡。帶著問題的（「某某那場的
   // 重點」）不會命中 matchEventByName()，照舊交給下面的路由讓米亞回答。
   // ⚠️ 等「哪一場」答案的時候（pending 查數據／要訓練連結）不攔：那時候點名稱是在回答問題。
-  if (!['event_analytics', 'training_link', 'create_event', 'update_pick', 'publish_pick'].includes(pending)) {
+  if (!['event_analytics', 'training_link', 'create_event', 'update_pick', 'publish_pick', 'photo_pick'].includes(pending)) {
     const tapped = matchEventByName(text, cards);
     if (tapped) {
       await sendEventCard(replyToken, userId, tapped.id);
@@ -2754,7 +2818,8 @@ async function sendStaffMenu(replyToken, userId) {
     '【直接改資料】\n' +
     '・「智慧醫療那場地點改成南港展覽館」——名稱、日期、時間、地點、新聞聯絡人都可以，會先跟你確認\n' +
     '・「發布 某某那場」——必填都齊了才能發布\n' +
-    '・打「復原上一個修改」改回去\n\n' +
+    '・打「復原上一個修改」改回去\n' +
+    '・直接傳照片——選一場，照片就加進那一場的活動照片\n\n' +
     '【教米亞】\n' +
     '・「記住：這場的技術還在實驗階段，不要說已經量產」——只記這一場\n' +
     '・「語氣：回答再短一點」——全站通用\n' +
@@ -3932,6 +3997,22 @@ async function handleEvent(ev) {
   if (!userId) return;
 
   if (ev.message?.type !== 'text') {
+    // 批次 79：職員傳照片 → 問要加到哪一場。記者傳照片照舊回「看不到」。
+    // 限流照樣算：一次傳十張照片不能變成十次沒上限的處理。
+    if ((ev.message?.type === 'image' || ev.message?.type === 'file') && await isStaffAuthenticated(userId)) {
+      if (rateLimited(userId)) {
+        await replyOrPush(replyToken, userId, '傳得太快了，請稍候片刻再傳。');
+        return;
+      }
+      if (ev.message.type === 'image') {
+        await handleStaffImage(replyToken, userId, ev.message.id);
+      } else {
+        await replyOrPush(replyToken, userId,
+          '檔案我這邊還不能直接讀 🙏 新聞稿的 Word 檔，請到那場的編輯頁，用知識庫上方的「從 Word 檔匯入」。',
+          staffChips('更新活動'));
+      }
+      return;
+    }
     await replyOrPush(replyToken, userId, nonTextReply(ev.message?.type));
     return;
   }

@@ -233,6 +233,14 @@ textarea.form-control { min-height: 240px; resize: vertical; line-height: 1.65; 
       <div class="form-hint">選一場舊活動，會把它的知識庫帶進下方欄位，你再修改成本場內容即可。</div>
     </div>
 
+    <div class="form-group" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <input type="file" id="input-word-file" accept=".docx" style="display:none">
+      <button type="button" class="btn btn-outline" id="word-import-btn" onclick="document.getElementById('input-word-file').click()">
+        <i class="ti ti-file-type-docx"></i> 從 Word 檔匯入
+      </button>
+      <span class="form-hint" id="word-import-status" style="margin:0">新聞稿的 .docx 檔直接選，文字會自動填進下面（舊版 .doc 請先另存成 .docx）</span>
+    </div>
+
     <div class="form-group">
       <textarea class="form-control" id="input-kb"
         placeholder="貼入本次活動的新聞稿或重要資訊…"
@@ -688,6 +696,58 @@ function toast(msg) {
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => el.style.display = 'none', 3200);
 }
+
+// ── 從 Word 檔匯入（批次 79）─────────────────────────────────────
+// 同仁在手機上最常卡的一步：新聞稿是 Word 檔，要打開、全選、複製、再貼過來。這裡直接
+// 讀 .docx 轉成純文字，在瀏覽器裡做完、不經過伺服器（不佔 Vercel Function 名額、
+// 檔案也不會離開同仁的裝置）。只接 .docx：mammoth 讀不了舊版 .doc。
+// 已經有內容時先問「覆蓋還是接在後面」——跟「帶入範本」「複製其他場」同一條規則：
+// 程式不可以默默蓋掉同仁打過的字（批次 53）。
+const MAMMOTH_SRC = 'https://cdn.jsdelivr.net/npm/mammoth@1.8.0/mammoth.browser.min.js';
+function loadMammoth() {
+  if (window.mammoth) return Promise.resolve(window.mammoth);
+  return new Promise((resolve, reject) => {
+    const sc = document.createElement('script');
+    sc.src = MAMMOTH_SRC;
+    sc.onload = () => window.mammoth ? resolve(window.mammoth) : reject(new Error('Word 轉換元件載入失敗'));
+    sc.onerror = () => reject(new Error('Word 轉換元件載入失敗，請檢查網路'));
+    document.head.appendChild(sc);
+  });
+}
+// 轉出來的文字整理一下：Word 的段落之間常常是一堆空行，壓成最多一個空行
+function tidyWordText(t) {
+  return String(t || '').replace(/\r/g, '').replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+async function importWordFile(file) {
+  const status = document.getElementById('word-import-status');
+  if (!file) return;
+  if (!/\.docx$/i.test(file.name)) { toast('只能匯入 .docx 檔；舊版 .doc 請先在 Word 另存成 .docx'); return; }
+  status.textContent = `讀取中：${file.name}…`;
+  try {
+    const mammoth = await loadMammoth();
+    const result = await mammoth.extractRawText({ arrayBuffer: await file.arrayBuffer() });
+    const text = tidyWordText(result.value);
+    if (!text) { toast('這個 Word 檔裡沒有讀到文字'); return; }
+    const kb = document.getElementById('input-kb');
+    if (kb.value.trim()) {
+      const replace = confirm('知識庫已經有內容了。\n\n按「確定」＝用 Word 的內容取代\n按「取消」＝接在現有內容後面');
+      kb.value = replace ? text : kb.value.trim() + '\n\n' + text;
+    } else {
+      kb.value = text;
+    }
+    updateKbCount();
+    dirty = true;
+    toast(`已匯入「${file.name}」（${text.length} 字），記得按「儲存內容」`);
+  } catch (e) {
+    toast('匯入失敗：' + e.message);
+  } finally {
+    status.textContent = '新聞稿的 .docx 檔直接選，文字會自動填進下面（舊版 .doc 請先另存成 .docx）';
+  }
+}
+document.getElementById('input-word-file').addEventListener('change', (e) => {
+  importWordFile(e.target.files[0]);
+  e.target.value = '';
+});
 
 load();
 </script>
