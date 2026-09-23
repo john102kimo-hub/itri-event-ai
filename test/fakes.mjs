@@ -101,7 +101,9 @@ export function reset() {
   state.noDataKeyword = ''; // 非空＝模擬「這場答不出來」，見 installFetchStub() 的問答分支
   state.newsDigestText = ''; // 非空＝模擬「官網補查那支模型」吐出這段話（批次 44）
   state.memories = [];       // bot_memory 的列（批次 46）：[時間, 範圍, 類型, 內容, 建立者, 狀態]
-  state.changes = [];        // event_changes 的列（批次 78）：[時間, LINE ID, 姓名, 活動 id, 活動名稱, 欄位, 改前, 改後, 來源]
+  state.changes = [];
+  state.photoUploads = [];   // 批次 79：saveEventPhoto() 被呼叫的紀錄 [eventId, messageId]
+  state.photoFailIds = [];   // 這些 messageId 模擬下載失敗        // event_changes 的列（批次 78）：[時間, LINE ID, 姓名, 活動 id, 活動名稱, 欄位, 改前, 改後, 來源]
   state.answerText = ''; // 非空＝模擬模型吐出這段原始文字，見 installFetchStub() 的問答分支
   state.loadingCalls.length = 0;
   sent.length = 0;
@@ -480,3 +482,12 @@ export function installFetchStub() {
   };
 }
 installFetchStub();
+
+// ── lib/photo-upload.js（批次 79）────────────────────────────────────
+export const photo = {
+  async saveEventPhoto(eventId, messageId) {
+    if ((state.photoFailIds || []).includes(messageId)) throw new Error('模擬下載失敗');
+    (state.photoUploads ||= []).push([eventId, messageId]);
+    return `https://x.public.blob.vercel-storage.com/line-${eventId}-${messageId}.jpg`;
+  }
+};

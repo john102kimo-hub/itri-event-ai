@@ -18,6 +18,8 @@ export async function resolve(specifier, context, next) {
 
   if (r.url.endsWith('/lib/sheets.js')) return { ...r, url: bust(r.url + '?stub=sheets'), shortCircuit: true };
   if (r.url.endsWith('/lib/line.js')) return { ...r, url: bust(r.url + '?stub=line'), shortCircuit: true };
+  // 批次 79：照片上傳會打 LINE 與 Vercel Blob，測試換成假的
+  if (r.url.endsWith('/lib/photo-upload.js')) return { ...r, url: bust(r.url + '?stub=photo'), shortCircuit: true };
   if (v && /\/lib\/[^/]+\.js$/.test(r.url)) return { ...r, url: bust(r.url), shortCircuit: true };
   return r;
 }
@@ -31,6 +33,13 @@ export const readRange = (...a) => sheets.readRange(...a);
 export const appendRows = (...a) => sheets.appendRows(...a);
 export const updateRange = (...a) => sheets.updateRange(...a);
 export const ensureSheets = (...a) => sheets.ensureSheets(...a);`
+    };
+  }
+  if (url.includes('?stub=photo')) {
+    return {
+      format: 'module', shortCircuit: true,
+      source: `import { photo } from ${JSON.stringify(FAKES)};
+export const saveEventPhoto = (...a) => photo.saveEventPhoto(...a);`
     };
   }
   if (url.includes('?stub=line')) {

@@ -3249,5 +3249,64 @@ check('　 同一視窗內真的在問活動 → 照樣回', out.length > 0, JSO
   delete process.env.LINE_ADMIN_USER_ID;
 }
 
+// ── 情境 79：在 LINE 傳照片給米亞、編輯頁匯入 Word（批次 79，職員模式第四批）──────────
+{
+  const labelsOf = o => (o?.quickReply || []).map(c => (typeof c === 'object' && c ? c.text : c));
+  const img = (id, userId = 'U_staff') => ({ type: 'message', replyToken: 'rt_' + id, source: { type: 'user', userId }, message: { type: 'image', id } });
+  reset(); await freshModule();
+  process.env.LINE_ADMIN_USER_ID = 'U_owner';
+  state.staff.push(['U_staff', '小美', '2026-08-27', '', '']);
+
+  out = await sendRaw([img('m1')]);
+  check('★ 職員傳照片 → 問要加到哪一場（按鈕是近期場次）', /收到 1 張照片/.test(out[0]?.text || '') && labelsOf(out[0]).includes('智慧醫療解決方案記者會'), JSON.stringify(out));
+  out = await sendRaw([img('m2')]);
+  check('　 連傳第二張 → 累計成 2 張，還沒上傳', /收到 2 張照片/.test(out[0]?.text || '') && state.photoUploads.length === 0, JSON.stringify(out));
+  out = await send('智慧醫療解決方案記者會', 'U_staff');
+  const med = state.events.find(r => r[0] === 'med');
+  check('★ 選場次 → 兩張都存起來、接進 H 欄', state.photoUploads.length === 2 && med[7].split('\n').length === 2 && /line-med-m1/.test(med[7]), JSON.stringify(med[7]));
+  check('　 回覆寫出加了幾張、現在共幾張', /已把 2 張照片加進《智慧醫療解決方案記者會》✅ 現在共 2 張/.test(out[0]?.text || ''), JSON.stringify(out));
+  check('　 留修改紀錄、通知管理員', state.changes.at(-1)?.[5] === 'images_add' && sent.some(o => o.push && o.to === 'U_owner' && /照片/.test(o.text)), JSON.stringify(state.changes));
+  check('　 選場次時不會跳成活動卡', out[0]?.kind !== 'flex');
+
+  // 原本就有照片的場次：接在後面，不蓋掉
+  reset(); await freshModule();
+  state.staff.push(['U_staff', '', '2026-08-27', '', '']);
+  await sendRaw([img('m3')]);
+  await send('奈米材料前瞻應用發表會', 'U_staff');
+  const soon = state.events.find(r => r[0] === 'soon');
+  check('原本就有照片 → 接在後面，舊的還在', soon[7].startsWith('https://example.com/photo.jpg\n') && /line-soon-m3/.test(soon[7]), soon[7]);
+  check('　 活動前（有邀請函）→ 提醒記者要活動當天才拿得到', /活動當天才拿得到照片/.test(sent[0]?.text || ''), sent[0]?.text);
+
+  // 取消、下載失敗
+  reset(); await freshModule();
+  state.staff.push(['U_staff', '', '2026-08-27', '', '']);
+  await sendRaw([img('m4')]);
+  out = await send('不用了', 'U_staff');
+  check('傳了照片又說不用了 → 不上傳', /照片沒有加/.test(out[0]?.text || '') && state.photoUploads.length === 0, JSON.stringify(out));
+  state.photoFailIds = ['m5'];
+  await sendRaw([img('m5')]);
+  out = await send('智慧醫療解決方案記者會', 'U_staff');
+  check('下載失敗 → 老實說沒存成功，H 欄不動', /沒能存起來/.test(out[0]?.text || '') && !state.events.find(r => r[0] === 'med')[7], JSON.stringify(out));
+
+  // 記者傳照片：照舊回看不到，不會被當成職員
+  reset(); await freshModule();
+  out = await sendRaw([img('m6', 'U_reporter')]);
+  check('記者傳照片 → 照舊回「看不到」', /看不到/.test(out[0]?.text || '') && state.photoUploads.length === 0, JSON.stringify(out));
+
+  // 職員傳檔案 → 指去編輯頁的 Word 匯入
+  reset(); await freshModule();
+  state.staff.push(['U_staff', '', '2026-08-27', '', '']);
+  out = await sendRaw([{ type: 'message', replyToken: 'rt_f', source: { type: 'user', userId: 'U_staff' }, message: { type: 'file', id: 'f1', fileName: '新聞稿.docx' } }]);
+  check('職員傳 Word 檔 → 指到編輯頁的「從 Word 檔匯入」', /從 Word 檔匯入/.test(out[0]?.text || ''), JSON.stringify(out));
+
+  // 編輯頁：Word 匯入（實際行為用瀏覽器驗過，這裡釘住「不會默默蓋掉」這條規則）
+  const { readFileSync } = await import('node:fs');
+  const editHtml = readFileSync(new URL('../public/edit.html', import.meta.url), 'utf8');
+  check('編輯頁有「從 Word 檔匯入」', /id="input-word-file"[^>]*accept="\.docx"/.test(editHtml));
+  check('　 已有內容時先問取代還是接在後面', /知識庫已經有內容了[\s\S]{0,120}取代[\s\S]{0,80}接在現有內容後面/.test(editHtml));
+  check('　 匯入後標記為未儲存（離開頁面會提醒）', /importWordFile[\s\S]*dirty = true/.test(editHtml));
+  delete process.env.LINE_ADMIN_USER_ID;
+}
+
 console.log(`\n${fail === 0 ? '✅' : '❌'} 流程測試通過 ${pass}／失敗 ${fail}`);
 process.exit(fail === 0 ? 0 : 1);
