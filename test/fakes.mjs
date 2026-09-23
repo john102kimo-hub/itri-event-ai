@@ -101,6 +101,7 @@ export function reset() {
   state.noDataKeyword = ''; // 非空＝模擬「這場答不出來」，見 installFetchStub() 的問答分支
   state.newsDigestText = ''; // 非空＝模擬「官網補查那支模型」吐出這段話（批次 44）
   state.memories = [];       // bot_memory 的列（批次 46）：[時間, 範圍, 類型, 內容, 建立者, 狀態]
+  state.changes = [];        // event_changes 的列（批次 78）：[時間, LINE ID, 姓名, 活動 id, 活動名稱, 欄位, 改前, 改後, 來源]
   state.answerText = ''; // 非空＝模擬模型吐出這段原始文字，見 installFetchStub() 的問答分支
   state.loadingCalls.length = 0;
   sent.length = 0;
@@ -127,6 +128,7 @@ export const sheets = {
     if (range.startsWith('line_staff!')) return state.staff.map(r => [...r]);
     if (range.startsWith('contacts_directory!')) return state.contactsDirectory ? [[state.contactsDirectory]] : [];
     if (range.startsWith('bot_memory!')) return state.memories.map(r => [...r]);
+    if (range.startsWith('event_changes!')) return (state.changes || []).map(r => [...r]);
     return [];
   },
   async appendRows(range, rows) {
@@ -141,6 +143,7 @@ export const sheets = {
     if (range.startsWith('line_staff!')) state.staff.push(...rows.map(r => [...r]));
     if (range.startsWith('bot_memory!')) state.memories.push(...rows.map(r => [...r]));
     if (range.startsWith('events!')) state.events.push(...rows.map(r => [...r]));
+    if (range.startsWith('event_changes!')) (state.changes ||= []).push(...rows.map(r => [...r]));
   },
   async updateRange(range, values) {
     if (range === 'contacts_directory!A2') { state.contactsDirectory = values[0][0]; return; }
@@ -194,7 +197,8 @@ export const sheets = {
 // ── lib/line.js（只換掉會對外送東西的那幾支）─────────────────────────
 export const line = {
   async replyOrPush(replyToken, userId, text, quickReplyItems) {
-    sent.push({ kind: 'text', text, quickReply: quickReplyItems || [] });
+    // to：批次 78 起要驗「通知是推給管理員、不是推給改資料的人」
+    sent.push({ kind: 'text', text, quickReply: quickReplyItems || [], to: userId, push: replyToken === null });
     return true;
   },
   // messages 原封不動帶出來：使用說明現在是「影片 ＋ 文字」兩則一起送（批次 46），
@@ -251,9 +255,26 @@ function matchEventIds(text) {
     .map(([id]) => id);
 }
 
+// 批次 78：「某某那場地點改成南港展覽館」「改到 10/30」→ update_event。只是夠測試用的
+// 簡化規則，真的判斷在 lib/staff.js routeStaffIntent() 那份 prompt。
+const FAKE_FIELD = [['新聞聯絡人', 'press_contact'], ['聯絡人', 'press_contact'], ['地點', 'venue'], ['時間', 'time'], ['日期', 'date'], ['名稱', 'name']];
+function fakeUpdate(text) {
+  const m = text.match(/(改成|改到|改為|換成|改在)\s*(.+)$/);
+  if (!m) return null;
+  let value = m[2].trim();
+  let field = (FAKE_FIELD.find(([w]) => text.includes(w)) || [])[1] || '';
+  const d = value.match(/^(\d{1,2})\/(\d{1,2})$/);
+  if (d) { field = field || 'date'; value = `2026-${d[1].padStart(2, '0')}-${d[2].padStart(2, '0')}`; }
+  if (!field && /點/.test(value)) field = 'time';
+  return { field, value };
+}
+
 function fakeStaffRoute(text) {
   const ids = matchEventIds(text);
-  const base = { event_ids: ids, new_event_name: '', new_event_date: '', confidence: 'high' };
+  const base = { event_ids: ids, new_event_name: '', new_event_date: '', update_field: '', update_value: '', confidence: 'high' };
+  const upd = fakeUpdate(text);
+  if (upd) return { ...base, intent: 'update_event', update_field: upd.field, update_value: upd.value };
+  if (/^發布|發布$/.test(text)) return { ...base, intent: 'publish' };
   if (/設定圖文選單/.test(text)) return { ...base, intent: 'setup_richmenu', event_ids: [] };
   if (/GEO/i.test(text)) return { ...base, intent: 'geo_status', event_ids: [] };
   if (/後台數據|問答統計|成效/.test(text)) return { ...base, intent: 'event_analytics' };
