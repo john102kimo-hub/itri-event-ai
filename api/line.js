@@ -55,6 +55,7 @@ import {
 } from '../lib/staff.js';
 import { proposeChange, applyChange, findLastChangeBy, fieldLabel, displayValue, appendEventPhotos } from '../lib/event-edit.js';
 import { saveEventPhoto } from '../lib/photo-upload.js';
+import { addPhoto, pendingPhotos, consumePhotos } from '../lib/photo-inbox.js';
 import { isPreEventMode } from '../lib/prompt.js';
 import {
   eventChecklist, formatProgressOverview, buildEventCardFlex, formatEventCardText,
@@ -2327,8 +2328,11 @@ async function proposeUpdate(replyToken, userId, eventId, field, value, { raw = 
   await setStaffPending(userId, 'update_confirm', p);
   // ⚠️ 跟教米亞的確認句一樣，這一則刻意**只有兩顆按鈕**：這一刻只有改／不改兩條路，
   // 旁邊擺一排別的出口只會讓人點走、留下一筆懸著的修改。
+  // 批次 80：改到今天以前的日期多半是打錯（或年份猜錯），確認句先講清楚
+  const pastWarn = field === 'date' && /^\d{4}-\d{2}-\d{2}$/.test(p.after) && p.after < todayTaipei()
+    ? '\n\n⚠️ 這個日期已經過了，確定沒打錯嗎？' : '';
   await replyOrPush(replyToken, userId,
-    `${undo ? '復原上一個修改：\n' : ''}要把《${p.eventName}》的${fieldLabel(field)}\n從「${displayValue(field, p.before)}」\n改成「${displayValue(field, p.after)}」嗎？\n\n改了以後，記者問米亞、活動網頁都會跟著更新。`,
+    `${undo ? '復原上一個修改：\n' : ''}要把《${p.eventName}》的${fieldLabel(field)}\n從「${displayValue(field, p.before)}」\n改成「${displayValue(field, p.after)}」嗎？${pastWarn}\n\n改了以後，記者問米亞、活動網頁都會跟著更新。`,
     [CONFIRM_UPDATE, CANCEL_UPDATE]);
 }
 
@@ -2366,17 +2370,15 @@ async function proposePublish(replyToken, userId, eventId) {
 // 活動現場拍完，直接在 LINE 傳給米亞，不用回電腦開編輯頁上傳。只有職員可以。
 // 一次傳好幾張時，LINE 會一張一張送 webhook：每一張都接進同一個「等著選場次」的清單，
 // 選一次就全部加進去。
-const PHOTO_BATCH_MAX = 10;
-
+// 批次 80：照片清單改存 lib/photo-inbox.js（每張一列），理由見那支檔案開頭。
 async function handleStaffImage(replyToken, userId, messageId) {
-  const pd = await getStaffPendingData(userId);
-  const prev = pd?.intent === 'photo_pick' && Array.isArray(pd.payload?.ids) ? pd.payload.ids : [];
-  const ids = [...prev, messageId].slice(-PHOTO_BATCH_MAX);
-  await setStaffPending(userId, 'photo_pick', { ids });
+  const count = await addPhoto(userId, messageId);
+  await setStaffPending(userId, 'photo_pick');
   const cards = buildAllCalendarCards(await getAllEventRows());
   await replyOrPush(replyToken, userId,
-    `收到 ${ids.length} 張照片 📷 要加到哪一場？點下面的活動。\n（還有照片的話可以繼續傳，選一次就一起加；不加了就回「不用了」）`,
-    staffChips(...staffPickList(cards).map(c => c.name)));
+    `收到 ${count} 張照片 📷 要加到哪一場？點下面的活動。\n（還有照片的話可以繼續傳，選一次就一起加；不加了就回「不用了」）`,
+    // 補照片常常是活動隔天的事：辦完兩週內的場次也列
+    staffChips(...staffPickList(cards, 8, { includePast: true, pastDays: 14 }).map(c => c.name)));
 }
 
 async function addPhotosToEvent(replyToken, userId, eventId, messageIds) {
@@ -2458,14 +2460,17 @@ async function handleEditFlow(replyToken, userId, text, pendingData, cards) {
   }
 
   // 批次 79：同仁剛傳了照片，這一則是「要加到哪一場」
-  if (pending === 'photo_pick' && Array.isArray(payload?.ids) && payload.ids.length) {
-    if (isCancelReply(s)) {
+  if (pending === 'photo_pick') {
+    const photos = await pendingPhotos(userId);
+    if (photos.length && isCancelReply(s)) {
+      await consumePhotos(photos);
       await replyOrPush(replyToken, userId, '好，照片沒有加 👌', staffChips('活動與進度'));
       return true;
     }
-    const target = matchEventByName(s, cards) || findCardByExactName(s, cards);
-    if (target) {
-      await addPhotosToEvent(replyToken, userId, target.id, payload.ids);
+    const target = findCardByExactName(s, cards) || matchEventByName(s, cards);
+    if (photos.length && target) {
+      await consumePhotos(photos); // 先標記用掉：就算下面上傳失敗，也不會下次選場次時又被加一次
+      await addPhotosToEvent(replyToken, userId, target.id, photos.map(p => p.messageId));
       return true;
     }
   }
@@ -2476,7 +2481,7 @@ async function handleEditFlow(replyToken, userId, text, pendingData, cards) {
       await replyOrPush(replyToken, userId, '好，沒有改 👌', staffChips('活動與進度'));
       return true;
     }
-    const target = matchEventByName(s, cards) || findCardByExactName(s, cards);
+    const target = findCardByExactName(s, cards) || matchEventByName(s, cards);
     if (target) {
       if (pending === 'publish_pick') await proposePublish(replyToken, userId, target.id);
       else await proposeUpdate(replyToken, userId, target.id, payload.field, payload.value);
@@ -2545,8 +2550,10 @@ async function handleStaffMessage(replyToken, userId, text) {
   const cardName = id => cards.find(c => c.id === id)?.name || id;
   // 批次 76：沒指定候選時用 staffPickList()（接下來要辦的在前、封存的不列）。舊版拿
   // 試算表前 8 列＝最舊的 8 場。後面一律接上整套職員入口（批次 54 的規則）。
-  const eventQuickReplies = (ids) =>
-    staffChips(...(ids && ids.length ? ids.map(cardName) : staffPickList(cards).map(c => c.name)));
+  // 批次 80：預設只列還沒過期的——改資料、發布、要訓練連結都用不到辦完的場次。
+  // 查成效（活動後才看）另外傳 { includePast: true }。
+  const eventQuickReplies = (ids, pickOpts = { includePast: false }) =>
+    staffChips(...(ids && ids.length ? ids.map(cardName) : staffPickList(cards, 8, pickOpts).map(c => c.name)));
 
   // ⚠️ 承接上一則的追問。實際回報的 bug：打「查活動後台數據」→ 系統問「哪一場？」→
   // 打「四足」→ 卻跑去回答四足那場的活動內容。
@@ -2595,7 +2602,9 @@ async function handleStaffMessage(replyToken, userId, text) {
   // 重點」）不會命中 matchEventByName()，照舊交給下面的路由讓米亞回答。
   // ⚠️ 等「哪一場」答案的時候（pending 查數據／要訓練連結）不攔：那時候點名稱是在回答問題。
   if (!['event_analytics', 'training_link', 'create_event', 'update_pick', 'publish_pick', 'photo_pick'].includes(pending)) {
-    const tapped = matchEventByName(text, cards);
+    // 批次 80：先比「名稱完全相同」。matchEventByName() 要求至少 6 個字，「眺望研討會」
+    // 這種短名稱點了清單按鈕會對不上，被當成主題詞問「要查產業趨勢還是技術」。
+    const tapped = findCardByExactName(text, cards) || matchEventByName(text, cards);
     if (tapped) {
       await sendEventCard(replyToken, userId, tapped.id);
       return;
@@ -2721,7 +2730,7 @@ async function handleStaffMessage(replyToken, userId, text) {
       await setStaffPending(userId, routed.intent);
       await replyOrPush(replyToken, userId,
         `請問是想查哪一場的${what}？直接打活動名稱，或點下面的按鈕。`,
-        eventQuickReplies());
+        eventQuickReplies(null, { includePast: routed.intent === 'event_analytics' }));
       return;
     }
     if (routed.event_ids.length > 1) {

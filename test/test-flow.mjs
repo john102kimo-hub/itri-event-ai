@@ -3308,5 +3308,73 @@ check('　 同一視窗內真的在問活動 → 照樣回', out.length > 0, JSO
   delete process.env.LINE_ADMIN_USER_ID;
 }
 
+// ── 情境 80：過期活動不再出現在修改清單、以及同一批檢查出來的問題（批次 80）──────────
+{
+  const labelsOf = o => (o?.quickReply || []).map(c => (typeof c === 'object' && c ? c.text : c));
+  const addEvents = () => {
+    state.events.push(['pastdraft', '上個月沒發的草稿活動', '#0F9E7A', '', 'draft', '2026-08-15', '', '', '', '工研院', 'cpd', '', '', '', '', '', '', '']);
+    state.events.push(['short', '眺望研討會', '#0F9E7A', 'kb', 'active', '2099-11-05', '', '', '', '工研院', 'csh', '', '', '', '', '', '', '']);
+  };
+  reset(); await freshModule();
+  state.staff.push(['U_staff', '', '2026-08-27', '', '']);
+  addEvents();
+
+  // (1) 回報原話：「要修改活動，不要跳出已經過期的活動」
+  out = await send('更新活動', 'U_staff');
+  let labels = labelsOf(out[0]);
+  check('★ 「更新活動」不列過期的活動（過期的草稿、辦完的都不列）',
+    !labels.includes('上個月沒發的草稿活動') && !labels.includes('半導體先進封裝技術發表會') && !labels.includes('經濟部四足機器人國產研發平台發表記者會'), JSON.stringify(labels));
+  check('　 接下來要辦的照樣在', labels.includes('智慧醫療解決方案記者會') && labels.includes('眺望研討會'), JSON.stringify(labels));
+  out = await send('新聞聯絡人換成王小明', 'U_staff');
+  check('「改哪一場？」的按鈕也不列過期的', !labelsOf(out[0]).includes('上個月沒發的草稿活動') && labelsOf(out[0]).includes('智慧醫療解決方案記者會'), JSON.stringify(labelsOf(out[0])));
+  await send('✖ 取消修改', 'U_staff');
+
+  // (2) 活動與進度也不列過期的草稿、已結束的
+  out = await send('活動與進度', 'U_staff');
+  check('★ 活動與進度不列過期的草稿', !/上個月沒發的草稿活動/.test(out[0]?.text || ''), out[0]?.text);
+
+  // 查成效是活動後的事：過期的要列
+  out = await send('查活動後台數據', 'U_staff');
+  check('查成效的「哪一場」仍然列辦完的場次', labelsOf(out[0]).includes('半導體先進封裝技術發表會'), JSON.stringify(labelsOf(out[0])));
+  await send('算了', 'U_staff');
+
+  // (3) 短名稱（不到 6 個字）點了也要出活動卡
+  out = await send('眺望研討會', 'U_staff');
+  check('★ 點短名稱的活動 → 活動卡，不是被當成主題詞', out[0]?.kind === 'flex' && /眺望研討會/.test(JSON.stringify(out[0].messages)), JSON.stringify(out));
+
+  // (4) 日期改到今天以前 → 確認句先警告
+  out = await send('智慧醫療解決方案記者會改到 1/5', 'U_staff');
+  check('★ 日期改到過去 → 確認句寫出「這個日期已經過了」', /這個日期已經過了/.test(out[0]?.text || ''), out[0]?.text);
+  await send('✖ 取消修改', 'U_staff');
+  out = await send('智慧醫療解決方案記者會改到 12/20', 'U_staff');
+  check('　 改到未來的日期 → 不警告', !/已經過了/.test(out[0]?.text || '') && /確認修改/.test(JSON.stringify(out)), out[0]?.text);
+  await send('✖ 取消修改', 'U_staff');
+
+  // (5) 追問狀態不能吃快取：另一個 instance（這裡用「剛讀過、快取還熱著」模擬）要看得到最新的
+  reset(); await freshModule();
+  state.staff.push(['U_staff', '', '2026-08-27', '', '']);
+  await send('活動與進度', 'U_staff');                    // 讓 line_staff 快取熱著（pending 是空的）
+  const edit = await import(new URL(`../lib/event-edit.js?v=${modSeq}`, import.meta.url).href);
+  const prop = (await edit.proposeChange('med', 'venue', '南港展覽館')).proposal;
+  // 模擬「確認句是另一台 instance 送出的」：直接把追問寫進表，這一台的快取不知道
+  state.staff[0][4] = `update_confirm:${Date.now()}:${encodeURIComponent(JSON.stringify(prop))}`;
+  out = await send('✅ 確認修改', 'U_staff');
+  check('★ 確認句由別台送出、這台快取還是舊的 → 按確認照樣改得到', state.events.find(r => r[0] === 'med')[12] === '南港展覽館' && /已更新/.test(out[0]?.text || ''), JSON.stringify(out));
+
+  // (6) 兩張照片「同時」送到，兩張都要在
+  reset(); await freshModule();
+  state.staff.push(['U_staff', '', '2026-08-27', '', '']);
+  const img = id => ({ type: 'message', replyToken: 'rt_' + id, source: { type: 'user', userId: 'U_staff' }, message: { type: 'image', id } });
+  sent.length = 0;
+  state.sheetLatencyMs = 5; // 讓兩個請求的讀寫真的交錯；沒有這個，兩個請求會一前一後跑完，測不出競態
+  await Promise.all([handler(makeRawReq([img('p1')]), res), handler(makeRawReq([img('p2')]), res)]);
+  state.sheetLatencyMs = 0;
+  await send('智慧醫療解決方案記者會', 'U_staff');
+  check('★ 兩張照片同時送到 → 選場次後兩張都加進去（舊版後寫的會蓋掉先寫的）',
+    state.photoUploads.map(x => x[1]).sort().join() === 'p1,p2', JSON.stringify(state.photoUploads));
+  out = await send('智慧醫療解決方案記者會', 'U_staff');
+  check('　 加過的照片不會再被加一次', state.photoUploads.length === 2 && out[0]?.kind === 'flex', JSON.stringify(state.photoUploads));
+}
+
 console.log(`\n${fail === 0 ? '✅' : '❌'} 流程測試通過 ${pass}／失敗 ${fail}`);
 process.exit(fail === 0 ? 0 : 1);
