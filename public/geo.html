@@ -148,9 +148,13 @@
   @media print{
     body{background:#fff}
     .wrap{max-width:none;padding:0}
-    #gate,.no-print,.head,.caveat,.kpi-grid,#snap-card,.start-card,
-    .card:not(#rep-card),#toast{display:none!important}
+    /* 列印詳細版一頁報告（printReport()）。列印簡報走 body.print-deck，規則在檔案後段 */
+    body:not(.print-deck) :is(#gate,.no-print,.head,.tabs,#sys-warn,.caveat,.kpi-grid,#snap-card,.start-card,
+    .card:not(#rep-card),#toast,#deck-stage){display:none!important}
+    body:not(.print-deck) section[data-tab="deck"]{display:block!important}
+    body:not(.print-deck) #rep-card{display:block!important}
     #rep-card{border:none;box-shadow:none;padding:0;margin:0}
+    #rep-card > details > summary{display:none}
     .rep-headline{background:#f3f4f6}
     .quote,.rep-stat{break-inside:avoid}
   }
@@ -187,6 +191,108 @@
   #toast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%) translateY(20px);background:#1a1a2e;color:#fff;padding:11px 20px;border-radius:10px;font-size:.86rem;opacity:0;transition:.2s;z-index:99;pointer-events:none}
   #toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
   @media(max-width:640px){.wrap{padding:18px 14px 60px}.head h1{font-size:1.25rem}}
+
+  /* ── 批次 72 改版：分頁、摘要、簡報 ─────────────────────────────────── */
+  .head-title{min-width:0;flex:1 1 320px}
+  .head .sub{font-size:.8rem}
+  .more-menu{position:relative}
+  .more-menu > summary{list-style:none}
+  .more-menu > summary::before{content:none}
+  .more-pop{position:absolute;right:0;top:calc(100% + 6px);background:#fff;border:1px solid var(--border);border-radius:12px;
+    box-shadow:0 12px 32px rgba(0,0,0,.12);padding:6px;display:flex;flex-direction:column;min-width:190px;z-index:30}
+  .more-pop .btn{justify-content:flex-start;width:100%;color:var(--text);text-decoration:none}
+  .more-pop .btn:hover{background:#f3f4f6}
+  #sys-warn:empty{display:none}
+  #sys-warn{background:#fef2f2;border:1px solid #fecaca;color:#991b1b;border-radius:10px;padding:8px 12px;font-size:.78rem;margin:8px 0 0;line-height:1.6}
+
+  .tabs{display:flex;gap:4px;margin:16px 0 18px;border-bottom:1px solid var(--border);overflow-x:auto;
+    position:sticky;top:0;background:var(--bg);z-index:20;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+  .tabs::-webkit-scrollbar{display:none}
+  .tabs button{border:none;background:none;font-family:var(--font);font-size:.9rem;font-weight:700;color:var(--muted);
+    padding:11px 14px;cursor:pointer;border-bottom:3px solid transparent;white-space:nowrap;display:inline-flex;align-items:center;gap:6px}
+  .tabs button.on{color:var(--primary-dark);border-bottom-color:var(--primary)}
+
+  .summary-card{border-left:4px solid var(--primary)}
+  .summary-list{list-style:none;display:flex;flex-direction:column;gap:8px;margin-top:8px}
+  .summary-list li{font-size:.92rem;line-height:1.65;padding-left:22px;position:relative}
+  .summary-list li::before{content:'';position:absolute;left:4px;top:.62em;width:8px;height:8px;border-radius:50%;background:var(--primary)}
+  .summary-list li.warn::before{background:var(--event)}
+  .summary-list li.bad::before{background:var(--down)}
+  .summary-list .go{border:none;background:none;color:var(--primary-dark);font-family:var(--font);font-weight:700;font-size:.84rem;cursor:pointer;padding:0 2px}
+
+  /* 長說明收起來：預設只留一句話，要細節的人點開 */
+  details.more-info{display:inline}
+  details.more-info > summary{display:inline;font-size:.78rem;font-weight:600;color:var(--primary-dark);cursor:pointer}
+  details.more-info > summary::before{content:none}
+  details.more-info[open]{display:block;margin-top:6px;padding:8px 10px;background:#f9fafb;border-radius:8px;color:var(--muted)}
+  .method-card > summary{font-size:.9rem}
+
+  /* 趨勢膠囊：兩行排，不要讓括號裡的基準值把整顆擠成亂折的三四行 */
+  .kpi .trend{display:flex;flex-direction:column;align-items:flex-start;border-radius:10px;padding:5px 9px}
+  .kpi .trend .base{font-weight:600;opacity:.75;font-size:.7rem}
+
+  /* 簡報：16:9，字級跟著投影片寬度縮放（縮圖、全螢幕、列印同一份） */
+  .deck-controls select,.deck-controls input{min-width:0}
+  .deck-controls #rep-by{flex:1 1 200px}
+  .deck-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px;margin-top:14px}
+  .slide{aspect-ratio:16/9;background:#fff;border:1px solid var(--border);border-radius:10px;overflow:hidden;position:relative;
+    container-type:inline-size;cursor:zoom-in;box-shadow:0 2px 10px rgba(0,0,0,.05)}
+  .slide .sl{position:absolute;inset:0;padding:5.5cqw 6cqw 5cqw;display:flex;flex-direction:column;gap:2.2cqw;font-size:2.2cqw;line-height:1.5}
+  .slide .no{position:absolute;right:2.4cqw;bottom:1.8cqw;font-size:1.5cqw;color:#9ca3af}
+  .slide .brand{position:absolute;left:6cqw;bottom:1.8cqw;font-size:1.5cqw;color:#9ca3af}
+  .slide h3{font-size:3.6cqw;line-height:1.3;color:var(--text);border-left:1cqw solid var(--primary);padding-left:1.8cqw}
+  .slide .kicker{font-size:1.8cqw;font-weight:700;color:var(--primary-dark);letter-spacing:.05em}
+  .slide.cover .sl{justify-content:center;background:linear-gradient(135deg,#0b3d30,#0F9E7A);color:#fff}
+  .slide.cover h1{font-size:5.4cqw;line-height:1.25}
+  .slide.cover .kicker{color:#a7f3d0}
+  .slide.cover .meta{font-size:2cqw;opacity:.9}
+  .slide .big{font-size:3cqw;font-weight:800;line-height:1.45;background:var(--primary-light);border-left:1cqw solid var(--primary);padding:2cqw 2.4cqw;border-radius:0 1.4cqw 1.4cqw 0}
+  .slide .stats{display:grid;grid-template-columns:repeat(3,1fr);gap:2cqw}
+  .slide .stat{border:1px solid var(--border);border-radius:1.6cqw;padding:2cqw}
+  .slide .stat .v{font-size:5cqw;font-weight:800;color:var(--primary);line-height:1.1}
+  .slide .stat .v.txt{font-size:2.8cqw;line-height:1.3}
+  .slide .stat .l{font-size:1.8cqw;color:var(--muted)}
+  .slide .bars{display:flex;flex-direction:column;gap:1.4cqw}
+  .slide .bar{display:flex;align-items:center;gap:1.6cqw;font-size:2.1cqw}
+  .slide .bar .n{flex:0 0 22cqw;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .slide .bar .t{flex:1;height:3cqw;background:#f1f3f5;border-radius:.8cqw;overflow:hidden}
+  .slide .bar .t i{display:block;height:100%;background:#cbd5e1}
+  .slide .bar.self{font-weight:800}
+  .slide .bar.self .t i{background:var(--primary)}
+  .slide .bar .c{flex:0 0 9cqw;text-align:right}
+  .slide .quote{font-size:1.9cqw;padding:1.6cqw 2cqw;border-radius:1.4cqw;margin:0}
+  .slide .quote .q{font-size:1.9cqw}
+  .slide .quote .t{font-size:1.9cqw;line-height:1.6}
+  .slide ol.acts{padding-left:3cqw;display:flex;flex-direction:column;gap:1.6cqw}
+  .slide ol.acts b{display:block;font-size:2.3cqw}
+  .slide ol.acts span{font-size:1.8cqw;color:var(--muted)}
+  .slide svg{width:100%;height:auto;display:block}
+  .slide svg text{font-family:var(--font);fill:var(--muted)}
+  .slide .small{font-size:1.6cqw;color:var(--muted);line-height:1.7}
+  .slide .verdict{font-size:1.9cqw;padding:1.4cqw 2cqw;margin:0}
+  .slide .lift-wrap{margin:0}
+  .slide .lift-cap{display:none}
+  .slide .lift-svg text{font-size:12px}
+
+  /* 全螢幕播放 */
+  #deck-stage{position:fixed;inset:0;background:#0b1220;z-index:200;display:none;align-items:center;justify-content:center}
+  #deck-stage.on{display:flex}
+  #deck-stage .slide{width:min(96vw,calc(92vh*16/9));cursor:default;border:none;border-radius:6px}
+  #deck-stage .ctl{position:fixed;bottom:14px;left:50%;transform:translateX(-50%);display:flex;gap:8px;align-items:center;color:#cbd5e1;font-size:.84rem}
+  #deck-stage .ctl button{background:rgba(255,255,255,.12);color:#fff;border:none;border-radius:8px;padding:8px 14px;font-family:var(--font);cursor:pointer}
+
+  @media print{
+    /* 列印簡報：一頁一張投影片、橫式（@page 由 printDeck() 臨時插入） */
+    body.print-deck .wrap > *:not(section[data-tab="deck"]),
+    body.print-deck section[data-tab="deck"] > *:not(.deck-card),
+    body.print-deck .deck-card > *:not(#deck-slides){display:none!important}
+    body.print-deck section[data-tab="deck"]{display:block!important}
+    body.print-deck .deck-card{border:none;padding:0;margin:0;box-shadow:none}
+    body.print-deck .deck-grid{display:block;margin:0}
+    body.print-deck .slide{width:100%;border:none;border-radius:0;box-shadow:none;break-after:page;page-break-after:always}
+    body.print-deck .slide:last-child{break-after:auto;page-break-after:auto}
+    body.print-deck #deck-stage{display:none!important}
+  }
 </style>
 </head>
 <body>
@@ -203,35 +309,163 @@
 
 <div class="wrap" id="app" style="display:none">
 
+  <!-- 批次 72 改版：原本十幾張卡片由上往下疊，最重要的數字要捲一個半螢幕才看得到。
+       現在頂端只留「看數字」與「做簡報」兩件事，其餘分到分頁裡。 -->
   <div class="head">
-    <div>
-      <h1><i class="ti ti-radar" style="color:var(--primary)"></i> AI 搜尋能見度追蹤</h1>
+    <div class="head-title">
+      <h1><i class="ti ti-radar" style="color:var(--primary)"></i> AI 搜尋能見度</h1>
       <div class="sub" id="sub">—</div>
     </div>
     <div class="toolbar">
-      <select id="days" onchange="loadSeries()">
+      <select id="days" onchange="loadSeries()" aria-label="期間">
         <option value="30">近 30 天</option>
         <option value="90" selected>近 90 天</option>
         <option value="180">近 180 天</option>
         <option value="365">近 365 天</option>
       </select>
-      <button class="btn btn-primary" onclick="openReport('')"><i class="ti ti-file-description"></i> 一頁報告</button>
-      <button class="btn btn-outline" onclick="loadAll()"><i class="ti ti-refresh"></i> 重整</button>
-      <button class="btn btn-outline admin-only" id="test-btn" onclick="selftest()"><i class="ti ti-stethoscope"></i> 測 1 題</button>
-      <button class="btn btn-primary" id="scan-btn" onclick="scan()"><i class="ti ti-player-play"></i> 立即掃描</button>
-      <a class="btn btn-ghost admin-only" href="/admin"><i class="ti ti-arrow-left"></i> 回後台</a>
+      <button class="btn btn-primary" onclick="openDeck('')"><i class="ti ti-presentation"></i> 產生簡報</button>
+      <button class="btn btn-outline" id="scan-btn" onclick="scan()"><i class="ti ti-player-play"></i> 立即掃描</button>
+      <details class="more-menu">
+        <summary class="btn btn-ghost" aria-label="更多"><i class="ti ti-dots"></i> 更多</summary>
+        <div class="more-pop">
+          <button class="btn btn-ghost" onclick="loadAll();closeMore(this)"><i class="ti ti-refresh"></i> 重新整理資料</button>
+          <button class="btn btn-ghost admin-only" id="test-btn" onclick="selftest();closeMore(this)"><i class="ti ti-stethoscope"></i> 自我測試 1 題</button>
+          <a class="btn btn-ghost admin-only" href="/admin"><i class="ti ti-arrow-left"></i> 回後台</a>
+        </div>
+      </details>
     </div>
   </div>
+  <div id="sys-warn"></div>
 
-  <!-- 今日可借勢話題：跟上面的能見度追蹤不同資料，關鍵字沿用同一批正在追蹤的議題 -->
-  <div class="card" id="newsjack-card">
-    <h2><i class="ti ti-bulb" style="color:var(--primary)"></i> 今日可借勢話題</h2>
-    <div class="desc">用 Google News（免費、不用金鑰）掃你正在追蹤的議題關鍵字，抓過去 48 小時內的相關新聞。要不要借、角度怎麼下，自己判斷——這裡只列候選，不幫忙下判斷。</div>
-    <button class="btn btn-outline" onclick="loadNewsjack()"><i class="ti ti-refresh"></i> 掃描今日話題</button>
-    <div id="newsjack-out" style="margin-top:10px"></div>
+  <nav class="tabs" id="tabs" role="tablist">
+    <button type="button" data-go="overview" class="on"><i class="ti ti-layout-dashboard"></i> 總覽</button>
+    <button type="button" data-go="deck"><i class="ti ti-presentation"></i> 簡報</button>
+    <button type="button" data-go="peers"><i class="ti ti-users-group"></i> 同業比較</button>
+    <button type="button" data-go="track"><i class="ti ti-wand"></i> 追蹤與工具</button>
+    <button type="button" data-go="settings" class="admin-only"><i class="ti ti-settings"></i> 設定</button>
+  </nav>
+
+  <!-- ═══════════ 總覽：打開就看得懂 ═══════════ -->
+  <section data-tab="overview">
+    <div class="card summary-card" id="summary-card">
+      <h2><i class="ti ti-bulb" style="color:var(--primary)"></i> 一眼看懂</h2>
+      <div id="summary-out"><div class="empty">整理中…</div></div>
+    </div>
+
+    <div class="kpi-grid" id="kpis"></div>
+
+    <div class="card">
+      <h2><i class="ti ti-chart-line" style="color:var(--primary)"></i> 能見度指數走勢</h2>
+      <div class="desc">實線為七日均線、淡點為單日原始值、橘色虛線為活動日。點色塊切換要看的議題。
+        <details class="more-info"><summary>怎麼看這張圖</summary>
+          0–100。提及 45＋位置 20＋自家網域被引用 20＋有具體內容 15。
+          <b>這張圖需要時間累積</b>——沒有人保存「上個月 AI 怎麼回答」的歷史，只能從開始追蹤那天起一天一筆。</details></div>
+      <div class="chips" id="chips"></div>
+      <div class="chart-box">
+        <svg id="chart" viewBox="0 0 920 340" preserveAspectRatio="none"></svg>
+        <div class="tip" id="tip"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2><i class="ti ti-list-numbers" style="color:var(--primary)"></i> 議題排行</h2>
+      <div class="desc">點任一列看診斷與下一步；「簡報」直接產生這個議題的簡報。
+        <details class="more-info"><summary>欄位怎麼算</summary>
+          變化＝所選期間後半段均分減前半段。提及率與引用率取近半段樣本。</details></div>
+      <div id="board" class="tbl"></div>
+    </div>
+
+    <div class="card">
+      <h2><i class="ti ti-flag" style="color:var(--event)"></i> 活動效應：這一場替你留下幾天記憶</h2>
+      <div class="desc">點任一列看這場的診斷與下一步。要對外宣稱「基線墊高」，以「簡報」裡 D+31 之後的判定為準。
+        <details class="more-info"><summary>欄位怎麼算</summary>
+          半衰期＝峰值掉回「峰值與基線的中點」要幾天；首次引用＝事件日起自家網域第一次被 AI 引用隔了幾天（每天一次取樣，精度只到天，不是新聞稿本身的引用時間，只看相對快慢）；最後一欄＝事件後第 15–30 天的均分減掉事前 14 天基線，這段整段過完才顯示。
+          ⚠️ 第 15–30 天還在新聞新鮮度的餘波期，高出來的部分<b>還不能叫新基線</b>，要看 D+31 之後、通過檢定才算。
+          這幾個數字<b>做不到回溯</b>：要在活動前兩週就開始追蹤，才算得出基線。</details></div>
+      <div id="events" class="tbl"></div>
+    </div>
+
+    <div class="card" id="snap-card" style="display:none">
+      <h2><i class="ti ti-bolt" style="color:var(--primary)"></i> 最近一次掃描 <span id="snap-kw" class="pill"></span></h2>
+      <div class="desc">掃完就有，不用等趨勢累積。</div>
+      <div id="snap-out"></div>
+    </div>
+
+    <details class="card method-card">
+      <summary><i class="ti ti-info-circle"></i> 這些數字量的是什麼？（對外引用前請先看）</summary>
+      <div style="margin-top:12px">
+  <div class="caveat">
+    <b>這份數字量的是什麼：</b>用「不指名工研院」的問法去問 AI，記錄它會不會提到工研院、第幾個提到、有沒有引到自家網域、有沒有講出具體內容。
+    它是<b>代理指標</b>——趨勢可用，但不等同 ChatGPT 或 Google AI Overviews 消費端畫面，對外引用務必註明。看趨勢請以<b>七日均線</b>為準。
   </div>
 
-  <!-- 主要動作：同仁只需要做這一件事 -->
+  <div class="caveat" style="background:#eef2ff;border-color:#c7d2fe;color:#3730a3">
+    <b>方法論依據：</b>AMEC（國際傳播評測學會，公關成效評測的國際權威組織，Barcelona Principles 的發布者）於 2026-05-20 在都柏林 Global Summit 發布《AMEC GEO Principles》，訂出七大原則與三個證據領域——
+    <b>上游聲譽訊號</b>（露出報告涵蓋）、<b>搜尋與內容可讀性</b>（發稿檢查清單涵蓋）、<b>下游 AI 輸出追蹤</b>（本頁涵蓋）。
+    官方原文明講：「AI outputs should be treated as directional evidence rather than absolute truth, and caution against relying on any single score, platform or tool.」——本頁用<b>七日均線</b>而非單次分數、明白標註<b>代理指標</b>、每月做多輪取樣校準誤差，做的正是這件事。
+    三層合起來看，才是完整的 GEO 量測；目前市面上多數 GEO 工具只做第三層，且未公開取樣方法。
+    <span style="font-size:.72rem;opacity:.75">原文：amecorg.com/2026/05/amec-launches-geo-principles-to-bring-rigour-to-ai-led-communications-measurement</span>
+  </div>
+
+      </div>
+    </details>
+  </section>
+
+  <!-- ═══════════ 簡報：一鍵產生、可直接播放或存 PDF ═══════════ -->
+  <section data-tab="deck" style="display:none">
+    <div class="card deck-card">
+      <h2><i class="ti ti-presentation" style="color:var(--primary)"></i> 能見度簡報</h2>
+      <div class="desc">選議題、按「產生」，就是一份可以直接播放或存成 PDF 的簡報。內容全部來自實測資料，不另外生成。</div>
+      <div class="row deck-controls">
+        <select id="deck-keyword" aria-label="議題"><option value="">全部議題</option></select>
+        <input type="text" id="rep-by" placeholder="製表單位／人（會印在封面）"
+               oninput="lsSet('geo_by',this.value);const l=document.getElementById('rep-by-line');if(l)l.textContent=this.value">
+        <button class="btn btn-primary" id="deck-gen-btn" onclick="openDeck(document.getElementById('deck-keyword').value)"><i class="ti ti-wand"></i> 產生簡報</button>
+      </div>
+      <div class="row deck-actions" id="deck-actions" style="display:none">
+        <button class="btn btn-primary" onclick="presentDeck(0)"><i class="ti ti-player-play"></i> 全螢幕播放</button>
+        <button class="btn btn-outline" onclick="printDeck()"><i class="ti ti-printer"></i> 列印／存 PDF</button>
+        <button class="btn btn-outline" onclick="copySlide()"><i class="ti ti-copy"></i> 複製簡報文字</button>
+      </div>
+      <div id="deck-slides" class="deck-grid"><div class="empty">按「產生簡報」開始。</div></div>
+    </div>
+
+    <!-- 詳細版一頁報告：給要看完整脈絡的人。簡報是從同一份資料抽出來的精簡版。 -->
+    <div class="card" id="rep-card" style="display:none">
+      <details id="rep-details">
+        <summary><i class="ti ti-file-description"></i> 詳細版一頁報告（含方法、樣本與原文）</summary>
+        <div class="rep-head no-print" style="margin-top:12px">
+          <div></div>
+          <button class="btn btn-outline" onclick="printReport()"><i class="ti ti-printer"></i> 列印這份報告</button>
+        </div>
+        <div id="rep-out"></div>
+      </details>
+    </div>
+  </section>
+
+  <!-- ═══════════ 同業比較 ═══════════ -->
+  <section data-tab="peers" style="display:none">
+    <div class="card">
+      <h2><i class="ti ti-users-group" style="color:var(--primary)"></i> 同業基準線：同一批問題，AI 提到誰</h2>
+      <div class="desc">縱軸是<b>提及率（%）</b>，不是能見度指數——兩張圖不要疊在一起看。點色塊切換機構。
+        <details class="more-info"><summary>資料從哪來、為什麼只比提及率</summary>
+          判官每判一題，本來就會記下「這段回答裡除了工研院還點名了哪些機構」，
+          所以對照機構跟我們是<b>同一題、同一天、同一個引擎、同一次回答</b>算出來的。
+          位置、自家網域被引、有沒有具體內容，判官只對工研院判，對照機構只有「有沒有被點名」這一個事實——
+          硬湊一個分數給對手，是拿自己編的數字跟自己比。滾動七日計算，窗內樣本不足的日子會斷線。
+          要看單一議題誰贏，用「簡報」分頁。</details></div>
+      <div class="chips" id="peer-chips"></div>
+      <div class="chart-box">
+        <svg id="peer-chart" viewBox="0 0 920 300" preserveAspectRatio="none"></svg>
+        <div class="tip" id="peer-tip"></div>
+      </div>
+      <div id="peer-note"></div>
+    </div>
+  </section>
+
+  <!-- ═══════════ 追蹤與工具 ═══════════ -->
+  <section data-tab="track" style="display:none">
+  <!-- 同仁最常做的一件事：開始追蹤一場活動 -->
   <div class="card start-card">
     <h2><i class="ti ti-wand" style="color:var(--primary)"></i> 追蹤一場活動</h2>
     <div class="desc">選一場活動、打一個關鍵字，題目我幫你想好。之後每天自動去問 AI，看發稿後各家有沒有提到工研院。</div>
@@ -287,88 +521,12 @@
     <div id="gen-out"></div>
   </div>
 
-  <div class="caveat">
-    <b>這份數字量的是什麼：</b>用「不指名工研院」的問法去問 AI，記錄它會不會提到工研院、第幾個提到、有沒有引到自家網域、有沒有講出具體內容。
-    它是<b>代理指標</b>——趨勢可用，但不等同 ChatGPT 或 Google AI Overviews 消費端畫面，對外引用務必註明。看趨勢請以<b>七日均線</b>為準。
-  </div>
 
-  <div class="caveat" style="background:#eef2ff;border-color:#c7d2fe;color:#3730a3">
-    <b>方法論依據：</b>AMEC（國際傳播評測學會，公關成效評測的國際權威組織，Barcelona Principles 的發布者）於 2026-05-20 在都柏林 Global Summit 發布《AMEC GEO Principles》，訂出七大原則與三個證據領域——
-    <b>上游聲譽訊號</b>（露出報告涵蓋）、<b>搜尋與內容可讀性</b>（發稿檢查清單涵蓋）、<b>下游 AI 輸出追蹤</b>（本頁涵蓋）。
-    官方原文明講：「AI outputs should be treated as directional evidence rather than absolute truth, and caution against relying on any single score, platform or tool.」——本頁用<b>七日均線</b>而非單次分數、明白標註<b>代理指標</b>、每月做多輪取樣校準誤差，做的正是這件事。
-    三層合起來看，才是完整的 GEO 量測；目前市面上多數 GEO 工具只做第三層，且未公開取樣方法。
-    <span style="font-size:.72rem;opacity:.75">原文：amecorg.com/2026/05/amec-launches-geo-principles-to-bring-rigour-to-ai-led-communications-measurement</span>
-  </div>
-
-  <div class="card" id="test-card" style="display:none">
-    <h2><i class="ti ti-stethoscope" style="color:var(--primary)"></i> 自我測試（不入庫）</h2>
-    <div class="desc">拿一題實跑到底，確認引擎跟判官真的通了、判分合理。上線後先按這個再開始掃。</div>
-    <div id="test-out"></div>
-  </div>
-
-  <!-- 給主管看的一頁報告 -->
-  <div class="card" id="rep-card" style="display:none">
-    <div class="rep-head no-print">
-      <h2><i class="ti ti-file-description" style="color:var(--primary)"></i> 一頁報告</h2>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-        <input type="text" id="rep-by" placeholder="製表單位／人（會印出來）" style="width:210px"
-               oninput="localStorage.setItem('geo_by',this.value);document.getElementById('rep-by-line').textContent=this.value">
-        <button class="btn btn-primary" onclick="copySlide()"><i class="ti ti-presentation"></i> 複製簡報素材</button>
-        <button class="btn btn-outline" onclick="window.print()"><i class="ti ti-printer"></i> 列印／存 PDF</button>
-        <button class="btn btn-ghost" onclick="document.getElementById('rep-card').style.display='none'">關閉</button>
-      </div>
-    </div>
-    <div id="rep-out"></div>
-  </div>
-
-  <div class="card" id="snap-card" style="display:none">
-    <h2><i class="ti ti-bolt" style="color:var(--primary)"></i> 現況快照 <span id="snap-kw" class="pill"></span></h2>
-    <div class="desc">最近一次掃描的結果。<b>這一段掃完就有，不用等。</b></div>
-    <div id="snap-out"></div>
-  </div>
-
-  <div class="kpi-grid" id="kpis"></div>
-
-  <div class="card">
-    <h2><i class="ti ti-chart-line" style="color:var(--primary)"></i> 能見度指數走勢</h2>
-    <div class="desc">0–100。提及 45＋位置 20＋自家網域被引用 20＋有具體內容 15。實線為七日均線，淡點為單日原始值，橘色虛線為活動日。
-      <b>這張圖需要時間累積</b>——沒有人保存「上個月 AI 怎麼回答」的歷史，只能從開始追蹤那天起一天一筆。</div>
-    <div class="chips" id="chips"></div>
-    <div class="chart-box">
-      <svg id="chart" viewBox="0 0 920 340" preserveAspectRatio="none"></svg>
-      <div class="tip" id="tip"></div>
-    </div>
-  </div>
-
-  <div class="card">
-    <h2><i class="ti ti-users-group" style="color:var(--primary)"></i> 同業基準線：同一批問題，AI 提到誰</h2>
-    <div class="desc">把工研院的數字放進可比較的脈絡——<b>52 分是好是壞，要看旁邊那幾條線在哪裡。</b>
-      這裡的資料不是另外去查的：判官每判一題，本來就會記下「這段回答裡除了工研院還點名了哪些機構」，
-      所以對照機構跟我們是<b>同一題、同一天、同一個引擎、同一次回答</b>算出來的。
-      <br>
-      ⚠️ 這條線是<b>提及率（%）</b>，不是上面那張的能見度指數——位置、自家網域被引、有沒有具體內容，
-      判官只對工研院判，對照機構只有「有沒有被點名」這一個事實。硬湊一個分數給對手，是拿自己編的數字跟自己比。
-      兩張圖的縱軸意義不同，<b>不要疊在一起看</b>。滾動七日計算，窗內樣本不足的日子會斷線。
-      要看單一議題誰贏，用上面的「一頁報告」。</div>
-    <div class="chips" id="peer-chips"></div>
-    <div class="chart-box">
-      <svg id="peer-chart" viewBox="0 0 920 300" preserveAspectRatio="none"></svg>
-      <div class="tip" id="peer-tip"></div>
-    </div>
-    <div id="peer-note"></div>
-  </div>
-
-  <div class="card">
-    <h2><i class="ti ti-flag" style="color:var(--event)"></i> 事件效應：這一場替你留下幾天記憶</h2>
-    <div class="desc">半衰期＝峰值掉回「峰值與基線的中點」要幾天；首次引用＝事件日起自家網域第一次被 AI 引用隔了幾天（每天一次取樣，精度只到天，不是新聞稿本身的引用時間，只看相對快慢）；基線抬升＝事件後第 15–30 天的均分減掉事前 14 天基線。抬升是真正能寫進績效的數字。<b>點任一列看這場的診斷與下一步。</b>
-      這幾個數字<b>做不到回溯</b>：要在活動前兩週就開始追蹤，才算得出基線。</div>
-    <div id="events" class="tbl"></div>
-  </div>
-
-  <div class="card">
-    <h2><i class="ti ti-list-numbers" style="color:var(--primary)"></i> 議題排行</h2>
-    <div class="desc">變化＝所選期間後半段均分減前半段。提及率與引用率取近半段樣本。<b>點任一列看這個議題的診斷與下一步。</b></div>
-    <div id="board" class="tbl"></div>
+  <div class="card" id="newsjack-card">
+    <h2><i class="ti ti-bulb" style="color:var(--primary)"></i> 今日可借勢話題</h2>
+    <div class="desc">用 Google News 掃你正在追蹤的議題，列出過去 48 小時的相關新聞。只列候選，借不借、怎麼切，自己判斷。</div>
+    <button class="btn btn-outline" onclick="loadNewsjack()"><i class="ti ti-refresh"></i> 掃描今日話題</button>
+    <div id="newsjack-out" style="margin-top:10px"></div>
   </div>
 
   <div class="card">
@@ -387,8 +545,18 @@
     <div id="adv-out" style="margin-top:14px"></div>
   </div>
 
+  <div class="card" id="test-card" style="display:none">
+    <h2><i class="ti ti-stethoscope" style="color:var(--primary)"></i> 自我測試（不入庫）</h2>
+    <div class="desc">拿一題實跑到底，確認引擎跟判官真的通了、判分合理。上線後先按這個再開始掃。</div>
+    <div id="test-out"></div>
+  </div>
+
+  </section>
+
+  <!-- ═══════════ 設定（承辦人） ═══════════ -->
+  <section data-tab="settings" class="admin-only" style="display:none">
   <div class="card admin-only">
-    <details>
+    <details open>
       <summary><i class="ti ti-settings"></i> 設定</summary>
 
       <div class="desc" style="margin-top:12px"><b>要問哪幾家 AI</b>（有填金鑰的才能打開）</div>
@@ -423,6 +591,7 @@
         停止追蹤＝該議題的題目從題庫刪除、不再計費；已掃到的歷史資料與曲線保留。</div>
     </details>
   </div>
+  </section>
 
 </div>
 
@@ -437,6 +606,26 @@ let S = { pwd:'', code:'', role:'admin', data:null, status:null,
 
 /* ── 登入 ── */
 function toast(m){const t=document.getElementById('toast');t.textContent=m;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2600);}
+const lsGet = (k) => { try { return localStorage.getItem(k) || ''; } catch(e){ return ''; } };
+const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch(e){} };
+
+/* ── 分頁（批次 72）────────────────────────────────────────────────────
+ * 原本十幾張卡片由上往下疊：掃描狀態、六顆按鈕、借勢話題、追蹤表單、兩大段方法論，
+ * 最重要的「能見度幾分、有沒有變好」要捲一個半螢幕才看得到。分頁之後打開就是總覽。
+ * 記在網址 #hash：重新整理、把連結傳給同事，都會停在同一頁。 */
+const TABS = ['overview', 'deck', 'peers', 'track', 'settings'];
+function showTab(name){
+  // 同仁連結沒有「設定」分頁（admin-only 整塊被拿掉），網址停在 #settings 時要退回總覽，不能一片空白
+  if(!TABS.includes(name) || !document.querySelector(`section[data-tab="${name}"]`)) name = 'overview';
+  document.querySelectorAll('section[data-tab]').forEach(sec => { sec.style.display = sec.dataset.tab === name ? '' : 'none'; });
+  document.querySelectorAll('#tabs button[data-go]').forEach(b => b.classList.toggle('on', b.dataset.go === name));
+  if(location.hash !== '#' + name) history.replaceState(null, '', '#' + name);
+}
+function bindTabs(){
+  document.querySelectorAll('#tabs button[data-go]').forEach(b => b.addEventListener('click', () => showTab(b.dataset.go)));
+  showTab((location.hash || '').slice(1));
+}
+function closeMore(el){ const d = el.closest('details'); if(d) d.open = false; }
 async function unlock(){
   const pwd = document.getElementById('gate-input').value.trim();
   if(!pwd) return;
@@ -446,6 +635,7 @@ async function unlock(){
   S.pwd = pwd; sessionStorage.setItem('itri_pwd', pwd);
   document.getElementById('gate').style.display='none';
   document.getElementById('app').style.display='block';
+  bindTabs();
   loadAll();
 }
 document.getElementById('gate-input').addEventListener('keydown', e=>{ if(e.key==='Enter') unlock(); });
@@ -460,6 +650,7 @@ document.getElementById('gate-input').addEventListener('keydown', e=>{ if(e.key=
       document.querySelectorAll('.admin-only').forEach(el=>el.remove());
       document.getElementById('gate').style.display='none';
       document.getElementById('app').style.display='block';
+      bindTabs();
       return loadAll();
     }
     document.getElementById('gate-err').textContent = '這條連結已失效，請向承辦人索取新的';
@@ -485,7 +676,7 @@ async function loadAll(){
 let LAST_REPORT = null;
 function copySlide(){
   const d = LAST_REPORT;
-  if(!d) return toast('先產生報告');
+  if(!d) return toast('先產生簡報');
   const p = d.performance;
   const L = [];
 
@@ -511,7 +702,7 @@ function copySlide(){
     L.push(`【可以講到什麼程度】`);
     L.push(proven
       ? `已通過 D+31 之後的檢定，可稱「基線墊高」${p.vBase1?.ci?`（95% 信賴區間 ${p.vBase1.ci[0]}～${p.vBase1.ci[1]}pp）`:''}。`
-      : `第 15–30 天仍在新聞新鮮度衰減期內，${'{'}不可寫成「基線已墊高」${'}'}。目前只能說「尚未回到發稿前水準」，是否形成新基線需累積至 D+31 之後。`);
+      : `第 15–30 天仍在新聞新鮮度衰減期內，不可寫成「基線已墊高」。目前只能說「尚未回到發稿前水準」，是否形成新基線需累積至 D+31 之後。`);
     L.push('');
   }
 
@@ -662,8 +853,14 @@ function liftChart(p){
   g += `<path d="${dpath.trim()}" fill="none" stroke="#334155" stroke-width="1.3" opacity=".55"/>`;
   s.forEach(pt=>{ if(pt.rate!==null) g += `<circle cx="${x(pt.offset)}" cy="${y(pt.rate)}" r="1.9" fill="#334155" opacity=".5"/>`; });
 
-  g += `<text x="${W-R+8}" y="${y(oldB)+4}" font-size="11" fill="#64748b">發稿前 ${oldB}%</text>`;
-  g += `<text x="${W-R+8}" y="${y(newLvl)+4}" font-size="11" font-weight="${proven?800:600}"
+  // 兩個標籤靠太近時上下推開（前後差 5pp 以內會疊成一團，批次 72 截圖看到的）
+  let yOld = y(oldB) + 4, yNew = y(newLvl) + 4;
+  if(Math.abs(yOld - yNew) < 13){
+    const mid = (yOld + yNew) / 2, up = newLvl >= oldB;
+    yNew = mid + (up ? -7 : 7); yOld = mid + (up ? 7 : -7);
+  }
+  g += `<text x="${W-R+8}" y="${yOld}" font-size="11" fill="#64748b">發稿前 ${oldB}%</text>`;
+  g += `<text x="${W-R+8}" y="${yNew}" font-size="11" font-weight="${proven?800:600}"
         fill="${proven?(lifted?'var(--primary-dark)':'#b91c1c'):'#475569'}">${
         proven?`新基線 ${newLvl}%`:`餘波期 ${newLvl}%`}</text>`;
 
@@ -742,17 +939,18 @@ function perfHtml(p, no){
     </div>`;
 }
 
-/* ── 一頁報告（給同仁與主管） ── */
-async function openReport(keyword){
+/* ── 一頁報告（給同仁與主管） ──
+ * 批次 72 起它是「簡報」分頁裡的詳細版：同一份資料，簡報是精簡版、這份是完整版。
+ * 回傳報告資料給 openDeck() 排投影片；資料還不夠時回 { msg }。 */
+function openReport(keyword){ return openDeck(keyword); }   // 舊的呼叫點與書籤相容
+async function loadReport(keyword){
   const card = document.getElementById('rep-card'), out = document.getElementById('rep-out');
-  document.getElementById('rep-by').value = localStorage.getItem('geo_by') || '';
   card.style.display = 'block';
-  card.scrollIntoView({behavior:'smooth', block:'start'});
   out.innerHTML = '<div class="empty">整理中…</div>';
 
   const d = await api(`action=report&days=30${keyword?`&keyword=${encodeURIComponent(keyword)}`:''}`);
-  if(d.error){ out.innerHTML = `<div class="empty down">${esc(d.error)}</div>`; return; }
-  if(!d.ready){ out.innerHTML = `<div class="empty">${esc(d.msg)}</div>`; return; }
+  if(d.error){ out.innerHTML = `<div class="empty down">${esc(d.error)}</div>`; return { msg: d.error }; }
+  if(!d.ready){ out.innerHTML = `<div class="empty">${esc(d.msg)}</div>`; return { msg: d.msg }; }
   LAST_REPORT = d;
 
   const max = Math.max(...d.voiceBoard.map(x=>x.n), 1);
@@ -858,6 +1056,221 @@ async function openReport(keyword){
       <b>限制</b>：本數據為代理指標，不等同 ChatGPT 或 Google AI Overviews 消費端畫面；
       單次查詢具隨機性，趨勢判讀以七日均線為準。對外引用請一併載明本限制。
     </div>`;
+  return d;
+}
+
+function printReport(){
+  showTab('deck');
+  const det = document.getElementById('rep-details');
+  if(det) det.open = true;
+  document.body.classList.remove('print-deck');
+  window.print();
+}
+
+/* ── 能見度簡報（批次 72）──────────────────────────────────────────────
+ * 需求原話：「能快速生成能見度簡報」。以前的路是：按一頁報告 → 捲到頁面中間 → 按「複製
+ * 簡報素材」→ 開 PowerPoint 自己排。現在按一下就是一份 16:9 的簡報：縮圖預覽、全螢幕
+ * 播放、一頁一張存成 PDF。
+ *
+ * ⚠️ 投影片上的每一句話、每一個數字都來自報告 API 已經算好的欄位（headline、stats、
+ * voiceBoard、performance、actions、quote），這裡只負責排版，不生成任何新的說法——
+ * 跟一頁報告同一個原則：簡報會被拿去給長官看，講不得的東西不能因為換了版面就講出來。
+ * 「成果績效」的字眼一樣只在通過 D+31 之後檢定（BASELINE_RAISED）時才出現。 */
+let DECK = [];
+let DECK_AT = 0;
+
+function renderDeckKeywords(keywords){
+  const sel = document.getElementById('deck-keyword');
+  if(!sel) return;
+  const cur = sel.value;
+  sel.innerHTML = `<option value="">全部議題</option>` +
+    keywords.map(k=>`<option value="${esc(k.keyword)}">${esc(k.keyword)}</option>`).join('');
+  if([...sel.options].some(o=>o.value===cur)) sel.value = cur;
+}
+
+function deckTitle(d){
+  const stage = d.performance?.stage;
+  return stage === 'BASELINE_RAISED' ? '成果績效報告'
+    : d.performance?.ready ? '活動後追蹤報告（期中）' : '基準調查';
+}
+
+/** 走勢小圖：七日均線＋單日淡點＋活動日。資料來自畫面上已經載入的 series，不另外打 API。 */
+function deckTrendSvg(keyword){
+  const ser = S.data?.series;
+  if(!ser || !ser.dates || !ser.dates.length) return '';
+  const line = keyword ? (ser.keywords||[]).find(k=>k.keyword===keyword) : ser.overall;
+  if(!line || !line.ma || !line.ma.some(v=>v!==null)) return '';
+  const W=900, H=300, L=40, R=16, T=14, B=30, n=ser.dates.length;
+  const x = (i) => L + (n<=1?0:(W-L-R)*i/(n-1));
+  const y = (v) => T + (H-T-B)*(1-v/100);
+  let g = '';
+  [0,25,50,75,100].forEach(v=>{ g += `<line x1="${L}" y1="${y(v)}" x2="${W-R}" y2="${y(v)}" stroke="#eef0f2"/><text x="${L-8}" y="${y(v)+4}" text-anchor="end" font-size="12">${v}</text>`; });
+  const step = Math.max(1, Math.ceil(n/6));
+  for(let i=0;i<n;i+=step) g += `<text x="${x(i)}" y="${H-8}" text-anchor="middle" font-size="12">${esc(ser.dates[i].slice(5))}</text>`;
+  (S.data.events||[]).filter(e=>!keyword || !e.matchedKeyword || e.matchedKeyword===keyword).forEach(e=>{
+    const i = ser.dates.indexOf(e.date); if(i<0) return;
+    g += `<line x1="${x(i)}" y1="${T}" x2="${x(i)}" y2="${H-B}" stroke="#f59e0b" stroke-width="1.6" stroke-dasharray="5 4"/>`;
+    g += `<text x="${x(i)+5}" y="${T+12}" font-size="12" fill="#b45309" style="fill:#b45309">${esc(e.title.slice(0,14))}</text>`;
+  });
+  line.raw.forEach((v,i)=>{ if(v!==null) g += `<circle cx="${x(i)}" cy="${y(v)}" r="2" fill="#0F9E7A" opacity=".25"/>`; });
+  g += `<path d="${pathOf(line.ma, (i)=>x(i), y)}" fill="none" stroke="#0F9E7A" stroke-width="3.2" stroke-linejoin="round"/>`;
+  return `<svg viewBox="0 0 ${W} ${H}">${g}</svg>`;
+}
+
+function buildDeckSlides(d, keyword){
+  const kw = d.keyword || '全部議題';
+  const by = lsGet('geo_by');
+  const today = new Date().toLocaleDateString('sv-SE');
+  const slides = [];
+  const add = (cls, html) => slides.push({ cls, html });
+
+  add('cover', `<div class="kicker">工研院｜AI 搜尋能見度</div>
+    <h1>${esc(kw)}<br>${esc(deckTitle(d))}</h1>
+    <div class="meta">調查期間 ${esc(d.dateRange[0])} ～ ${esc(d.dateRange[1])}｜${d.samples} 次問答｜${d.engines.map(esc).join('、')}<br>
+      製表 ${esc(today)}${by?`　${esc(by)}`:''}</div>`);
+
+  const stats = (d.stats||[]).slice(0,3).map(st=>`<div class="stat">
+      <div class="v ${st.pct!==null && st.pct!==undefined ? '' : 'txt'}">${st.pct!==null && st.pct!==undefined ? st.pct+'%' : esc(st.value)}</div>
+      <div class="l">${esc(st.label)}</div>
+      ${st.pct!==null && st.pct!==undefined ? `<div class="l">${esc(st.value)}</div>` : ''}</div>`).join('');
+  add('', `<h3>結論</h3><div class="big">${esc(d.headline)}</div><div class="stats">${stats}</div>`);
+
+  const trend = deckTrendSvg(keyword);
+  if(trend){
+    add('', `<h3>能見度指數走勢（近 ${esc(document.getElementById('days').value)} 天）</h3>${trend}
+      <div class="small">0–100，粗線為七日均線、淡點為單日值、橘色虛線為活動日。趨勢請看均線，單日會跳動。</div>`);
+  }
+
+  const vb = (d.voiceBoard||[]).slice(0,7);
+  if(vb.length){
+    const max = Math.max(...vb.map(x=>x.n), 1);
+    add('', `<h3>同一批問題，AI 把誰當成答案</h3>
+      <div class="bars">${vb.map(x=>`<div class="bar ${x.self?'self':''}"><span class="n">${esc(x.name)}</span>
+        <span class="t"><i style="width:${Math.round(x.n/max*100)}%"></i></span><span class="c">${x.n} 次</span></div>`).join('')}</div>
+      <div class="small">不指名任何單位的問法，AI 分別提到各單位幾次。同一單位的不同寫法已合併。</div>`);
+  }
+
+  const p = d.performance;
+  if(p && p.ready){
+    const st = STAGE[p.stage] || STAGE.INSUFFICIENT_N;
+    add('', `<h3>這一場帶來的變化：${esc(p.event.title)}</h3>
+      ${liftChart(p)}
+      <div class="verdict ${st.cls}"><b>${esc(st.t)}。</b>AI 提到工研院的比例：發稿前 ${p.before.mentionRate}% → 活動期 ${p.during.mentionRate}% → 第 15–30 天 ${p.after.mentionRate}%。
+        ${st.can ? '這個結論可以拿去報告。' : '<b>先不要拿去宣稱成果。</b>'}</div>`);
+  }
+
+  const qhtml = (o, miss) => !o ? '' : `<div class="quote ${miss?'miss':''}"><div class="q">Q：${esc(o.question)}</div>
+      <div class="t">${esc(String(o.text).slice(0,150))}${String(o.text).length>150?'…':''}</div>
+      <div class="small">${esc(o.engine)}｜${esc(o.date)}${miss?'　← 這一題完全沒提到工研院':''}</div></div>`;
+  if(d.quote || d.missed){
+    add('', `<h3>AI 實際上是怎麼講的</h3>${qhtml(d.quote,false)}${qhtml(d.missed,true)}
+      <div class="small">AI 回答原文節錄，未經改寫。</div>`);
+  }
+
+  const acts = (d.actions||[]).slice(0,3);
+  if(acts.length){
+    add('', `<h3>建議下一步</h3><ol class="acts">${acts.map(a=>`<li><b>${esc(a.title)}</b>
+      <span>${esc(String(a.todo).replace(/\*\*(.+?)\*\*/g,'$1'))}</span></li>`).join('')}</ol>`);
+  }
+
+  add('', `<h3>方法與限制</h3>
+    <div class="small" style="font-size:2cqw">以不指名工研院的問句詢問具網路搜尋能力的 AI 答案引擎，逐次記錄回答內容、提及單位與引用來源，分數由程式依固定規則計算，非人工評分。<br><br>
+    本數據為<b>代理指標</b>，不等同 ChatGPT 或 Google AI Overviews 消費端畫面；單次查詢具隨機性，趨勢判讀以七日均線為準。對外引用請一併載明本限制。<br><br>
+    方法論依據：AMEC《GEO Principles》（2026-05）——AI 輸出應視為方向性證據，不依賴任何單一分數、平台或工具。</div>`);
+
+  return slides;
+}
+
+function slideHtml(sl, i, n){
+  return `<div class="slide ${sl.cls}" data-i="${i}"><div class="sl">${sl.html}</div>`
+    + (sl.cls==='cover' ? '' : `<div class="brand">工研院 AI 搜尋能見度</div>`)
+    + `<div class="no">${i+1} / ${n}</div></div>`;
+}
+
+async function openDeck(keyword){
+  showTab('deck');
+  const sel = document.getElementById('deck-keyword');
+  if(sel && [...sel.options].some(o=>o.value===(keyword||''))) sel.value = keyword || '';
+  const by = document.getElementById('rep-by');
+  if(by && !by.value) by.value = lsGet('geo_by');
+  const box = document.getElementById('deck-slides');
+  const btn = document.getElementById('deck-gen-btn');
+  box.innerHTML = '<div class="empty">整理中…</div>';
+  document.getElementById('deck-actions').style.display = 'none';
+  btn.disabled = true;
+  try{
+    const d = await loadReport(keyword || '');
+    if(!d || d.msg !== undefined){ box.innerHTML = `<div class="empty">${esc(d?.msg || '資料還不夠，產生不了簡報')}</div>`; DECK = []; return; }
+    DECK = buildDeckSlides(d, keyword || '');
+    box.innerHTML = DECK.map((sl,i)=>slideHtml(sl,i,DECK.length)).join('');
+    box.querySelectorAll('.slide').forEach(el=>el.addEventListener('click', ()=>presentDeck(Number(el.dataset.i))));
+    document.getElementById('deck-actions').style.display = 'flex';
+  }catch(e){
+    box.innerHTML = `<div class="empty down">產生失敗：${esc(e.message)}</div>`;
+  }finally{
+    btn.disabled = false;
+  }
+}
+
+/** 全螢幕播放：← → 換頁、Esc 離開，點畫面也會換下一張。 */
+function presentDeck(i){
+  if(!DECK.length) return toast('先產生簡報');
+  let stage = document.getElementById('deck-stage');
+  if(!stage){
+    stage = document.createElement('div');
+    stage.id = 'deck-stage';
+    stage.innerHTML = `<div id="deck-stage-slot"></div>
+      <div class="ctl"><button type="button" data-d="-1">‹ 上一張</button><span id="deck-stage-no"></span>
+        <button type="button" data-d="1">下一張 ›</button><button type="button" data-d="0">離開（Esc）</button></div>`;
+    document.body.appendChild(stage);
+    stage.querySelector('.ctl').addEventListener('click', (e)=>{
+      const b = e.target.closest('button'); if(!b) return;
+      e.stopPropagation();
+      const dir = Number(b.dataset.d);
+      dir ? stepDeck(dir) : closeDeck();
+    });
+    stage.addEventListener('click', ()=>stepDeck(1));
+    document.addEventListener('keydown', (e)=>{
+      if(!stage.classList.contains('on')) return;
+      if(['ArrowRight','PageDown',' ','Enter'].includes(e.key)){ e.preventDefault(); stepDeck(1); }
+      else if(['ArrowLeft','PageUp','Backspace'].includes(e.key)){ e.preventDefault(); stepDeck(-1); }
+      else if(e.key === 'Escape'){ closeDeck(); }
+    });
+  }
+  DECK_AT = Math.max(0, Math.min(DECK.length-1, i||0));
+  drawStage();
+  stage.classList.add('on');
+  if(stage.requestFullscreen) stage.requestFullscreen().catch(()=>{});
+}
+function drawStage(){
+  document.getElementById('deck-stage-slot').innerHTML = slideHtml(DECK[DECK_AT], DECK_AT, DECK.length);
+  document.getElementById('deck-stage-no').textContent = `${DECK_AT+1} / ${DECK.length}`;
+}
+function stepDeck(dir){
+  const next = DECK_AT + dir;
+  if(next < 0) return;
+  if(next >= DECK.length) return closeDeck();
+  DECK_AT = next; drawStage();
+}
+function closeDeck(){
+  const stage = document.getElementById('deck-stage');
+  if(stage) stage.classList.remove('on');
+  if(document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(()=>{});
+}
+
+/** 一頁一張、橫式。@page 不能依 class 切換，所以列印前臨時插一段、印完拿掉。 */
+function printDeck(){
+  if(!DECK.length) return toast('先產生簡報');
+  showTab('deck');
+  const st = document.createElement('style');
+  st.id = 'deck-page-style';
+  st.textContent = '@page{size:A4 landscape;margin:8mm}';
+  document.head.appendChild(st);
+  document.body.classList.add('print-deck');
+  const done = () => { document.body.classList.remove('print-deck'); st.remove(); window.removeEventListener('afterprint', done); };
+  window.addEventListener('afterprint', done);
+  window.print();
+  setTimeout(done, 60000);  // 保險：有些瀏覽器不發 afterprint（print() 也不一定會阻塞，太早拿掉會印錯版）
 }
 
 /* ── 現況快照：掃完立刻能看，不用等趨勢累積 ── */
@@ -1047,15 +1460,17 @@ async function loadStatus(){
   // 有金鑰但被 GEO_ENGINES 關掉的，要跟「根本沒設金鑰」分開講，不然會以為是壞了
   const muted = s.engines.filter(e=>!e.enabled && e.hasKey).map(e=>e.id);
   const off   = s.engines.filter(e=>!e.enabled && !e.hasKey).map(e=>e.env);
-  document.getElementById('sub').innerHTML =
-    `今日 ${s.date}：已掃 <b>${s.done}/${s.total}</b> ｜ 探測：${live.join('、')||'（無）'} (${s.model})` +
-    ` ｜ 判官：${s.judge||'—'}` +
-    (muted.length?` ｜ 已停掃（省錢）：${muted.join('、')}`:'') +
-    (off.length?` ｜ 未設金鑰：${off.join('、')}`:'') +
-    (s.ready?` ｜ <span style="color:#ef4444;font-weight:700">${esc(s.ready)}</span>`:'') +
-    (S.role==='admin' && !s.cronSecretSet
-      ? ` ｜ <span style="color:#ef4444;font-weight:700">⚠ 尚未設定 CRON_SECRET，排程端點可被外部觸發，請至 Vercel 環境變數新增</span>`
-      : '');
+  // 標題下只留一行人看得懂的狀態；引擎、判官、金鑰這些技術細節收進 title（滑過去看得到）
+  // 與「設定」分頁。會影響掃描的問題才放到紅色提示條，不再跟狀態擠在同一行。
+  const tech = `探測：${live.join('、')||'（無）'} (${s.model})｜判官：${s.judge||'—'}`
+    + (muted.length?`｜已停掃（省錢）：${muted.join('、')}`:'') + (off.length?`｜未設金鑰：${off.join('、')}`:'');
+  const sub = document.getElementById('sub');
+  sub.innerHTML = `今日 ${esc(s.date)} 已掃 <b>${s.done}/${s.total}</b> 題｜${live.length} 家 AI`;
+  sub.title = tech;
+  const warns = [];
+  if(s.ready) warns.push(esc(s.ready));
+  if(S.role==='admin' && !s.cronSecretSet) warns.push('尚未設定 CRON_SECRET，排程端點可被外部觸發，請至 Vercel 環境變數新增');
+  document.getElementById('sys-warn').innerHTML = warns.map(w=>`⚠ ${w}`).join('<br>');
 }
 
 /* ── 主資料 ── */
@@ -1067,7 +1482,51 @@ async function loadSeries(){
   renderKpis(d.summary); renderChips(d.series); renderChart(); renderEvents(d.events); renderBoard(d.board);
   renderPeerChips(); renderPeerChart();
   renderAdviseKeywords(d.series?.keywords || []);
+  renderDeckKeywords(d.series?.keywords || []);
+  renderSummary(d);
 }
+
+/* ── 一眼看懂（批次 72）────────────────────────────────────────────────
+ * 主管打開這頁要的是三句話：現在幾分、有沒有變好、哪裡該顧。以前得自己看四張卡、
+ * 一張圖、兩張表拼出來。
+ * ⚠️ 每一句都只是把下面卡片裡**已經有的數字**換成白話，不做任何推論——特別是漲跌：
+ * 後端 selfTrend() 樣本不足時回 dir:null，這裡就不講漲跌（批次 69 的原則：資料不夠
+ * 就不要長出一個看起來像結論的東西）。 */
+function renderSummary(d){
+  const out = document.getElementById('summary-out');
+  const s = d.summary || {};
+  if(!s.samples){
+    out.innerHTML = `<div class="empty">還沒有掃描資料。到「追蹤與工具」開始追蹤一場活動，或按右上角「立即掃描」。</div>`;
+    return;
+  }
+  const items = [];
+  const t = s.trend;
+  const trendTxt = t && t.dir
+    ? `，本週比近 ${t.baseDays} 天${t.dir==='flat' ? '持平' : `${t.label} ${Math.abs(t.delta)} 分`}`
+    : '';
+  items.push({ cls: t && t.dir==='down' ? 'warn' : '', html:
+    `近 14 天能見度指數 <b>${s.score14 ?? '—'}</b> 分${esc(trendTxt)}；不指名工研院時，AI 有 <b>${s.mentionRate14 ?? '—'}%</b> 的回答會提到工研院，<b>${s.citedRate14 ?? '—'}%</b> 引用到自家網頁。` });
+  const board = (d.board || []).filter(b => b.score !== null);
+  if(board.length >= 2){
+    const sorted = [...board].sort((a,b) => b.score - a.score);
+    const best = sorted[0], worst = sorted[sorted.length-1];
+    items.push({ cls:'', html: `表現最好的議題是 <b>${esc(best.keyword)}</b>（${best.score} 分）`
+      + `<button class="go" onclick="openDeck('${jsq(best.keyword)}')">做簡報 ›</button>` });
+    items.push({ cls: worst.score < 30 ? 'bad' : 'warn', html: `最需要加強的是 <b>${esc(worst.keyword)}</b>（${worst.score} 分，提及率 ${worst.mentionRate ?? '—'}%）`
+      + `<button class="go" onclick="showTab('overview');document.getElementById('board').scrollIntoView({behavior:'smooth'})">看診斷 ›</button>` });
+  }
+  // ⚠️ 不說「基線抬升」：第 15–30 天是餘波期，能不能對外講成成果，一頁報告／簡報另有判定，
+  // 摘要句不能搶先下一個比它更樂觀的結論（批次 72：兩處說法曾經互相矛盾）。
+  const ev = (d.events || []).filter(e => e.lift !== null && e.settled).slice(-1)[0];
+  if(ev){
+    items.push({ cls: ev.lift > 0 ? '' : 'warn', html: `最近一場活動《${esc(ev.title)}》發稿後第 15–30 天比發稿前 <b>${ev.lift>0?'+':''}${ev.lift}</b> 分；能不能對外說成成果，看簡報裡的判定。`
+      + (ev.matchedKeyword ? `<button class="go" onclick="openDeck('${jsq(ev.matchedKeyword)}')">看判定 ›</button>` : '') });
+  }
+  if(s.failed14) items.push({ cls:'warn', html: `近 14 天有 ${s.failed14} 次掃描失敗，數字可能偏少，承辦人可到「設定」檢查金鑰。` });
+  out.innerHTML = `<ul class="summary-list">${items.map(i=>`<li class="${i.cls}">${i.html}</li>`).join('')}</ul>`;
+}
+// 放進 onclick='...' 的字串：先轉 HTML、再跳脫單引號與反斜線
+function jsq(v){ return esc(v).replace(/\\/g,'\\\\').replace(/'/g,"\\'"); }
 
 /* ── 發稿建議：把累積的掃描資料變成能直接用的修改建議 ── */
 function renderAdviseKeywords(keywords){
@@ -1151,8 +1610,8 @@ function trendBadge(t){
   }
   const icon = t.dir === 'up' ? 'ti-arrow-up-right' : t.dir === 'down' ? 'ti-arrow-down-right' : 'ti-arrow-right';
   const sign = t.delta > 0 ? '+' : '';
-  return `<div class="trend ${t.dir}"><i class="ti ${icon}"></i>本週${t.label} ${sign}${t.delta}
-    <span style="font-weight:600;opacity:.75">（vs 近 ${t.baseDays} 天 ${t.baseline} 分）</span></div>`;
+  return `<div class="trend ${t.dir}"><span><i class="ti ${icon}"></i>本週${t.label} ${sign}${t.delta}</span>
+    <span class="base">vs 近 ${t.baseDays} 天 ${t.baseline} 分</span></div>`;
 }
 
 function renderKpis(s){
@@ -1173,7 +1632,7 @@ function renderChips(series){
   box.innerHTML = items.map(it=>{
     const on = S.on.has(it.k);
     return `<button class="chip ${on?'on':''}" style="${on?`background:${it.color}`:`color:${it.color}`}"
-      onclick="toggle('${it.k.replace(/'/g,"\\'")}')"><span class="dot"></span>${it.label}</button>`;
+      onclick="toggle('${jsq(it.k)}')"><span class="dot"></span>${esc(it.label)}</button>`;
   }).join('');
 }
 function toggle(k){ S.on.has(k) ? S.on.delete(k) : S.on.add(k); renderChips(S.data.series); renderChart(); }
@@ -1252,9 +1711,9 @@ function renderChart(){
     const rows = (svg._lines||[]).map(L=>{
       const v = L.ma[i], raw = L.raw[i];
       if(v===null && raw===null) return '';
-      return `<div><span style="color:${L.color}">●</span> ${L.label}：<b>${v??'—'}</b>${raw!==null?` <span style="opacity:.6">(當日 ${raw})</span>`:''}</div>`;
+      return `<div><span style="color:${L.color}">●</span> ${esc(L.label)}：<b>${v??'—'}</b>${raw!==null?` <span style="opacity:.6">(當日 ${raw})</span>`:''}</div>`;
     }).filter(Boolean).join('');
-    tip.innerHTML = `<b>${date}</b>${ev.map(e=>`<div style="color:#fbbf24">▲ ${e.title}</div>`).join('')}${rows||'<div style="opacity:.7">當日無資料</div>'}`;
+    tip.innerHTML = `<b>${date}</b>${ev.map(e=>`<div style="color:#fbbf24">▲ ${esc(e.title)}</div>`).join('')}${rows||'<div style="opacity:.7">當日無資料</div>'}`;
     tip.style.opacity = 1;
     const left = Math.min(r.width - 200, Math.max(0, (px(i,n)/W)*r.width - 60));
     tip.style.left = left + 'px';
@@ -1397,14 +1856,15 @@ function renderPeerChart(){
 function renderEvents(events){
   const box = document.getElementById('events');
   if(!events || !events.length){
-    box.innerHTML = '<div class="empty">還沒有追蹤中的活動。用最上面那張綠框卡片「追蹤一場活動」開始。</div>';
+    box.innerHTML = '<div class="empty">還沒有追蹤中的活動。到「追蹤與工具」分頁的「追蹤一場活動」開始。</div>';
     return;
   }
   box.innerHTML = `<table><thead><tr>
       <th>#</th><th>日期</th><th>活動</th><th>鎖定議題</th>
-      <th>事前基線</th><th>峰值</th><th>半衰期</th><th>首次引用</th><th>基線抬升</th></tr></thead><tbody>` +
+      <th>事前基線</th><th>峰值</th><th>半衰期</th><th>首次引用</th><th>第 15–30 天<br>vs 發稿前</th></tr></thead><tbody>` +
     events.map((e,i)=>{
-      const lift = e.lift===null ? (e.settled?'—':'<span class="flat">觀察中</span>')
+      // 第 30 天還沒過完就不給數字（settled 的定義見 api/geo.js eventEffects，批次 72）
+      const lift = !e.settled ? '<span class="flat">觀察中</span>' : e.lift===null ? '—'
         : `<span class="${e.lift>0?'up':e.lift<0?'down':'flat'}">${e.lift>0?'+':''}${e.lift}</span>`;
       const firstCite = e.daysToFirstCitation===null
         ? (e.citationWindowComplete?'<span class="down">未引用</span>':'<span class="flat">觀察中</span>')
@@ -1452,8 +1912,8 @@ function renderBoard(board){
     board.map(b=>`<tr class="clickable" onclick="toggleFinds(this)">
       <td><b>${esc(b.keyword)}</b>
         <br><button class="linkbtn" style="color:var(--primary-dark)"
-          onclick="event.stopPropagation();openReport('${esc(b.keyword).replace(/'/g,"\\'")}')">
-          <i class="ti ti-file-description"></i> 一頁報告</button></td>
+          onclick="event.stopPropagation();openDeck('${jsq(b.keyword)}')">
+          <i class="ti ti-presentation"></i> 簡報</button></td>
       <td class="num-cell">${b.score??'—'}</td>
       <td class="num-cell ${b.delta>0?'up':b.delta<0?'down':'flat'}">${b.delta===null?'—':(b.delta>0?'▲ +':b.delta<0?'▼ ':'')+Math.abs(b.delta)}</td>
       <td class="num-cell">${b.mentionRate===null?'—':b.mentionRate+'%'}</td>
@@ -1468,14 +1928,17 @@ async function scan(){
   btn.disabled = true;
   let total = 0;
   try{
+    // ⚠️ 出錯時要停在錯誤訊息上：以前 break 之後緊接著 toast('掃描完成，本次 0 筆')，
+    // 把剛顯示的錯誤原因蓋掉——掃描失敗，畫面上看到的卻是「完成」（批次 72）。
+    let failed = '';
     for(let round=0; round<12; round++){
       btn.innerHTML = `<i class="ti ti-loader-2"></i> 掃描中… 已完成 ${total}`;
       const r = await post({ action:'scan' });
-      if(r.error){ toast(r.error); break; }
+      if(r.error){ failed = r.error; break; }
       total += r.processed;
       if(r.remaining <= 0 || r.processed === 0) break;
     }
-    toast(`掃描完成，本次 ${total} 筆`);
+    toast(failed ? `掃描沒有完成：${failed}${total?`（已完成 ${total} 筆）`:''}` : `掃描完成，本次 ${total} 筆`);
   }catch(e){ toast('掃描失敗：'+e.message); }
   btn.disabled = false;
   btn.innerHTML = '<i class="ti ti-player-play"></i> 立即掃描';
@@ -1488,6 +1951,8 @@ async function selftest(){
   const card = document.getElementById('test-card'), out = document.getElementById('test-out');
   btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader-2"></i> 測試中…';
   card.style.display = 'block';
+  showTab('track');
+  card.scrollIntoView({behavior:'smooth', block:'start'});
   out.innerHTML = '<div class="empty">實跑中，約 20–60 秒…</div>';
   try{
     const d = await api('action=selftest');
@@ -1516,15 +1981,17 @@ async function selftest(){
             <div style="font-size:.8rem;margin-top:6px">${esc(r.error)}</div></div>`).join('');
     }
   }catch(e){ out.innerHTML = `<div class="empty down">${esc(e.message)}</div>`; }
-  btn.disabled = false; btn.innerHTML = '<i class="ti ti-stethoscope"></i> 測 1 題';
+  btn.disabled = false; btn.innerHTML = '<i class="ti ti-stethoscope"></i> 自我測試 1 題';
 }
 
 /* ── 題庫 ── */
 async function loadPrompts(){
   const d = await api('action=prompts');
   S.prompts = d.prompts || [];
-  document.getElementById('prompt-count').textContent = S.prompts.length;
-  const box = document.getElementById('prompts');
+  // 同仁連結把「設定」整塊拿掉了（admin-only），這兩格不存在——以前每次載入都在主控台丟例外
+  const cnt = document.getElementById('prompt-count'), box = document.getElementById('prompts');
+  if(!cnt || !box) return;
+  cnt.textContent = S.prompts.length;
   if(!S.prompts.length){ box.innerHTML = '<div class="empty">還沒有題目。按「帶入預設 12 題」開始。</div>'; return; }
   box.innerHTML = `<table><thead><tr><th>主題</th><th>問句</th><th>關鍵字</th><th>狀態</th><th></th></tr></thead><tbody>` +
     S.prompts.map(p=>`<tr>
@@ -1602,14 +2069,16 @@ async function startTracking(){
     `<div class="find good" style="margin-top:14px">
        <div class="t">已開始追蹤「${esc(r.event.title)}」</div>
        <div class="w">加入 ${r.added} 題，議題「${esc(kw)}」，活動日 ${esc(r.event.date)}。</div>
-       <div class="d">正在跑第一次掃描，結果會出現在下面「現況快照」。之後每天早上自動跑。</div>
+       <div class="d">正在跑第一次掃描，跑完會自動跳到「總覽」的「最近一次掃描」。之後每天早上自動跑。</div>
      </div>`;
   document.getElementById('s-kw').value = '';
   document.getElementById('s-structured').checked = false;
   sel.value = ''; onPickEvent();
   loadPrompts(); loadEvents();
   await scan();
-  loadSnapshot(kw);   // 掃完立刻把結果攤出來
+  await loadSnapshot(kw);   // 掃完立刻把結果攤出來
+  showTab('overview');
+  document.getElementById('snap-card').scrollIntoView({behavior:'smooth', block:'start'});
 }
 
 async function savePrompt(){
@@ -1710,8 +2179,9 @@ async function runStructCheck(){
 async function loadEvents(){
   const d = await api('action=events');
   S.events = (d.events||[]).sort((a,b)=>b.date.localeCompare(a.date));
-  document.getElementById('event-count').textContent = S.events.length;
-  const box = document.getElementById('event-list');
+  const cnt = document.getElementById('event-count'), box = document.getElementById('event-list');
+  if(!cnt || !box) return;   // 同仁連結沒有設定分頁，見 loadPrompts()
+  cnt.textContent = S.events.length;
   if(!S.events.length){ box.innerHTML = '<div class="empty">還沒有追蹤中的活動</div>'; return; }
   box.innerHTML = `<table><thead><tr><th>日期</th><th>活動</th><th>議題</th><th>綁定</th><th></th></tr></thead><tbody>` +
     S.events.map(e=>`<tr><td>${e.date}</td><td>${esc(e.title)}</td><td>${esc(e.keywords)}</td>

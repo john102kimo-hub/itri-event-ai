@@ -738,7 +738,7 @@ function buildSeries(runs, days) {
  * 半衰期（峰值後掉回 (峰值+基線)/2 要幾天）、基線抬升（事件後 15–30 天 − 基線）。
  * 這四個數字就是「潤利艾克曼給不了」的部分：AI 記憶留存天數。
  */
-function eventEffects(events, runs) {
+export function eventEffects(events, runs) {
   const byDate = {};
   runs.filter((r) => r.score !== null).forEach((r) => {
     (byDate[r.date] ||= []).push(r.score);
@@ -788,7 +788,10 @@ function eventEffects(events, runs) {
       baseline: round(baseline), peak: round(peak), peakDate,
       halfLifeDays: halfLife,
       lift: baseline !== null && after !== null ? round(after - baseline) : null,
-      settled: after !== null,
+      // ⚠️ settled＝「第 15–30 天這整段已經過完」，不是「這段裡有任何一天的資料」（批次 72）。
+      // 舊寫法 after !== null 在 D+15 當天就成立——一天的資料就寫出「30 天後基線 +X」
+      // 「這場真的改變了 AI 的長期認知」，而同一頁的一頁報告還在說「餘波期，不能宣稱」。
+      settled: after !== null && addDays(ev.date, 30) < todayTW(),
     };
 
     // 這場活動窗期內的實際樣本 → 給診斷用
@@ -899,17 +902,21 @@ function diagnoseEvent(ev) {
       todo: '活動後 3 天內補一頁獨立技術頁，並回頭確認關鍵那句話有沒有被寫進報導。',
     });
   }
+  // ⚠️ 用字要跟一頁報告的判定一致（批次 72）：第 15–30 天是新聞新鮮度的餘波期，那裡的高點
+  // 還不能叫「基線」——要宣稱基線墊高，得看 D+31 之後、通過信賴區間檢定（見 reportPerformance）。
+  // 舊標題「基線被抬升了」「這場真的改變了 AI 的長期認知」跟同一頁報告的「先不要拿去宣稱
+  // 成果」互相矛盾，主管截哪一張圖出去就是哪一個結論。
   if (ev.settled && ev.lift !== null && ev.lift <= 0) {
     out.push({
-      level: 'bad', title: '這場沒有留下基線抬升',
-      why: '30 天後回到原點，等於這場記者會對 AI 的長期記憶沒有貢獻。',
+      level: 'bad', title: '第 15–30 天已經回到發稿前的水準',
+      why: '熱度一退就回到原點，這場記者會沒有在 AI 的記憶裡留下東西。',
       todo: '下一場改變作法：發稿當天同步上線一個獨立主題頁，不要只靠媒體轉載。',
     });
   }
   if (ev.settled && ev.lift !== null && ev.lift > 5) {
     out.push({
-      level: 'good', title: `基線被抬升了 +${ev.lift}`,
-      why: '這場真的改變了 AI 對這個主題的長期認知，不只是當天熱度。',
+      level: 'good', title: `第 15–30 天仍比發稿前高 +${ev.lift}`,
+      why: '熱度退了之後還留著一截，是好跡象；但這段還在新聞的餘波期，要不要對外寫成「基線墊高」，以簡報裡 D+31 之後的判定為準。',
       todo: '把這場的發稿與落地頁作法記錄下來，當成之後的範本。',
     });
   }

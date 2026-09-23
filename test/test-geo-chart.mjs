@@ -83,11 +83,11 @@ console.log('── buildGeoBriefFlex：追蹤中的活動（settled 才給留�
 {
   const flex = buildGeoBriefFlex(status, series, SITE);
   const flat = JSON.stringify(flex.contents.body);
-  check('已 settled 的活動顯示基線抬升數字', flat.includes('30 天後基線 +12'));
+  check('已 settled 的活動顯示第 15–30 天的抬升數字（不叫「基線」——那段是餘波期）', flat.includes('第 15–30 天比發稿前 +12') && !flat.includes('30 天後基線'));
   check('已 settled 的活動附上找到的重點 finding', flat.includes('基線被抬升了 +12'));
   check('還沒 settled 的活動改顯示觀察中，不能提前下留存結論（這是 api/geo.js 已校準過的判定門檻，這裡只負責排版不重判）',
     flat.includes('30 天觀察期還沒到，暫不評斷留存'));
-  check('還沒 settled 的活動不會出現任何 lift 數字', !flat.includes('固態電池') || !/固態電池[\s\S]{0,200}30 天後基線/.test(flat));
+  check('還沒 settled 的活動不會出現任何 lift 數字', !flat.includes('固態電池') || !/固態電池[\s\S]{0,200}第 15–30 天比發稿前/.test(flat));
 }
 
 console.log('── buildGeoBriefFlex：兩份資料都拿不到時回 null，呼叫端才知道要退回純文字 ──');
