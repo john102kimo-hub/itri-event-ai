@@ -121,7 +121,9 @@ const brief = await page.textContent('#brief-out .slide');
 check(/修改前/.test(brief) && /修改後/.test(brief), '呈核一頁有修改前 → 修改後');
 check(/已符合 GEO 寫法/.test(brief), '全部過關時才寫「已符合」');
 check(/不保證一定被引用/.test(brief), '頁尾講清楚是寫法檢核、不保證被引用');
-check(/AI 最可能整句引用的一句/.test(brief), '附上 AI 最可能整句引用的一句');
+check(/最可能被整句引用的一句/.test(brief) && /示意/.test(brief), '附上最可能被整句引用的一句，並標明是示意');
+check(await page.locator('#brief-out .tile.on').count() === await page.locator('#brief-out .tile').count() && await page.locator('#brief-out .tile svg').count() >= 6 && await page.locator('#brief-out .ring svg').count() === 2, '圖像式：兩個圓環、每項一個內嵌圖示且全亮');
+check(await page.evaluate(() => { const sl = document.querySelector('#brief-out .slide').getBoundingClientRect(); const f = document.querySelector('#brief-out .slide .foot').getBoundingClientRect(); return f.height > 0 && f.bottom <= sl.bottom - 2; }), '頁尾那行「不保證一定被引用」完整留在投影片裡，沒被擠出去');
 if (OUT) await page.locator('#brief-out .slide').screenshot({ path: OUT + '/g-brief.png' });
 await page.evaluate(() => { const st = document.createElement('style'); st.textContent = '@page{size:A4 landscape;margin:8mm}'; document.head.appendChild(st); document.body.classList.add('print-brief'); });
 const bpdf = await page.pdf({ preferCSSPageSize: true, printBackground: true });
@@ -133,6 +135,7 @@ await page.fill('#adv-revised', '研討會\n今年研討會邀請多位專家，
 await page.click('#brief-btn');
 await page.waitForFunction(() => /還差/.test(document.getElementById('brief-out').textContent));
 check(!/已符合/.test(await page.textContent('#brief-out .slide')), '沒過關時不寫「已符合」，寫還差幾項');
+if (OUT) await page.locator('#brief-out .slide').screenshot({ path: OUT + '/g-brief-warn.png' });
 
 // 同仁連結
 const staff = await browser.newPage();

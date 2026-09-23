@@ -274,25 +274,40 @@
   .slide .lift-cap{display:none}
   .slide .lift-svg text{font-size:12px}
 
-  /* 呈核一頁（批次 74）：一眼看完——大數字、三個打勾、一句話 */
+  /* 呈核一頁（批次 74）：圖像式——兩個圓環、七個亮燈圖示、一段 AI 引用示意 */
   .brief-box{margin-top:18px;padding-top:16px;border-top:1px dashed var(--border)}
   #brief-out .slide{max-width:760px;cursor:zoom-in}
-  .slide.brief .sl{gap:1.8cqw;padding:4.5cqw 5.5cqw 4.5cqw}
-  .slide.brief .score{display:flex;align-items:center;gap:3cqw}
-  .slide.brief .score .box{text-align:center;border-radius:1.8cqw;padding:1.6cqw 3cqw}
-  .slide.brief .score .n{font-size:8cqw;font-weight:900;line-height:1}
-  .slide.brief .score .n small{font-size:3.4cqw;font-weight:700;opacity:.6}
-  .slide.brief .score .cap{font-size:1.7cqw;color:var(--muted);margin-top:.6cqw}
-  .slide.brief .score .old{background:#f3f4f6;color:#9ca3af}
-  .slide.brief .score .new{background:var(--primary-light);color:var(--primary);border:.3cqw solid var(--primary)}
-  .slide.brief .score .arrow{font-size:5cqw;color:var(--primary);font-weight:900}
-  .slide.brief .score .msg{flex:1;font-size:3cqw;font-weight:800;line-height:1.35}
-  .slide.brief ul.ticks{list-style:none;display:flex;flex-direction:column;gap:1cqw}
-  .slide.brief ul.ticks li{font-size:2.3cqw;display:flex;gap:1.4cqw;align-items:baseline}
-  .slide.brief ul.ticks li b{color:var(--primary);font-size:2.6cqw}
-  .slide.brief .q{font-size:2.1cqw;background:#f9fafb;border-left:1cqw solid var(--primary);padding:1.4cqw 2cqw;border-radius:0 1.2cqw 1.2cqw 0}
-  .slide.brief .q span{display:block;font-size:1.5cqw;color:var(--muted);margin-bottom:.4cqw}
-  .slide.brief .foot{font-size:1.35cqw;color:#9ca3af;margin-top:auto;line-height:1.6}
+  .slide.brief .sl{gap:1.3cqw;padding:3cqw 4.5cqw 2.4cqw}
+  .slide.brief .hl{font-size:3.2cqw;font-weight:900;line-height:1.25;color:var(--text)}
+  .slide.brief .hl small{display:block;font-size:1.9cqw;font-weight:700;color:var(--primary-dark);margin-top:.5cqw}
+  .slide.brief .hl.warn{color:#b45309}
+  .slide.brief .vis{display:flex;align-items:center;gap:3cqw}
+  .slide.brief .rings{display:flex;align-items:center;gap:1.4cqw;flex:none}
+  .slide.brief .ring{text-align:center;width:12cqw}
+  .slide.brief .ring svg{width:12cqw;height:12cqw;display:block}
+  .slide.brief .ring .cap{font-size:1.6cqw;font-weight:700;color:var(--muted);margin-top:.4cqw}
+  .slide.brief .ring.old svg text{fill:#9ca3af}
+  .slide.brief .ring.new svg text{fill:var(--primary)}
+  .slide.brief .ring.new .cap{color:var(--primary)}
+  .slide.brief .rings .arrow{font-size:4.4cqw;color:var(--primary);font-weight:900;margin-bottom:2.4cqw}
+  .slide.brief .tiles{flex:1;display:grid;grid-template-columns:repeat(4,1fr);gap:1cqw}
+  .slide.brief .tile{position:relative;border-radius:1.4cqw;padding:1.1cqw .6cqw .9cqw;text-align:center;border:.25cqw solid #e5e7eb;background:#f9fafb;color:#b6bcc6}
+  .slide.brief .tile svg{width:3.6cqw;height:3.6cqw;display:block;margin:0 auto}
+  .slide.brief .tile span{display:block;font-size:1.55cqw;font-weight:700;margin-top:.6cqw;line-height:1.3}
+  .slide.brief .tile.on{background:var(--primary-light);border-color:var(--primary);color:var(--primary-dark)}
+  .slide.brief .tile em{position:absolute;top:-1.1cqw;right:-.6cqw;font-style:normal;font-size:1.15cqw;font-weight:800;background:#f59e0b;color:#fff;border-radius:99px;padding:.15cqw .8cqw}
+  .slide.brief .tile .x{position:absolute;top:.5cqw;right:.8cqw;font-size:1.4cqw;color:#dc2626;font-weight:900}
+  .slide.brief .chat{background:#f3f6fb;border-radius:1.6cqw;padding:1cqw 1.8cqw;display:flex;flex-direction:column;gap:.6cqw}
+  .slide.brief .chat .tag{font-size:1.25cqw;color:var(--muted);font-weight:700}
+  .slide.brief .bub{display:flex;gap:1cqw;align-items:flex-start;font-size:1.75cqw;line-height:1.4}
+  .slide.brief .bub svg{width:2.8cqw;height:2.8cqw;flex:none;margin-top:.3cqw}
+  .slide.brief .bub div{padding:.5cqw 1.3cqw;border-radius:1.2cqw;background:#fff;border:.15cqw solid #e5e7eb}
+  .slide.brief .bub.u{justify-content:flex-end}
+  .slide.brief .bub.u div{background:#e0e7ff;border-color:#c7d2fe}
+  .slide.brief .bub.ai svg{color:var(--primary)}
+  .slide.brief .bub.u svg{color:#6366f1}
+  .slide.brief .bub b{color:var(--primary-dark);background:#fef3c7;padding:0 .2cqw;border-radius:.3cqw}
+  .slide.brief .foot{font-size:1.2cqw;color:#9ca3af;margin-top:auto;line-height:1.55}
 
   /* 全螢幕播放 */
   #deck-stage{position:fixed;inset:0;background:#0b1220;z-index:200;display:none;align-items:center;justify-content:center}
@@ -1323,8 +1338,9 @@ function printDeck(){
 
 /* ── 新聞稿呈核一頁（批次 74）──────────────────────────────────────────
  * 需求原話：「長官很懶得看也不會費心思去深入了解，最好是那種一看就能讓他『哇』」。
- * 所以整頁只有三樣東西：① 改前 → 改後的大數字 ② 改了哪幾件事（白話、最多三條）
- * ③ AI 最可能整句引用的那一句。細節、規則名稱、方法論全部不上這一頁。
+ * 第二版改成圖像式（朱朱：「看能否用圖像式呈現？一看就能懂」）：① 改前 → 改後兩個圓環
+ * ② 七個圖示，做到的亮燈、這次改後才亮的掛「改後」標籤 ③ 一段「問 AI → AI 引用這句」
+ * 的對話示意。字只剩兩三個字的短標籤，細節、規則名稱、方法論全部不上這一頁。
  *
  * ⚠️ 「哇」要建立在真的東西上：分數是 lib/geo-draft-check.js 的固定規則算出來的，
  * 不是 AI 打的分；標題只有「全部過關」時才寫「已符合」，差幾項就老實寫差幾項。
@@ -1341,7 +1357,7 @@ async function makeDraftBrief(){
   try{
     const r = await post({ action:'draft-check', before, after, keyword });
     if(r.error){ out.innerHTML = `<div class="empty down">${esc(r.error)}</div>`; return; }
-    BRIEF = [{ cls:'brief', html: draftBriefHtml(r.before, r.after, after) }];
+    BRIEF = [{ cls:'brief', html: draftBriefHtml(r.before, r.after, after, keyword) }];
     const miss = r.after.checks.filter(c=>!c.pass);
     out.innerHTML = slideHtml(BRIEF[0], 0, 1)
       + (miss.length ? `<div class="find warn" style="margin-top:10px"><div class="t">還差 ${miss.length} 項才算完全符合</div>
@@ -1353,23 +1369,68 @@ async function makeDraftBrief(){
   finally{ btn.disabled = false; }
 }
 
-function draftBriefHtml(b, a, afterText){
+// 七項檢核各自的圖示與「兩三個字看得懂」的短標籤——投影片只放這個；完整條件寫在
+// lib/geo-draft-check.js 的 label／plain，頁面下方「還差幾項」才用得到。
+// 圖示直接內嵌 SVG（線條仿 Tabler），不用頁面其他地方的 Tabler 字型：字型走 CDN，
+// 離線或 CDN 慢的時候存出來的 PDF 圖示會整排空白——這一頁的重點就是圖。
+const BRIEF_ICON = {
+  building: 'M3 21h18M5 21V7l7-4 7 4v14M9 9h1M14 9h1M9 13h1M14 13h1M10 21v-4h4v4',
+  chart:    'M4 20h16M7 20v-6M12 20V8M17 20v-9',
+  search:   'M10 4a6 6 0 1 0 0 12a6 6 0 1 0 0-12M20 20l-5.6-5.6',
+  quote:    'M10 11H6a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v6c0 2.7-1.3 4.3-4 5M19 11h-4a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v6c0 2.7-1.3 4.3-4 5',
+  calendar: 'M6 5h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2M16 3v4M8 3v4M4 11h16M8 15h2v2H8z',
+  link:     'M9 15l6-6M11 6l.5-.5a5 5 0 0 1 7 7l-.5.5M13 18l-.4.5a5 5 0 0 1-7.1 0a5 5 0 0 1 0-7l.5-.5',
+  lines:    'M4 6h16M4 12h10M4 18h14',
+  check:    'M5 12l5 5L20 7',
+  user:     'M12 4a4 4 0 1 0 0 8a4 4 0 1 0 0-8M6 21v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2',
+  spark:    'M16 18a2 2 0 0 1 2 2a2 2 0 0 1 2-2a2 2 0 0 1-2-2a2 2 0 0 1-2 2zM16 6a2 2 0 0 1 2 2a2 2 0 0 1 2-2a2 2 0 0 1-2-2a2 2 0 0 1-2 2zM9 18a6 6 0 0 1 6-6a6 6 0 0 1-6-6a6 6 0 0 1-6 6a6 6 0 0 1 6 6z',
+};
+const briefIcon = (k) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="${BRIEF_ICON[k]||BRIEF_ICON.check}"/></svg>`;
+const BRIEF_TILE = {
+  lead_brand:  ['building', '開頭就是工研院'],
+  lead_number: ['chart',    '開頭就有數字'],
+  keyword:     ['search',   '對得上關鍵字'],
+  quotable:    ['quote',    '有可引用金句'],
+  date:        ['calendar', '有明確日期'],
+  owned_link:  ['link',     '連回本院官網'],
+  short_paras: ['lines',    '段落不冗長'],
+};
+function briefRing(r, cap, cls){
+  const C = 2*Math.PI*40, f = r.total ? r.passed/r.total : 0;
+  const col = cls==='new' ? 'var(--primary)' : '#cbd5e1';
+  return `<div class="ring ${cls}"><svg viewBox="0 0 100 100">
+      <circle cx="50" cy="50" r="40" fill="none" stroke="#eef0f3" stroke-width="12"/>
+      <circle cx="50" cy="50" r="40" fill="none" stroke="${col}" stroke-width="12" stroke-linecap="round"
+        stroke-dasharray="${(f*C).toFixed(1)} ${C.toFixed(1)}" transform="rotate(-90 50 50)"/>
+      <text x="50" y="52" text-anchor="middle" dominant-baseline="middle" font-size="30" font-weight="900">${r.passed}<tspan font-size="15" font-weight="700" dx="1">/${r.total}</tspan></text>
+    </svg><div class="cap">${cap}</div></div>`;
+}
+function draftBriefHtml(b, a, afterText, keyword){
   const title = String(afterText).split('\n').map(x=>x.trim()).find(Boolean) || '';
   const allPass = a.passed === a.total;
-  // 改了哪幾件事：修改前沒過、修改後過了的，用給長官看的白話講；沒有修改前就列修改後過的
-  const flipped = a.checks.filter(c=>c.pass && !(b && b.checks.find(x=>x.key===c.key)?.pass));
-  const shown = (flipped.length ? flipped : a.checks.filter(c=>c.pass)).slice(0,3);
-  const msg = allPass ? '這篇稿子已符合 GEO 寫法<br>AI 更容易正確說出「工研院」'
-    : `離 GEO 寫法還差 ${a.total - a.passed} 項`;
+  const was = (key) => !!(b && b.checks.find(x=>x.key===key)?.pass);
+  const head = allPass
+    ? `<div class="hl">這篇稿子已符合 GEO 寫法<small>AI 更容易讀懂、正確說出「工研院」</small></div>`
+    : `<div class="hl warn">離 GEO 寫法還差 ${a.total - a.passed} 項<small>灰色的圖示就是還沒做到的</small></div>`;
+  const tiles = a.checks.map(c=>{
+    const [icon, short] = BRIEF_TILE[c.key] || ['check', c.label];
+    const fresh = b && c.pass && !was(c.key);   // 這次修改才亮起來的
+    return `<div class="tile ${c.pass?'on':''}">${briefIcon(icon)}<span>${esc(short)}</span>`
+      + (fresh ? '<em>改後</em>' : '') + (c.pass ? '' : '<b class="x">✕</b>') + `</div>`;
+  }).join('');
+  // 引用示意：AI 那一格只放稿子裡**原本就有的那一句**，不另外編 AI 的回答；標明「示意」。
+  const kw = String(keyword||'').trim();
+  const quote = a.quote ? esc(a.quote).replace(/工研院/g, '<b>工研院</b>') : '';
+  const chat = quote ? `<div class="chat"><div class="tag">示意｜有人問 AI 時，這篇稿子裡最可能被整句引用的一句</div>
+      <div class="bub u"><div>${kw ? `「${esc(kw)}」有什麼新消息？` : '這個議題有什麼新消息？'}</div>${briefIcon('user')}</div>
+      <div class="bub ai">${briefIcon('spark')}<div>「${quote}」</div></div></div>` : '';
   return `<div class="kicker">新聞稿 GEO 檢核｜${esc(title.slice(0,40))}</div>
-    <div class="score">
-      ${b ? `<div class="box old"><div class="n">${b.passed}<small>/${b.total}</small></div><div class="cap">修改前</div></div>
-      <div class="arrow">→</div>` : ''}
-      <div class="box new"><div class="n">${a.passed}<small>/${a.total}</small></div><div class="cap">${b?'修改後':'檢核結果'}</div></div>
-      <div class="msg">${msg}</div>
+    ${head}
+    <div class="vis">
+      <div class="rings">${b ? briefRing(b,'修改前','old') + '<div class="arrow">→</div>' : ''}${briefRing(a, b?'修改後':'檢核結果','new')}</div>
+      <div class="tiles">${tiles}</div>
     </div>
-    <ul class="ticks">${shown.map(c=>`<li><b>✓</b>${esc(c.plain)}</li>`).join('')}</ul>
-    ${a.quote ? `<div class="q"><span>AI 最可能整句引用的一句</span>「${esc(a.quote)}」</div>` : ''}
+    ${chat}
     <div class="foot">GEO（生成式引擎優化）＝讓 ChatGPT、Gemini 等 AI 回答問題時引用我們。本頁依固定規則檢核寫法（${a.total} 項），參照 AMEC GEO 原則與本院 AI 能見度實測；代表寫法到位，不保證一定被引用。</div>`;
 }
 
