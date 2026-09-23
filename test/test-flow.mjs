@@ -335,8 +335,9 @@ check('職員功能表不再列記者端那些功能（趨勢／技術／邀訪�
   out.some(o => o.kind === 'text' &&
     !/記者問得到的/.test(o.text) && !/產業趨勢/.test(o.text) && !/媒體邀訪需求/.test(o.text)),
   JSON.stringify(out));
-check('「直接打活動名稱」留著並歸到【管理】——它帶著「含未發布」，是職員才有的權限',
-  out.some(o => o.kind === 'text' && /直接打活動名稱/.test(o.text) && /含未發布/.test(o.text)),
+// 批次 77：「直接打活動名稱」拆成兩條——點名稱看活動卡、帶著問題問才由米亞回答
+check('「點活動名稱／帶著問題問」留著並歸到【管理】——後者帶著「含未發布」，是職員才有的權限',
+  out.some(o => o.kind === 'text' && /點活動名稱/.test(o.text) && /含未發布/.test(o.text)),
   JSON.stringify(out));
 
 // ⚠️⚠️ 拿掉的是**文案**，不是能力：批次 52 修的是 handleStaffMessage() 的路由，不是
@@ -2975,7 +2976,8 @@ check('　 同一視窗內真的在問活動 → 照樣回', out.length > 0, JSO
 // ── 情境 76：職員模式第一批小修（批次 76，盤點實測到的十個問題）──────────────
 {
   const labelsOf = o => (o?.quickReply || []).map(c => (typeof c === 'object' && c ? c.text : c));
-  const hasStaffEntries = o => ['新增活動', '查活動後台數據', '最近有哪些活動'].every(t => labelsOf(o).includes(t));
+  // 批次 77 起職員選單第一格是「活動與進度」（取代「最近有哪些活動」）
+  const hasStaffEntries = o => ['新增活動', '查活動後台數據', '活動與進度'].every(t => labelsOf(o).includes(t));
 
   // (1) 米亞問名稱之後回「算了」之類 → 不建活動
   for (const phrase of ['算了', '不用了', '取消', '謝謝', '先不要', '等一下', '我還沒想好名字']) {
@@ -3031,12 +3033,13 @@ check('　 同一視窗內真的在問活動 → 照樣回', out.length > 0, JSO
   check('　 沒給日期 → 寫「未定」', /日期：未定/.test(created), created);
   out = await send('最近有哪些活動', 'U_staff');   // 同一個模組實例：60 秒快取還在
   check('★ 剛建好的活動馬上就在清單上（不用等 60 秒快取過期）', /眺望2027產業發展趨勢研討會/.test(out[0]?.text || ''), out[0]?.text);
-  check('★ 沒填日期的活動顯示「日期未定」，不是建立當天', /日期未定　眺望2027/.test(out[0]?.text || ''), out[0]?.text);
+  check('★ 沒填日期的活動顯示「日期未定」，不是建立當天', /眺望2027產業發展趨勢研討會　🔒 未發布\n　日期未定/.test(out[0]?.text || ''), out[0]?.text);
   check('★ 清單按鈕列得到還沒有新聞稿的草稿', labelsOf(out[0]).includes('眺望2027產業發展趨勢研討會'), JSON.stringify(labelsOf(out[0])));
   check('　 清單也帶整套職員入口', hasStaffEntries(out[0]), JSON.stringify(labelsOf(out[0])));
   out = await send('眺望2027產業發展趨勢研討會', 'U_staff');
-  check('點那場草稿 → 給狀態與編輯連結，不是一句「沒有資料」的 AI 回答',
-    out[0]?.kind !== 'answer' && /未發布/.test(out[0]?.text || '') && /\/edit\?id=.+&code=/.test(out[0]?.text || ''), JSON.stringify(out));
+  // 批次 77 起點名稱看到的是活動卡（Flex），卡上有編輯頁按鈕
+  check('點那場草稿 → 活動卡（狀態與編輯頁），不是一句「沒有資料」的 AI 回答',
+    out[0]?.kind === 'flex' && /未發布/.test(JSON.stringify(out[0].messages)) && /\/edit\?id=.+&code=/.test(JSON.stringify(out[0].messages)), JSON.stringify(out));
   out = await send('四足機器人的重點', 'U_staff');
   check('　 有新聞稿的場次照舊由米亞回答', out.some(o => o.kind === 'answer'), JSON.stringify(out));
 
@@ -3052,6 +3055,106 @@ check('　 同一視窗內真的在問活動 → 照樣回', out.length > 0, JSO
   const editHtml = readFileSync(new URL('../public/edit.html', import.meta.url), 'utf8');
   check('編輯頁不再無條件擋「知識庫不可為空」', !/if \(!knowledge_base\) \{ toast\('知識庫不可為空'\)/.test(editHtml));
   check('　 只有要發布時才要求知識庫', /!knowledge_base && statusForCheck !== 'draft'/.test(editHtml));
+}
+
+// ── 情境 77：活動卡、活動與進度、催填訊息（批次 77，職員模式第二批）──────────────
+{
+  const labelsOf = o => (o?.quickReply || []).map(c => (typeof c === 'object' && c ? c.text : c));
+  const flexOf = o => JSON.stringify(o?.messages || []);
+  const es = await import(new URL(`../lib/event-status.js?v=${modSeq}`, import.meta.url).href);
+
+  // 純函式：必填四項（朱朱定的）、加分項、快到了還沒填齊要標 ⚠️
+  const row = (over = {}) => {
+    const r = ['x', '測試活動記者會', '#0F9E7A', '', 'draft', '', '', '', '', '工研院', 'c', '', '', '', '', '', '', ''];
+    for (const [i, v] of Object.entries(over)) r[i] = v;
+    return r;
+  };
+  let c = es.eventChecklist(row(), '2026-09-23');
+  check('必填是日期、地點、新聞聯絡人、新聞稿', c.required.map(i => i.label).join() === '日期,地點,新聞聯絡人,新聞稿', c.required.map(i => i.label).join());
+  check('全空 → 四項全缺', c.missingRequired.length === 4, c.missingRequired.join());
+  c = es.eventChecklist(row({ 5: '2026/9/23 下午1:58:07' }), '2026-09-23');
+  check('建立時間戳記不算活動日期', c.missingRequired.includes('日期') && c.date === '');
+  c = es.eventChecklist(row({ 5: '2026-09-26', 12: '中興院區' }), '2026-09-23');
+  check('3 天後要辦、必填沒齊 → urgent', c.urgent === true && c.daysLeft === 3);
+  c = es.eventChecklist(row({ 5: '2026-10-30', 12: '中興院區' }), '2026-09-23');
+  check('一個多月後 → 不算 urgent', c.urgent === false);
+  c = es.eventChecklist(row({ 3: '新聞稿內容', 4: 'active', 5: '2026-09-26', 12: '中興院區', 14: '王小明' }), '2026-09-23');
+  check('必填齊了 → 沒缺、不 urgent', c.missingRequired.length === 0 && c.urgent === false);
+  check('活動還沒到 → 邀請函列在加分項', c.bonus.some(i => i.key === 'invite_letter'));
+  c = es.eventChecklist(row({ 4: 'ended', 5: '2026-09-01' }), '2026-09-23');
+  check('活動已經辦過 → 不再要邀請函、也不算 urgent', !c.bonus.some(i => i.key === 'invite_letter') && c.urgent === false);
+
+  const rows = [
+    row({ 0: 'a', 1: '十月的發表會', 4: 'active', 5: '2026-10-10' }),
+    row({ 0: 'b', 1: '九月底的記者會', 4: 'active', 5: '2026-09-25' }),
+    row({ 0: 'c', 1: '還沒定日期的草稿', 4: 'draft' }),
+    row({ 0: 'd', 1: '上個月辦完的活動', 4: 'ended', 5: '2026-08-01' }),
+    row({ 0: 'e', 1: '封存掉的活動', 4: 'archived', 5: '2026-10-01' })
+  ];
+  const ov = es.formatProgressOverview(rows, '2026-09-23');
+  check('總覽照日期排、日期未定排最後', ov.names.join('|') === '九月底的記者會|十月的發表會|還沒定日期的草稿', ov.names.join('|'));
+  check('總覽不列封存與已經辦完的', !/封存掉的活動|上個月辦完/.test(ov.text), ov.text);
+  check('總覽寫出每場還缺什麼、快到的標 ⚠️', /⚠️ 必填 0／4，還缺：日期|⚠️ 必填 1／4，還缺：地點、新聞聯絡人、新聞稿/.test(ov.text) && /1 場快到了還沒填齊/.test(ov.text), ov.text);
+
+  const nudge = es.formatNudgeMessage(es.eventChecklist(row({ 5: '2026-10-10', 12: '南港' }), '2026-09-23'), 'https://x/edit?id=x&code=c');
+  check('催填訊息寫出缺什麼、附編輯連結', /必填還缺：新聞聯絡人、新聞稿/.test(nudge) && nudge.includes('https://x/edit?id=x&code=c'), nudge);
+  check('催填訊息是寫給被轉傳的人看的：不出現後台、草稿、編輯碼這類內部用語', !/後台|草稿|draft|編輯碼|職員/.test(nudge), nudge);
+
+  // 流程：選單「活動與進度」
+  reset(); await freshModule();
+  state.staff.push(['U_staff', '', '2026-08-27', '', '']);
+  out = await send('活動與進度', 'U_staff');
+  check('★ 「活動與進度」→ 總覽，寫出每場還缺什麼', /【活動與進度】/.test(out[0]?.text || '') && /還缺：/.test(out[0]?.text || ''), out[0]?.text);
+  check('　 按鈕是活動名稱＋整套職員入口', labelsOf(out[0]).includes('智慧醫療解決方案記者會') && labelsOf(out[0]).includes('新增活動'), JSON.stringify(labelsOf(out[0])));
+  out = await send('最近有哪些活動', 'U_staff');
+  check('職員打「最近有哪些活動」也是同一份總覽', /【活動與進度】/.test(out[0]?.text || ''), out[0]?.text);
+  out = await send('哪幾場還沒填完', 'U_staff');
+  check('「哪幾場還沒填完」字面就認得（不用等模型）', /【活動與進度】/.test(out[0]?.text || ''), out[0]?.text);
+
+  // 「更新活動」→ 選哪一場
+  out = await send('更新活動', 'U_staff');
+  check('「更新活動」→ 請他選一場，按鈕是近期場次', /要更新哪一場/.test(out[0]?.text || '') && labelsOf(out[0]).includes('智慧醫療解決方案記者會'), JSON.stringify(out));
+
+  // 點活動名稱 → 活動卡
+  out = await send('智慧醫療解決方案記者會', 'U_staff');
+  const card = flexOf(out[0]);
+  check('★ 點活動名稱 → 活動卡（Flex）', out[0]?.kind === 'flex' && /智慧醫療解決方案記者會/.test(card), JSON.stringify(out));
+  check('　 卡上有編輯頁連結（按了直接開，不用複製）', /"type":"uri"[^}]*\/edit\?id=med&code=code3/.test(card), card);
+  check('　 卡上寫出還缺新聞聯絡人（這場沒填）', /⬜ 新聞聯絡人/.test(card), card);
+  check('　 卡上有「催填訊息」按鈕', card.includes('催填：智慧醫療解決方案記者會'), card);
+  check('　 卡片也帶職員入口，還有「問米亞這場」', (() => {
+    const qr = out[0]?.messages?.[0]?.quickReply?.items?.map(i => i.action.text) || [];
+    return qr.includes('新增活動') && qr.includes('智慧醫療解決方案記者會的重點是什麼');
+  })(), card);
+  check('　 活動卡不是 AI 回答（不花模型、不寫進 qa_log）', !out.some(o => o.kind === 'answer'));
+
+  // 帶著問題問 → 照舊由米亞回答
+  out = await send('智慧醫療解決方案記者會的重點是什麼', 'U_staff');
+  check('帶著問題問 → 照舊由米亞回答', out.some(o => o.kind === 'answer'), JSON.stringify(out));
+
+  // 催填
+  out = await send('催填：智慧醫療解決方案記者會', 'U_staff');
+  check('★ 催填 → 兩則：一句說明＋一則可以轉傳的', out[0]?.kind === 'flex' && out[0].messages.length === 2, JSON.stringify(out));
+  const n2 = out[0]?.messages?.[1]?.text || '';
+  check('　 可轉傳的那則寫出缺什麼、附編輯連結', /新聞聯絡人/.test(n2) && /\/edit\?id=med&code=code3/.test(n2), n2);
+
+  // 數據
+  out = await send('數據：智慧醫療解決方案記者會', 'U_staff');
+  check('卡上的「問答數據」→ 那場的後台數據', /【智慧醫療解決方案記者會】後台數據/.test(out[0]?.text || ''), JSON.stringify(out));
+  out = await send('催填：不存在的活動', 'U_staff');
+  check('名稱對不上 → 說找不到並給清單，不亂猜', /找不到/.test(out[0]?.text || ''), JSON.stringify(out));
+
+  // 在等「哪一場」的時候點名稱，是在回答問題，不是要看卡
+  out = await send('查活動後台數據', 'U_staff');
+  out = await send('智慧醫療解決方案記者會', 'U_staff');
+  check('等「哪一場」時點名稱 → 照原本要做的事（查數據），不是跳出活動卡', /後台數據/.test(out[0]?.text || ''), JSON.stringify(out));
+
+  // 新增後的按鈕可以直接看卡
+  out = await send('新增活動', 'U_staff');
+  out = await send('眺望2027產業發展趨勢研討會', 'U_staff');
+  check('建立完成的第一顆按鈕是「看這場的活動卡」', labelsOf(out[0])[0] === '眺望2027產業發展趨勢研討會', JSON.stringify(labelsOf(out[0])));
+  out = await send('眺望2027產業發展趨勢研討會', 'U_staff');
+  check('　 按了就是剛建的那場的活動卡', out[0]?.kind === 'flex' && /必填 0／4/.test(flexOf(out[0])), flexOf(out[0]).slice(0, 300));
 }
 
 console.log(`\n${fail === 0 ? '✅' : '❌'} 流程測試通過 ${pass}／失敗 ${fail}`);
