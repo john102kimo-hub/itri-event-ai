@@ -149,10 +149,10 @@
     body{background:#fff}
     .wrap{max-width:none;padding:0}
     /* 列印詳細版一頁報告（printReport()）。列印簡報走 body.print-deck，規則在檔案後段 */
-    body:not(.print-deck) :is(#gate,.no-print,.head,.tabs,#sys-warn,.caveat,.kpi-grid,#snap-card,.start-card,
+    body:not(.print-deck):not(.print-brief) :is(#gate,.no-print,.head,.tabs,#sys-warn,.caveat,.kpi-grid,#snap-card,.start-card,
     .card:not(#rep-card),#toast,#deck-stage){display:none!important}
-    body:not(.print-deck) section[data-tab="deck"]{display:block!important}
-    body:not(.print-deck) #rep-card{display:block!important}
+    body:not(.print-deck):not(.print-brief) section[data-tab="deck"]{display:block!important}
+    body:not(.print-deck):not(.print-brief) #rep-card{display:block!important}
     #rep-card{border:none;box-shadow:none;padding:0;margin:0}
     #rep-card > details > summary{display:none}
     .rep-headline{background:#f3f4f6}
@@ -274,6 +274,26 @@
   .slide .lift-cap{display:none}
   .slide .lift-svg text{font-size:12px}
 
+  /* 呈核一頁（批次 74）：一眼看完——大數字、三個打勾、一句話 */
+  .brief-box{margin-top:18px;padding-top:16px;border-top:1px dashed var(--border)}
+  #brief-out .slide{max-width:760px;cursor:zoom-in}
+  .slide.brief .sl{gap:1.8cqw;padding:4.5cqw 5.5cqw 4.5cqw}
+  .slide.brief .score{display:flex;align-items:center;gap:3cqw}
+  .slide.brief .score .box{text-align:center;border-radius:1.8cqw;padding:1.6cqw 3cqw}
+  .slide.brief .score .n{font-size:8cqw;font-weight:900;line-height:1}
+  .slide.brief .score .n small{font-size:3.4cqw;font-weight:700;opacity:.6}
+  .slide.brief .score .cap{font-size:1.7cqw;color:var(--muted);margin-top:.6cqw}
+  .slide.brief .score .old{background:#f3f4f6;color:#9ca3af}
+  .slide.brief .score .new{background:var(--primary-light);color:var(--primary);border:.3cqw solid var(--primary)}
+  .slide.brief .score .arrow{font-size:5cqw;color:var(--primary);font-weight:900}
+  .slide.brief .score .msg{flex:1;font-size:3cqw;font-weight:800;line-height:1.35}
+  .slide.brief ul.ticks{list-style:none;display:flex;flex-direction:column;gap:1cqw}
+  .slide.brief ul.ticks li{font-size:2.3cqw;display:flex;gap:1.4cqw;align-items:baseline}
+  .slide.brief ul.ticks li b{color:var(--primary);font-size:2.6cqw}
+  .slide.brief .q{font-size:2.1cqw;background:#f9fafb;border-left:1cqw solid var(--primary);padding:1.4cqw 2cqw;border-radius:0 1.2cqw 1.2cqw 0}
+  .slide.brief .q span{display:block;font-size:1.5cqw;color:var(--muted);margin-bottom:.4cqw}
+  .slide.brief .foot{font-size:1.35cqw;color:#9ca3af;margin-top:auto;line-height:1.6}
+
   /* 全螢幕播放 */
   #deck-stage{position:fixed;inset:0;background:#0b1220;z-index:200;display:none;align-items:center;justify-content:center}
   #deck-stage.on{display:flex}
@@ -292,6 +312,17 @@
     body.print-deck .slide{width:100%;border:none;border-radius:0;box-shadow:none;break-after:page;page-break-after:always}
     body.print-deck .slide:last-child{break-after:auto;page-break-after:auto}
     body.print-deck #deck-stage{display:none!important}
+    /* 列印呈核一頁：只留那一張 */
+    body.print-brief .wrap > *:not(section[data-tab="track"]),
+    body.print-brief section[data-tab="track"] > *:not(.card:has(#brief-out)),
+    body.print-brief .card:has(#brief-out) > *:not(.brief-box),
+    body.print-brief .brief-box > *:not(#brief-out),
+    body.print-brief #brief-out > *:not(.slide),
+    body.print-brief #deck-stage{display:none!important}
+    body.print-brief section[data-tab="track"]{display:block!important}
+    body.print-brief .card:has(#brief-out){border:none;padding:0;margin:0}
+    body.print-brief .brief-box{border:none;padding:0;margin:0}
+    body.print-brief #brief-out .slide{max-width:none;width:100%;border:none;box-shadow:none}
   }
 </style>
 </head>
@@ -543,6 +574,18 @@
       <button class="btn btn-primary" id="adv-btn" onclick="runAdvise()"><i class="ti ti-sparkles"></i> 分析這份初稿</button>
     </div>
     <div id="adv-out" style="margin-top:14px"></div>
+
+    <!-- 批次 74：改完之後的驗收＋呈核用一頁。純規則檢核（lib/geo-draft-check.js），不呼叫 AI -->
+    <div class="brief-box">
+      <div class="desc" style="margin-bottom:8px"><b>② 改好了嗎？產生呈核用一頁</b>
+        — 貼上修改後的稿子，系統用固定規則比對修改前後，做成一頁給長官看的簡報（呈核時附上）。</div>
+      <textarea id="adv-revised" rows="6" placeholder="貼上修改後的新聞稿（第一行當標題）…"></textarea>
+      <div class="row" style="margin-top:10px">
+        <button class="btn btn-primary" id="brief-btn" onclick="makeDraftBrief()"><i class="ti ti-presentation"></i> 產生呈核一頁</button>
+        <span style="font-size:.76rem;color:var(--muted)">修改前＝上面那格初稿；議題＝上面選的那個</span>
+      </div>
+      <div id="brief-out" style="margin-top:12px"></div>
+    </div>
   </div>
 
   <div class="card" id="test-card" style="display:none">
@@ -623,6 +666,8 @@ function showTab(name){
 }
 function bindTabs(){
   document.querySelectorAll('#tabs button[data-go]').forEach(b => b.addEventListener('click', () => showTab(b.dataset.go)));
+  // 手動改網址的 #、按瀏覽器上一頁，也要切到對應分頁
+  window.addEventListener('hashchange', () => showTab((location.hash || '').slice(1)));
   showTab((location.hash || '').slice(1));
 }
 function closeMore(el){ const d = el.closest('details'); if(d) d.open = false; }
@@ -1183,8 +1228,8 @@ function buildDeckSlides(d, keyword){
 
 function slideHtml(sl, i, n){
   return `<div class="slide ${sl.cls}" data-i="${i}"><div class="sl">${sl.html}</div>`
-    + (sl.cls==='cover' ? '' : `<div class="brand">工研院 AI 搜尋能見度</div>`)
-    + `<div class="no">${i+1} / ${n}</div></div>`;
+    + (sl.cls==='cover' || sl.cls==='brief' ? '' : `<div class="brand">工研院 AI 搜尋能見度</div>`)
+    + (n > 1 ? `<div class="no">${i+1} / ${n}</div>` : '') + `</div>`;
 }
 
 async function openDeck(keyword){
@@ -1213,8 +1258,11 @@ async function openDeck(keyword){
 }
 
 /** 全螢幕播放：← → 換頁、Esc 離開，點畫面也會換下一張。 */
-function presentDeck(i){
-  if(!DECK.length) return toast('先產生簡報');
+let STAGE_LIST = [];   // 目前全螢幕播放的是哪一組投影片（簡報，或呈核一頁）
+function presentDeck(i){ return presentSlides(DECK, i); }
+function presentSlides(list, i){
+  if(!list || !list.length) return toast('先產生簡報');
+  STAGE_LIST = list;
   let stage = document.getElementById('deck-stage');
   if(!stage){
     stage = document.createElement('div');
@@ -1237,19 +1285,19 @@ function presentDeck(i){
       else if(e.key === 'Escape'){ closeDeck(); }
     });
   }
-  DECK_AT = Math.max(0, Math.min(DECK.length-1, i||0));
+  DECK_AT = Math.max(0, Math.min(STAGE_LIST.length-1, i||0));
   drawStage();
   stage.classList.add('on');
   if(stage.requestFullscreen) stage.requestFullscreen().catch(()=>{});
 }
 function drawStage(){
-  document.getElementById('deck-stage-slot').innerHTML = slideHtml(DECK[DECK_AT], DECK_AT, DECK.length);
-  document.getElementById('deck-stage-no').textContent = `${DECK_AT+1} / ${DECK.length}`;
+  document.getElementById('deck-stage-slot').innerHTML = slideHtml(STAGE_LIST[DECK_AT], DECK_AT, STAGE_LIST.length);
+  document.getElementById('deck-stage-no').textContent = `${DECK_AT+1} / ${STAGE_LIST.length}`;
 }
 function stepDeck(dir){
   const next = DECK_AT + dir;
   if(next < 0) return;
-  if(next >= DECK.length) return closeDeck();
+  if(next >= STAGE_LIST.length) return closeDeck();
   DECK_AT = next; drawStage();
 }
 function closeDeck(){
@@ -1271,6 +1319,71 @@ function printDeck(){
   window.addEventListener('afterprint', done);
   window.print();
   setTimeout(done, 60000);  // 保險：有些瀏覽器不發 afterprint（print() 也不一定會阻塞，太早拿掉會印錯版）
+}
+
+/* ── 新聞稿呈核一頁（批次 74）──────────────────────────────────────────
+ * 需求原話：「長官很懶得看也不會費心思去深入了解，最好是那種一看就能讓他『哇』」。
+ * 所以整頁只有三樣東西：① 改前 → 改後的大數字 ② 改了哪幾件事（白話、最多三條）
+ * ③ AI 最可能整句引用的那一句。細節、規則名稱、方法論全部不上這一頁。
+ *
+ * ⚠️ 「哇」要建立在真的東西上：分數是 lib/geo-draft-check.js 的固定規則算出來的，
+ * 不是 AI 打的分；標題只有「全部過關」時才寫「已符合」，差幾項就老實寫差幾項。
+ * 頁尾一行小字講清楚這是寫法檢核、不是保證被引用——長官拿去往上報時，這句會救他。 */
+let BRIEF = [];
+async function makeDraftBrief(){
+  const after = document.getElementById('adv-revised').value.trim();
+  const before = document.getElementById('adv-draft').value.trim();
+  const keyword = document.getElementById('adv-keyword').value;
+  const out = document.getElementById('brief-out');
+  if(after.length < 30) return toast('請貼上修改後的完整稿子');
+  const btn = document.getElementById('brief-btn');
+  btn.disabled = true;
+  try{
+    const r = await post({ action:'draft-check', before, after, keyword });
+    if(r.error){ out.innerHTML = `<div class="empty down">${esc(r.error)}</div>`; return; }
+    BRIEF = [{ cls:'brief', html: draftBriefHtml(r.before, r.after, after) }];
+    const miss = r.after.checks.filter(c=>!c.pass);
+    out.innerHTML = slideHtml(BRIEF[0], 0, 1)
+      + (miss.length ? `<div class="find warn" style="margin-top:10px"><div class="t">還差 ${miss.length} 項才算完全符合</div>
+          <div class="d plain">${miss.map(c=>`・${esc(c.label)}${c.otherLink?'（有網址，但不是 itri.org.tw）':''}`).join('<br>')}</div></div>` : '')
+      + `<div class="row"><button class="btn btn-outline" onclick="presentSlides(BRIEF,0)"><i class="ti ti-player-play"></i> 全螢幕</button>
+         <button class="btn btn-outline" onclick="printBrief()"><i class="ti ti-printer"></i> 列印／存 PDF</button></div>`;
+    out.querySelector('.slide')?.addEventListener('click', ()=>presentSlides(BRIEF,0));
+  }catch(e){ out.innerHTML = `<div class="empty down">${esc(e.message)}</div>`; }
+  finally{ btn.disabled = false; }
+}
+
+function draftBriefHtml(b, a, afterText){
+  const title = String(afterText).split('\n').map(x=>x.trim()).find(Boolean) || '';
+  const allPass = a.passed === a.total;
+  // 改了哪幾件事：修改前沒過、修改後過了的，用給長官看的白話講；沒有修改前就列修改後過的
+  const flipped = a.checks.filter(c=>c.pass && !(b && b.checks.find(x=>x.key===c.key)?.pass));
+  const shown = (flipped.length ? flipped : a.checks.filter(c=>c.pass)).slice(0,3);
+  const msg = allPass ? '這篇稿子已符合 GEO 寫法<br>AI 更容易正確說出「工研院」'
+    : `離 GEO 寫法還差 ${a.total - a.passed} 項`;
+  return `<div class="kicker">新聞稿 GEO 檢核｜${esc(title.slice(0,40))}</div>
+    <div class="score">
+      ${b ? `<div class="box old"><div class="n">${b.passed}<small>/${b.total}</small></div><div class="cap">修改前</div></div>
+      <div class="arrow">→</div>` : ''}
+      <div class="box new"><div class="n">${a.passed}<small>/${a.total}</small></div><div class="cap">${b?'修改後':'檢核結果'}</div></div>
+      <div class="msg">${msg}</div>
+    </div>
+    <ul class="ticks">${shown.map(c=>`<li><b>✓</b>${esc(c.plain)}</li>`).join('')}</ul>
+    ${a.quote ? `<div class="q"><span>AI 最可能整句引用的一句</span>「${esc(a.quote)}」</div>` : ''}
+    <div class="foot">GEO（生成式引擎優化）＝讓 ChatGPT、Gemini 等 AI 回答問題時引用我們。本頁依固定規則檢核寫法（${a.total} 項），參照 AMEC GEO 原則與本院 AI 能見度實測；代表寫法到位，不保證一定被引用。</div>`;
+}
+
+function printBrief(){
+  if(!BRIEF.length) return toast('先產生呈核一頁');
+  showTab('track');
+  const st = document.createElement('style');
+  st.textContent = '@page{size:A4 landscape;margin:8mm}';
+  document.head.appendChild(st);
+  document.body.classList.add('print-brief');
+  const done = () => { document.body.classList.remove('print-brief'); st.remove(); window.removeEventListener('afterprint', done); };
+  window.addEventListener('afterprint', done);
+  window.print();
+  setTimeout(done, 60000);
 }
 
 /* ── 現況快照：掃完立刻能看，不用等趨勢累積 ── */
@@ -2003,10 +2116,38 @@ async function loadPrompts(){
       <td><button class="btn btn-ghost" onclick="delPrompt('${p.id}')"><i class="ti ti-trash"></i></button></td>
     </tr>`).join('') + '</tbody></table>';
 }
-async function genPrompts(){
+/** 這個關鍵字是不是已經有啟用中的題目（別場活動或長期關注開的）。 */
+function activePromptsOf(kw){
+  return (S.prompts||[]).filter(p=>p.active!==false && String(p.keyword||'').trim()===kw);
+}
+
+async function genPrompts(forceNew){
   const kw = document.getElementById('s-kw').value.trim();
   if(!kw) return toast('先打一個關鍵字');
   const btn = document.getElementById('gen-btn'), out = document.getElementById('gen-out');
+  /* 同一個關鍵字已經在追蹤了（批次 74，回報的情境：10/28 眺望活動用「產業分析師」，
+   * 而「產業分析師」本來就在長期追蹤）。這時候不要再生一批題目加進同一條線——題庫中途
+   * 改變，這場的前後對比會被判成不可比較，原本的長期走勢也會斷一截。直接沿用既有題目
+   * 反而最好：活動前的基線早就有了。真的有這場專屬的角度，改用另一個關鍵字單獨追蹤。 */
+  const existing = forceNew ? [] : activePromptsOf(kw);
+  if(existing.length){
+    const since = existing.map(p=>String(p.created_at||'').slice(0,10)).filter(Boolean).sort()[0] || '';
+    const evs = (S.events||[]).filter(e=>String(e.keywords||'').split(/[,，、|]/).map(x=>x.trim()).includes(kw));
+    out.innerHTML = `<div class="find good" style="margin-top:14px">
+        <div class="t">「${esc(kw)}」已經在追蹤中（${existing.length} 題${since?`，${esc(since)} 起`:''}）</div>
+        <div class="w">${evs.length?`目前掛在這個關鍵字上的：${evs.map(e=>esc(e.title)).join('、')}。`:''}
+          這場活動<b>直接沿用這些題目</b>就好：活動前的基線早就有了，發稿後馬上比得出前後差異，
+          也不會打亂原本那條長期走勢。之後停止追蹤這場，也不會關掉原本的追蹤。</div>
+        <div class="row">
+          <button class="btn btn-primary btn-lg" onclick="startTracking(true)"><i class="ti ti-flag"></i> 沿用既有題目，標記這場活動</button>
+        </div>
+        <div style="font-size:.78rem;color:var(--muted);margin-top:8px">
+          這場有特別想問的角度？
+          <button class="btn btn-ghost" style="font-size:.78rem;padding:2px 6px" onclick="useSubKeyword()">改用「${esc(kw)}・${esc(eventShortName())}」另外追蹤</button>
+          （新關鍵字自己一條線，不會跟原本的混在一起；但沒有活動前的基線，要提早兩週開始）</div>
+      </div>`;
+    return;
+  }
   btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader-2"></i> 想題目中…';
   out.innerHTML = '<div class="empty">約 5–15 秒…</div>';
   try{
@@ -2037,12 +2178,25 @@ async function genPrompts(){
   btn.disabled = false; btn.innerHTML = '<i class="ti ti-wand"></i> 產生題目';
 }
 
-/** 一鍵：存題目 ＋ 建立活動標記（綁 ITRI EVENT AI 活動）＋ 立刻先掃一次 */
-async function startTracking(){
-  const picked = [...document.querySelectorAll('#gen-out .cand')]
+/** 另開一個子關鍵字（「產業分析師・眺望」）單獨追蹤這場專屬的角度 */
+function eventShortName(){
+  const sel = document.getElementById('s-event');
+  const name = (sel.value && sel.value!=='__other__') ? (sel.selectedOptions[0]?.dataset.name||'') : document.getElementById('s-title').value;
+  return String(name||'這場').replace(/\s+/g,'').replace(/^(20\d\d|\d{3,4})/,'').slice(0,6) || '這場';
+}
+function useSubKeyword(){
+  const kwEl = document.getElementById('s-kw');
+  kwEl.value = `${kwEl.value.trim()}・${eventShortName()}`;
+  genPrompts(true);
+}
+
+/** 一鍵：存題目 ＋ 建立活動標記（綁 ITRI EVENT AI 活動）＋ 立刻先掃一次。
+ *  reuse=true：這個關鍵字已經在追蹤，沿用既有題目、只加一筆活動標記（見 genPrompts）。 */
+async function startTracking(reuse){
+  const picked = reuse ? [] : [...document.querySelectorAll('#gen-out .cand')]
     .filter(el=>el.querySelector('input[type=checkbox]').checked)
     .map(el=>el.querySelector('textarea').value.trim()).filter(Boolean);
-  if(!picked.length) return toast('至少留一題');
+  if(!reuse && !picked.length) return toast('至少留一題');
 
   const sel = document.getElementById('s-event');
   const opt = sel.selectedOptions[0];
@@ -2068,7 +2222,7 @@ async function startTracking(){
   document.getElementById('gen-out').innerHTML =
     `<div class="find good" style="margin-top:14px">
        <div class="t">已開始追蹤「${esc(r.event.title)}」</div>
-       <div class="w">加入 ${r.added} 題，議題「${esc(kw)}」，活動日 ${esc(r.event.date)}。</div>
+       <div class="w">${r.reused?`沿用「${esc(kw)}」既有的 ${r.reused} 題`:`加入 ${r.added} 題，議題「${esc(kw)}」`}，活動日 ${esc(r.event.date)}。</div>
        <div class="d">正在跑第一次掃描，跑完會自動跳到「總覽」的「最近一次掃描」。之後每天早上自動跑。</div>
      </div>`;
   document.getElementById('s-kw').value = '';
@@ -2190,10 +2344,10 @@ async function loadEvents(){
         <i class="ti ti-trash"></i> 停止追蹤</button></td></tr>`).join('') + '</tbody></table>';
 }
 async function stopTracking(id, title){
-  if(!confirm(`停止追蹤「${title}」？\n\n・該議題的題目會停用，不再掃描也不再計費（之後可重新啟用）\n・已經掃到的歷史資料與曲線保留`)) return;
+  if(!confirm(`停止追蹤「${title}」？\n\n・這場自己加的題目會停用，不再掃描也不再計費（之後可重新啟用）\n・跟其他追蹤共用的題目不受影響\n・已經掃到的歷史資料與曲線保留`)) return;
   const r = await post({ action:'track_stop', id });
   if(r.error) return toast(r.error);
-  toast(`已停止追蹤，停用 ${r.removed} 題`);
+  toast(r.removed ? `已停止追蹤，停用 ${r.removed} 題` : `已移除這場的標記；「${r.keyword}」的題目還有其他追蹤在用，照常掃描`);
   loadEvents(); loadPrompts(); loadSeries(); loadSnapshot();
 }
 const delEvent = (id) => stopTracking(id, '這場活動');

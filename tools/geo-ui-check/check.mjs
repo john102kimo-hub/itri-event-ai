@@ -94,6 +94,46 @@ check(await page.isVisible('#rep-card'), '詳細版一頁報告在簡報下面')
 // 活動效應欄位
 await page.click('#tabs button[data-go="overview"]');
 check((await page.textContent('#events')).includes('第 15–30 天'), '活動效應欄位改名，不叫「基線抬升」');
+// ── 批次 74：同一個關鍵字已經在追蹤 → 沿用既有題目，停止追蹤不會關掉原本那條線 ──
+const { sheets } = await import('./data.mjs');
+const activeOf = (kw) => sheets.geo_prompts.filter((r) => r[3] === kw && String(r[6]).toUpperCase() !== 'FALSE').length;
+const before矽 = activeOf('矽光子');
+await page.click('#tabs button[data-go="track"]');
+await page.selectOption('#s-event', { label: '無人機應用論壇' });
+await page.fill('#s-kw', '矽光子');
+await page.click('#gen-btn');
+check((await page.textContent('#gen-out')).includes('已經在追蹤中'), '關鍵字已在追蹤 → 不另外生題目，提示沿用');
+await page.click('text=沿用既有題目，標記這場活動');
+await page.waitForFunction(() => /已開始追蹤/.test(document.getElementById('gen-out').textContent), null, { timeout: 60000 });
+check(activeOf('矽光子') === before矽, `沿用：「矽光子」題目數不變（${before矽}）——題庫中途沒被改`);
+const newEv = sheets.geo_events.find((r) => r[2] === '無人機應用論壇');
+check(!!newEv && newEv[5] === 'prompts=', '活動標記記下「這場沒有自己加題」');
+const h = await fetch(base + '/api/geo', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'track_stop', id: newEv[0], password: 'pw' }) }).then((r) => r.json());
+check(h.removed === 0 && activeOf('矽光子') === before矽, '停止追蹤這場 → 原本的「矽光子」長期追蹤照常，一題都沒停');
+
+// ── 批次 74：新聞稿呈核一頁 ──
+await page.goto(base + '/geo#track'); await page.waitForTimeout(1500);
+await page.fill('#adv-draft', '產業前瞻研討會\n今年研討會邀請多位專家，共同推動產業發展，與會人士反應熱烈，討論各項議題並交換意見。');
+await page.fill('#adv-revised', '工研院眺望2027：AI伺服器產值成長38%\n工研院產科國際所今（28）日發表眺望2027，預估2027年台灣AI伺服器產值將成長38%，達新台幣1.2兆元。\n2026年10月28日起可至官網下載完整報告：https://www.itri.org.tw/iek2027');
+await page.click('#brief-btn');
+await page.waitForSelector('#brief-out .slide.brief');
+const brief = await page.textContent('#brief-out .slide');
+check(/修改前/.test(brief) && /修改後/.test(brief), '呈核一頁有修改前 → 修改後');
+check(/已符合 GEO 寫法/.test(brief), '全部過關時才寫「已符合」');
+check(/不保證一定被引用/.test(brief), '頁尾講清楚是寫法檢核、不保證被引用');
+check(/AI 最可能整句引用的一句/.test(brief), '附上 AI 最可能整句引用的一句');
+if (OUT) await page.locator('#brief-out .slide').screenshot({ path: OUT + '/g-brief.png' });
+await page.evaluate(() => { const st = document.createElement('style'); st.textContent = '@page{size:A4 landscape;margin:8mm}'; document.head.appendChild(st); document.body.classList.add('print-brief'); });
+const bpdf = await page.pdf({ preferCSSPageSize: true, printBackground: true });
+const bpages = (bpdf.toString('latin1').match(/\/Type\s*\/Page[^s]/g) || []).length;
+check(bpages === 1, `呈核一頁存 PDF 剛好 1 頁（實際 ${bpages}）`);
+if (OUT) fs.writeFileSync(OUT + '/brief.pdf', bpdf);
+await page.evaluate(() => document.body.classList.remove('print-brief'));
+await page.fill('#adv-revised', '研討會\n今年研討會邀請多位專家，與會人士反應熱烈，討論各項議題並交換意見。這是一段沒有數字的稿子。');
+await page.click('#brief-btn');
+await page.waitForFunction(() => /還差/.test(document.getElementById('brief-out').textContent));
+check(!/已符合/.test(await page.textContent('#brief-out .slide')), '沒過關時不寫「已符合」，寫還差幾項');
+
 // 同仁連結
 const staff = await browser.newPage();
 const serrs = []; staff.on('pageerror', e => serrs.push(e.message));

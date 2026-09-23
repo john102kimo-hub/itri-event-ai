@@ -20,6 +20,7 @@
 import { readRange, appendRows, updateRange, ensureSheets } from '../lib/sheets.js';
 import { fetchNewsjackCandidates } from '../lib/newsjacking.js';
 import { checkStructuredContent } from '../lib/structured-check.js';
+import { checkGeoDraft } from '../lib/geo-draft-check.js';
 import { BRAND_DEFAULT, canonList, tallyOrgs } from '../lib/geo-orgs.js';
 import { buildPeerSeries, selfTrend } from '../lib/geo-benchmark.js';
 
@@ -1616,6 +1617,21 @@ export default async function handler(req, res) {
      * 純規則計算，不寫入任何分頁，也不影響 track_start 實際存的 structured 值——
      * 那一格最終還是同仁自己勾。
      */
+    /**
+     * 新聞稿 GEO 寫法檢核（批次 74）：修改前／修改後各算一次，給「發稿建議」的呈核一頁用。
+     * 純規則、不呼叫 AI、不寫任何分頁——見 lib/geo-draft-check.js 開頭的說明。
+     */
+    if (body.action === 'draft-check') {
+      const keyword = String(body.keyword || '').trim().slice(0, 40);
+      const before = String(body.before || '').slice(0, 20000);
+      const after = String(body.after || '').slice(0, 20000);
+      if (!after.trim()) return res.status(400).json({ error: '請貼上修改後的稿子' });
+      return ok(res, {
+        before: before.trim() ? checkGeoDraft(before, { keyword }) : null,
+        after: checkGeoDraft(after, { keyword }),
+      });
+    }
+
     if (body.action === 'check-structured') {
       return ok(res, checkStructuredContent({ title: body.title, text: body.text }));
     }
@@ -1649,8 +1665,20 @@ export default async function handler(req, res) {
       const keyword = String(body.keyword || '').trim();
       if (!keyword) return res.status(400).json({ error: '請填這場活動的關鍵字' });
 
-      const list = (body.prompts || []).map((s) => String(s || '').trim()).filter((s) => s.length >= 8);
-      if (!list.length) return res.status(400).json({ error: '至少要留一題' });
+      // ── 同一個關鍵字已經在追蹤了（批次 74）────────────────────────────
+      // 回報的情境：10/28 眺望活動的關鍵字是「產業分析師」，而「產業分析師」本來就在長期
+      // 追蹤。舊版照樣把新題目加進同一條線，兩件事會壞：
+      //   ① 題庫在中途變了，這場的前後對比被判成「題庫改過、不可比較」，原本那條長期
+      //      走勢也在這一天多出一批題目、斷一截
+      //   ② 之後對這場按「停止追蹤」，會把「產業分析師」所有題目停掉，連長期追蹤一起關
+      // 這種情況其實是最好的情況——活動前的基線早就有了，不用等兩週。所以預設**沿用既有
+      // 題目**、只加一筆活動標記；真的要另外加角度，前端會改用另一個關鍵字單獨追蹤。
+      const existingActive = (await safeRead('geo_prompts!A2:H')).filter((r) => r[0]).map(parsePrompt)
+        .filter((p) => p.active !== false && p.keyword === keyword);
+      const reuse = existingActive.length > 0 && body.add_prompts !== true;
+
+      const list = reuse ? [] : (body.prompts || []).map((s) => String(s || '').trim()).filter((s) => s.length >= 8);
+      if (!reuse && !list.length) return res.status(400).json({ error: '至少要留一題' });
       const bad = list.filter((s) => BRAND_RE.test(s));
       if (bad.length) return res.status(400).json({ error: `有 ${bad.length} 題出現「工研院」，那會變成自問自答，請先改掉。` });
 
@@ -1674,20 +1702,22 @@ export default async function handler(req, res) {
       const compStr = comps.length ? comps.join('、') : COMPETITORS;
 
       const stamp = nowTW();
-      await appendRows('geo_prompts!A:H', list.map((p) => [
-        uid('gp'), keyword, p, keyword, BRAND_DEFAULT, compStr, 'TRUE', stamp,
-      ]));
+      const newRows = list.map((p) => [uid('gp'), keyword, p, keyword, BRAND_DEFAULT, compStr, 'TRUE', stamp]);
+      if (newRows.length) await appendRows('geo_prompts!A:H', newRows);
 
       // 結構化稿：同仁在③打完題目、按「開始追蹤」前順手勾一下。
       // 沒勾＝FALSE，跟「不知道」（舊資料留白）分開存，兩者含意不同。
       const structured = body.structured ? 'TRUE' : 'FALSE';
 
       const evId = uid('ge');
+      // F 欄（note）記下「這場自己加了哪幾題」，停止追蹤時只停這幾題（見 track_stop）。
+      // 沿用既有題目的場次記成空清單「prompts=」——停止時一題都不動。
       await appendRows('geo_events!A:H', [[
-        evId, date, title, body.type || '記者會', keyword, '', refId, structured,
+        evId, date, title, body.type || '記者會', keyword, `prompts=${newRows.map((r) => r[0]).join(',')}`, refId, structured,
       ]]);
 
-      return ok(res, { success: true, added: list.length, event: { id: evId, date, title, keyword } });
+      return ok(res, { success: true, added: newRows.length, reused: reuse ? existingActive.length : 0,
+        event: { id: evId, date, title, keyword } });
     }
 
     if (body.action === 'settings_save') {
@@ -1734,13 +1764,21 @@ export default async function handler(req, res) {
       if (!target) return res.status(404).json({ error: '找不到這場追蹤' });
       const keyword = target[4] || '';
 
-      // 停用同議題的題目（逐列更新 G 欄，不影響其他欄位與其他議題的題目）
+      // 要停哪些題（批次 74）：
+      //   - 有記「prompts=…」的（批次 74 之後建的）→ 只停這場自己加的那幾題；沿用既有題目的
+      //     場次清單是空的，一題都不停
+      //   - 舊資料沒有記 → 還有其他追蹤共用這個關鍵字時一題都不停（舊版會把共用的長期追蹤
+      //     一起關掉）；沒有人共用才照舊停掉整個關鍵字
+      const own = String(target[5] || '').match(/(?:^|;)\s*prompts=([^;]*)/);
+      const ownIds = own ? new Set(own[1].split(',').map((x) => x.trim()).filter(Boolean)) : null;
+      const shared = evRows.some((r) => r[0] && r[0] !== body.id && r[4] === keyword);
       let stopped = 0;
-      if (keyword) {
+      if (keyword && (ownIds ? ownIds.size : !shared)) {
         const pRows = await safeRead('geo_prompts!A2:H');
         for (let i = 0; i < pRows.length; i++) {
           const r = pRows[i];
-          if (r[0] && r[3] === keyword && String(r[6]).toUpperCase() !== 'FALSE') {
+          const mine = ownIds ? ownIds.has(r[0]) : r[3] === keyword;
+          if (r[0] && mine && String(r[6]).toUpperCase() !== 'FALSE') {
             await updateRange(`geo_prompts!G${i + 2}`, [['FALSE']]);
             stopped++;
           }
@@ -1753,7 +1791,7 @@ export default async function handler(req, res) {
       }
       if (kept.length) await updateRange(`geo_events!A2:H${kept.length + 1}`, kept);
 
-      return ok(res, { success: true, removed: stopped, keyword });
+      return ok(res, { success: true, removed: stopped, keyword, kept_shared: stopped === 0 && (shared || !!ownIds) });
     }
 
     if (body.action === 'prompt_generate') {
