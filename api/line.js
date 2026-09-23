@@ -49,7 +49,8 @@ import {
   isPasscodeMatch, isStaffAuthenticated, authenticateStaff, routeStaffIntent,
   createDraftEvent, editLink, trainingLink, ensureEventEditCode, getEventRawById,
   getEventAnalyticsSummary, formatEventAnalyticsReply, getGeoStatusSummary, getGeoTrendSeries,
-  isExitStaffCommand, revokeStaff, listActiveStaffIds, getStaffPending, setStaffPending
+  isExitStaffCommand, revokeStaff, listActiveStaffIds, getStaffPending, setStaffPending,
+  isCancelReply, staffPickList, dateWithWeekday
 } from '../lib/staff.js';
 import { buildGeoBriefFlex, formatGeoBriefText } from '../lib/geo-brief.js';
 import {
@@ -85,6 +86,9 @@ async function getAllEventRows() {
   eventsCache = { rows, expiry: Date.now() + CACHE_TTL_MS };
   return rows;
 }
+// 職員從 LINE 寫進 events 表之後要清掉（批次 76）：不清的話，剛建好的活動在同一個
+// instance 上最多 60 秒查不到——清單上沒有、問「哪一場」的按鈕也沒有。
+function invalidateEventsCache() { eventsCache = { rows: null, expiry: 0 }; }
 function rowToEvent(row) {
   return {
     id: row[0], name: row[1], color: row[2] || '#0F9E7A',
@@ -2024,7 +2028,7 @@ async function applyStaffMenu(userId) {
 
 async function handleSetupRichMenu(replyToken, userId) {
   if (!process.env.LINE_CHANNEL_ACCESS_TOKEN) {
-    await replyOrPush(replyToken, userId, '尚未設定 LINE_CHANNEL_ACCESS_TOKEN，無法建立圖文選單。');
+    await replyOrPush(replyToken, userId, '尚未設定 LINE_CHANNEL_ACCESS_TOKEN，無法建立圖文選單。', staffChips());
     return;
   }
   await startLoading(userId, 45);
@@ -2065,10 +2069,11 @@ async function handleSetupRichMenu(replyToken, userId) {
       '圖文選單已設定完成 ✅\n\n' +
       `【記者看到的】\n${REPORTER_MENU.buttons.map(b => `・${b.label}`).join('\n')}\n\n` +
       `【職員看到的】（已套用到 ${linked} 位職員）\n${STAFF_MENU.buttons.map(b => `・${b.label}`).join('\n')}\n\n` +
-      '記者不會看到職員那一套。已經加過好友的人可能要把對話關掉重開才會看到。');
+      '記者不會看到職員那一套。已經加過好友的人可能要把對話關掉重開才會看到。',
+      staffChips());
   } catch (e) {
     console.error('設定圖文選單失敗:', e.message);
-    await replyOrPush(replyToken, userId, `設定圖文選單失敗：${e.message}\n\n請確認 LINE_CHANNEL_ACCESS_TOKEN 有效，且網站已部署最新版本。`);
+    await replyOrPush(replyToken, userId, `設定圖文選單失敗：${e.message}\n\n請確認 LINE_CHANNEL_ACCESS_TOKEN 有效，且網站已部署最新版本。`, staffChips());
   }
 }
 
@@ -2106,6 +2111,18 @@ async function handleTeachMessage(replyToken, userId, text) {
 
   const cmd = parseMemoryCommand(s);
   if (!cmd) return false;
+
+  // 批次 76：「改成下午兩點開始」「請改一下這場的地點」是在改活動資料，不是在教米亞
+  // 說話方式。舊版會把它記成全站語氣規則，套用到每一場（見 lib/bot-memory.js
+  // looksLikeFieldChange() 的說明）。這裡不存任何東西，只指路。
+  if (cmd.kind === 'field_hint') {
+    await replyOrPush(replyToken, userId,
+      '這句看起來是要改某一場的活動資料（時間、地點、聯絡人⋯⋯），我沒有把它記成規則，不然會套用到所有場次 🙏\n\n' +
+      '要改資料：打「要媒體訓練連結」選那一場，會一起拿到編輯連結，在編輯頁改。\n' +
+      '只想讓米亞知道：打「記住：」加上活動名稱和內容，例如「記住：智慧醫療那場改到下午兩點」。',
+      staffChips('要媒體訓練連結', '記憶清單'));
+    return true;
+  }
 
   if (cmd.kind === 'list') {
     // 清單是空的時候，下一步是「怎麼教」——職員版的「使用說明」裡有【教米亞】那段。
@@ -2171,7 +2188,7 @@ async function handleTeachMessage(replyToken, userId, text) {
     // ⚠️ 這是整個職員模式**唯一**刻意不帶整套入口的一則：這一刻只有「記／不記」兩條路，
     // 旁邊擺一排別的出口只會讓人點走、留下一筆永遠 pending 的內容。不要順手統一掉。
     await replyOrPush(replyToken, userId,
-      `這句話要我以後都照做嗎？\n「${cmd.text}」`, [TEACH_YES, TEACH_NO]);
+      `這句話要我以後都照做嗎？\n「${cmd.text}」\n\n（會套用到所有場次的每一個回答）`, [TEACH_YES, TEACH_NO]);
   } else {
     const where = cmd.type === 'style' ? '所有回答' : (scope === 'global' ? '所有場次' : (scopeName ? `《${scopeName}》這一場` : '這一場'));
     await replyOrPush(replyToken, userId,
@@ -2249,6 +2266,14 @@ async function handleStaffMessage(replyToken, userId, text) {
 
   const routed = await routeStaffIntent(text, cards);
 
+  // 批次 76：米亞剛問「新活動叫什麼名字」，同仁回的是「算了／不用了／取消」。舊版把這句
+  // 當成名稱，建出一場叫「算了」的草稿。取消用字面比對攔下（不交給模型判）。
+  if (pending === 'create_event' && (isCancelReply(text) || detectCourtesy(text))) {
+    console.log(`[line] staff 取消新增活動 q="${text.slice(0, 40)}"`);
+    await replyOrPush(replyToken, userId, '好，先不建立 👌 要建的時候再按「新增活動」就可以。', staffChips());
+    return;
+  }
+
   if (pending) {
     // 批次 75（四角色模擬）：舊版不管這一則是什麼都當成新活動名稱。同事被問「新活動叫
     // 什麼」之後改口要「智慧醫療那場的媒體訓練連結」，結果建出一場叫這個名字的活動。
@@ -2271,11 +2296,15 @@ async function handleStaffMessage(replyToken, userId, text) {
 
   // 追問時附上活動名稱按鈕：點按鈕送出的是完整活動名稱，模型比對得到、pending 也
   // 還在，兩條路都通。只列有意義的前幾場，LINE 上限 13 顆。
+  // 批次 76：沒指定候選時用 staffPickList()（接下來要辦的在前、封存的不列）。舊版拿
+  // 試算表前 8 列＝最舊的 8 場。後面一律接上整套職員入口（批次 54 的規則）。
   const eventQuickReplies = (ids) =>
-    (ids && ids.length ? ids.map(cardName) : cards.slice(0, 8).map(c => c.name)).slice(0, 13);
+    staffChips(...(ids && ids.length ? ids.map(cardName) : staffPickList(cards).map(c => c.name)));
 
   if (routed.intent === 'calendar') {
-    await replyOrPush(replyToken, userId, formatCalendarReply(cards), calendarQuickReplyItems(cards));
+    // 批次 76：按鈕不再只列「有知識庫」的場次——剛建好、最需要處理的草稿反而點不到。
+    // 後面接上整套職員入口（批次 54）。
+    await replyOrPush(replyToken, userId, formatCalendarReply(cards), eventQuickReplies());
     return;
   }
 
@@ -2304,13 +2333,21 @@ async function handleStaffMessage(replyToken, userId, text) {
     if (!routed.new_event_name) {
       // 記下「我正在等新活動名稱」，下一則整句就會被當成名稱（見上面承接追問那段）
       await setStaffPending(userId, 'create_event');
-      await replyOrPush(replyToken, userId, '請告訴我新活動的名稱，直接打名稱就好，例如：\n半導體先進封裝技術發表會');
+      await replyOrPush(replyToken, userId,
+        '請告訴我新活動的名稱，直接打名稱就好，例如：\n半導體先進封裝技術發表會\n\n（可以順便帶日期，例如「眺望研討會 10/28」；不建了就回「算了」）',
+        staffChips());
       return;
     }
     const created = await createDraftEvent(routed.new_event_name, routed.new_event_date);
+    invalidateEventsCache();
     console.log(`[line] 職員新增活動 id=${created.id} name="${created.name}"`);
+    const dateLine = dateWithWeekday(routed.new_event_date);
+    // 批次 76：舊版寫「要到後台按『發布』」——後台要密碼，而同仁編輯頁本來就能發布。
     await replyOrPush(replyToken, userId,
-      `已建立《${created.name}》（狀態：未發布，僅後台看得到）\n\n同仁編輯連結（給負責的同仁，他不需要後台密碼）：\n${editLink(created.id, created.editCode)}\n\n內容填好、確認沒問題後，要到後台按「發布」才會對記者公開。`);
+      `已建立《${created.name}》✅\n日期：${dateLine || '未定（在編輯頁補上）'}\n狀態：未發布，記者還看不到\n\n` +
+      `同仁編輯連結（轉給負責的同仁，不需要後台密碼）：\n${editLink(created.id, created.editCode)}\n\n` +
+      '內容填好後，在編輯頁把「活動狀態」改成「進行中」，記者就問得到了。',
+      staffChips('最近有哪些活動'));
     return;
   }
 
@@ -2334,17 +2371,32 @@ async function handleStaffMessage(replyToken, userId, text) {
     const eventId = routed.event_ids[0];
     if (routed.intent === 'event_analytics') {
       const summary = await getEventAnalyticsSummary(eventId, cardName(eventId));
-      await replyOrPush(replyToken, userId, formatEventAnalyticsReply(summary));
+      await replyOrPush(replyToken, userId, formatEventAnalyticsReply(summary), staffChips());
     } else {
       // 舊活動可能還沒有編輯碼，當場補一個（冪等），不要把同仁踢回後台自己弄一次
       const editCode = await ensureEventEditCode(eventId);
       if (!editCode) {
-        await replyOrPush(replyToken, userId, '這場活動的編輯碼產生失敗，請稍後再試，或到後台開啟一次該活動的編輯連結。');
+        await replyOrPush(replyToken, userId, '這場活動的編輯碼產生失敗，請稍後再試，或到後台開啟一次該活動的編輯連結。', staffChips());
         return;
       }
       await replyOrPush(replyToken, userId,
-        `《${cardName(eventId)}》\n\n媒體訓練（發言練習）：\n${trainingLink(eventId, editCode)}\n\n同仁編輯連結（改內容用，不需後台密碼）：\n${editLink(eventId, editCode)}`);
+        `《${cardName(eventId)}》\n\n媒體訓練（發言練習）：\n${trainingLink(eventId, editCode)}\n\n同仁編輯連結（改內容用，不需後台密碼）：\n${editLink(eventId, editCode)}`,
+        staffChips());
     }
+    return;
+  }
+
+  // 批次 76：職員點了清單上一場「還沒有新聞稿」的活動（多半是剛建好的草稿）。交給
+  // answerQuestion() 只會拿到一句「這部分我沒有資料」——給他這場的狀態與編輯連結才有用。
+  // 只認「整句就是活動名稱」（按清單按鈕送出的就是這個），帶著問題的照舊走問答。
+  const tapped = matchEventByName(text, cards);
+  if (tapped && !tapped.has_kb) {
+    const editCode = await ensureEventEditCode(tapped.id);
+    const statusLabel = { draft: '未發布，記者還看不到', active: '進行中', ended: '已結束', archived: '已封存' }[tapped.status] || tapped.status;
+    await replyOrPush(replyToken, userId,
+      `《${tapped.name}》\n狀態：${statusLabel}\n還沒有新聞稿內容，米亞現在答不出這場的問題。` +
+      (editCode ? `\n\n同仁編輯連結（轉給負責的同仁，不需要後台密碼）：\n${editLink(tapped.id, editCode)}` : ''),
+      staffChips());
     return;
   }
 
@@ -2361,7 +2413,7 @@ async function handleStaffMessage(replyToken, userId, text) {
   if (routed.intent === 'qa' && routed.event_ids.length > 1) {
     await replyOrPush(replyToken, userId,
       `是想問這幾場的哪一場？\n${routed.event_ids.map(id => '・' + cardName(id)).join('\n')}`,
-      routed.event_ids.map(cardName));
+      staffChips(...routed.event_ids.map(cardName)));
     return;
   }
 
@@ -2406,7 +2458,7 @@ async function sendStaffMenu(replyToken, userId) {
     '\n・設定圖文選單——重設下方選單\n' +
     '・直接打活動名稱——問那一場的內容（含未發布）\n\n' +
     '【教米亞】\n' +
-    '・「記住：這場地點改到南港展覽館」——只記這一場\n' +
+    '・「記住：這場的技術還在實驗階段，不要說已經量產」——只記這一場\n' +
     '・「語氣：回答再短一點」——全站通用\n' +
     '・打「記憶清單」看目前記得什麼\n\n' +
     '【離開】打「退出職員模式」回到記者身分。',
@@ -3628,7 +3680,7 @@ async function handleEvent(ev) {
   // #代碼／reporter 流程——職員用自然語言下所有指令，不用記兩套語法。
   if (isPasscodeMatch(text)) {
     if (await isStaffAuthenticated(userId)) {
-      await replyOrPush(replyToken, userId, '您已經是職員模式了，直接問我就可以，不用再輸入一次密語。');
+      await replyOrPush(replyToken, userId, '您已經是職員模式了，直接問我就可以，不用再輸入一次密語。', staffChips());
       return;
     }
     const { displayName } = await authenticateStaff(userId);
