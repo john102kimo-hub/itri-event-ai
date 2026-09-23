@@ -1,6 +1,6 @@
 import {
   detectMetaIntent, matchEventByName, buildWelcomeFlex, buildRichMenuDefinition,
-  ALL_MENUS, REPORTER_MENU, STAFF_MENU
+  ALL_MENUS, REPORTER_MENU, STAFF_MENU, detectCourtesy, isOrgWideNewsAsk
 } from '../lib/menu.js';
 import { isExitStaffCommand } from '../lib/staff.js';
 
@@ -375,6 +375,29 @@ for (const t of [
   '最近有哪些活動', '近期活動', '其他活動', '還有哪些活動', '活動列表',
   '未來有什麼場次', '明天有哪些活動', '貴院最近有哪些活動', '你們最近有什麼活動'
 ]) eq(detectMetaIntent(t), 'calendar', `「${t}」還是要認得是查活動清單`);
+
+console.log('── 批次 72：收尾語整句才算，後面接著真問題的不算 ──');
+for (const t of ['謝謝', '好的謝謝', '謝謝米亞', '謝謝你', '謝啦', '感謝感謝', '收到謝謝', '好喔謝謝', '先這樣謝謝',
+  'Thank you!', 'thx', '太棒了', '很有幫助', '讚', '好的謝謝米亞🙏', '了解謝謝']) {
+  eq(detectCourtesy(t), 'thanks', `「${t}」是道謝`);
+}
+for (const t of ['了解', '瞭解', '知道了', '收到', 'OK', 'ok的', '好的', '好的收到', '沒問題', '沒事了', '不用了', '先這樣', '嗯嗯好']) {
+  eq(detectCourtesy(t), 'ack', `「${t}」是了解／收到`);
+}
+for (const t of ['你好', '好', '哈囉米亞', '謝謝，那成本呢', '收到新聞稿了嗎', '了解一下這技術', '謝謝你們的邀請',
+  '太棒了這技術', '很棒的活動', '是的', '辛苦了', '新陳代謝', '晶圓測試', 'OK鏡', '這場的重點']) {
+  eq(detectCourtesy(t), null, `「${t}」不是收尾語（後面有內容、或根本是別的東西）`);
+}
+eq(detectMetaIntent('好的謝謝'), 'thanks', 'detectMetaIntent 認得道謝');
+eq(detectMetaIntent('了解'), 'ack', 'detectMetaIntent 認得了解');
+
+console.log('── 批次 72：綁定中問新聞稿，是問「這一場」還是「全院」──');
+for (const t of ['有新聞稿嗎', '給我新聞稿', '新聞稿呢', '新聞稿發了嗎', '今天的新聞稿']) {
+  eq(isOrgWideNewsAsk(t), false, `「${t}」沒有指向全院 → 綁定中是在問這一場`);
+}
+for (const t of ['工研院最近有哪些新聞', '最新新聞稿', '最近的新聞稿', '有哪些新聞稿', '這個月的新聞', 'ITRI news']) {
+  eq(isOrgWideNewsAsk(t), true, `「${t}」指向全院／一段時間 → 全站最新新聞`);
+}
 
 console.log(`\n${fail === 0 ? '✅' : '❌'} 通過 ${pass}／失敗 ${fail}`);
 process.exit(fail === 0 ? 0 : 1);

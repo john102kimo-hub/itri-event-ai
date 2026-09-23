@@ -33,7 +33,7 @@
 import { AsyncLocalStorage } from 'async_hooks';
 import { readRange, appendRows, updateRange, ensureSheets } from '../lib/sheets.js';
 import { toTraditionalTW } from '../lib/zh-tw.js';
-import { buildSystemPrompt, resolveEventContent } from '../lib/prompt.js';
+import { buildSystemPrompt, resolveEventContent, formatEventBasics } from '../lib/prompt.js';
 import {
   readRawBody, verifySignature, replyOrPush as replyOrPushRaw, replyOrPushMessages, startLoading, pushImages,
   createRichMenu, uploadRichMenuImage, setDefaultRichMenu, listRichMenus, deleteRichMenu,
@@ -42,7 +42,7 @@ import {
 } from '../lib/line.js';
 import { buildCalendarCards, buildAllCalendarCards, routeIntent, formatCalendarReply, calendarQuickReplyItems } from '../lib/router.js';
 import {
-  detectMetaIntent, matchEventByName, HELP_TEXT, ORG_INTRO_TEXT, buildWelcomeFlex,
+  detectMetaIntent, detectCourtesy, isOrgWideNewsAsk, matchEventByName, HELP_TEXT, ORG_INTRO_TEXT, buildWelcomeFlex,
   buildRichMenuDefinition, ALL_MENUS, REPORTER_MENU, STAFF_MENU
 } from '../lib/menu.js';
 import {
@@ -90,6 +90,9 @@ function rowToEvent(row) {
     id: row[0], name: row[1], color: row[2] || '#0F9E7A',
     knowledge_base: row[3] || '', status: row[4] || 'active', event_date: row[5] || '',
     chips: row[6] || '', images: row[7] || '', organizer: row[9] || '工研院',
+    // L／M 欄（時間、地點）批次 72 之前沒讀——後台填了，答題的模型卻從來看不到，
+    // 記者問「幾點開始／在哪裡」只能拿到「這部分我沒有資料」。見 lib/prompt.js formatEventBasics()。
+    event_time: row[11] || '', venue: row[12] || '',
     press_contact: row[14] || '', contacts: row[15] || '', invite_letter: row[16] || '',
     invite_letter_chips: row[17] || ''
   };
@@ -1878,7 +1881,11 @@ async function answerQuestion(replyToken, userId, rawEvent, mediaName, text, { a
     console.error('selectRelatedEvents 失敗:', e.message);
   }
 
-  const rawReply = await askAnthropic(systemPrompt, text, history, { extraSystem: relatedBlock });
+  // 活動基本資料（日期／時間／地點／聯絡人＋現在時間）放在第二個、不吃快取的 system
+  // 區塊：現在時間每分鐘在變，放進第一塊會讓每一題都重建快取（見 formatEventBasics()）。
+  const basicsBlock = formatEventBasics(event);
+  const extraSystem = [basicsBlock, relatedBlock].filter(Boolean).join('\n\n');
+  const rawReply = await askAnthropic(systemPrompt, text, history, { extraSystem });
   // 標記一定要切掉（不管後面用不用得到那個關鍵詞），見 extractNoDataKeyword() 的 ⚠️。
   const { text: aiReply, keyword: noDataKeyword } = extractNoDataKeyword(rawReply);
   // 這場答不出來時，補查一次工研院官網新聞中心——回報的截圖就是這個洞（見
@@ -2409,6 +2416,19 @@ async function handleMetaIntent(replyToken, userId, text, metaIntent, binding, {
     await setContactPending(userId, '');
   }
 
+  if (metaIntent === 'thanks' || metaIntent === 'ack') {
+    // 收尾語（批次 72，見 lib/menu.js detectCourtesy()）。寫死一句、不呼叫模型：
+    // 以前綁定中說「謝謝」會送進 answerQuestion()，花一次 Sonnet、回一句「不客氣」再加
+    // 一行「內容僅供參考，以工研院官網新聞稿為準」，還被記進 qa_log 算成一題提問；
+    // 沒綁定時更糟，會被當成主題詞複誦（「『謝謝米亞』我可以從兩個方向幫您找」）。
+    // 按鈕照樣給：綁定中是這場的快速提問（他可能還想問），沒綁定是四條路。
+    const current = binding?.event_id ? await getEventById(binding.event_id) : null;
+    const chips = isUsable(current) ? eventQuickChips(current, { group })
+      : (group ? undefined : ['最近有哪些活動', '產業趨勢分析', '想問什麼技術', CONTACT_MENU_LABEL]);
+    await replyOrPush(replyToken, userId, COURTESY_REPLIES[metaIntent], chips);
+    return;
+  }
+
   if (metaIntent === 'help') {
     // ⚠️ 直接把影片送進對話裡播，不是丟一條連結（批次 46）。
     // 回報的原話：「影片現在是跳連結，有可能直接在對話傳或播影片嗎？不會有人特別
@@ -2463,6 +2483,20 @@ async function handleMetaIntent(replyToken, userId, text, metaIntent, binding, {
   }
 
   if (metaIntent === 'news') {
+    // ⚠️ 綁定中、而且句子沒有指向全院（「有新聞稿嗎」「給我新聞稿」「新聞稿呢」）——
+    // 問的是**這一場**的新聞稿，交給這一場回答（批次 72，見 lib/menu.js
+    // isOrgWideNewsAsk()）。這場答不出來時 answerQuestion() 自己會老實說還沒有、給
+    // 新聞聯絡人；活動前會說正式新聞稿當天發布（邀請函模式）——都比丟一份工研院
+    // 最新五則正確。批次 61 在 routeIntent() 那條路修過同一個症狀，這裡是規則層那條。
+    if (binding?.event_id && !isOrgWideNewsAsk(text)) {
+      const current = await getEventById(binding.event_id);
+      if (isUsable(current)) {
+        console.log(`[line] 綁定中問新聞稿 → 答這一場 event=${current.id} q="${text.slice(0, 40)}"`);
+        await answerQuestion(replyToken, userId, current, group ? '（群組提問）' : (binding.media_name || ''), text,
+          { group, memory: !group });
+        return;
+      }
+    }
     // 直接答，不用像 tech_query 那樣先問一次要哪個技術——記者問的就是「最近有哪些
     // 新聞」，答案是官網新聞中心的最新清單，本來就不需要關鍵字（見 answerLatestNews）。
     // 原話刻意照傳給模型（不像 industry_trend 那樣固定換成一句請求句）：這條規則接得
@@ -2678,7 +2712,13 @@ function looksLikeBareTopic(text) {
   const s = String(text || '').trim();
   // 一-鿿 是中日韓統一表意文字（常用中文字）；連同英數之外的字元一律不算
   // 主題詞——全形／半形標點、空白、表情符號都落在這個白名單外面，不用另外列。
-  return /^[一-鿿A-Za-z0-9]{2,8}$/.test(s) && !GREETING_RE.test(s) && !SENTENCE_RE.test(s);
+  // ⚠️ 批次 72：收尾語（「好的謝謝」「了解」）、閒聊（天氣、「答錯了」「測試一下」）、
+  // 帶著名字的招呼（「哈囉米亞」「早安米亞」）也都是 2～8 個字、沒有疑問詞——之前全部
+  // 被當成主題詞複誦。群組守門那邊也靠這支判斷「剛答完趨勢後的裸名詞追問」，放行了
+  // 「好的謝謝」就等於在別人的群組裡插一句「不客氣」。
+  const core = s.replace(/米亞/g, '');
+  return /^[一-鿿A-Za-z0-9]{2,8}$/.test(s) && !!core && !GREETING_RE.test(core) && !SENTENCE_RE.test(s)
+    && !detectCourtesy(s) && !detectChitchat(s);
 }
 
 // ── 風趣兜底：天氣／告白這種「連四條路都不用比」的閒聊（批次 62）───────────────
@@ -2724,6 +2764,13 @@ const CHITCHAT_COMPLIMENT_RE = /(你好聰明|妳好聰明|你好棒|妳好棒|�
 // 你是什麼」這種問法，不含「AI」「機器人」這幾個字，兩邊不會對同一句話有不同答案。
 const CHITCHAT_AI_IDENTITY_RE = /(你是不是ai|妳是不是ai|你是ai嗎|妳是ai嗎|你是不是機器人|妳是不是機器人|你是機器人嗎|妳是機器人嗎|你會不會被取代|妳會不會被取代|你會不會失業|妳會不會失業|你是真人嗎|妳是真人嗎)/i;
 const CHITCHAT_CARE_RE = /(辛苦了|你會累嗎|妳會累嗎|你累不累|妳累不累|你不用休息嗎|妳不用休息嗎|你要不要休息|妳要不要休息)/;
+// 批次 72 新增：「答錯了／看不懂／再說一次／太長了」這種**對上一則答案的反應**，以及
+// 「測試一下」。盤點時整批丟進規則層，沒綁定時全部被 looksLikeBareTopic() 當成主題詞
+// 複誦（「『答錯了』我可以從兩個方向幫您找」）。綁定中不會走到這裡——那時它們會連同
+// 上一輪對話一起交給 answerQuestion()，模型可以真的重答、縮短；只有「沒有上一輪可以
+// 改」的時候才需要這一句。整句錨定，後面還接著問題的（「不對，我是問成本」）不算。
+const CHITCHAT_REPAIR_RE = /^(米亞)?[\s，,]*(你|妳)?(答錯了|回答錯了|講錯了|說錯了|不對|不是這個|不是這樣|我不是問這個|不是問這個|看不懂|聽不懂|什麼意思|甚麼意思|啥意思|再說一次|再講一次|講清楚一點|說清楚一點|太長了|太長|簡短一點|短一點|講重點|說重點)(啦|喔|吧|耶|欸)?[\s\p{P}\p{S}]*$/u;
+const CHITCHAT_TEST_RE = /^(米亞)?[\s，,]*(測試|test|testing)(一下|測試|中|看看|\d+)*[\s\p{P}\p{S}]*$/iu;
 
 function detectChitchat(text) {
   const s = String(text || '').trim();
@@ -2733,6 +2780,8 @@ function detectChitchat(text) {
   if (CHITCHAT_COMPLIMENT_RE.test(s)) return 'compliment';
   if (CHITCHAT_AI_IDENTITY_RE.test(s)) return 'ai_identity';
   if (CHITCHAT_CARE_RE.test(s)) return 'care';
+  if (CHITCHAT_REPAIR_RE.test(s)) return 'repair';
+  if (CHITCHAT_TEST_RE.test(s)) return 'test';
   if (CHITCHAT_WEATHER_RE.test(s)) return 'weather';
   return null;
 }
@@ -2758,7 +2807,17 @@ const CHITCHAT_FIXED_REPLIES = {
   persona: '我是米亞，工研院的公關小特派 🙂 個性走直球型，想到什麼就講什麼，不拐彎抹角。平常最愛做的事就是幫記者把記者會內容、產業趨勢、工研院技術、媒體邀訪窗口這幾件事搞定。如果超出我理解的問題，請見諒QQ，或是可以聯絡我的同事們為您解答:)',
   compliment: '謝謝誇獎，我會繼續加油 💪 不過真正厲害的是工研院這些技術跟記者會內容，我只是負責幫你講清楚——這幾類的問題我最樂意接。',
   ai_identity: '是啊，我是 AI 沒錯 😄 不過我這個 AI 比較專一，只認真做記者會、產業趨勢跟工研院技術這幾件事，這幾類的問題我最拿手。',
-  care: '謝謝你這麼貼心 😊 我是 AI 不會累，隨時都能幫你查記者會、產業趨勢跟工研院技術這幾件事，有需要儘管找我。'
+  care: '謝謝你這麼貼心 😊 我是 AI 不會累，隨時都能幫你查記者會、產業趨勢跟工研院技術這幾件事，有需要儘管找我。',
+  // 批次 72 新增的兩句，同樣請朱朱審過語氣再定稿（見 LINE-PLAN.md 批次 72）
+  repair: '不好意思，剛剛可能沒答到你要的 🙏 麻煩換個說法再問我一次；想問某一場記者會，直接打活動名稱最準，我會照那一場的資料重新回答。',
+  test: '收到，我在線上 🙂 想問記者會、產業趨勢、工研院技術，或要找採訪窗口，直接打給我就可以。'
+};
+
+// 收尾語的固定回覆（批次 72，見 lib/menu.js detectCourtesy()）。不呼叫模型——
+// 一句「不客氣」不值得一次 Sonnet，更不該掛上「內容僅供參考」的警語。
+const COURTESY_REPLIES = {
+  thanks: '不客氣 🙂 之後想到什麼，直接打給我就好。',
+  ack: '好的 🙂 還有想問的，隨時打給我。'
 };
 
 // 任何 routeIntent() 判不出來的訊息最後都會走到這裡（1 對 1 的 handleUnbound()、
@@ -2846,6 +2905,13 @@ async function sendFallbackGuide(replyToken, targetId, text, { staff = false } =
   // 天氣／告白／問個性這種閒聊：不呼叫 Haiku，直接送寫死的俏皮話（見上方
   // CHITCHAT_FIXED_REPLIES 的說明）。放在 looksLikeBareTopic 之前，因為裸主題詞判斷
   // 同樣會誤收「天氣」兩個字。
+  // 收尾語：記者端早在 detectMetaIntent() 就攔下了，會走到這裡的是職員模式借道
+  // （職員那邊不經過 handleMetaIntent() 的這個分支）。
+  const courtesy = detectCourtesy(text);
+  if (courtesy) {
+    await replyOrPush(replyToken, targetId, COURTESY_REPLIES[courtesy] + staffTail, chips);
+    return;
+  }
   const chitchat = detectChitchat(text);
   if (chitchat) {
     await replyOrPush(replyToken, targetId, CHITCHAT_FIXED_REPLIES[chitchat] + staffTail, chips);

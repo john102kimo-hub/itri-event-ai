@@ -19,7 +19,13 @@
     --font: 'PingFang TC','Noto Sans TC','Microsoft JhengHei',sans-serif;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: var(--font); background: var(--bg); color: var(--text); height: 100dvh; display: flex; flex-direction: column; }
+  body { font-family: var(--font); background: var(--bg); color: var(--text); height: 100dvh; display: flex; flex-direction: column; overflow: hidden; }
+
+  /* 批次 72：固定在畫面上的只剩 header、進度條、作答區，其餘全部在這一塊裡捲。
+     舊版說明卡與媒體橫幅整場都佔著固定高度，iPhone 上作答時對話區只剩兩百多 px。 */
+  #scroller { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; -webkit-overflow-scrolling: touch; }
+  /* 開始後說明卡就功成身退——它講的是「開始前要知道的事」，留著只是佔掉對話的位置 */
+  body.started #info-card { display: none; }
 
   #header {
     background: var(--primary);
@@ -31,10 +37,13 @@
     box-shadow: 0 2px 8px rgba(0,0,0,0.15);
     flex-shrink: 0;
   }
-  #header h1 { font-size: 1.1rem; font-weight: 700; }
-  #header p { font-size: 0.78rem; opacity: 0.85; margin-top: 1px; }
+  /* 活動名稱常常很長（「經濟部四足機器人國產研發平台發表記者會」），手機上折成兩行
+     會把 header 撐到將近 100px、右邊的按鈕被擠成直排三個字。收成一行、超出用省略號。 */
+  #header-text { flex: 1; min-width: 0; }
+  #header h1 { font-size: 1.1rem; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #header p { font-size: 0.78rem; opacity: 0.85; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   #back-link {
-    margin-left: auto;
+    margin-left: auto; white-space: nowrap; flex-shrink: 0;
     color: rgba(255,255,255,0.8);
     font-size: 0.82rem;
     text-decoration: none;
@@ -72,12 +81,12 @@
   #progress-track { height: 6px; background: var(--border); border-radius: 3px; }
   #progress-fill { height: 100%; background: var(--primary); border-radius: 3px; transition: width 0.4s; width: 0%; }
 
-  /* Chat */
+  /* Chat —— 捲動交給外層的 #scroller，這裡只負責排版 */
   #messages {
-    flex: 1; overflow-y: auto;
     padding: 12px 16px 16px;
     display: flex; flex-direction: column; gap: 14px;
   }
+  #messages:empty { display: none; }
   .msg { display: flex; gap: 10px; align-items: flex-start; }
   .msg.user { flex-direction: row-reverse; }
   .avatar {
@@ -325,6 +334,36 @@
   }
   #outlet-banner b { color: var(--text); }
   #outlet-banner .sim { display: block; margin-top: 4px; font-size: .7rem; color: #9ca3af; }
+  #outlet-banner { margin-top: 12px; flex-shrink: 0; }
+
+  /* 題數：3 題快速／5 題完整。主管的時間是零碎的，門檻降下來才會有第二次。 */
+  #qcount-picker { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; max-width: 380px; }
+  .q-chip {
+    border: 1.5px solid var(--border); background: #fff; border-radius: 10px;
+    padding: 8px 14px; cursor: pointer; font-family: var(--font); color: var(--text);
+    font-size: .85rem; line-height: 1.35; text-align: center;
+  }
+  .q-chip b { display: block; font-size: .9rem; }
+  .q-chip span { font-size: .72rem; color: var(--muted); }
+  .q-chip.on { border-color: var(--primary); background: var(--primary-light); }
+  .q-chip.on b { color: var(--primary); }
+
+  /* 上次練習（存在這台裝置上）：看得到自己上次卡在哪，才會想再練一次 */
+  #last-session, #resume-box {
+    width: 100%; max-width: 380px; background: #fff; border: 1px solid var(--border);
+    border-radius: 10px; padding: 10px 14px; font-size: .8rem; line-height: 1.6; color: var(--muted);
+  }
+  #last-session b, #resume-box b { color: var(--text); }
+  #resume-box { border-color: var(--primary); border-left-width: 3px; }
+  .resume-actions { display: flex; gap: 10px; align-items: center; margin-top: 8px; }
+  #resume-btn {
+    background: var(--primary); color: #fff; border: none; border-radius: 8px; padding: 8px 16px;
+    font-family: var(--font); font-size: .88rem; font-weight: 700; cursor: pointer;
+    display: flex; align-items: center; gap: 6px;
+  }
+
+  /* 等太久時的一句話。打點點轉二十秒，人會以為當掉了。 */
+  .wait-hint { display: block; margin-top: 6px; font-size: .74rem; opacity: .75; }
 
   /* 連線失敗時的重試。沒有這顆按鈕，一次網路中斷就毀掉整場五題的演練。 */
   .retry-btn {
@@ -340,28 +379,47 @@
     cursor: pointer;
     display: flex; align-items: center; gap: 8px;
     transition: background 0.2s;
+    /* 手機上開始畫面比一個螢幕高（身分五顆＋題數＋兩個欄位），舊版這顆按鈕在畫面外，
+       要往下捲才知道有它。黏在捲動區底部，不論捲到哪都看得到。 */
+    position: sticky; bottom: 12px; z-index: 2;
+    box-shadow: 0 4px 14px rgba(232,93,4,0.35);
   }
   #start-btn:hover { background: var(--primary-dark); }
 
-  /* 結束畫面 */
+  /* 結束畫面——在捲動區裡，跟對話接在一起，不再是一塊把對話擠扁的固定區塊 */
   #end-screen {
     display: none;
-    padding: 30px 20px;
+    margin: 4px 16px 24px; padding: 22px 18px;
+    background: #fff; border: 1px solid var(--border); border-radius: var(--radius);
     text-align: center;
     flex-shrink: 0;
   }
-  #end-screen .trophy { font-size: 52px; margin-bottom: 12px; }
-  #end-screen h2 { font-size: 1.3rem; margin-bottom: 8px; }
-  #end-screen p { color: var(--muted); font-size: 0.9rem; margin-bottom: 20px; }
-  #restart-btn {
-    background: var(--primary); color: white;
-    border: none; border-radius: 10px;
-    padding: 12px 28px;
-    font-family: var(--font); font-size: 0.95rem; font-weight: 600;
-    cursor: pointer;
-    transition: background 0.2s;
+  #end-screen .trophy { font-size: 44px; margin-bottom: 6px; }
+  #end-screen h2 { font-size: 1.25rem; margin-bottom: 6px; }
+  #end-avg { font-weight: 700; color: var(--primary); font-size: 1.05rem; margin-bottom: 14px; }
+  #report-body { text-align: left; font-size: .88rem; line-height: 1.7; }
+  #report-body h3 { font-size: .92rem; margin: 14px 0 6px; color: var(--text); }
+  #report-body ol { padding-left: 1.3em; }
+  #report-body li { margin-bottom: 4px; }
+  #report-body blockquote {
+    margin: 0; padding: 8px 12px; border-left: 3px solid var(--primary);
+    background: var(--primary-light); border-radius: 6px; font-weight: 600;
   }
+  #report-body .q-row { display: flex; gap: 8px; align-items: baseline; padding: 6px 0; border-top: 1px dashed var(--border); }
+  #report-body .q-row:first-child { border-top: none; }
+  #report-body .q-score { font-weight: 800; color: var(--primary); min-width: 2.6em; }
+  #report-body .q-score.low { color: #dc2626; }
+  #report-body .q-meta { font-size: .74rem; color: var(--muted); }
+  #report-body .q-text { flex: 1; min-width: 0; }
+  .end-actions { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin-top: 14px; }
+  .end-actions button {
+    border-radius: 10px; padding: 10px 16px; font-family: var(--font); font-size: .88rem; font-weight: 700;
+    cursor: pointer; display: flex; align-items: center; gap: 6px;
+    background: #fff; color: var(--primary); border: 1.5px solid var(--primary);
+  }
+  #restart-btn { background: var(--primary); color: white; border-color: var(--primary); }
   #restart-btn:hover { background: var(--primary-dark); }
+  #copy-note { font-size: .78rem; color: #0F9E7A; min-height: 1em; margin-top: 8px; }
 
   /* Loading */
   #loading {
@@ -385,16 +443,11 @@
 
 <div id="header">
   <i class="ti ti-microphone" style="font-size:26px"></i>
-  <div>
+  <div id="header-text">
     <h1 id="event-title">媒體訓練模式</h1>
     <p id="event-subtitle">AI 記者實戰演練</p>
   </div>
-  <a id="back-link" href="#"><i class="ti ti-arrow-left"></i> 母後台</a>
-</div>
-
-<div id="info-card">
-  <i class="ti ti-info-circle"></i>
-  <span>AI 將扮演犀利記者向您提問，<strong>直接用講的回答就好</strong>，不用打字。每題請在 <strong>30 秒到 1 分鐘內把重點講完</strong>——這是記者真正用得到的長度。每題回答後 AI 會就您講的內容與長度評分。共 <strong>5 題</strong>。</span>
+  <a id="back-link" href="/"><i class="ti ti-arrow-left"></i> <span id="back-label">回後台</span></a>
 </div>
 
 <div id="progress-bar">
@@ -405,21 +458,57 @@
   <div id="progress-track"><div id="progress-fill"></div></div>
 </div>
 
-<div id="outlet-banner"></div>
+<!-- 批次 72：說明卡、媒體橫幅、對話、開始區、結算報告全部放進同一個捲動區。
+     舊版它們各自佔一塊固定高度，手機上作答時對話區只剩兩百多 px，評分泡泡幾乎看不到。 -->
+<div id="scroller">
+  <div id="info-card">
+    <i class="ti ti-info-circle"></i>
+    <span>AI 將扮演犀利記者向您提問，<strong>直接用講的回答就好</strong>，不用打字。每題請在 <strong>30 秒到 1 分鐘內把重點講完</strong>——這是記者真正用得到的長度。每題回答後 AI 會就您講的內容與長度評分。題數可選 <strong>3 題（快速）</strong>或 <strong>5 題（完整）</strong>，練完會給您一份帶得走的重點。</span>
+  </div>
 
-<div id="messages"></div>
+  <div id="outlet-banner"></div>
 
-<div id="start-area">
-  <div id="who-ask">開始前先告訴 AI 記者，今天受訪的是誰——<b>題目會跟著您的職務換一批</b>。
-    院長被問的跟計畫主持人被問的，本來就不是同一批問題。</div>
-  <div id="role-picker"></div>
-  <input id="trainee-input" type="text" maxlength="40"
-         placeholder="您的姓名／職稱（選填，方便主管追蹤訓練紀錄）">
-  <input id="focus-input" type="text" maxlength="60"
-         placeholder="您負責的題目／領域（選填，例如：固態電池）">
-  <button id="start-btn">
-    <i class="ti ti-player-play"></i> 開始媒體訓練
-  </button>
+  <div id="messages"></div>
+
+  <div id="start-area">
+    <!-- 上次練到一半就中斷（重新整理、切去設定開麥克風權限、來電）時，讓他接著練 -->
+    <div id="resume-box" style="display:none">
+      <div id="resume-text"></div>
+      <div class="resume-actions">
+        <button id="resume-btn" type="button"><i class="ti ti-player-play"></i> 接著練</button>
+        <button id="discard-btn" type="button" class="link-btn">重新開始</button>
+      </div>
+    </div>
+    <div id="last-session" style="display:none"></div>
+    <div id="who-ask">開始前先告訴 AI 記者，今天受訪的是誰——<b>題目會跟著您的職務換一批</b>。
+      院長被問的跟計畫主持人被問的，本來就不是同一批問題。</div>
+    <div id="role-picker"></div>
+    <div id="qcount-picker"></div>
+    <input id="trainee-input" type="text" maxlength="40"
+           placeholder="您的姓名／職稱（選填，方便主管追蹤訓練紀錄）">
+    <input id="focus-input" type="text" maxlength="60"
+           placeholder="您負責的題目／領域（選填，例如：固態電池）">
+    <button id="start-btn">
+      <i class="ti ti-player-play"></i> 開始媒體訓練
+    </button>
+  </div>
+
+  <!-- 結算畫面。舊版只有一個平均分和一句「請參考各題的評分建議」，主管離開頁面就什麼都不剩。 -->
+  <div id="end-screen">
+    <div class="trophy">🎯</div>
+    <h2>訓練完成！</h2>
+    <p id="end-avg"></p>
+    <div id="report-body"></div>
+    <div class="end-actions">
+      <button id="copy-report-btn" type="button"><i class="ti ti-copy"></i> 複製重點</button>
+      <button id="download-report-btn" type="button"><i class="ti ti-download"></i> 下載完整紀錄</button>
+    </div>
+    <p id="copy-note"></p>
+    <div class="end-actions">
+      <button id="drill-btn" type="button"><i class="ti ti-target"></i> 最低分那題，再答一次</button>
+      <button id="restart-btn" type="button"><i class="ti ti-refresh"></i> 再練一場</button>
+    </div>
+  </div>
 </div>
 
 <div id="input-area" class="voice" style="display:none">
@@ -463,14 +552,6 @@
   </div>
 </div>
 
-<div id="end-screen">
-  <div class="trophy">🎯</div>
-  <h2>訓練完成！</h2>
-  <p id="end-avg" style="font-weight:700;color:var(--primary);font-size:1.05rem;margin-bottom:6px"></p>
-  <p>您已完成本次媒體訓練。請參考各題的評分建議，調整您的發言策略。</p>
-  <button id="restart-btn"><i class="ti ti-refresh"></i> 再練一次</button>
-</div>
-
 <script>
 const params = new URLSearchParams(location.search);
 let eventId = params.get('id');
@@ -479,7 +560,18 @@ const TRAINING_CODE = params.get('code') || '';
 const TRAINING_PWD = sessionStorage.getItem('itri_pwd') || '';
 let reporterHist = [];  // 記者對話歷程
 let questionCount = 0;
-const MAX_Q = 5;
+// 這一場幾題。開始畫面讓主管選 3（快速）或 5（完整）——主管的時間是零碎的，
+// 固定 5 題（約 10 分鐘）的門檻，會讓「再練一次」永遠排不進行程（批次 70 待辦第 1 項）。
+const Q_OPTIONS = [
+  { n: 3, label: '3 題・快速', hint: '約 6 分鐘' },
+  { n: 5, label: '5 題・完整', hint: '約 10 分鐘' },
+];
+const Q_LS_KEY = 'itri_training_q_total';
+let MAX_Q = 5;
+// 「最低分那題，再答一次」：同一家媒體、同一題，只練這一題。不寫進演練紀錄
+// （它是一場演練的延伸，不是新的一場——「演練場次」不該被它灌水）。
+let isDrill = false;
+let drillPrevScore = null;
 let isWaiting = false;
 let awaitingAnswer = false; // 等待使用者回答
 let eventName = '工研院活動';
@@ -488,6 +580,17 @@ let eventName = '工研院活動';
 // AI 格式漂移時才會發生）。只在真的走到終畫面（5 題全部答完）才會送去記錄——
 // 中途離開的不算一場，見 startTraining()／submitAnswer() 裡的說明。
 let sessionScores = [];
+
+// 這一場畫面上出現過的每一則（記者題目 q／主管作答 a／訓練師評分 e），照順序記下來。
+// 三個用途：終畫面的「帶得走」報告、複製／下載紀錄、重新整理之後接著練。
+// ⚠️ 只在「新內容第一次出現」時記（見 addReporterMsg 等的 log 參數），接著練時
+// 重畫舊內容不能再記一次，不然每重新整理一次，報告就多一份重複的題目。
+let sessionLog = [];
+let sessionStartedAt = 0;
+// 送出了但還沒拿到結果的那一步：{ kind: 'eval', seconds, viaVoice } 或 { kind: 'question' }。
+// 重新整理之後靠它知道要補哪一步——回答已經送出、評分還沒回來時，接著練要直接補評分，
+// 不能叫主管把那一題重講一遍。
+let pendingStep = null;
 
 // ── 語音作答狀態 ─────────────────────────────────────────────────────
 // 'voice' | 'type'。記在瀏覽器裡，下次進來維持上次的選擇——在開放空間不方便
@@ -579,9 +682,290 @@ function showOutletBanner(outlet) {
   el.style.display = 'block';
 }
 
+// ── 題數 ─────────────────────────────────────────────────────────────
+function renderQPicker() {
+  document.getElementById('qcount-picker').innerHTML = Q_OPTIONS.map((o) =>
+    `<button type="button" class="q-chip${o.n === MAX_Q ? ' on' : ''}" data-n="${o.n}">`
+    + `<b>${escHtml(o.label)}</b><span>${escHtml(o.hint)}</span></button>`).join('');
+  updateProgress();
+}
+function pickQ(n) {
+  if (!Q_OPTIONS.some((o) => o.n === n)) return;
+  MAX_Q = n;
+  lsSet(Q_LS_KEY, String(n));
+  renderQPicker();
+}
+
+// ── 練到一半中斷，回來接著練（批次 72）─────────────────────────────────
+// iPhone 上這件事比想像中常發生：麥克風權限被擋 → 照提示去「設定」打開 → 回到 Safari
+// 時分頁被重新載入；練到一半來電；手滑按到「回後台」。舊版全部等於從第一題重來，
+// 而批次 70 才剛修掉「網路抖一下就毀掉整場」——重新整理是同一種傷害，只是換了個入口。
+//
+// 存在 sessionStorage（不是 localStorage）：關掉分頁就該結束，只有「同一個分頁重新
+// 載入」才接得回來。存不了（無痕模式、容量滿）就算了，行為跟改之前一模一樣。
+const SESSION_SS_PREFIX = 'itri_training_session:';
+const sessionKey = () => SESSION_SS_PREFIX + (eventId || '');
+function saveSession() {
+  if (isDrill) return;   // 單題重練不值得接著練，也不要蓋掉剛結束那場的狀態
+  try {
+    sessionStorage.setItem(sessionKey(), JSON.stringify({
+      v: 1, eventId, total: MAX_Q, questionCount, reporterHist, sessionScores,
+      voiceAnswerCount, sessionOutlet, role: traineeRole, log: sessionLog,
+      pending: pendingStep, startedAt: sessionStartedAt, savedAt: Date.now(),
+    }));
+  } catch (e) { /* 存不了就算了 */ }
+}
+function clearSavedSession() {
+  try { sessionStorage.removeItem(sessionKey()); } catch (e) {}
+}
+function loadSavedSession() {
+  try {
+    const s = JSON.parse(sessionStorage.getItem(sessionKey()) || 'null');
+    if (!s || s.v !== 1 || s.eventId !== eventId) return null;
+    if (!Array.isArray(s.reporterHist) || !Array.isArray(s.log) || !s.log.length) return null;
+    if (Date.now() - (s.savedAt || 0) > 6 * 60 * 60 * 1000) return null;  // 半天前的就不要了
+    return s;
+  } catch (e) { return null; }
+}
+function offerResume() {
+  const s = loadSavedSession();
+  if (!s) return;
+  const answered = s.log.filter((x) => x.k === 'e').length;
+  document.getElementById('resume-text').innerHTML =
+    `<b>剛才那場還沒練完</b>（${escHtml(String(answered))} / ${escHtml(String(s.total))} 題已評分`
+    + `${s.sessionOutlet && s.sessionOutlet.name ? `，《${escHtml(s.sessionOutlet.name)}》來訪` : ''}）。`
+    + '<br>可能是重新整理、切去設定開麥克風，或來了一通電話——進度都還在。';
+  document.getElementById('resume-box').style.display = 'block';
+}
+function restoreSession(s) {
+  document.getElementById('resume-box').style.display = 'none';
+  MAX_Q = s.total || 5;
+  questionCount = s.questionCount || 0;
+  reporterHist = s.reporterHist || [];
+  sessionScores = s.sessionScores || [];
+  voiceAnswerCount = s.voiceAnswerCount || 0;
+  sessionOutlet = s.sessionOutlet || null;
+  if (ROLES.some((r) => r.id === s.role)) traineeRole = s.role;
+  sessionLog = s.log || [];
+  sessionStartedAt = s.startedAt || Date.now();
+  pendingStep = s.pending || null;
+  isDrill = false;
+
+  enterTrainingLayout();
+  if (sessionOutlet) showOutletBanner(sessionOutlet);
+  for (const entry of sessionLog) renderEntry(entry);
+  updateProgress();
+
+  // 斷在哪一步，就從哪一步接：評分還沒回來 → 補評分；下一題還沒出來 → 補出題；
+  // 否則就是在等他回答。
+  if (pendingStep && pendingStep.kind === 'eval') {
+    const p = pendingStep;
+    showRetry('剛才送出的回答還沒評分完成，按下面接著評分（不用重講）。', () => evaluateAnswer(p.seconds, p.viaVoice));
+  } else if (pendingStep && pendingStep.kind === 'question') {
+    showRetry('下一題還沒出來，按下面接著走。', askNextQuestion);
+  } else if (!reporterHist.length || reporterHist[reporterHist.length - 1].role !== 'assistant') {
+    showRetry('按下面接著出題。', askNextQuestion);
+  } else {
+    enableAnswering();
+  }
+}
+
+// ── 上次練習（存在這台裝置上）───────────────────────────────────────────
+// training_log 在後端存了，但主管自己看不到（批次 70 待辦第 3 項）。這裡只記在瀏覽器：
+// 不用登入、不多打一次 Sheets，要的只是「上次卡在哪、這次有沒有進步」這一眼。
+const HISTORY_LS_KEY = 'itri_training_history';
+function loadHistory() {
+  try { const h = JSON.parse(localStorage.getItem(HISTORY_LS_KEY) || '[]'); return Array.isArray(h) ? h : []; }
+  catch (e) { return []; }
+}
+function rememberHistory(item) {
+  const h = loadHistory();
+  h.push(item);
+  try { localStorage.setItem(HISTORY_LS_KEY, JSON.stringify(h.slice(-10))); } catch (e) {}
+}
+function renderLastSession() {
+  const h = loadHistory().filter((x) => x && x.eventId === eventId && x.avg != null);
+  const el = document.getElementById('last-session');
+  if (!h.length) { el.style.display = 'none'; return; }
+  const last = h[h.length - 1];
+  const d = new Date(last.at || 0);
+  const when = isNaN(d.getTime()) ? '' : `${d.getMonth() + 1}/${d.getDate()}`;
+  const trend = h.length >= 2 ? `<br>最近 ${Math.min(h.length, 3)} 次平均：${h.slice(-3).map((x) => escHtml(String(x.avg))).join(' → ')}` : '';
+  el.innerHTML = `<b>上次練習</b>（${escHtml(when)}${last.outlet ? `・${escHtml(last.outlet)}` : ''}・${escHtml(String(last.total))} 題）平均 <b>${escHtml(String(last.avg))}</b> 分`
+    + (last.fix ? `<br>上次最該改的：${escHtml(last.fix)}` : '') + trend;
+  el.style.display = 'block';
+}
+
+// ── 結算報告：帶得走的重點（批次 72）─────────────────────────────────────
+// 批次 70 待辦第 2 項：「終畫面只有平均分和一句『請參考各題的評分建議』，主管離開頁面
+// 就什麼都不剩」。媒體訓練真正的產出不是分數，是「下次上台前要記得的三件事」和「一句
+// 可以直接拿去用的話」——這兩樣都已經在每一題的評語裡了，只是散在五個泡泡裡沒人整理。
+//
+// ⚠️ 刻意不再多打一次模型做「總評」：評語是訓練師看著逐字稿寫的，這裡只做整理——
+// 從評語裡挑、排序、去重，不生成任何新的說法。多一次呼叫就多一個會失敗、會等的地方，
+// 而且總評寫出評語裡沒有的東西時，主管分不出哪一句是真的根據他的回答。
+
+/** 評語裡「標題：」後面那一段的第一條（「• 」「・」「- 」開頭的項目）。 */
+function firstBulletAfter(text, head) {
+  const lines = String(text || '').split('\n');
+  const i = lines.findIndex((l) => l.trim().startsWith(head));
+  if (i < 0) return '';
+  for (let j = i + 1; j < lines.length; j++) {
+    const t = lines[j].trim();
+    if (!t) continue;
+    const m = t.match(/^[•・\-*＊●]\s*(.+)$/);
+    return m ? m[1].trim() : '';
+  }
+  return '';
+}
+/** 「可直接引用的一句：」下一行（或同一行冒號後）的內容；佔位說明、找不到的聲明一律當沒有。 */
+function quoteAfter(text) {
+  const m = String(text || '').match(/可直接引用的一句[：:][ \t]*\n?[ \t]*([^\n]+)/);
+  if (!m) return '';
+  const q = m[1].trim().replace(/^[「『"]+|[」』"]+$/g, '').trim();
+  if (!q || /^[（(]/.test(q) || /沒有能單獨引用|40 ?字以內/.test(q)) return '';
+  return q;
+}
+
+/** 把 sessionLog 整理成「一題一列」。 */
+function collectRounds() {
+  const rounds = [];
+  let cur = null;
+  for (const e of sessionLog) {
+    if (e.k === 'q') { cur = { q: e.text, a: '', sec: 0, voice: false, evalText: '', score: null }; rounds.push(cur); }
+    else if (e.k === 'a' && cur) { cur.a = e.text; cur.sec = e.sec || 0; cur.voice = !!e.voice; }
+    else if (e.k === 'e' && cur) { cur.evalText = e.text; cur.score = e.score; }
+  }
+  return rounds.filter((r) => r.evalText);
+}
+
+function buildReport() {
+  const rounds = collectRounds();
+  const scores = rounds.map((r) => r.score).filter((s) => s != null);
+  const avg = scores.length ? Math.round((scores.reduce((a, b) => a + b, 0) / scores.length) * 10) / 10 : null;
+  // 最該改的三件事：從分數最低的題目開始，取各題「改進建議」的第一條，去重後取三條。
+  // 第一條是訓練師認為最重要的那一條（語音場次的 prompt 甚至規定超時要寫在第一條）。
+  const byLow = [...rounds].sort((a, b) => (a.score ?? 99) - (b.score ?? 99));
+  const fixes = [];
+  for (const r of byLow) {
+    const f = firstBulletAfter(r.evalText, '改進建議');
+    if (f && !fixes.includes(f)) fixes.push(f);
+    if (fixes.length >= 3) break;
+  }
+  // 最好的一句：分數最高那題的「可直接引用的一句」
+  const withQuote = rounds.filter((r) => quoteAfter(r.evalText));
+  const best = withQuote.sort((a, b) => (b.score ?? -1) - (a.score ?? -1))[0];
+  const low = byLow.find((r) => r.score != null) || null;
+  return { rounds, avg, fixes, bestQuote: best ? quoteAfter(best.evalText) : '', low };
+}
+
+function shortQ(q) {
+  const s = String(q || '').replace(/\s+/g, ' ').trim();
+  return s.length > 60 ? s.slice(0, 60) + '…' : s;
+}
+
+function renderReport() {
+  const rep = buildReport();
+  const body = document.getElementById('report-body');
+  const parts = [];
+  if (isDrill && drillPrevScore != null && rep.rounds[0] && rep.rounds[0].score != null) {
+    const now = rep.rounds[0].score;
+    const diff = Math.round((now - drillPrevScore) * 10) / 10;
+    parts.push(`<h3>這一題：${escHtml(String(drillPrevScore))} → ${escHtml(String(now))} 分</h3>`
+      + `<p>${diff > 0 ? `進步了 ${escHtml(String(diff))} 分 👍` : diff === 0 ? '跟上次一樣，對照下面的建議再調一次看看。' : '這次比上次低，對照下面的建議再調一次看看。'}</p>`);
+  }
+  if (rep.fixes.length) {
+    parts.push(`<h3>最該改的${['', '一', '兩', '三'][rep.fixes.length]}件事</h3><ol>` + rep.fixes.map((f) => `<li>${escHtml(f)}</li>`).join('') + '</ol>');
+  }
+  if (rep.bestQuote) {
+    parts.push(`<h3>可以直接拿去用的一句</h3><blockquote>「${escHtml(rep.bestQuote)}」</blockquote>`);
+  }
+  if (rep.rounds.length > 1) {
+    parts.push('<h3>各題分數</h3>' + rep.rounds.map((r, i) =>
+      `<div class="q-row"><span class="q-score${r.score != null && r.score < 6 ? ' low' : ''}">${r.score != null ? escHtml(String(r.score)) : '—'}</span>`
+      + `<span class="q-text">${escHtml(shortQ(r.q))}<br><span class="q-meta">第 ${i + 1} 題${r.voice && r.sec ? `・用講的 ${fmtTime(r.sec)}${r.sec > TARGET_MAX_SEC ? '（超時）' : ''}` : ''}</span></span></div>`).join(''));
+  }
+  body.innerHTML = parts.join('') || '<p>請參考各題的評分建議，調整您的發言策略。</p>';
+  document.getElementById('end-avg').textContent = rep.avg != null
+    ? `${isDrill ? '這一題' : '本次平均分'}：${rep.avg} / 10${!isDrill && voiceAnswerCount ? `（${voiceAnswerCount} / ${rep.rounds.length} 題用講的）` : ''}`
+    : '';
+  // 至少答了兩題、而且真的有分數，「再答一次」才有意義；單題重練完就不再疊一層
+  document.getElementById('drill-btn').style.display = (!isDrill && rep.low && rep.rounds.length > 1) ? '' : 'none';
+  document.getElementById('copy-note').textContent = '';
+  return rep;
+}
+
+/** 給人貼到 LINE／Email 的純文字版重點（不是完整紀錄）。 */
+function reportText(full) {
+  const rep = buildReport();
+  const d = new Date(sessionStartedAt || Date.now());
+  const head = [
+    `【媒體訓練紀錄】${eventName}`,
+    `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`
+      + `${sessionOutlet && sessionOutlet.name ? `｜《${sessionOutlet.name}》來訪（模擬）` : ''}`
+      + `｜${rep.rounds.length} 題${rep.avg != null ? `｜平均 ${rep.avg} 分` : ''}`,
+  ];
+  const trainee = document.getElementById('trainee-input').value.trim();
+  if (trainee) head.push(`受訓者：${trainee}`);
+  const out = [head.join('\n')];
+  if (rep.fixes.length) out.push(`最該改的${['', '一', '兩', '三'][rep.fixes.length]}件事\n` + rep.fixes.map((f, i) => `${i + 1}. ${f}`).join('\n'));
+  if (rep.bestQuote) out.push(`可以直接拿去用的一句\n「${rep.bestQuote}」`);
+  out.push('各題\n' + rep.rounds.map((r, i) =>
+    `第 ${i + 1} 題（${r.score != null ? r.score + ' 分' : '未評分'}${r.voice && r.sec ? `，講了 ${fmtTime(r.sec)}` : ''}）${shortQ(r.q)}`
+    + (full ? `\n\n【記者】${r.q}\n\n【我的回答】${r.a}\n\n【訓練師】\n${r.evalText}` : '')).join(full ? '\n\n──────────\n\n' : '\n'));
+  return out.join('\n\n');
+}
+
+async function copyReport() {
+  const text = reportText(false);
+  const note = document.getElementById('copy-note');
+  try {
+    await navigator.clipboard.writeText(text);
+    note.textContent = '已複製，可以直接貼到 LINE 或 Email。';
+  } catch (e) {
+    // 舊版 iOS／非 HTTPS 沒有 clipboard API：退回傳統的選取＋複製
+    const ta = document.createElement('textarea');
+    ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0'; ta.style.fontSize = '16px';
+    document.body.appendChild(ta); ta.select();
+    let ok = false;
+    try { ok = document.execCommand('copy'); } catch (e2) {}
+    ta.remove();
+    note.textContent = ok ? '已複製，可以直接貼到 LINE 或 Email。' : '這個瀏覽器不讓網頁複製，請改按「下載完整紀錄」。';
+  }
+}
+
+function downloadReport() {
+  const blob = new Blob(['﻿' + reportText(true)], { type: 'text/plain;charset=utf-8' });
+  const a = document.createElement('a');
+  const d = new Date(sessionStartedAt || Date.now());
+  a.href = URL.createObjectURL(blob);
+  a.download = `媒體訓練紀錄_${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}.txt`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+
 async function init() {
-  // 設定返回連結
-  document.getElementById('back-link').href = '/';
+  // 返回連結：同仁是拿編輯連結（?code=）進來的，沒有後台密碼——舊版一律連到 /，
+  // 同仁按了只會看到一個登入畫面。有編輯碼就回這場的編輯頁。
+  const back = document.getElementById('back-link');
+  if (TRAINING_CODE && eventId && eventId !== 'all') {
+    back.href = `/edit?id=${encodeURIComponent(eventId)}&code=${encodeURIComponent(TRAINING_CODE)}`;
+    document.getElementById('back-label').textContent = '回編輯頁';
+  } else {
+    back.href = '/';
+  }
+  // 練到一半按「回…」會丟掉進度——至少問一聲（進度其實也存在分頁裡，見 saveSession）
+  back.addEventListener('click', (e) => {
+    if (reporterHist.length && !document.body.classList.contains('finished') && !confirm('演練還沒結束，確定要離開嗎？')) e.preventDefault();
+  });
+
+  const savedQ = Number(lsGet(Q_LS_KEY));
+  if (Q_OPTIONS.some((o) => o.n === savedQ)) MAX_Q = savedQ;
+  renderQPicker();
+  document.getElementById('qcount-picker').addEventListener('click', (e) => {
+    const chip = e.target.closest('.q-chip');
+    if (chip) pickQ(Number(chip.dataset.n));
+  });
 
   // 作答方式：沿用上次的選擇；這台機器根本錄不了音就直接退回打字，不要讓人
   // 按了麥克風才發現不能用。
@@ -646,6 +1030,8 @@ async function init() {
   } catch(e) {}
 
   document.getElementById('loading').style.display = 'none';
+  renderLastSession();
+  offerResume();
 }
 
 function showEventSelector(events) {
@@ -654,6 +1040,7 @@ function showEventSelector(events) {
   document.getElementById('start-area').style.display = 'none';
 
   const container = document.createElement('div');
+  container.id = 'event-selector';
   container.style.cssText = 'padding:20px 16px;';
 
   const title = document.createElement('p');
@@ -687,7 +1074,11 @@ function createSelectorBtn(label, id, desc) {
   }
   btn.onmouseover = () => { btn.style.borderColor = 'var(--primary)'; btn.style.background = 'var(--primary-light)'; };
   btn.onmouseout = () => { btn.style.borderColor = '#e5e7eb'; btn.style.background = 'white'; };
-  btn.onclick = () => selectEvent(id);
+  btn.onclick = () => {
+    // 報告與下載檔要寫得出活動名稱——選擇器進來的，init() 那時還不知道是哪一場
+    if (id !== 'all') eventName = label.replace(/^📋\s*/, '');
+    selectEvent(id);
+  };
   return btn;
 }
 
@@ -695,9 +1086,10 @@ function selectEvent(id) {
   eventId = id;
   // 更新 URL（不重新整理）
   history.replaceState(null, '', '/training?id=' + encodeURIComponent(id));
-  // 移除選擇器，顯示進度條＋開始
-  const sel = document.getElementById('info-card').nextElementSibling;
-  if (sel && sel.tagName === 'DIV') sel.remove();
+  // 移除選擇器，顯示進度條＋開始。
+  // ⚠️ 用 id 找，不要用「info-card 的下一個兄弟」——那一格在批次 72 之後是媒體橫幅，
+  // 找錯人會把橫幅整個刪掉。
+  document.getElementById('event-selector')?.remove();
   document.getElementById('progress-bar').style.display = '';
   document.getElementById('start-area').style.display = 'flex';
 
@@ -706,35 +1098,121 @@ function selectEvent(id) {
     document.getElementById('event-title').textContent = '彙整媒體訓練 — 全部活動';
     document.getElementById('event-subtitle').textContent = 'AI 記者實戰演練（綜合所有活動）';
   }
+  renderLastSession();
+  offerResume();
 }
 
 document.getElementById('start-btn').addEventListener('click', startTraining);
-document.getElementById('restart-btn').addEventListener('click', () => {
+
+/** 把一場演練的所有狀態歸零（開始新的一場、再練一場、單題重練都先過這裡）。 */
+function resetSessionState() {
   reporterHist = [];
   questionCount = 0;
   sessionScores = [];
   voiceAnswerCount = 0;
   sttFallbackNoticed = false;
-  sessionOutlet = null;   // 下一場換一家媒體來訪，題目才不會每次都一樣
+  sessionLog = [];
+  pendingStep = null;
+  isWaiting = false;
+  awaitingAnswer = false;
   if (recording) stopRecording(true); else cleanupRecording();
-  document.getElementById('outlet-banner').style.display = 'none';
   document.getElementById('messages').innerHTML = '';
   document.getElementById('end-avg').textContent = '';
+  document.getElementById('report-body').innerHTML = '';
   document.getElementById('end-screen').style.display = 'none';
+  document.body.classList.remove('finished');
+}
+
+/** 開始作答的版面：開始區收起、說明卡收起（見 body.started）、作答區打開。 */
+function enterTrainingLayout() {
+  document.body.classList.add('started');
+  document.getElementById('start-area').style.display = 'none';
+  document.getElementById('end-screen').style.display = 'none';
+  document.getElementById('input-area').style.display = 'flex';
+  document.getElementById('scroller').scrollTop = 0;
+}
+
+document.getElementById('restart-btn').addEventListener('click', () => {
+  resetSessionState();
+  isDrill = false;
+  sessionOutlet = null;   // 下一場換一家媒體來訪，題目才不會每次都一樣
+  document.getElementById('outlet-banner').style.display = 'none';
+  document.body.classList.remove('started');
   document.getElementById('input-area').style.display = 'none';
   document.getElementById('start-area').style.display = 'flex';
+  // 單題重練把 MAX_Q 設成 1 過；回到開始畫面時一律回到他選的題數
+  const q = Number(lsGet(Q_LS_KEY));
+  MAX_Q = Q_OPTIONS.some((o) => o.n === q) ? q : 5;
+  renderQPicker();
+  renderLastSession();
   updateProgress();
+  document.getElementById('scroller').scrollTop = 0;
 });
 
 async function startTraining() {
-  sessionScores = [];
-  voiceAnswerCount = 0;
+  clearSavedSession();    // 按了「開始」就是不要接上次那場了
+  document.getElementById('resume-box').style.display = 'none';
+  resetSessionState();
+  isDrill = false;
   sessionOutlet = null;   // 每一場重新抽一家媒體，不然練第二次還是同一家
+  sessionStartedAt = Date.now();
   rememberTrainee(document.getElementById('trainee-input').value.trim());
   lsSet(FOCUS_LS_KEY, document.getElementById('focus-input').value.trim());
-  document.getElementById('start-area').style.display = 'none';
-  document.getElementById('input-area').style.display = 'flex';
+  enterTrainingLayout();
+  updateProgress();
   await askNextQuestion();
+}
+
+/**
+ * 「最低分那題，再答一次」。真實的媒體訓練最常做的一件事就是「這題再來一次」——
+ * 看完建議馬上重答，比下次整場重練有效得多。同一家媒體、同一題，只練這一題；
+ * 題目直接用剛才那一題的原文，不重新出題（重新出的就不是同一題了）。
+ */
+function startDrill() {
+  const { low } = buildReport();
+  if (!low) return;
+  resetSessionState();
+  isDrill = true;
+  drillPrevScore = low.score;
+  MAX_Q = 1;
+  sessionStartedAt = Date.now();
+  enterTrainingLayout();
+  if (sessionOutlet) showOutletBanner(sessionOutlet);
+  addSystemMsg(`再答一次：上次這題 ${low.score} 分。先看一下剛才的建議，再開始。`);
+  reporterHist.push({ role: 'assistant', content: low.q });
+  addReporterMsg(low.q, { log: true });
+  questionCount = 1;
+  updateProgress();
+  enableAnswering();
+}
+document.getElementById('drill-btn').addEventListener('click', startDrill);
+document.getElementById('copy-report-btn').addEventListener('click', copyReport);
+document.getElementById('download-report-btn').addEventListener('click', downloadReport);
+document.getElementById('resume-btn').addEventListener('click', () => {
+  const s = loadSavedSession();
+  if (s) restoreSession(s); else document.getElementById('resume-box').style.display = 'none';
+});
+document.getElementById('discard-btn').addEventListener('click', () => {
+  clearSavedSession();
+  document.getElementById('resume-box').style.display = 'none';
+});
+
+/** 最後一題評完：顯示帶得走的報告、記錄這一場。 */
+function finishTraining() {
+  document.body.classList.add('finished');
+  document.getElementById('input-area').style.display = 'none';
+  const rep = renderReport();
+  const end = document.getElementById('end-screen');
+  end.style.display = 'block';
+  updateProgress();
+  setTimeout(() => end.scrollIntoView({ behavior: 'smooth', block: 'start' }), 400);
+  clearSavedSession();
+  if (isDrill) { MAX_Q = Number(lsGet(Q_LS_KEY)) || 5; return; }   // 單題重練不記成一場
+  rememberHistory({
+    at: Date.now(), eventId, total: rep.rounds.length, avg: rep.avg,
+    outlet: sessionOutlet && sessionOutlet.name ? sessionOutlet.name : '', fix: rep.fixes[0] || '',
+  });
+  logSession();
 }
 
 /** 每次呼叫 /api/training 都要帶的身分資料。集中一處，免得哪一支漏帶。 */
@@ -744,6 +1222,7 @@ function personaPayload() {
     trainee: document.getElementById('trainee-input').value.trim(),
     focus: document.getElementById('focus-input').value.trim(),
     outlet: sessionOutlet ? sessionOutlet.id : undefined,
+    total: MAX_Q,   // 記者要知道這場只有幾題，題數少時才會直接挑最關鍵的角度問
   };
 }
 
@@ -781,6 +1260,8 @@ async function askNextQuestion() {
   isWaiting = true;
   awaitingAnswer = false;
   lockAnswering();
+  pendingStep = { kind: 'question' };
+  saveSession();
 
   showTyping('reporter');
 
@@ -813,10 +1294,12 @@ async function askNextQuestion() {
 
     adoptOutlet(data);
     reporterHist.push({ role: 'assistant', content: data.reply });
-    addReporterMsg(data.reply);
+    addReporterMsg(data.reply, { log: true });
 
     questionCount++;
     updateProgress();
+    pendingStep = null;
+    saveSession();
 
     enableAnswering();
   } catch(e) {
@@ -838,7 +1321,12 @@ async function askNextQuestion() {
 async function submitAnswer(rawText, seconds = 0, viaVoice = false) {
   if (isWaiting || !awaitingAnswer) return;
   const typeBox = document.getElementById('user-input');
-  const ans = String(rawText ?? typeBox.value).trim();
+  // ⚠️ 只收字串。批次 66 起送出鍵綁的是 `addEventListener('click', submitAnswer)`，
+  // 點擊事件物件被當成 rawText 傳進來，`String(event)` 是「[object PointerEvent]」——
+  // 主管打好的回答被清掉，畫面與送去評分的都變成那串字（批次 72 實測重現）。
+  // 按 Enter 走的是 submitAnswer() 不帶參數，所以桌機測不出來，偏偏手機上多半是按鍵。
+  // 綁定那裡也改了，這裡再擋一次：不是字串就一律當成「從打字框拿」。
+  const ans = String(typeof rawText === 'string' ? rawText : typeBox.value).trim();
   if (!ans) return;
 
   typeBox.value = '';
@@ -848,8 +1336,10 @@ async function submitAnswer(rawText, seconds = 0, viaVoice = false) {
   isWaiting = true;
   if (viaVoice) voiceAnswerCount++;
 
-  addUserMsg(ans, viaVoice ? seconds : 0);
+  addUserMsg(ans, viaVoice ? seconds : 0, { log: true, voice: viaVoice });
   reporterHist.push({ role: 'user', content: ans });
+  pendingStep = { kind: 'eval', seconds, viaVoice };
+  saveSession();
 
   await evaluateAnswer(seconds, viaVoice);
 }
@@ -911,28 +1401,26 @@ async function evaluateAnswer(seconds, viaVoice) {
     const score = scoreMatch ? Math.max(0, Math.min(10, Number(scoreMatch[1]))) : null;
     sessionScores.push(score);
 
-    addEvalMsg(evalPart, score);
+    addEvalMsg(evalPart, score, { log: true });
+    pendingStep = null;
 
     if (questionCount >= MAX_Q) {
-      // 訓練結束
-      setTimeout(() => {
-        document.getElementById('input-area').style.display = 'none';
-        document.getElementById('end-screen').style.display = 'block';
-        updateProgress();
-      }, 800);
-      logSession();
+      // 訓練結束：帶得走的報告、這台裝置的練習紀錄、後端的 training_log
+      finishTraining();
     } else if (!nextQ) {
       // 評分沒照格式附上下一題。以前這裡會直接判定訓練結束，五題變兩題就沒了；
       // 改成回頭用記者模式補問一題，格式漂移不該讓整場訓練提早收掉。
       reporterHist.push({ role: 'user', content: '（訓練系統）請直接提出下一個問題，只要問題本身，不要任何前綴或說明。' });
       await askNextQuestion();
     } else {
-      // 繼續下一題（把下一題加入對話）
-      reporterHist.push({ role: 'assistant', content: nextQ });
-      addReporterMsg(nextQ);
+      // 繼續下一題。⚠️ 不要再把 nextQ 另外 push 進 reporterHist：上面那則 evalText
+      // 本身就以「---下一題---」＋這一題結尾，再推一次等於同一題在歷程裡出現兩次、
+      // 而且變成兩則連續的 assistant（批次 72 實測歷程是 assistant,user,assistant,assistant,user）。
+      addReporterMsg(nextQ, { log: true });
 
       questionCount++;
       updateProgress();
+      saveSession();
 
       enableAnswering();
     }
@@ -1383,7 +1871,7 @@ function redoRecording() {
   enableAnswering();
 }
 
-// 訓練走到終畫面才呼叫（見 submitAnswer() 裡 questionCount >= MAX_Q 那段）——中途
+// 訓練走到終畫面才呼叫（見 finishTraining()；單題重練不呼叫）——中途
 // 離開的不記，不然「演練場次」會被答一題就走的雜訊灌水。fire-and-forget：不 await
 // 結果來擋終畫面顯示，訓練本身已經結束，紀錄寫不寫得進去不該讓受訓者等待或看到
 // 錯誤畫面；寫成功的話，把後端重新算好的平均分（不是前端自己算的那份）補上去。
@@ -1404,7 +1892,9 @@ async function logSession() {
       })
     });
     const data = await res.json();
-    if (data.success && data.avg_score !== '' && data.avg_score != null) {
+    // 報告那一行 renderReport() 早就用前端的分數寫好了；後端重新算的平均（同一批分數，
+    // 正常情況兩個數字一樣）回來時再覆寫一次，以後端為準。使用者已經開始單題重練時不要蓋。
+    if (!isDrill && data.success && data.avg_score !== '' && data.avg_score != null) {
       const via = voiceAnswerCount ? `（${voiceAnswerCount} / ${sessionScores.length} 題用講的）` : '';
       document.getElementById('end-avg').textContent = `本次平均分：${data.avg_score} / 10 ${via}`.trim();
     }
@@ -1420,20 +1910,30 @@ function updateProgress() {
 }
 
 // 訊息渲染
-function addReporterMsg(text) {
+// { log: true } ＝這是新內容，記進 sessionLog（報告、下載、接著練都靠它）。
+// 接著練時重畫舊內容走 renderEntry()，不帶 log，免得同一則被記兩次。
+function logEntry(entry) {
+  sessionLog.push(entry);
+}
+function renderEntry(e) {
+  if (e.k === 'q') addReporterMsg(e.text);
+  else if (e.k === 'a') addUserMsg(e.text, e.voice ? e.sec : 0);
+  else if (e.k === 'e') addEvalMsg(e.text, e.score);
+}
+
+function addReporterMsg(text, { log = false } = {}) {
+  if (log) logEntry({ k: 'q', text });
   const el = document.createElement('div');
   el.className = 'msg reporter';
   el.innerHTML = `
     <div class="avatar"><i class="ti ti-microphone"></i></div>
-    <div class="bubble">
-      <span class="label">AI 記者</span><br>
-      ${escHtml(text)}
-    </div>`;
+    <div class="bubble"><span class="label">AI 記者</span><br>${escHtml(text)}</div>`;
   document.getElementById('messages').appendChild(el);
   el.scrollIntoView({ behavior: 'smooth', block: 'end' });
 }
 
-function addUserMsg(text, seconds) {
+function addUserMsg(text, seconds, { log = false, voice = false } = {}) {
+  if (log) logEntry({ k: 'a', text, sec: seconds || 0, voice: !!voice });
   const el = document.createElement('div');
   el.className = 'msg user';
   // 講了多久是真實媒體訓練會看的數字（電視新聞一則受訪片段大約 8–15 秒），
@@ -1450,7 +1950,16 @@ function addUserMsg(text, seconds) {
   el.scrollIntoView({ behavior: 'smooth', block: 'end' });
 }
 
-function addEvalMsg(text, score) {
+// ⚠️ 泡泡是 white-space: pre-wrap——模板字串裡 <div class="bubble"> 後面的換行與縮排會被原樣
+// 畫出來，每個泡泡上方都多一大塊空白（手機上一則評分因此多佔兩三行）。泡泡內容一律寫在同一行。
+
+/** 畫面上顯示的評語：拿掉開頭那行「---評分---」（那是給程式切分用的，徽章已經放大顯示分數）。 */
+function displayEval(text) {
+  return String(text || '').replace(/^\s*[-—–─]{2,}[^\n]*評分[^\n]*[-—–─]{2,}\s*\n?/, '').trim();
+}
+
+function addEvalMsg(text, score, { log = false } = {}) {
+  if (log) logEntry({ k: 'e', text, score });
   const el = document.createElement('div');
   el.className = 'msg eval';
   // 分數已經在內文的「整體分數：X / 10」那行了，這裡另外用徽章放大呈現一次——
@@ -1458,10 +1967,7 @@ function addEvalMsg(text, score) {
   const badge = (score != null) ? `<span class="score-badge">${score}<span class="of10">/10</span></span><br>` : '';
   el.innerHTML = `
     <div class="avatar"><i class="ti ti-star"></i></div>
-    <div class="bubble">
-      <span class="eval-label">訓練師評分</span><br>
-      ${badge}${escHtml(text)}
-    </div>`;
+    <div class="bubble"><span class="eval-label">訓練師評分</span><br>${badge}${escHtml(displayEval(text))}</div>`;
   document.getElementById('messages').appendChild(el);
   el.scrollIntoView({ behavior: 'smooth', block: 'end' });
 }
@@ -1480,14 +1986,22 @@ function showTyping(type) {
   const icon = type === 'eval' ? 'ti-star' : 'ti-microphone';
   el.innerHTML = `
     <div class="avatar"><i class="ti ${icon}"></i></div>
-    <div class="bubble">
-      <span class="typing-dot"></span><span class="typing-dot"></span><span class="typing-dot"></span>
-    </div>`;
+    <div class="bubble"><span class="typing-dot"></span><span class="typing-dot"></span><span class="typing-dot"></span><span class="wait-hint"></span></div>`;
   document.getElementById('messages').appendChild(el);
   el.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  // 評分通常要十幾秒。只有三個點在跳、什麼字都沒有，人過了十秒就會開始懷疑是不是
+  // 當掉了、想重新整理——而重新整理正是最不該在這時候做的事。過一陣子補一句話。
+  const hint = el.querySelector('.wait-hint');
+  const say = (t) => { if (hint && document.getElementById('typing') === el) hint.textContent = t; };
+  typingTimers.push(setTimeout(() => say(type === 'eval'
+    ? '訓練師正在看您的回答，通常 10–20 秒…' : '記者正在準備問題…'), 5000));
+  typingTimers.push(setTimeout(() => say('比平常久一點，再等一下；真的沒回應會出現「再試一次」。'), 25000));
 }
 
+let typingTimers = [];
 function removeTyping() {
+  typingTimers.forEach(clearTimeout);
+  typingTimers = [];
   document.getElementById('typing')?.remove();
 }
 
@@ -1519,7 +2033,8 @@ document.getElementById('user-input').addEventListener('keydown', e => {
   if (e.isComposing || e.keyCode === 229) return; // 中文輸入法選字時的 Enter，不當作送出
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submitAnswer(); }
 });
-document.getElementById('send-btn').addEventListener('click', submitAnswer);
+// ⚠️ 一定要包一層：直接傳 submitAnswer 的話，點擊事件物件會被當成回答內容（見 submitAnswer 的說明）
+document.getElementById('send-btn').addEventListener('click', () => submitAnswer());
 document.getElementById('user-input').addEventListener('input', function() {
   this.style.height = 'auto';
   this.style.height = Math.min(this.scrollHeight, 120) + 'px';
