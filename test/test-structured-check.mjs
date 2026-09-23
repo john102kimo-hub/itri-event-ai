@@ -150,9 +150,13 @@ console.log('── 沒給關鍵字：不檢查那一項（6 項），不硬扣�
 console.log('── 邊界：空稿、過長段落、引用句長度 ──');
 {
   check('空稿 → 0／0（不會被畫成 0 分的呈核頁）', checkGeoDraft('   ').total === 0);
-  const long = '標題\n\n工研院' + '很長的段落'.repeat(50) + '。';
-  check('段落超過 200 字 → short_paras 不過',
+  const long = '標題\n\n工研院' + '很長的段落'.repeat(90) + '。';
+  check('段落超過 400 字 → short_paras 不過',
     checkGeoDraft(long).checks.find((c) => c.key === 'short_paras').pass === false);
+  // 導言、主管談話一段 250–350 字是常態（朱朱：「導言、主管表示都會一段很長」），不能扣分
+  const lead = '標題\n\n工研院' + '導言的內容'.repeat(60) + '。\n\n工研院院長表示，' + '談話的內容'.repeat(64) + '。';
+  check('導言 300 字、主管談話 320 字 → short_paras 照樣通過',
+    checkGeoDraft(lead).checks.find((c) => c.key === 'short_paras').pass === true);
   check('引用句太長（>80 字）不選', bestQuotable('標題\n工研院' + '數據顯示成長'.repeat(15) + ' 30%。') === '');
   check('同一篇檢查兩次同分（純規則、可重複）',
     JSON.stringify(checkGeoDraft(long)) === JSON.stringify(checkGeoDraft(long)));
