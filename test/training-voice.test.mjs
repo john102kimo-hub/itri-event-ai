@@ -219,6 +219,7 @@ console.log('\n[9] training.html — 前端結構（不會報錯的那種錯）'
   // getElementById 打錯字不會有任何紅字，只會讓按鈕按了沒反應。
   const declared = new Set([...html.matchAll(/id="([^"]+)"/g)].map((m) => m[1]));
   declared.add('typing'); // showTyping() 自己 new 出來的
+  declared.add('event-selector'); // showEventSelector() 自己 new 出來的（批次 72 起改用 id 移除）
   const used = [...new Set([...js.matchAll(/getElementById\('([^']+)'\)/g)].map((m) => m[1]))];
   const missing = used.filter((id) => !declared.has(id));
   ok(missing.length === 0, `JS 用到的 ${used.length} 個 element id 在 HTML 裡都有（缺：${missing.join('、') || '無'}）`);
@@ -457,6 +458,112 @@ console.log('\n[11] showTranscript — 空逐字稿不評論長度，有逐字�
   ok(sandbox.document.getElementById('transcript-box').value === '', '兩邊都沒聽到，框是空的');
   ok(/沒有聽到說話的內容/.test(headText()), `這時那句話成立，要留著（實際：${headText()}）`);
   ok(!/講了/.test(headText()), '而且不評論長度');
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * [12] 批次 72：打字送出鍵、對話歷程、結算報告——真的跑起來驗
+ *
+ * ① 送出鍵綁的是 `addEventListener('click', submitAnswer)`，點擊事件物件被當成回答，
+ *    畫面與送去評分的都是「[object PointerEvent]」，主管打的字被清掉。按 Enter 不會中，
+ *    所以桌機測不出來——偏偏手機上多半是按鍵。
+ * ② 評分回來之後，下一題被 push 進歷程兩次（evalText 本身就以下一題結尾），歷程變成
+ *    assistant,user,assistant,assistant,user。
+ * ③ 結算報告只做整理、不生成：三件事、一句話都要真的是評語裡的原文。
+ * ──────────────────────────────────────────────────────────────────────── */
+console.log('\n[12] 打字送出鍵、對話歷程不重複、結算報告');
+{
+  const { runInNewContext } = await import('node:vm');
+  const html = fs.readFileSync(new URL('../public/training.html', import.meta.url), 'utf8');
+  const code = [...html.matchAll(/<script(?![^>]*src=)([^>]*)>([\s\S]*?)<\/script>/g)]
+    .filter((m) => !/module/.test(m[1])).map((m) => m[2])
+    .sort((a, b) => b.length - a.length)[0];
+  const plain = code.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+
+  // 靜態：舊的綁法不能回來
+  ok(!/addEventListener\('click',\s*submitAnswer\)/.test(plain),
+    '送出鍵不能直接綁 submitAnswer（點擊事件會被當成回答內容）');
+
+  const els = new Map();
+  const listeners = new Map();
+  const makeEl = (id) => ({
+    id, value: '', textContent: '', innerHTML: '', disabled: false, scrollHeight: 40, scrollTop: 0,
+    style: {}, dataset: {},
+    addEventListener(type, fn) { listeners.set(`${id}:${type}`, fn); }, removeEventListener() {},
+    click() {}, focus() {}, scrollIntoView() {},
+    classList: { add() {}, remove() {}, toggle() {}, contains: () => false },
+    getBoundingClientRect: () => ({ left: 0, top: 0, width: 390, height: 40 }),
+    setAttribute() {}, getAttribute: () => null, closest: () => null,
+    querySelector: () => null, querySelectorAll: () => [], appendChild() {}, remove() {},
+  });
+  const requests = [];
+  let evalReply = '';
+  const sandbox = {
+    console: { log() {}, warn() {}, error() {} },
+    setTimeout: (fn) => 0, clearTimeout() {}, setInterval, clearInterval,
+    localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
+    sessionStorage: { getItem: () => null, setItem() {}, removeItem() {} },
+    location: { reload() {}, href: '', search: '', protocol: 'https:', hostname: 'localhost' },
+    confirm: () => true, alert() {}, addEventListener() {}, removeEventListener() {},
+    fetch: async (_url, opts) => {
+      const body = JSON.parse(opts.body);
+      requests.push(body);
+      return { ok: true, status: 200, json: async () => ({ reply: evalReply }) };
+    },
+    navigator: { mediaDevices: {} },
+    URLSearchParams, URL, requestAnimationFrame: () => 0, cancelAnimationFrame() {},
+    document: {
+      body: makeEl('body'),
+      getElementById(id) { if (!els.has(id)) els.set(id, makeEl(id)); return els.get(id); },
+      querySelector: () => null, querySelectorAll: () => [],
+      addEventListener() {}, createElement: makeEl,
+    },
+  };
+  sandbox.window = sandbox;
+  sandbox.globalThis = sandbox;
+  runInNewContext(code + `
+;globalThis.__state = () => ({ reporterHist, sessionLog, questionCount, MAX_Q });
+;globalThis.__setup = (hist, qc, max) => { reporterHist = hist; questionCount = qc; MAX_Q = max; awaitingAnswer = true; isWaiting = false; answerMode = 'type'; };
+;globalThis.__setLog = (log) => { sessionLog = log; };
+`, sandbox);
+
+  // ① 模擬手機按送出鍵：listener 收到的是一個事件物件
+  sandbox.__setup([{ role: 'assistant', content: '第一題：成本多少？' }], 1, 5);
+  sandbox.document.getElementById('user-input').value = '成本大約三千萬元，由經濟部補助。';
+  evalReply = '---評分---\n整體分數：7 / 10\n\n改進建議：\n• 先講數字\n\n---下一題---\n那時程呢？';
+  const clickHandler = listeners.get('send-btn:click');
+  ok(typeof clickHandler === 'function', '送出鍵有綁點擊事件');
+  await clickHandler({ type: 'click', target: {} });
+  const evalReq = requests.find((r) => r.mode === 'evaluate');
+  const sent = evalReq?.messages?.at(-1)?.content;
+  ok(sent === '成本大約三千萬元，由經濟部補助。', `按送出鍵送出的是打的字，不是事件物件（實際：${sent}）`);
+
+  // ② 評分回來、接下一題：歷程裡同一題只能出現一次，也不能有連續兩則 assistant
+  const st = sandbox.__state();
+  const roles = st.reporterHist.map((m) => m.role).join(',');
+  ok(roles === 'assistant,user,assistant', `評分後的歷程沒有重複的下一題（實際：${roles}）`);
+  ok(st.questionCount === 2, '題數往前推一題');
+  ok(st.sessionLog.map((e) => e.k).join(',') === 'a,e,q', `報告用的紀錄依序記下作答、評分、下一題（實際：${st.sessionLog.map((e) => e.k).join(',')}）`);
+
+  // ③ 結算報告：只整理評語，不生成
+  const ev = (score, fix, quote) => `---評分---\n整體分數：${score} / 10\n\n優點：\n• 好\n\n改進建議：\n• ${fix}\n• 次要的建議\n\n建議更好的答法：\n（示範）\n\n可直接引用的一句：\n${quote}\n\n---下一題---\n下一題？`;
+  sandbox.__setLog([
+    { k: 'q', text: 'Q1' }, { k: 'a', text: 'A1' }, { k: 'e', text: ev(8, '數字放第一句', '「年底量產，國產化八成。」'), score: 8 },
+    { k: 'q', text: 'Q2' }, { k: 'a', text: 'A2' }, { k: 'e', text: ev(4, '不要迴避預算問題', '（這段回答裡沒有能單獨引用的一句）'), score: 4 },
+    { k: 'q', text: 'Q3' }, { k: 'a', text: 'A3' }, { k: 'e', text: ev(6, '數字放第一句', '「成本比進口低三成。」'), score: 6 },
+  ]);
+  const rep = sandbox.buildReport();
+  ok(rep.avg === 6, `平均分（實際：${rep.avg}）`);
+  ok(rep.fixes[0] === '不要迴避預算問題', `最該改的從最低分那題開始（實際：${rep.fixes[0]}）`);
+  ok(rep.fixes.length === 2, `重複的建議只列一次（實際：${JSON.stringify(rep.fixes)}）`);
+  ok(!rep.fixes.includes('次要的建議'), '每題只取改進建議的第一條（訓練師排在第一條的就是最重要的）');
+  ok(rep.bestQuote === '年底量產，國產化八成。', `最好的一句取自最高分那題（實際：${rep.bestQuote}）`);
+  ok(rep.low && rep.low.q === 'Q2', '「再答一次」挑的是最低分那題');
+  ok(sandbox.quoteAfter(ev(5, 'x', '（從他的回答裡挑出最適合被記者直接引用的一句，40 字以內）')) === '',
+    '模型照抄格式裡的佔位說明時，不能當成一句話放進報告');
+  const txt = sandbox.reportText(false);
+  ok(txt.includes('最該改的兩件事') && txt.includes('1. 不要迴避預算問題'), '複製出去的純文字有重點，件數寫對');
+  ok(!txt.includes('【我的回答】'), '「複製重點」是精簡版，不含整段回答');
+  ok(sandbox.reportText(true).includes('【我的回答】A2'), '「下載完整紀錄」含每題回答與評語');
 }
 
 console.log(fails === 0 ? '\n全部通過 ✅' : `\n失敗 ${fails} 項 ❌`);

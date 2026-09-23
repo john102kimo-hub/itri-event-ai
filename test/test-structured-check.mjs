@@ -1,6 +1,7 @@
 // lib/structured-check.js 純函式測試——四條規則各自獨立驗證，再驗證 true／false／null
 // 三種門檻的邊界（3 過＝true，1 過＝false，2 過＝null，都空＝null）。
 import { checkStructuredContent } from '../lib/structured-check.js';
+import { checkGeoDraft, bestQuotable } from '../lib/geo-draft-check.js';
 
 let pass = 0, fail = 0;
 function check(label, cond, detail) {
@@ -118,6 +119,47 @@ import { readFileSync } from 'node:fs';
     check('　 初判文字仍然在（要告訴人結論，只是不幫他勾）',
       /初判/.test(body), body.slice(-200));
   }
+}
+
+
+// ── 批次 74：新聞稿 GEO 寫法檢核（呈核一頁的分數來源）──
+console.log('── GEO 寫法檢核：改前 vs 改後 ──');
+{
+  const before = `眺望 2027 產業發展趨勢研討會\n\n面對全球局勢變化，產業界需要掌握未來方向，本次研討會邀請多位專家分享觀點，內容精彩可期，歡迎各界踴躍參加。\n\n詳情請見 https://news.example.com/abc`;
+  const after = `工研院眺望 2027：產業分析師預估半導體產值成長 12%\n\n工研院產業分析師 2026年10月28日於眺望研討會指出，2027 年台灣半導體產值可望成長 12%，產業分析師並提出三大布局建議。\n\n工研院預估 AI 伺服器出貨將成長 25%，帶動先進封裝需求。\n\n完整簡報：https://www.itri.org.tw/news/2027`;
+  const b = checkGeoDraft(before, { keyword: '產業分析師' });
+  const a = checkGeoDraft(after, { keyword: '產業分析師' });
+  check('有給關鍵字 → 共 7 項', a.total === 7 && b.total === 7, JSON.stringify([a.total, b.total]));
+  check('★ 改後 7／7 全過', a.passed === 7, JSON.stringify(a.checks.filter((c) => !c.pass)));
+  check('改前分數明顯較低（≤2）', b.passed <= 2, JSON.stringify(b.checks.map((c) => c.key + ':' + c.pass)));
+  check('改前標題、首段都沒有「產業分析師」→ keyword 不過',
+    b.checks.find((c) => c.key === 'keyword').pass === false);
+  check('改前的網址不是自家的 → 標記 otherLink（提示換成 itri.org.tw）',
+    b.checks.find((c) => c.key === 'owned_link').otherLink === true);
+  check('改後找得到可整句引用的一句，且含「工研院」與數字', /工研院/.test(a.quote) && /\d/.test(a.quote), a.quote);
+  check('改前沒有可引用句', b.quote === '', b.quote);
+  check('每一項都有給長官看的白話', a.checks.every((c) => c.plain && c.plain.length > 4));
+}
+
+console.log('── 沒給關鍵字：不檢查那一項（6 項），不硬扣分 ──');
+{
+  const r = checkGeoDraft('工研院發表新技術\n\n工研院今天宣布效率提升 30%。');
+  check('共 6 項、沒有 keyword 項', r.total === 6 && !r.checks.some((c) => c.key === 'keyword'), JSON.stringify(r.checks.map((c) => c.key)));
+}
+
+console.log('── 邊界：空稿、過長段落、引用句長度 ──');
+{
+  check('空稿 → 0／0（不會被畫成 0 分的呈核頁）', checkGeoDraft('   ').total === 0);
+  const long = '標題\n\n工研院' + '很長的段落'.repeat(90) + '。';
+  check('段落超過 400 字 → short_paras 不過',
+    checkGeoDraft(long).checks.find((c) => c.key === 'short_paras').pass === false);
+  // 導言、主管談話一段 250–350 字是常態（朱朱：「導言、主管表示都會一段很長」），不能扣分
+  const lead = '標題\n\n工研院' + '導言的內容'.repeat(60) + '。\n\n工研院院長表示，' + '談話的內容'.repeat(64) + '。';
+  check('導言 300 字、主管談話 320 字 → short_paras 照樣通過',
+    checkGeoDraft(lead).checks.find((c) => c.key === 'short_paras').pass === true);
+  check('引用句太長（>80 字）不選', bestQuotable('標題\n工研院' + '數據顯示成長'.repeat(15) + ' 30%。') === '');
+  check('同一篇檢查兩次同分（純規則、可重複）',
+    JSON.stringify(checkGeoDraft(long)) === JSON.stringify(checkGeoDraft(long)));
 }
 
 console.log(`\n${fail === 0 ? '✅' : '❌'} 結構化稿自動初檢測試通過 ${pass}／失敗 ${fail}`);

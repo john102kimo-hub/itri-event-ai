@@ -303,6 +303,52 @@ export function buildTranscriptionHint(event) {
  * 這個組合在 Chrome／Android 上也用得到伺服器辨識，而不是永遠退到瀏覽器辨識。
  * 兩邊要一起看才成立，改任何一邊之前先看另一邊。
  */
+// ── 逾時（批次 72）──────────────────────────────────────────────────────
+// 這支原本三個對外呼叫（Anthropic、OpenAI、Gemini）一個 signal 都沒有——跟批次 57
+// 盤點 LINE 時抓到的是同一件事。vercel.json 給這支 60 秒，時間到 function 直接消失，
+// 前端拿到的是 Vercel 的 HTML 錯誤頁，不是我們的 JSON。前端雖然接得住（會出「再試
+// 一次」），但畫面上那句話是猜的；有了逾時，後端自己回一句講得清楚的話。
+//
+// 轉寫 40 秒：一題最長 150 秒的錄音，正常幾秒就轉完，40 秒還沒回來就是上游有事，
+// 回 502 帶 fallback:'browser'，前端改用瀏覽器那份，主管不用重講。
+// 模型 52 秒：留 8 秒給 Sheets 讀取（出題前要讀 qa_log）與回應本身。
+const STT_TIMEOUT_MS = 40_000;
+const MODEL_TIMEOUT_MS = 52_000;
+
+// 一場演練幾題。前端讓主管選 3（快速）或 5（完整），這裡只信任這個範圍內的整數——
+// 數字會被拼進 prompt，不能讓人從 devtools 塞一個 999 進來。
+export const DEFAULT_TOTAL_Q = 5;
+export function resolveTotal(raw) {
+  const n = Math.round(Number(raw));
+  return Number.isFinite(n) && n >= 1 && n <= 8 ? n : DEFAULT_TOTAL_Q;
+}
+
+/**
+ * 把前端送來的對話歷程整理成 Messages API 收得下的樣子（批次 72）。
+ *
+ * ⚠️ 前端的歷程從「記者的第一題」開始，也就是 **第一則是 assistant**。Messages API
+ * 文件寫明第一則必須是 user——出第一題時後端送的是 `[{ user: '請開始。' }]`，之後前端
+ * 只記下模型回的那一則，於是從第二次請求起，歷程開頭就少了那一則 user。這裡補回同一句，
+ * 模型看到的對話才跟它出第一題時是同一段。
+ *
+ * 另外兩件順手收乾淨的事：
+ *   - 連續同角色的訊息合併成一則（API 本來就會合併，這裡先合，送出去的長相才確定）
+ *   - 只留 user／assistant 且內容是字串的訊息，每則截在 8000 字——這是從瀏覽器來的資料
+ */
+export function normalizeMessages(raw) {
+  const list = (Array.isArray(raw) ? raw : [])
+    .filter((m) => m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string' && m.content.trim())
+    .map((m) => ({ role: m.role, content: m.content.slice(0, 8000) }));
+  const out = [];
+  for (const m of list) {
+    const last = out[out.length - 1];
+    if (last && last.role === m.role) last.content += '\n\n' + m.content;
+    else out.push({ ...m });
+  }
+  if (!out.length || out[0].role !== 'user') out.unshift({ role: 'user', content: '請開始。' });
+  return out;
+}
+
 export function pickTranscribeEngine(mime, env = process.env) {
   if (env.OPENAI_API_KEY) return 'openai';
   if (env.GEMINI_API_KEY && mime !== 'audio/webm') return 'gemini';
@@ -322,6 +368,7 @@ async function transcribeWithOpenAI(buffer, mime, ext, hint) {
     // 手動設會讓整個 form 解不開，錯誤訊息還只會說「檔案格式不對」，很難查。
     headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` },
     body: form,
+    signal: AbortSignal.timeout(STT_TIMEOUT_MS),
   });
   const data = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(data?.error?.message || `OpenAI 轉寫失敗（${r.status}）`);
@@ -344,6 +391,7 @@ async function transcribeWithGemini(buffer, mime, hint) {
         }],
         generationConfig: { temperature: 0 },
       }),
+      signal: AbortSignal.timeout(STT_TIMEOUT_MS),
     }
   );
   const data = await r.json().catch(() => ({}));
@@ -507,7 +555,7 @@ function realQuestionBlock(rq) {
  * spoken=true 是語音作答場次：問題會被主管「聽」而不是「讀」，所以要短、要口語。
  */
 export function buildReporterPrompt({ eventName, knowledgeBase, realQ = '', spoken = false,
-  outlet = null, role = null, trainee = '', focus = '' }) {
+  outlet = null, role = null, trainee = '', focus = '', total = DEFAULT_TOTAL_Q }) {
   // 媒體名稱與受訪者身分由程式決定（見 lib/training-persona.js 開頭）——
   // 這裡拿到的是已經收斂過的物件，模型沒有「自己挑一家媒體」的餘地。
   const persona = buildPersonaBlock({ outlet, role, trainee, focus });
@@ -560,7 +608,7 @@ ${persona}
 ${knowledgeBase}${realQ}
 
 ${opening}
-整個訓練共進行 5 題左右。`;
+整個訓練共 ${resolveTotal(total)} 題。${resolveTotal(total) <= 3 ? '題數少，請直接挑最關鍵、最可能被追問的角度，不要把題目花在暖身。' : ''}`;
 }
 
 /**
@@ -616,12 +664,16 @@ ${speech.line}
 評語裡請多一行「可直接引用的一句」：從他講的話裡挑出（必要時稍微修順）最適合
 被記者剪出來用的那一句，長度控制在 40 字以內。` : '';
 
-  const quoteLine = speech ? `
+  // 「可直接引用的一句」批次 72 起打字作答也要有：終畫面的「帶得走」報告要從每一題
+  // 挑出最好的一句給主管帶走，只有語音題才有的話，打字練的人什麼都拿不到。
+  // 那一句找不到也要照寫一行說明——前端靠這一行的標題抓內容，缺行會讓報告少一格。
+  const lengthLine = speech ? `
 
-本題長度：${speech.seconds} 秒（目標 ${TARGET_MIN_SEC}–${TARGET_MAX_SEC} 秒）— （一句話講評，超時就說明該砍哪一段）
+本題長度：${speech.seconds} 秒（目標 ${TARGET_MIN_SEC}–${TARGET_MAX_SEC} 秒）— （一句話講評，超時就說明該砍哪一段）` : '';
+  const quoteLine = `${lengthLine}
 
 可直接引用的一句：
-（40 字以內）` : '';
+（從他的回答裡挑出最適合被記者直接引用的一句，必要時稍微修順，40 字以內；整段找不到能單獨成立的一句，就寫「（這段回答裡沒有能單獨引用的一句）」）`;
 
   return `你是一位資深媒體訓練師，正在幫「${eventName}」的發言人進行媒體訓練。
 
@@ -686,7 +738,7 @@ export default async function handler(req, res) {
   const {
     messages, event_id, mode = 'reporter', code, password, trainee, scores,
     spoken, duration, voice_answers: voiceAnswers,
-    outlet: outletId, role: roleId, focus,
+    outlet: outletId, role: roleId, focus, total,
   } = req.body || {};
 
   // 只有 reporter／evaluate 是「對話」，要帶 messages、也要呼叫 Anthropic。
@@ -736,25 +788,40 @@ export default async function handler(req, res) {
 
     const systemPrompt = mode === 'evaluate'
       ? buildEvaluatePrompt({ eventName, knowledgeBase, realQ, speech, outlet, role, trainee, focus })
-      : buildReporterPrompt({ eventName, knowledgeBase, realQ, spoken: !!spoken, outlet, role, trainee, focus });
+      : buildReporterPrompt({ eventName, knowledgeBase, realQ, spoken: !!spoken, outlet, role, trainee, focus, total });
 
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01'
-      },
-      body: JSON.stringify({
-        // Sonnet 5 預設開啟 adaptive thinking（4.6 預設是關的），
-        // 而 max_tokens 是「思考＋回答」的總上限 —— evaluate 模式要輸出完整結構，
-        // 思考吃掉大半預算時容易被截斷，所以給到 8000（上限 128K，毫無壓力）。
-        model: 'claude-sonnet-5',
-        max_tokens: 8000,
-        system: [{ type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }],
-        messages: messages.length > 0 ? messages : [{ role: 'user', content: '請開始。' }]
-      })
-    });
+    let response;
+    try {
+      response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01'
+        },
+        signal: AbortSignal.timeout(MODEL_TIMEOUT_MS),
+        body: JSON.stringify({
+          // Sonnet 5 預設開啟 adaptive thinking（4.6 預設是關的），
+          // 而 max_tokens 是「思考＋回答」的總上限 —— evaluate 模式要輸出完整結構，
+          // 思考吃掉大半預算時容易被截斷，所以給到 8000（上限 128K，毫無壓力）。
+          model: 'claude-sonnet-5',
+          max_tokens: 8000,
+          system: [{ type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }],
+          // 見 normalizeMessages()：前端的歷程從記者第一題（assistant）開始，要補回開頭那則 user
+          messages: normalizeMessages(messages)
+        })
+      });
+    } catch (e) {
+      // 逾時（AbortSignal）或連線中斷。前端看到非 2xx 會出「再試一次」，對話歷程還在，
+      // 主管不必重講——這裡要做的只是把原因講清楚，不要讓他以為是自己按錯了什麼。
+      console.error('training 模型呼叫失敗:', e.name, e.message, event_id, mode);
+      const timedOut = e.name === 'TimeoutError' || e.name === 'AbortError';
+      return res.status(timedOut ? 504 : 502).json({
+        error: timedOut
+          ? 'AI 這次想得比較久，還沒回來。您剛才的進度都還在，按「再試一次」就好。'
+          : '連不上 AI 服務。您剛才的進度都還在，稍等幾秒再按「再試一次」。'
+      });
+    }
 
     const data = await response.json();
     if (!response.ok) return res.status(response.status).json({ error: data.error?.message || 'API 錯誤' });

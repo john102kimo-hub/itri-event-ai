@@ -198,7 +198,10 @@ const sandbox = {
   console, setTimeout, clearTimeout, setInterval, clearInterval,
   localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
   sessionStorage: { getItem: () => null, setItem() {}, removeItem() {} },
-  location: { reload() {}, href: '', search: '' },
+  location: { reload() {}, href: '', search: '', hash: '' },
+  // 頁面開頭那段自動登入是 async IIFE，用到 URLSearchParams。少了它會變成一個沒人接的
+  // rejection——以前整支測試是同步的、在它浮上來之前就結束了；批次 72 加了 await 才冒出來。
+  URLSearchParams, URL, history: { replaceState() {} },
   confirm: () => true, alert() {}, addEventListener() {}, removeEventListener() {},
   fetch: async () => ({ ok: true, status: 200, json: async () => ({}) }),
   document: {
@@ -214,6 +217,7 @@ sandbox.globalThis = sandbox;
 runInNewContext(code + `
 ;globalThis.__S = () => S;
 ;globalThis.__PEER_PALETTE = PEER_PALETTE;
+;globalThis.__setReport = (d) => { LAST_REPORT = d; };
 `, sandbox);
 
 const $ = (id) => sandbox.document.getElementById(id);
@@ -305,6 +309,90 @@ console.log('── 畫面：未登記機構的名稱是 AI 寫什麼存什麼�
   const chips = $('peer-chips').innerHTML;
   check('機構名稱有跳脫，沒有原封不動的標籤', !chips.includes('<img'), chips);
   check('onclick 只帶索引，名稱不進屬性', /onclick="togglePeer\(\d+\)"/.test(chips) && !/onclick="[^"]*img/.test(chips), chips);
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * 批次 72：GEO 介面改版——同一份資料，頁面上不同地方不能講出不同的結論
+ * ──────────────────────────────────────────────────────────────────────── */
+console.log('── 後端：第 15–30 天整段過完才算 settled，診斷不再叫它「基線」──');
+{
+  const { eventEffects } = await import('../api/geo.js');
+  const tw = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Taipei' });
+  const runsAround = (evDate, spanBefore, spanAfter) => {
+    const out = [];
+    for (let i = -spanBefore; i <= spanAfter; i++) {
+      const d = addDays(evDate, i);
+      if (d > tw) break;
+      const sc = i < 0 ? 20 : 45;   // 發稿後一路比發稿前高
+      for (let k = 0; k < 3; k++) out.push({ date: d, keyword: 'kw', score: sc, mentioned: true, cited: i >= 2, citations: '', engine: 'gemini' });
+    }
+    return out;
+  };
+  const young = addDays(tw, -17);   // D+17：第 15–30 天這段才過了三天
+  const [e1] = eventEffects([{ id: 'e1', date: young, title: '剛辦完', keywords: 'kw', type: '記者會' }], runsAround(young, 14, 17));
+  check('D+17：第 15–30 天還沒過完 → settled 為 false（舊版一有資料就算 settled）', e1.settled === false, JSON.stringify({ settled: e1.settled, lift: e1.lift }));
+  check('D+17：診斷不會出現「基線被抬升」這種長期結論',
+    !(e1.findings || []).some((f) => /基線被抬升|長期認知/.test(f.title + f.why)), JSON.stringify(e1.findings));
+  const old = addDays(tw, -40);
+  const [e2] = eventEffects([{ id: 'e2', date: old, title: '一個多月前', keywords: 'kw', type: '記者會' }], runsAround(old, 14, 40));
+  check('D+40：第 15–30 天已過完 → settled', e2.settled === true && e2.lift > 5, JSON.stringify({ settled: e2.settled, lift: e2.lift }));
+  const good = (e2.findings || []).find((f) => f.level === 'good' && /第 15–30 天/.test(f.title));
+  check('D+40：診斷說的是「第 15–30 天仍比發稿前高」，並提醒要看 D+31 之後的判定', !!good && /D\+31/.test(good.why), JSON.stringify(e2.findings));
+  check('D+40：任何一條診斷都不叫它「基線被抬升」', !(e2.findings || []).some((f) => /基線被抬升/.test(f.title)), JSON.stringify(e2.findings));
+}
+
+console.log('── 畫面：一眼看懂的摘要只把卡片上的數字換成白話，不搶先下結論 ──');
+{
+  const data = {
+    summary: { samples: 900, score14: 27.2, mentionRate14: 36, citedRate14: 12, failed14: 0,
+      trend: { current: 26.6, baseline: 32.9, delta: -6.3, dir: 'down', label: '下降', baseDays: 30 } },
+    board: [{ keyword: '固態電池', score: 41.1, mentionRate: 55 }, { keyword: '無人機', score: 18, mentionRate: 23 }],
+    events: [{ title: '還在觀察的那場', lift: 9.9, settled: false, matchedKeyword: '固態電池' }],
+  };
+  sandbox.renderSummary(data);
+  const html1 = $('summary-out').innerHTML;
+  check('下降的分數不再帶負號（「下降 -6.3 分」）', /下降 6\.3 分/.test(html1) && !/下降 -/.test(html1), html1);
+  check('最好／最需要加強的議題都點名', /固態電池/.test(html1) && /無人機/.test(html1), html1);
+  check('第 15–30 天還沒過完的活動不出現在摘要（不提前講留存數字）', !/還在觀察的那場/.test(html1), html1);
+  sandbox.renderSummary({ ...data, events: [{ title: '過完的那場', lift: 16.6, settled: true, matchedKeyword: '固態電池' }] });
+  const html2 = $('summary-out').innerHTML;
+  check('過完的活動講「第 15–30 天比發稿前 +16.6」，不說「基線抬升」', /第 15–30 天比發稿前 <b>\+16\.6<\/b>/.test(html2) && !/基線抬升/.test(html2), html2);
+  check('並且指回簡報裡的判定', /看簡報裡的判定/.test(html2), html2);
+  sandbox.renderSummary({ ...data, summary: { ...data.summary, trend: { dir: null, reason: '還在累積' } } });
+  check('趨勢樣本不夠（dir:null）時，摘要一個字都不提漲跌', !/上升|下降|持平/.test($('summary-out').innerHTML), $('summary-out').innerHTML);
+  const inj = { ...data, board: [{ keyword: '<img src=x onerror=alert(1)>', score: 50, mentionRate: 50 }, { keyword: '無人機', score: 18, mentionRate: 23 }] };
+  sandbox.renderSummary(inj);
+  check('議題名稱有跳脫（同仁連結能新增議題，名稱是使用者輸入）', !/<img/.test($('summary-out').innerHTML), $('summary-out').innerHTML);
+}
+
+console.log('── 畫面：簡報的標題跟一頁報告用同一套判定 ──');
+{
+  const base = { keyword: '固態電池', dateRange: ['2026-08-25', '2026-09-23'], samples: 172, engines: ['gemini'],
+    headline: '「固態電池」上工研院是 AI 的首選答案', stats: [{ label: '提及率', value: '172 次裡 96 次', pct: 56 }, { label: '差距', value: '領先 27 次（清大）', pct: null }],
+    voiceBoard: [{ name: '工研院', n: 96, self: true }, { name: '清大', n: 69 }], actions: [{ title: '提及率偏低', todo: '把 **主詞** 寫清楚' }], quote: null, missed: null };
+  Object.assign(sandbox.__S(), { data: null });
+  const plain = sandbox.buildDeckSlides({ ...base, performance: null }, '固態電池');
+  check('沒有活動績效 → 封面是「基準調查」', /基準調查/.test(plain[0].html) && !/成果績效/.test(plain.map((x) => x.html).join('')), plain[0].html);
+  check('建議下一步把 ** 標記拿掉，不會把星號印在投影片上', !/\*\*/.test(plain.map((x) => x.html).join('')), '');
+  check('最後一張一定是方法與限制（對外引用要附的那段）', /方法與限制/.test(plain.at(-1).html) && /代理指標/.test(plain.at(-1).html), plain.at(-1).html);
+  const notYet = sandbox.buildDeckSlides({ ...base, performance: { ready: false, stage: 'ECHO_HIGH_NOT_BASELINE' } }, '固態電池');
+  check('還沒通過 D+31 檢定 → 簡報不會掛「成果績效」的名', !/成果績效/.test(notYet.map((x) => x.html).join('')), notYet[0].html);
+  const raised = sandbox.buildDeckSlides({ ...base, performance: { ready: false, stage: 'BASELINE_RAISED' } }, '固態電池');
+  check('通過 D+31 檢定（BASELINE_RAISED）才叫「成果績效報告」', /成果績效報告/.test(raised[0].html), raised[0].html);
+  const xss = sandbox.buildDeckSlides({ ...base, performance: null, headline: '<script>x</script>', keyword: '<b>k</b>' }, '');
+  check('投影片上的文字都有跳脫', !/<script>|<b>k<\/b>/.test(xss.map((x) => x.html).join('')), '');
+}
+
+console.log('── 畫面：複製簡報文字不能夾帶程式碼殘留的大括號 ──');
+{
+  let copied = '';
+  sandbox.navigator = { clipboard: { writeText: async (t) => { copied = t; } } };
+  sandbox.__setReport({ keyword: '固態電池', headline: 'h', voiceBoard: [], stats: [], dateRange: ['a', 'b'], samples: 1, engines: ['gemini'], missed: null,
+    performance: { ready: true, stage: 'ECHO_HIGH_NOT_BASELINE', before: { mentionRate: 35, firstRate: 9 }, during: { mentionRate: 71, firstRate: 28 },
+      after: { mentionRate: 56, firstRate: 17 }, delta: { mentionRatePP: 21, firstRatePP: 8 }, decay: null } });
+  sandbox.copySlide();
+  await new Promise((r) => setTimeout(r, 0));
+  check('「不可寫成基線已墊高」那句沒有 { } 包著（舊版 ${\'{\'} 寫法會印出大括號）', /不可寫成「基線已墊高」/.test(copied) && !/[{}]/.test(copied), copied.split('\n').find((l) => /墊高/.test(l)));
 }
 
 console.log(`\n${fail === 0 ? '✅' : '❌'} GEO 基準線測試（含畫面）通過 ${pass}／失敗 ${fail}`);

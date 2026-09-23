@@ -20,6 +20,7 @@
 import { readRange, appendRows, updateRange, ensureSheets } from '../lib/sheets.js';
 import { fetchNewsjackCandidates } from '../lib/newsjacking.js';
 import { checkStructuredContent } from '../lib/structured-check.js';
+import { checkGeoDraft } from '../lib/geo-draft-check.js';
 import { BRAND_DEFAULT, canonList, tallyOrgs } from '../lib/geo-orgs.js';
 import { buildPeerSeries, selfTrend } from '../lib/geo-benchmark.js';
 
@@ -738,7 +739,7 @@ function buildSeries(runs, days) {
  * 半衰期（峰值後掉回 (峰值+基線)/2 要幾天）、基線抬升（事件後 15–30 天 − 基線）。
  * 這四個數字就是「潤利艾克曼給不了」的部分：AI 記憶留存天數。
  */
-function eventEffects(events, runs) {
+export function eventEffects(events, runs) {
   const byDate = {};
   runs.filter((r) => r.score !== null).forEach((r) => {
     (byDate[r.date] ||= []).push(r.score);
@@ -788,7 +789,10 @@ function eventEffects(events, runs) {
       baseline: round(baseline), peak: round(peak), peakDate,
       halfLifeDays: halfLife,
       lift: baseline !== null && after !== null ? round(after - baseline) : null,
-      settled: after !== null,
+      // ⚠️ settled＝「第 15–30 天這整段已經過完」，不是「這段裡有任何一天的資料」（批次 72）。
+      // 舊寫法 after !== null 在 D+15 當天就成立——一天的資料就寫出「30 天後基線 +X」
+      // 「這場真的改變了 AI 的長期認知」，而同一頁的一頁報告還在說「餘波期，不能宣稱」。
+      settled: after !== null && addDays(ev.date, 30) < todayTW(),
     };
 
     // 這場活動窗期內的實際樣本 → 給診斷用
@@ -899,17 +903,21 @@ function diagnoseEvent(ev) {
       todo: '活動後 3 天內補一頁獨立技術頁，並回頭確認關鍵那句話有沒有被寫進報導。',
     });
   }
+  // ⚠️ 用字要跟一頁報告的判定一致（批次 72）：第 15–30 天是新聞新鮮度的餘波期，那裡的高點
+  // 還不能叫「基線」——要宣稱基線墊高，得看 D+31 之後、通過信賴區間檢定（見 reportPerformance）。
+  // 舊標題「基線被抬升了」「這場真的改變了 AI 的長期認知」跟同一頁報告的「先不要拿去宣稱
+  // 成果」互相矛盾，主管截哪一張圖出去就是哪一個結論。
   if (ev.settled && ev.lift !== null && ev.lift <= 0) {
     out.push({
-      level: 'bad', title: '這場沒有留下基線抬升',
-      why: '30 天後回到原點，等於這場記者會對 AI 的長期記憶沒有貢獻。',
+      level: 'bad', title: '第 15–30 天已經回到發稿前的水準',
+      why: '熱度一退就回到原點，這場記者會沒有在 AI 的記憶裡留下東西。',
       todo: '下一場改變作法：發稿當天同步上線一個獨立主題頁，不要只靠媒體轉載。',
     });
   }
   if (ev.settled && ev.lift !== null && ev.lift > 5) {
     out.push({
-      level: 'good', title: `基線被抬升了 +${ev.lift}`,
-      why: '這場真的改變了 AI 對這個主題的長期認知，不只是當天熱度。',
+      level: 'good', title: `第 15–30 天仍比發稿前高 +${ev.lift}`,
+      why: '熱度退了之後還留著一截，是好跡象；但這段還在新聞的餘波期，要不要對外寫成「基線墊高」，以簡報裡 D+31 之後的判定為準。',
       todo: '把這場的發稿與落地頁作法記錄下來，當成之後的範本。',
     });
   }
@@ -1609,6 +1617,21 @@ export default async function handler(req, res) {
      * 純規則計算，不寫入任何分頁，也不影響 track_start 實際存的 structured 值——
      * 那一格最終還是同仁自己勾。
      */
+    /**
+     * 新聞稿 GEO 寫法檢核（批次 74）：修改前／修改後各算一次，給「發稿建議」的呈核一頁用。
+     * 純規則、不呼叫 AI、不寫任何分頁——見 lib/geo-draft-check.js 開頭的說明。
+     */
+    if (body.action === 'draft-check') {
+      const keyword = String(body.keyword || '').trim().slice(0, 40);
+      const before = String(body.before || '').slice(0, 20000);
+      const after = String(body.after || '').slice(0, 20000);
+      if (!after.trim()) return res.status(400).json({ error: '請貼上修改後的稿子' });
+      return ok(res, {
+        before: before.trim() ? checkGeoDraft(before, { keyword }) : null,
+        after: checkGeoDraft(after, { keyword }),
+      });
+    }
+
     if (body.action === 'check-structured') {
       return ok(res, checkStructuredContent({ title: body.title, text: body.text }));
     }
@@ -1642,8 +1665,20 @@ export default async function handler(req, res) {
       const keyword = String(body.keyword || '').trim();
       if (!keyword) return res.status(400).json({ error: '請填這場活動的關鍵字' });
 
-      const list = (body.prompts || []).map((s) => String(s || '').trim()).filter((s) => s.length >= 8);
-      if (!list.length) return res.status(400).json({ error: '至少要留一題' });
+      // ── 同一個關鍵字已經在追蹤了（批次 74）────────────────────────────
+      // 回報的情境：10/28 眺望活動的關鍵字是「產業分析師」，而「產業分析師」本來就在長期
+      // 追蹤。舊版照樣把新題目加進同一條線，兩件事會壞：
+      //   ① 題庫在中途變了，這場的前後對比被判成「題庫改過、不可比較」，原本那條長期
+      //      走勢也在這一天多出一批題目、斷一截
+      //   ② 之後對這場按「停止追蹤」，會把「產業分析師」所有題目停掉，連長期追蹤一起關
+      // 這種情況其實是最好的情況——活動前的基線早就有了，不用等兩週。所以預設**沿用既有
+      // 題目**、只加一筆活動標記；真的要另外加角度，前端會改用另一個關鍵字單獨追蹤。
+      const existingActive = (await safeRead('geo_prompts!A2:H')).filter((r) => r[0]).map(parsePrompt)
+        .filter((p) => p.active !== false && p.keyword === keyword);
+      const reuse = existingActive.length > 0 && body.add_prompts !== true;
+
+      const list = reuse ? [] : (body.prompts || []).map((s) => String(s || '').trim()).filter((s) => s.length >= 8);
+      if (!reuse && !list.length) return res.status(400).json({ error: '至少要留一題' });
       const bad = list.filter((s) => BRAND_RE.test(s));
       if (bad.length) return res.status(400).json({ error: `有 ${bad.length} 題出現「工研院」，那會變成自問自答，請先改掉。` });
 
@@ -1667,20 +1702,22 @@ export default async function handler(req, res) {
       const compStr = comps.length ? comps.join('、') : COMPETITORS;
 
       const stamp = nowTW();
-      await appendRows('geo_prompts!A:H', list.map((p) => [
-        uid('gp'), keyword, p, keyword, BRAND_DEFAULT, compStr, 'TRUE', stamp,
-      ]));
+      const newRows = list.map((p) => [uid('gp'), keyword, p, keyword, BRAND_DEFAULT, compStr, 'TRUE', stamp]);
+      if (newRows.length) await appendRows('geo_prompts!A:H', newRows);
 
       // 結構化稿：同仁在③打完題目、按「開始追蹤」前順手勾一下。
       // 沒勾＝FALSE，跟「不知道」（舊資料留白）分開存，兩者含意不同。
       const structured = body.structured ? 'TRUE' : 'FALSE';
 
       const evId = uid('ge');
+      // F 欄（note）記下「這場自己加了哪幾題」，停止追蹤時只停這幾題（見 track_stop）。
+      // 沿用既有題目的場次記成空清單「prompts=」——停止時一題都不動。
       await appendRows('geo_events!A:H', [[
-        evId, date, title, body.type || '記者會', keyword, '', refId, structured,
+        evId, date, title, body.type || '記者會', keyword, `prompts=${newRows.map((r) => r[0]).join(',')}`, refId, structured,
       ]]);
 
-      return ok(res, { success: true, added: list.length, event: { id: evId, date, title, keyword } });
+      return ok(res, { success: true, added: newRows.length, reused: reuse ? existingActive.length : 0,
+        event: { id: evId, date, title, keyword } });
     }
 
     if (body.action === 'settings_save') {
@@ -1727,13 +1764,21 @@ export default async function handler(req, res) {
       if (!target) return res.status(404).json({ error: '找不到這場追蹤' });
       const keyword = target[4] || '';
 
-      // 停用同議題的題目（逐列更新 G 欄，不影響其他欄位與其他議題的題目）
+      // 要停哪些題（批次 74）：
+      //   - 有記「prompts=…」的（批次 74 之後建的）→ 只停這場自己加的那幾題；沿用既有題目的
+      //     場次清單是空的，一題都不停
+      //   - 舊資料沒有記 → 還有其他追蹤共用這個關鍵字時一題都不停（舊版會把共用的長期追蹤
+      //     一起關掉）；沒有人共用才照舊停掉整個關鍵字
+      const own = String(target[5] || '').match(/(?:^|;)\s*prompts=([^;]*)/);
+      const ownIds = own ? new Set(own[1].split(',').map((x) => x.trim()).filter(Boolean)) : null;
+      const shared = evRows.some((r) => r[0] && r[0] !== body.id && r[4] === keyword);
       let stopped = 0;
-      if (keyword) {
+      if (keyword && (ownIds ? ownIds.size : !shared)) {
         const pRows = await safeRead('geo_prompts!A2:H');
         for (let i = 0; i < pRows.length; i++) {
           const r = pRows[i];
-          if (r[0] && r[3] === keyword && String(r[6]).toUpperCase() !== 'FALSE') {
+          const mine = ownIds ? ownIds.has(r[0]) : r[3] === keyword;
+          if (r[0] && mine && String(r[6]).toUpperCase() !== 'FALSE') {
             await updateRange(`geo_prompts!G${i + 2}`, [['FALSE']]);
             stopped++;
           }
@@ -1746,7 +1791,7 @@ export default async function handler(req, res) {
       }
       if (kept.length) await updateRange(`geo_events!A2:H${kept.length + 1}`, kept);
 
-      return ok(res, { success: true, removed: stopped, keyword });
+      return ok(res, { success: true, removed: stopped, keyword, kept_shared: stopped === 0 && (shared || !!ownIds) });
     }
 
     if (body.action === 'prompt_generate') {

@@ -2823,5 +2823,86 @@ out = await send('工研院簡介', 'U_staff');
 check('職員模式問「工研院簡介」→ 借用記者端的機構簡介，不是職員功能清單',
   /吳政忠/.test(out[0]?.text || ''), JSON.stringify(out));
 
+// ── 情境 28：再次盤點（批次 72）——三個「會被問倒」的洞 ─────────────────────────
+// ① 綁定中問「有新聞稿嗎」→ 規則層（isLatestNewsQuestion）在 routeIntent() 之前就把它
+//    送去工研院官網最新五則。批次 61 修的是 AI 那條路，這是同一個症狀的規則層版本。
+for (const text of ['有新聞稿嗎', '給我新聞稿', '新聞稿呢', '新聞稿發了嗎']) {
+  reset(); await freshModule();
+  state.bindings.set('U_reporter', { event_id: 'quad', media_name: '中央社', note: '', bound_at: Date.now() });
+  out = await send(text);
+  check(`綁定中打「${text}」→ 由這一場回答（不是工研院官網最新新聞清單）`,
+    out[0]?.kind === 'answer' && out[0].event === 'quad' && !/工研院官網新聞中心最近發布/.test(out[0].sys || ''),
+    JSON.stringify(out.map(o => [o.kind, o.event])));
+}
+// 反面：句子明確指向全院，照舊給最新新聞
+reset(); await freshModule();
+state.bindings.set('U_reporter', { event_id: 'quad', media_name: '中央社', note: '', bound_at: Date.now() });
+out = await send('工研院最近有哪些新聞');
+check('綁定中問「工研院最近有哪些新聞」→ 照舊是全院最新新聞（不被釘回這一場）',
+  out[0]?.kind === 'answer' && out[0].event === 'unknown' && /工研院最近發了哪些新聞/.test(out[0].sys || ''),
+  JSON.stringify(out.map(o => [o.kind, o.event])));
+// 沒綁定時沒有「這一場」可以回答，維持全站新聞
+reset(); await freshModule();
+out = await send('有新聞稿嗎');
+check('沒綁定時問「有新聞稿嗎」→ 維持原本的全站最新新聞',
+  out[0]?.kind === 'answer' && out[0].event === 'unknown', JSON.stringify(out.map(o => [o.kind, o.event])));
+// 群組綁定中一樣
+reset(); await freshModule();
+state.bindings.set('Cgroup1', { event_id: 'quad', bound_at: Date.now() });
+out = await sendGroup('@我 有新聞稿嗎', { mentionSelf: true, mentionText: '@我 ' });
+check('群組綁定中 @ 問「有新聞稿嗎」→ 也是這一場回答',
+  out[0]?.kind === 'answer' && out[0].event === 'quad', JSON.stringify(out.map(o => [o.kind, o.event])));
+
+// ② 後台填的時間、地點、新聞聯絡人要交給答題模型——以前 rowToEvent() 根本沒讀 L、M 欄，
+//    「幾點開始／在哪裡辦」只能回「這部分我沒有資料」。
+reset(); await freshModule();
+state.events[0][11] = '14:00–16:00';
+state.events[0][12] = '工研院中興院區 51 館';
+state.bindings.set('U_reporter', { event_id: 'quad', media_name: '中央社', note: '', bound_at: Date.now() });
+out = await send('這場在哪裡辦？幾點開始？');
+const qaSys = out.find(o => o.kind === 'answer')?.sysAll || '';
+check('問時間地點 → 模型拿得到後台填的地點', /地點：工研院中興院區 51 館/.test(qaSys), qaSys.slice(-400));
+check('問時間地點 → 模型拿得到後台填的時間', /時間：14:00–16:00/.test(qaSys), qaSys.slice(-400));
+check('問時間地點 → 模型拿得到新聞聯絡人', /新聞聯絡人：王小明/.test(qaSys), qaSys.slice(-400));
+check('問時間地點 → 模型知道「現在」是什麼時候（答得出開始了沒）', /現在時間：\d{4}-\d{2}-\d{2}（星期.）\d{2}:\d{2}（台灣時間）/.test(qaSys), qaSys.slice(-400));
+check('活動日期寫出相對今天幾天（已經辦完的不會被講成未來式）', /活動日期：2026-08-08（星期.）——已經在 \d+ 天前舉行/.test(qaSys), qaSys.slice(-400));
+check('基本資料放在第二個 system 區塊，第一塊（吃快取）不含「現在時間」',
+  !/現在時間：/.test(out.find(o => o.kind === 'answer')?.sys || ''), '');
+
+// ③ 收尾語、對答案的反應、測試——沒綁定時以前全被當成主題詞複誦
+for (const text of ['好的謝謝', '謝謝米亞', '了解', '收到謝謝', '先這樣', '太棒了']) {
+  reset(); await freshModule();
+  out = await send(text);
+  check(`沒綁定時打「${text}」→ 回一句收尾，不是「『${text}』我可以從兩個方向幫您找」`,
+    out.length === 1 && /不客氣|好的 🙂/.test(out[0]?.text || '') && !/兩個方向/.test(out[0]?.text || ''),
+    JSON.stringify(out));
+  check(`沒綁定時打「${text}」→ 不呼叫模型`, !out.some(o => o.kind === 'answer' || o.kind === 'fallback'),
+    JSON.stringify(out.map(o => o.kind)));
+}
+reset(); await freshModule();
+state.bindings.set('U_reporter', { event_id: 'quad', media_name: '中央社', note: '', bound_at: Date.now() });
+out = await send('好的謝謝');
+check('綁定中說「好的謝謝」→ 固定回覆、不送進 Sonnet（不掛警語、不算一題提問）',
+  out.length === 1 && /不客氣/.test(out[0]?.text || '') && !out.some(o => o.kind === 'answer'), JSON.stringify(out));
+check('綁定中說謝謝 → 按鈕列還是這場的快速提問（他可能還想問）',
+  chipsLookRight(out[0]?.quickReply, ['重點']), JSON.stringify(out[0]?.quickReply));
+check('綁定中說謝謝 → 綁定不動', state.bindings.get('U_reporter')?.event_id === 'quad');
+reset(); await freshModule();
+out = await send('謝謝，那成本呢');
+check('「謝謝，那成本呢」後面接著真問題 → 不被當成收尾語', !/不客氣/.test(out[0]?.text || ''), JSON.stringify(out));
+for (const [text, want] of [['答錯了', /換個說法/], ['看不懂', /換個說法/], ['測試一下', /我在線上/], ['哈囉米亞', null]]) {
+  reset(); await freshModule();
+  out = await send(text);
+  check(`沒綁定時打「${text}」→ 不被當成主題詞複誦`, !/兩個方向/.test(out.at(-1)?.text || ''), JSON.stringify(out));
+  if (want) check(`沒綁定時打「${text}」→ 固定回覆`, want.test(out.at(-1)?.text || ''), JSON.stringify(out));
+}
+// 群組續問視窗內、沒 @：「好的謝謝」多半是在跟別人講，要安靜（插話是這個帳號最該避免的事）
+reset(); await freshModule();
+state.bindings.set('Cgroup1', { event_id: 'quad', bound_at: Date.now(), groupSessionUntil: Date.now() + 60_000 });
+out = await sendGroup('好的謝謝', { mentionSelf: false });
+check('群組續問視窗內沒 @ 的「好的謝謝」→ 安靜', out.length === 0, JSON.stringify(out));
+out = await sendGroup('@我 謝謝', { mentionSelf: true, mentionText: '@我 ' });
+check('群組裡 @ 米亞說謝謝 → 回一句不客氣', /不客氣/.test(out[0]?.text || ''), JSON.stringify(out));
+
 console.log(`\n${fail === 0 ? '✅' : '❌'} 流程測試通過 ${pass}／失敗 ${fail}`);
 process.exit(fail === 0 ? 0 : 1);

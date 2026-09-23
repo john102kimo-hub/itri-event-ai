@@ -5,7 +5,7 @@
 //   2. 沒帶 → 維持原本一次回傳 { reply } 的 JSON（舊前端／外部呼叫者不會被打斷）
 
 import { readRange, appendRows, warmAuth } from '../lib/sheets.js';
-import { buildSystemPrompt, resolveEventContent } from '../lib/prompt.js';
+import { buildSystemPrompt, resolveEventContent, formatEventBasics } from '../lib/prompt.js';
 
 // 活動設定快取（60 秒；記者會現場臨時改稿也能很快生效）
 const eventCache = new Map();
@@ -22,7 +22,9 @@ async function fetchEventConfig(eventId) {
   return {
     id: row[0], name: row[1], color: row[2] || '#0F9E7A',
     knowledge_base: row[3] || '', status: row[4] || 'active', event_date: row[5] || '',
-    organizer: row[9] || '工研院', images: row[7] || '', invite_letter: row[16] || ''
+    organizer: row[9] || '工研院', images: row[7] || '', invite_letter: row[16] || '',
+    // 時間、地點、新聞聯絡人（批次 72）：記者問「幾點開始／在哪裡」時答得出來，見 formatEventBasics()
+    event_time: row[11] || '', venue: row[12] || '', press_contact: row[14] || ''
   };
 }
 
@@ -156,6 +158,7 @@ export default async function handler(req, res) {
 
     const eventName = event.name;
     const systemPrompt = buildSystemPrompt(event);
+    const basicsBlock = formatEventBasics(event);
     const lastUserMsg = [...trimmed].reverse().find(m => m.role === 'user');
     const question = !lastUserMsg
       ? ''
@@ -176,7 +179,11 @@ export default async function handler(req, res) {
         stream: !!stream,
         // 知識庫在 60 秒快取視窗內逐 byte 穩定，加 ephemeral cache 讓同場記者連續發問時
         // 讀取只收 0.1 倍價（記者會現場正是這種「同一份知識庫、多人連續提問」的場景）
-        system: [{ type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }],
+        system: [
+          { type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } },
+          // 活動基本資料＋現在時間：每分鐘在變，放在快取區塊之後，不打散上面那塊的快取
+          ...(basicsBlock ? [{ type: 'text', text: basicsBlock }] : [])
+        ],
         messages: trimmed
       })
     });

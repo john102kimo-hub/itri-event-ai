@@ -1,6 +1,6 @@
 // lib/prompt.js 的邀請函替換邏輯（resolveEventContent／isPreEventMode）——純函式，
 // 不需要 test/loader.mjs 那套 fake Sheets／LINE，直接測。
-import { buildSystemPrompt, resolveEventContent, isPreEventMode } from '../lib/prompt.js';
+import { buildSystemPrompt, resolveEventContent, isPreEventMode, formatEventBasics } from '../lib/prompt.js';
 
 let pass = 0, fail = 0;
 function eq(actual, expected, label) {
@@ -102,6 +102,24 @@ console.log('── buildSystemPrompt 帶上邀請函規則 ──');
   const prompt = buildSystemPrompt(ev);
   ok(prompt.includes(base.knowledge_base), '非活動前：system prompt 含正式新聞稿內容');
   ok(!/媒體邀請函/.test(prompt), '非活動前：不會多出邀請函提醒規則');
+}
+
+// ── 活動基本資料（批次 72）─────────────────────────────────────────────
+{
+  const now = new Date('2026-09-23T07:04:00Z'); // 台灣 15:04，星期三
+  const b = formatEventBasics({ event_date: '2026-09-23', event_time: '14:00-16:00', venue: '中興院區', press_contact: '王小明' }, now);
+  ok(b.includes('活動日期：2026-09-23（星期三）——就是今天'), '當天的活動寫明「就是今天」');
+  ok(b.includes('現在時間：2026-09-23（星期三）15:04（台灣時間）'), '現在時間用台灣時區（Vercel 跑在 UTC）');
+  ok(/時間：14:00-16:00/.test(b) && /地點：中興院區/.test(b) && /新聞聯絡人：王小明/.test(b), '時間、地點、聯絡人都在');
+  ok(formatEventBasics({ event_date: '2026-9-25' }, now).includes('——還有 2 天'), '個位數月日也認得，算得出還有幾天');
+  ok(formatEventBasics({ event_date: '2026-09-20', venue: 'x' }, now).includes('已經在 3 天前舉行'), '辦完的活動寫明已經舉行');
+  eq(formatEventBasics({ event_date: '2026/6/18 下午11:06:04' }, now), '',
+    'F 欄是系統寫的建立時間戳記（沒填活動日期）→ 不能當成活動日期，其他欄位也空就整段不給');
+  ok(!formatEventBasics({ event_date: '2026/6/18 下午11:06:04', venue: 'A 館' }, now).includes('活動日期'),
+    '建立時間戳記不會變成「活動日期」那一行');
+  eq(formatEventBasics({}, now), '', '什麼都沒填 → 空字串（不多一塊只有現在時間的 system）');
+  ok(!buildSystemPrompt({ name: 'X', knowledge_base: 'kb', venue: 'A 館' }).includes('A 館'),
+    'buildSystemPrompt() 本身不變（網頁版逐 byte 相同、吃快取的那一塊不放會變動的東西）');
 }
 
 console.log(`\n${fail === 0 ? '✅' : '❌'} 邀請函規則測試通過 ${pass}／失敗 ${fail}`);
