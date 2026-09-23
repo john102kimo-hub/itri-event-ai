@@ -50,8 +50,10 @@ import {
   createDraftEvent, editLink, trainingLink, ensureEventEditCode, getEventRawById,
   getEventAnalyticsSummary, formatEventAnalyticsReply, getGeoStatusSummary, getGeoTrendSeries,
   isExitStaffCommand, revokeStaff, listActiveStaffIds, getStaffPending, setStaffPending,
-  isCancelReply, staffPickList, dateWithWeekday, todayTaipei, getEventStats
+  isCancelReply, staffPickList, dateWithWeekday, todayTaipei, getEventStats,
+  getStaffPendingData, getStaffName
 } from '../lib/staff.js';
+import { proposeChange, applyChange, findLastChangeBy, fieldLabel, displayValue } from '../lib/event-edit.js';
 import {
   eventChecklist, formatProgressOverview, buildEventCardFlex, formatEventCardText,
   formatNudgeMessage, previewLink
@@ -2121,14 +2123,9 @@ async function handleTeachMessage(replyToken, userId, text) {
   // 批次 76：「改成下午兩點開始」「請改一下這場的地點」是在改活動資料，不是在教米亞
   // 說話方式。舊版會把它記成全站語氣規則，套用到每一場（見 lib/bot-memory.js
   // looksLikeFieldChange() 的說明）。這裡不存任何東西，只指路。
-  if (cmd.kind === 'field_hint') {
-    await replyOrPush(replyToken, userId,
-      '這句看起來是要改某一場的活動資料（時間、地點、聯絡人⋯⋯），我沒有把它記成規則，不然會套用到所有場次 🙏\n\n' +
-      '要改資料：打「要媒體訓練連結」選那一場，會一起拿到編輯連結，在編輯頁改。\n' +
-      '只想讓米亞知道：打「記住：」加上活動名稱和內容，例如「記住：智慧醫療那場改到下午兩點」。',
-      staffChips('要媒體訓練連結', '記憶清單'));
-    return true;
-  }
+  // 批次 78 起不在這裡回覆，交回呼叫端：這句話多半是「改資料」，交給職員路由的
+  // update_event 走確認流程；路由也接不住時，呼叫端再送下面那段 FIELD_HINT_TEXT。
+  if (cmd.kind === 'field_hint') return 'field_hint';
 
   if (cmd.kind === 'list') {
     // 清單是空的時候，下一步是「怎麼教」——職員版的「使用說明」裡有【教米亞】那段。
@@ -2210,7 +2207,7 @@ async function handleTeachMessage(replyToken, userId, text) {
 // 100% 認得出來，還省一次模型呼叫（lib/menu.js 開頭同一個道理）。
 const PROGRESS_RE = /^(活動與進度|活動進度|填寫進度|看填寫進度|查填寫進度|填寫狀況|活動填寫狀況|哪幾場還沒填完)[?？。!！]?$/;
 const UPDATE_ENTRY_RE = /^(更新活動|修改活動|更新活動資訊|修改活動資訊|改活動資料)[?？。!！]?$/;
-const CARD_CMD_RE = /^(催填|數據|活動卡)\s*[:：]\s*(.+)$/;
+const CARD_CMD_RE = /^(催填|數據|活動卡|發布)\s*[:：]\s*(.+)$/;
 
 // Flex 訊息要自己帶快速回覆（replyOrPushMessages 收的是原始物件，不會幫忙轉）。
 // 格式跟 lib/line.js buildQuickReply() 一樣：最多 13 顆、label 最長 20 字。
@@ -2295,6 +2292,136 @@ function findCardByExactName(name, cards) {
   return hits.length === 1 ? hits[0] : null;
 }
 
+// ── 在 LINE 改資料、發布、復原（批次 78）────────────────────────────────────
+// 確認鈕用完整句子，不用「是／否」：這兩顆按鈕會留在對話紀錄裡，隔天滑回去按到，
+// 也要看得出是在確認什麼（跟 TEACH_YES 同一個理由）。過了 10 分鐘，按了只會得到
+// 「沒有等著確認的修改」，不會改到任何東西。
+const CONFIRM_UPDATE = '✅ 確認修改';
+const CANCEL_UPDATE = '✖ 取消修改';
+const CONFIRM_PUBLISH = '🚀 確認發布';
+const CANCEL_PUBLISH = '✖ 先不發布';
+const UNDO_RE = /^(復原上一個修改|復原|還原上一個修改|取消上一個修改|改回來|改回去)[。!！]?$/;
+
+const FIELD_HINT_TEXT =
+  '這句看起來是要改活動資料，我沒有把它記成規則，不然會套用到所有場次 🙏\n\n' +
+  '要改的話請說是哪一場，例如「智慧醫療那場改到下午兩點」，我會先跟你確認再改。\n' +
+  '只想讓米亞知道、不改資料：打「記住：」加上活動名稱和內容。';
+
+// 有人在 LINE 改了記者看得到的資料 → 通知管理員（批次 76 決定 5：職員不分權限，
+// 所以每次修改都要讓管理員知道，密語外流被亂改時才來得及發現）。
+async function notifyAdminOfChange(userId, text) {
+  const ownerId = process.env.LINE_ADMIN_USER_ID;
+  if (!ownerId || ownerId === userId) return;
+  try { await pushMessage(ownerId, text); } catch (e) { console.error('通知管理員失敗:', e.message); }
+}
+
+async function proposeUpdate(replyToken, userId, eventId, field, value, { raw = false, undo = false } = {}) {
+  const r = await proposeChange(eventId, field, value, { raw });
+  if (!r.ok) {
+    await replyOrPush(replyToken, userId, r.reason, staffChips('活動與進度'));
+    return;
+  }
+  const p = r.proposal;
+  await setStaffPending(userId, 'update_confirm', p);
+  // ⚠️ 跟教米亞的確認句一樣，這一則刻意**只有兩顆按鈕**：這一刻只有改／不改兩條路，
+  // 旁邊擺一排別的出口只會讓人點走、留下一筆懸著的修改。
+  await replyOrPush(replyToken, userId,
+    `${undo ? '復原上一個修改：\n' : ''}要把《${p.eventName}》的${fieldLabel(field)}\n從「${displayValue(field, p.before)}」\n改成「${displayValue(field, p.after)}」嗎？\n\n改了以後，記者問米亞、活動網頁都會跟著更新。`,
+    [CONFIRM_UPDATE, CANCEL_UPDATE]);
+}
+
+async function proposePublish(replyToken, userId, eventId) {
+  const row = (await getAllEventRows()).find(r => r[0] === eventId);
+  if (!row) {
+    await replyOrPush(replyToken, userId, '找不到這場活動，可能剛被改名了。', staffChips('活動與進度'));
+    return;
+  }
+  const c = eventChecklist(row, todayTaipei());
+  if (c.status !== 'draft') {
+    await replyOrPush(replyToken, userId, `《${c.name}》已經是${displayValue('status', c.status)}，記者本來就問得到。`, staffChips({ label: '看這場的活動卡', text: c.name }));
+    return;
+  }
+  // 朱朱的決定（批次 76 決定 2）：先過檢查清單。必填沒齊就不給發布——記者問得到卻什麼
+  // 都答不出來，比晚一點發布更糟。
+  if (c.missingRequired.length) {
+    await replyOrPush(replyToken, userId,
+      `《${c.name}》還不能發布，必填還缺：${c.missingRequired.join('、')}。\n\n補齊之後再按一次「發布」就可以。`,
+      staffChips({ label: '產生催填訊息', text: `催填：${c.name}` }, { label: '看這場的活動卡', text: c.name }));
+    return;
+  }
+  const r = await proposeChange(eventId, 'status', 'active');
+  if (!r.ok) {
+    await replyOrPush(replyToken, userId, r.reason, staffChips('活動與進度'));
+    return;
+  }
+  await setStaffPending(userId, 'publish_confirm', r.proposal);
+  await replyOrPush(replyToken, userId,
+    `要發布《${c.name}》嗎？\n${c.date ? `活動日期：${dateWithWeekday(c.date)}\n` : ''}\n發布後記者在 LINE 和活動網頁都問得到這一場。`,
+    [CONFIRM_PUBLISH, CANCEL_PUBLISH]);
+}
+
+// 回傳 true＝這則訊息已經處理完。
+async function handleEditFlow(replyToken, userId, text, pendingData, cards) {
+  const pending = pendingData?.intent || null;
+  const payload = pendingData?.payload || null;
+  const s = String(text || '').trim();
+
+  if (s === CONFIRM_UPDATE || s === CONFIRM_PUBLISH) {
+    const want = s === CONFIRM_UPDATE ? 'update_confirm' : 'publish_confirm';
+    if (pending !== want || !payload) {
+      await replyOrPush(replyToken, userId, '沒有等著確認的修改喔（超過 10 分鐘會自動取消）。要改的話再說一次就好。', staffChips('活動與進度'));
+      return true;
+    }
+    const userName = await getStaffName(userId);
+    const r = await applyChange(payload, { userId, userName });
+    if (!r.ok) {
+      await replyOrPush(replyToken, userId, r.reason, staffChips('活動與進度'));
+      return true;
+    }
+    invalidateEventsCache();
+    const name = payload.field === 'name' ? payload.after : payload.eventName;
+    const change = `${fieldLabel(payload.field)}：「${displayValue(payload.field, payload.before)}」→「${displayValue(payload.field, payload.after)}」`;
+    console.log(`[line] 職員修改 user=${userId} event=${payload.eventId} field=${payload.field}`);
+    await replyOrPush(replyToken, userId,
+      payload.field === 'status' && payload.after === 'active'
+        ? `已發布 ✅《${name}》\n記者現在問得到這一場了。`
+        : `已更新 ✅《${name}》\n${change}`,
+      staffChips({ label: '看這場的活動卡', text: name }, '復原上一個修改'));
+    await notifyAdminOfChange(userId,
+      `✏️ 活動資料被修改\n《${name}》\n${change}\n改的人：${userName || '（沒有名字）'}\nLINE ID：${userId}\n\n不是你認識的人改的，可以到試算表 event_changes 分頁查紀錄。`);
+    return true;
+  }
+  if (s === CANCEL_UPDATE || s === CANCEL_PUBLISH) {
+    await replyOrPush(replyToken, userId, s === CANCEL_PUBLISH ? '好，先不發布 👌' : '好，沒有改 👌', staffChips('活動與進度'));
+    return true;
+  }
+
+  if (UNDO_RE.test(s)) {
+    const last = await findLastChangeBy(userId);
+    if (!last) {
+      await replyOrPush(replyToken, userId, '你最近沒有在 LINE 上改過活動資料，沒有東西可以復原。', staffChips('活動與進度'));
+      return true;
+    }
+    await proposeUpdate(replyToken, userId, last.eventId, last.field, last.before, { raw: true, undo: true });
+    return true;
+  }
+
+  // 上一則問了「要改／發布哪一場」，這一則是場次名稱
+  if ((pending === 'update_pick' && payload) || pending === 'publish_pick') {
+    if (isCancelReply(s)) {
+      await replyOrPush(replyToken, userId, '好，沒有改 👌', staffChips('活動與進度'));
+      return true;
+    }
+    const target = matchEventByName(s, cards) || findCardByExactName(s, cards);
+    if (target) {
+      if (pending === 'publish_pick') await proposePublish(replyToken, userId, target.id);
+      else await proposeUpdate(replyToken, userId, target.id, payload.field, payload.value);
+      return true;
+    }
+  }
+  return false;
+}
+
 async function handleStaffMessage(replyToken, userId, text) {
   // ⚠️ 退出一定要在 routeStaffIntent() 之前用字面比對攔下來。交給 AI 判意圖會被歸到
   // 'other'，使用者只會拿到一份能力清單、永遠退不出去（實際回報過的狀況）。
@@ -2313,7 +2440,9 @@ async function handleStaffMessage(replyToken, userId, text) {
   // ⚠️ 一定要排在 routeStaffIntent() 之前，而且用字面比對——跟 isExitStaffCommand()
   // 同一個理由：「這句話會不會被寫進知識庫、讓每個記者都讀到」，不該取決於模型當下
   // 判得準不準。
-  if (await handleTeachMessage(replyToken, userId, text)) return;
+  const teach = await handleTeachMessage(replyToken, userId, text);
+  if (teach === true) return;
+  const fieldHint = teach === 'field_hint';
 
   // ── 職員 ＝ 記者 ＋ 管理，不是「另一個世界」（回報：「職員模式要重新思考改進，
   // 不好用」）────────────────────────────────────────────────────────────
@@ -2362,8 +2491,13 @@ async function handleStaffMessage(replyToken, userId, text) {
   // 活動名稱，模型判成 qa 完全合理——問題不在模型判錯，而在沒有人告訴它「上一句我問
   // 的是哪一場的後台數據」。所以這裡先把 pending 讀回來（讀取免費，isStaffAuthenticated
   // 本來就要讀同一批列），再用它覆寫這次的意圖。
-  const pending = await getStaffPending(userId);
+  // 批次 78：追問可能帶著資料（等確認的那筆修改），要在清掉之前讀出來
+  const pendingData = await getStaffPendingData(userId);
+  const pending = pendingData?.intent || null;
   if (pending) await setStaffPending(userId, ''); // 一次性，用掉就清
+
+  // ── 批次 78：修改／發布的確認、復原、選場次 ────────────────────────────────
+  if (await handleEditFlow(replyToken, userId, text, pendingData, cards)) return;
 
   // ── 批次 77：選單與活動卡按鈕送出的固定句型，字面比對直接處理 ─────────────
   if (PROGRESS_RE.test(text)) {
@@ -2372,7 +2506,8 @@ async function handleStaffMessage(replyToken, userId, text) {
   }
   if (UPDATE_ENTRY_RE.test(text)) {
     await replyOrPush(replyToken, userId,
-      '要更新哪一場？點下面的活動，會出現那場的活動卡：\n・按「✏️ 開啟編輯頁」直接改\n・按「📨 催填訊息」產生一則可以轉傳給負責同仁的提醒',
+      '名稱、日期、時間、地點、新聞聯絡人可以直接跟我說，例如「智慧醫療那場地點改成南港展覽館」，我會先跟你確認再改。\n\n' +
+      '新聞稿、邀請函、照片：點下面的活動，在活動卡上按「✏️ 開啟編輯頁」；要請別人填，按「📨 催填訊息」。',
       eventQuickReplies());
     return;
   }
@@ -2384,6 +2519,7 @@ async function handleStaffMessage(replyToken, userId, text) {
       return;
     }
     if (cardCmd[1] === '催填') return sendNudge(replyToken, userId, target.id);
+    if (cardCmd[1] === '發布') return proposePublish(replyToken, userId, target.id);
     if (cardCmd[1] === '數據') {
       const summary = await getEventAnalyticsSummary(target.id, target.name);
       await replyOrPush(replyToken, userId, formatEventAnalyticsReply(summary), staffChips('活動與進度'));
@@ -2394,7 +2530,7 @@ async function handleStaffMessage(replyToken, userId, text) {
   // 點了清單上的活動名稱（整句就是某一場的名稱）→ 活動卡。帶著問題的（「某某那場的
   // 重點」）不會命中 matchEventByName()，照舊交給下面的路由讓米亞回答。
   // ⚠️ 等「哪一場」答案的時候（pending 查數據／要訓練連結）不攔：那時候點名稱是在回答問題。
-  if (pending !== 'event_analytics' && pending !== 'training_link' && pending !== 'create_event') {
+  if (!['event_analytics', 'training_link', 'create_event', 'update_pick', 'publish_pick'].includes(pending)) {
     const tapped = matchEventByName(text, cards);
     if (tapped) {
       await sendEventCard(replyToken, userId, tapped.id);
@@ -2454,6 +2590,36 @@ async function handleStaffMessage(replyToken, userId, text) {
       // 一片空白，退回純文字版——跟 lib/menu.js buildWelcomeFlex 同一套降級模式。
       await replyOrPush(replyToken, userId, formatGeoBriefText(statusData, seriesData, SITE));
     }
+    return;
+  }
+
+  // 批次 78：在 LINE 直接改資料。模型只負責聽懂「哪一場、哪一欄、改成什麼」；能不能改、
+  // 格式對不對、改前是什麼，全部由 lib/event-edit.js 決定，而且一定先給人按確認。
+  if (routed.intent === 'update_event') {
+    if (!routed.update_field || !routed.update_value) {
+      await replyOrPush(replyToken, userId,
+        '要改哪一場的什麼？直接說就好，例如：\n・智慧醫療那場地點改成南港展覽館\n・眺望研討會改到 10/30\n・奈米那場的新聞聯絡人換成王小明 0912-345-678\n\n在 LINE 可以改：名稱、日期、時間、地點、新聞聯絡人。新聞稿、邀請函、照片請按活動卡上的「開啟編輯頁」。',
+        eventQuickReplies());
+      return;
+    }
+    if (routed.event_ids.length === 1) {
+      await proposeUpdate(replyToken, userId, routed.event_ids[0], routed.update_field, routed.update_value);
+      return;
+    }
+    await setStaffPending(userId, 'update_pick', { field: routed.update_field, value: routed.update_value });
+    await replyOrPush(replyToken, userId,
+      `要改哪一場的${fieldLabel(routed.update_field)}（改成「${routed.update_value}」）？點下面的活動，或打活動名稱。`,
+      eventQuickReplies(routed.event_ids));
+    return;
+  }
+
+  if (routed.intent === 'publish') {
+    if (routed.event_ids.length === 1) {
+      await proposePublish(replyToken, userId, routed.event_ids[0]);
+      return;
+    }
+    await setStaffPending(userId, 'publish_pick');
+    await replyOrPush(replyToken, userId, '要發布哪一場？點下面的活動，或打活動名稱。', eventQuickReplies(routed.event_ids));
     return;
   }
 
@@ -2548,6 +2714,12 @@ async function handleStaffMessage(replyToken, userId, text) {
   // 的本來就是「兩邊都沒對上」的少數訊息，而同仁的訊息量遠小於記者。
   // askMediaName／remember 都關掉：同仁不是記者，不要問他貴媒體的名稱，內部對話也
   // 不該混進記者的對話記憶。staff:true 讓兜底那則帶職員的按鈕，不是記者的。
+  // 批次 76／78：「改成下午兩點開始」這種句子，模型也沒聽出是哪一欄、哪一場。不能交給
+  // 兜底——那條路可能把它當閒聊回。明確告訴同仁怎麼講才改得動。
+  if (fieldHint) {
+    await replyOrPush(replyToken, userId, FIELD_HINT_TEXT, eventQuickReplies());
+    return;
+  }
   await handleUnbound(replyToken, userId, text, { askMediaName: false, remember: false, staff: true });
 }
 
@@ -2579,6 +2751,10 @@ async function sendStaffMenu(replyToken, userId) {
     '\n・設定圖文選單——重設下方選單\n' +
     '・點活動名稱——看那一場的活動卡：填寫進度、編輯頁、催填訊息、媒體訓練\n' +
     '・帶著問題問（「某某那場的重點是什麼」）——米亞照那場的內容回答（含未發布）\n\n' +
+    '【直接改資料】\n' +
+    '・「智慧醫療那場地點改成南港展覽館」——名稱、日期、時間、地點、新聞聯絡人都可以，會先跟你確認\n' +
+    '・「發布 某某那場」——必填都齊了才能發布\n' +
+    '・打「復原上一個修改」改回去\n\n' +
     '【教米亞】\n' +
     '・「記住：這場的技術還在實驗階段，不要說已經量產」——只記這一場\n' +
     '・「語氣：回答再短一點」——全站通用\n' +

@@ -2995,7 +2995,8 @@ check('　 同一視窗內真的在問活動 → 照樣回', out.length > 0, JSO
   state.staff.push(['U_staff', '', '2026-08-27', '', '']);
   out = await send('改成下午兩點開始', 'U_staff');
   check('★ 「改成下午兩點開始」不會記成任何規則', state.memories.length === 0, JSON.stringify(state.memories));
-  check('　 並說明為什麼沒記、要去哪裡改', /不然會套用到所有場次/.test(out[0]?.text || '') && hasStaffEntries(out[0]), JSON.stringify(out));
+  // 批次 78 起這句會走「在 LINE 改資料」的流程：問是哪一場，而不是只說不能記
+  check('　 改走修改流程：問要改哪一場的時間', /要改哪一場的時間/.test(out[0]?.text || '') && hasStaffEntries(out[0]), JSON.stringify(out));
   out = await send('請改一下智慧醫療的地點，改到南港展覽館', 'U_staff');
   check('「請改一下⋯地點」也不會記成規則', state.memories.length === 0, JSON.stringify(state.memories));
   out = await send('以後回答短一點', 'U_staff');
@@ -3113,7 +3114,7 @@ check('　 同一視窗內真的在問活動 → 照樣回', out.length > 0, JSO
 
   // 「更新活動」→ 選哪一場
   out = await send('更新活動', 'U_staff');
-  check('「更新活動」→ 請他選一場，按鈕是近期場次', /要更新哪一場/.test(out[0]?.text || '') && labelsOf(out[0]).includes('智慧醫療解決方案記者會'), JSON.stringify(out));
+  check('「更新活動」→ 說明怎麼改，按鈕是近期場次', /直接跟我說/.test(out[0]?.text || '') && labelsOf(out[0]).includes('智慧醫療解決方案記者會'), JSON.stringify(out));
 
   // 點活動名稱 → 活動卡
   out = await send('智慧醫療解決方案記者會', 'U_staff');
@@ -3155,6 +3156,97 @@ check('　 同一視窗內真的在問活動 → 照樣回', out.length > 0, JSO
   check('建立完成的第一顆按鈕是「看這場的活動卡」', labelsOf(out[0])[0] === '眺望2027產業發展趨勢研討會', JSON.stringify(labelsOf(out[0])));
   out = await send('眺望2027產業發展趨勢研討會', 'U_staff');
   check('　 按了就是剛建的那場的活動卡', out[0]?.kind === 'flex' && /必填 0／4/.test(flexOf(out[0])), flexOf(out[0]).slice(0, 300));
+}
+
+// ── 情境 78：在 LINE 改活動資料、發布、復原（批次 78，職員模式第三批）──────────────
+{
+  const labelsOf = o => (o?.quickReply || []).map(c => (typeof c === 'object' && c ? c.text : c));
+  const medRow = () => state.events.find(r => r[0] === 'med');
+  reset(); await freshModule();
+  process.env.LINE_ADMIN_USER_ID = 'U_owner';
+  state.staff.push(['U_staff', '小美', '2026-08-27', '', '']);
+
+  // 改地點：先確認，按了才寫
+  out = await send('智慧醫療解決方案記者會地點改成南港展覽館', 'U_staff');
+  check('★ 改地點 → 先給「改前 → 改後」確認，不直接寫', /從「（空白）」\n改成「南港展覽館」/.test(out[0]?.text || '') && medRow()[12] === '', JSON.stringify(out));
+  check('　 確認句只有「確認／取消」兩顆', JSON.stringify(labelsOf(out[0])) === JSON.stringify(['✅ 確認修改', '✖ 取消修改']), JSON.stringify(labelsOf(out[0])));
+  out = await send('✅ 確認修改', 'U_staff');
+  check('★ 按確認 → 真的寫進 events 表 M 欄', medRow()[12] === '南港展覽館', JSON.stringify(medRow()));
+  check('　 回覆寫出改了什麼，按鈕有「復原上一個修改」', /已更新 ✅/.test(out.find(o => !o.push)?.text || '') && labelsOf(out.find(o => !o.push)).includes('復原上一個修改'), JSON.stringify(out));
+  check('　 修改紀錄寫進 event_changes（誰、哪場、哪欄、改前改後）',
+    state.changes.length === 1 && state.changes[0][1] === 'U_staff' && state.changes[0][2] === '小美' && state.changes[0][3] === 'med' && state.changes[0][5] === 'venue' && state.changes[0][7] === '南港展覽館', JSON.stringify(state.changes));
+  check('★ 通知 LINE_ADMIN_USER_ID（決定 5：不分權限，所以每次修改都通知）', sent.some(o => o.push && o.to === 'U_owner' && /南港展覽館/.test(o.text)) && !sent.some(o => o.push && o.to === 'U_staff'), JSON.stringify(sent));
+  out = await send('✅ 確認修改', 'U_staff');
+  check('再按一次確認 → 不會重複寫，說沒有等著確認的', /沒有等著確認/.test(out[0]?.text || '') && state.changes.length === 1, JSON.stringify(out));
+
+  // 取消
+  out = await send('智慧醫療解決方案記者會時間改成14:00', 'U_staff');
+  out = await send('✖ 取消修改', 'U_staff');
+  check('按取消 → 沒有改', medRow()[11] === '' && /沒有改/.test(out[0]?.text || ''), JSON.stringify(medRow()));
+
+  // 日期：格式由程式把關，並帶星期幾
+  out = await send('智慧醫療解決方案記者會改到 10/15', 'U_staff');
+  check('改日期 → 確認句帶星期幾', /改成「2026-10-15（四）」/.test(out[0]?.text || ''), out[0]?.text);
+  await send('✅ 確認修改', 'U_staff');
+  check('　 確認後寫成 YYYY-MM-DD', medRow()[5] === '2026-10-15', medRow()[5]);
+
+  // 沒說哪一場 → 問哪一場，點了再確認
+  out = await send('新聞聯絡人換成王小明 0912-345-678', 'U_staff');
+  check('沒說哪一場 → 問要改哪一場的新聞聯絡人', /要改哪一場的新聞聯絡人/.test(out[0]?.text || ''), JSON.stringify(out));
+  out = await send('智慧醫療解決方案記者會', 'U_staff');
+  check('　 點了場次 → 出確認句（不是跳活動卡）', /要把《智慧醫療解決方案記者會》的新聞聯絡人/.test(out[0]?.text || ''), JSON.stringify(out));
+  await send('✅ 確認修改', 'U_staff');
+  check('　 確認後寫進 O 欄', medRow()[14] === '王小明 0912-345-678', medRow()[14]);
+
+  // 復原
+  out = await send('復原上一個修改', 'U_staff');
+  check('★ 復原 → 確認要改回原本的值', /復原上一個修改/.test(out[0]?.text || '') && /改成「（空白）」/.test(out[0]?.text || ''), out[0]?.text);
+  await send('✅ 確認修改', 'U_staff');
+  check('　 確認後真的改回去', medRow()[14] === '', medRow()[14]);
+  reset(); await freshModule();
+  state.staff.push(['U_other', '', '2026-08-27', '', '']);
+  out = await send('復原上一個修改', 'U_other');
+  check('沒改過東西的人按復原 → 說沒有東西可以復原（不能復原別人的）', /沒有東西可以復原/.test(out[0]?.text || ''), JSON.stringify(out));
+
+  // 有人在確認前改過 → 不蓋掉
+  reset(); await freshModule();
+  state.staff.push(['U_staff', '', '2026-08-27', '', '']);
+  await send('智慧醫療解決方案記者會地點改成南港展覽館', 'U_staff');
+  state.events.find(r => r[0] === 'med')[12] = '別人剛填的地點';
+  out = await send('✅ 確認修改', 'U_staff');
+  check('★ 確認前別人改過 → 不蓋掉，說剛剛被改了', state.events.find(r => r[0] === 'med')[12] === '別人剛填的地點' && /剛剛被改成/.test(out[0]?.text || ''), JSON.stringify(out));
+
+  // 不合法的值、封存的場次
+  out = await send('智慧醫療解決方案記者會改到 2/30', 'U_staff');
+  check('不存在的日期 → 擋下，不出確認句', !/確認修改/.test(JSON.stringify(out)), JSON.stringify(out));
+  state.events.find(r => r[0] === 'med')[4] = 'archived';
+  out = await send('智慧醫療解決方案記者會地點改成台北', 'U_staff');
+  check('封存的場次 → 不能在 LINE 改', /封存/.test(out[0]?.text || '') && !/確認修改/.test(JSON.stringify(out)), JSON.stringify(out));
+
+  // 發布：必填沒齊不給發；齊了先確認再發
+  reset(); await freshModule();
+  state.staff.push(['U_staff', '', '2026-08-27', '', '']);
+  state.events.push(['dr', '眺望2027產業發展趨勢研討會', '#0F9E7A', '', 'draft', '2026-10-28', '', '', '', '工研院', 'cdr', '', '中興院區', '', '王小明', '', '', '']);
+  out = await send('發布：眺望2027產業發展趨勢研討會', 'U_staff');
+  check('★ 必填沒齊（沒有新聞稿）→ 不給發布，寫出缺什麼', /還不能發布/.test(out[0]?.text || '') && /新聞稿/.test(out[0]?.text || '') && state.events.at(-1)[4] === 'draft', JSON.stringify(out));
+  state.events.at(-1)[3] = '【新聞稿】眺望研討會…';
+  await freshModule();
+  out = await send('眺望2027產業發展趨勢研討會', 'U_staff');
+  check('必填齊了的草稿，活動卡上有「🚀 發布」', JSON.stringify(out[0]?.messages || []).includes('發布：眺望2027產業發展趨勢研討會'), '');
+  out = await send('發布：眺望2027產業發展趨勢研討會', 'U_staff');
+  check('　 按發布 → 先確認', JSON.stringify(labelsOf(out[0])) === JSON.stringify(['🚀 確認發布', '✖ 先不發布']) && state.events.at(-1)[4] === 'draft', JSON.stringify(out));
+  out = await send('🚀 確認發布', 'U_staff');
+  check('★ 確認發布 → 狀態改成 active', state.events.at(-1)[4] === 'active' && /已發布 ✅/.test(out[0]?.text || ''), JSON.stringify(out));
+  check('　 發布也寫進修改紀錄', state.changes.at(-1)?.[5] === 'status' && state.changes.at(-1)?.[7] === 'active', JSON.stringify(state.changes));
+  out = await send('發布：眺望2027產業發展趨勢研討會', 'U_staff');
+  check('已經發布的再按發布 → 說本來就問得到', /已經是進行中/.test(out[0]?.text || ''), JSON.stringify(out));
+
+  // 白名單：知識庫不能在 LINE 改
+  const edit = await import(new URL(`../lib/event-edit.js?v=${modSeq}`, import.meta.url).href);
+  const bad = await edit.proposeChange('med', 'knowledge_base', '亂寫的新聞稿');
+  check('欄位白名單：新聞稿不能在 LINE 改', bad.ok === false, JSON.stringify(bad));
+  check('名稱不能跟別場重複', (await edit.proposeChange('med', 'name', '半導體先進封裝技術發表會')).ok === false);
+  delete process.env.LINE_ADMIN_USER_ID;
 }
 
 console.log(`\n${fail === 0 ? '✅' : '❌'} 流程測試通過 ${pass}／失敗 ${fail}`);
