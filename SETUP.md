@@ -28,7 +28,7 @@
 |---|---|
 | `LINE_CHANNEL_SECRET` | LINE Developers Console → Messaging API channel 的 Channel secret。用來驗證每個 webhook 請求真的來自 LINE，**這把沒設對，任何人都能偽造 LINE 的名義打你的 webhook**。 |
 | `LINE_CHANNEL_ACCESS_TOKEN` | 同頁的 Channel access token（要選「長期」，不是那種會過期的短期權杖）。用來呼叫 LINE 的回覆／推播 API。 |
-| `LINE_BASIC_ID` | 官方帳號的 LINE ID（`@` 開頭）。後台活動卡片的「**LINE QR**」（每場專屬、記者掃了直接接上那一場）與記者頁的「用 LINE 問」入口都靠它組連結（見 `lib/line-link.js`）；**沒設定時這兩個入口都不會出現**。`api/line.js` 本身不需要這個值。 |
+| `LINE_BASIC_ID` | 官方帳號的 LINE ID（`@` 開頭）。後台活動卡片的「**LINE QR**」（每場專屬、記者掃了直接接上那一場）與記者頁的「用 LINE 問」入口都靠它組連結（見 `lib/line-link.js`）；**沒設定時這兩個入口都不會出現**。群組裡有人要完整新聞稿時，米亞附上的「跟我一對一拿全文」連結也靠它（批次 83，沒設定時改成請記者加好友私訊）。 |
 
 設完到 LINE Developers Console → Messaging API → Webhook URL 填 `https://itri-event-ai.vercel.app/api/line`，按 **Verify** 應顯示 Success。
 
