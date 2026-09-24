@@ -58,6 +58,7 @@ import { saveEventPhoto } from '../lib/photo-upload.js';
 import { addPhoto, pendingPhotos, consumePhotos } from '../lib/photo-inbox.js';
 import { isPreEventMode } from '../lib/prompt.js';
 import { lineBindUrl } from '../lib/line-link.js';
+import { reportAiFailure } from '../lib/ai-alert.js';
 import {
   eventChecklist, formatProgressOverview, buildEventCardFlex, formatEventCardText,
   formatNudgeMessage, previewLink
@@ -949,6 +950,8 @@ async function askAnthropic(systemPrompt, userText, history = [], { extraSystem 
     const data = await response.json();
     if (!response.ok) {
       console.error('Anthropic API 錯誤:', data.error?.message);
+      // 批次 85：金鑰失效／額度用完這種不會自己好的錯誤，LINE 通知管理員（見 lib/ai-alert.js）
+      await reportAiFailure({ status: response.status, message: data.error?.message, where: 'LINE 問答' });
       return '抱歉，目前無法取得回應，請稍後再試或洽現場工作人員。';
     }
     // LINE 不渲染 Markdown，統一在這個出口清一次——見 stripMarkdownForLine() 的說明。
@@ -2129,6 +2132,21 @@ const GROUP_ANSWER_RULE = '這一題是在多人 LINE 群組裡問的，群組�
 // 只認「要整份稿子」的講法。刻意不收「完整版」「逐字稿」：「有完整版影片嗎？」「有沒有
 // 逐字稿？」問的不是新聞稿，後面接一段「完整新聞稿比較長…」就是答非所問。
 const GROUP_FULL_TEXT_RE = /(完整|整篇|整份)的?(新聞)?稿|新聞稿的?(全文|全部|完整)|全文|完整的?內容|整篇(貼|給|傳|發)/;
+// 「要哪一場的完整新聞稿」那排按鈕送出的字（批次 85）。固定格式，才能不靠模型、直接認出是哪一場，
+// 群組裡別人按也認得（見 isOwnButtonText()）。有人照這個格式自己打字，意思也一樣。
+const FULL_TEXT_PICK_RE = /^給我《(.+)》的完整新聞稿$/;
+function fullTextPickButton(name) {
+  return { label: name, text: `給我《${name}》的完整新聞稿` };
+}
+async function fullTextPickEvent(text) {
+  const m = String(text || '').trim().match(FULL_TEXT_PICK_RE);
+  if (!m) return null;
+  const name = m[1].trim();
+  const row = (await getAllEventRows()).find(r => String(r[1] || '').trim() === name);
+  const event = row ? rowToEvent(row) : null;
+  return isUsable(event) ? event : null;
+}
+
 function groupFullTextTail(event) {
   const url = lineBindUrl(event.id);
   return url
@@ -3342,6 +3360,20 @@ async function handleUnbound(replyToken, userId, text, { silentOnOther = false, 
     }
   }
 
+  // 要的是「某一場的完整新聞稿」，但沒講哪一場、目前也沒在問哪一場（批次 85）。以前掉到兜底
+  // 「這句我不太確定該從哪邊幫您找答案」——其實我們很清楚他要什麼，只是不知道哪一場。
+  // 反問一次，每一場一顆按鈕，按下去直接給那一場（見 FULL_TEXT_PICK_RE）。
+  if (!silentOnOther && GROUP_FULL_TEXT_RE.test(text)) {
+    const named = event_ids.map(id => cards.find(c => c.id === id)).filter(c => c?.has_kb);
+    const picks = named.length ? named.map(c => c.name) : calendarQuickReplyItems(cards);
+    if (picks.length) {
+      await replyOrPush(replyToken, userId,
+        `想要哪一場的完整新聞稿呢？點下面的活動就給您：\n${picks.map(n => '・' + n).join('\n')}`,
+        [...picks.map(fullTextPickButton), BTN.events, BTN.human].slice(0, 13));
+      return;
+    }
+  }
+
   if (intent === 'qa' && event_ids.length > 0) {
     const names = event_ids.map(id => cards.find(c => c.id === id)?.name).filter(Boolean).slice(0, 3);
     if (names.length) {
@@ -3757,6 +3789,7 @@ async function isOwnButtonText(groupId, text, speakerId) {
 
   if (GROUP_FIXED_BUTTONS.has(s)) return true;      // 固定選單詞
   if (/^邀訪[:：]/.test(s)) return true;             // 全域邀訪主題（機器產生的格式）
+  if (FULL_TEXT_PICK_RE.test(s)) return true;         // 「要哪一場的完整新聞稿」那排（批次 85）
   // 兩顆導流按鈕——見 CROSS_TOPIC_*_RE 的說明。批次 34 補上，不再破例。
   if (CROSS_TOPIC_TECH_RE.test(s) || CROSS_TOPIC_TREND_RE.test(s)) return true;
 
@@ -4075,6 +4108,16 @@ async function handleGroupMessage(replyToken, groupId, text, { mentioned, speake
     }
   }
 
+  // 按了「給我《ＸＸ》的完整新聞稿」（批次 85）：接上那一場。群組版的答案照群組規則只給重點，
+  // 後面自動接一對一拿全文的連結（見 GROUP_FULL_TEXT_RE）。
+  const pickedFullText = await fullTextPickEvent(text);
+  if (pickedFullText) {
+    await upsertBinding(groupId, pickedFullText.id, '');
+    await answerQuestion(replyToken, groupId, pickedFullText, '（群組提問）', '給我完整新聞稿', { group: true, speakerId });
+    await touchGroupSession(groupId);
+    return;
+  }
+
   const metaIntent = detectMetaIntent(text);
   if (metaIntent) {
     await handleMetaIntent(replyToken, groupId, text, metaIntent, binding, { speakerId, group: true });
@@ -4359,6 +4402,14 @@ async function handleEvent(ev) {
     // 代碼對不上——很可能是把活動「代碼」跟活動「名稱」搞混了，把 # 拿掉當一般
     // 文字重新路由一次，不要只回「找不到」就結束，記者不會知道代碼跟名稱是兩回事。
     await handleUnbound(replyToken, userId, code || text);
+    return;
+  }
+
+  // 按了「給我《ＸＸ》的完整新聞稿」（批次 85）：直接接上那一場、給全文，不經過路由。
+  const pickedFullText = await fullTextPickEvent(text);
+  if (pickedFullText) {
+    await upsertBinding(userId, pickedFullText.id, '');
+    await answerQuestion(replyToken, userId, pickedFullText, await getStoredMediaName(userId), '給我完整新聞稿', { memory: true });
     return;
   }
 

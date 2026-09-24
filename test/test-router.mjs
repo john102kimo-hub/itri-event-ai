@@ -13,11 +13,15 @@ function check(label, cond, detail) {
 const d = (s) => new Date(s + 'T00:00:00');
 const today = new Date(); today.setHours(0, 0, 0, 0);
 const iso = (dt) => dt.toISOString().slice(0, 10);
-const inPast = iso(new Date(today.getTime() - 20 * 86400000));
+// 批次 85 起「最近 30 天內辦過的」會列在【最近辦過】——「已結束不列」的規則改用 45 天前的場次驗，
+// 20 天前的那場另外驗「會出現在最近辦過」。
+const inPast = iso(new Date(today.getTime() - 45 * 86400000));
+const inRecentPast = iso(new Date(today.getTime() - 20 * 86400000));
 const inFuture = iso(new Date(today.getTime() + 10 * 86400000));
 
 const cards = [
   { id: 'ended-past', name: '已結束的舊記者會', status: 'ended', date: d(inPast), has_kb: true },
+  { id: 'ended-recent', name: '二十天前的記者會', status: 'ended', date: d(inRecentPast), has_kb: true },
   { id: 'active-future', name: '即將舉行的記者會', status: 'active', date: d(inFuture), has_kb: true },
   { id: 'draft-past', name: '草稿場次（日期填了很久以前）', status: 'draft', date: d(inPast), has_kb: false },
   { id: 'archived-future', name: '已下架但日期還沒到', status: 'archived', date: d(inFuture), has_kb: true },
@@ -42,7 +46,9 @@ check('已結束的活動名稱沒出現在清單裡', !text.includes('已結束
 check('未來場次的名稱有出現', text.includes('即將舉行的記者會'), text);
 check('草稿場次有出現且帶未發布標籤', /草稿場次.*🔒未發布/.test(text), text);
 check('已下架的沒出現在清單裡（即使日期還沒到）', !text.includes('已下架但日期還沒到'), text);
-check('文案有提示「含已結束的場次」可以直接打名字問', /含已結束的場次/.test(text), text);
+check('文案有提示更早的場次可以直接打名字問', /含更早的場次/.test(text), text);
+check('批次 85：30 天內辦過的列在【最近辦過】', /【最近辦過】[\s\S]*二十天前的記者會/.test(text), text);
+check('批次 85：最近辦過的不混進【近期活動】那一段', !/【近期活動】[^【]*二十天前的記者會/.test(text), text);
 
 console.log('── 全部場次都已結束時的訊息 ──');
 const allEnded = [{ id: 'x', name: '很久以前的活動', status: 'ended', date: d(inPast), has_kb: true }];
@@ -53,7 +59,8 @@ check('仍然引導可以直接問已結束的場次', /直接打活動名稱/.t
 
 console.log('── calendarQuickReplyItems：只挑有資料、已過濾的場次 ──');
 const items = calendarQuickReplyItems(cards);
-check('已結束場次不會出現在快速回覆按鈕', !items.includes('已結束的舊記者會'), JSON.stringify(items));
+check('超過 30 天的已結束場次不會出現在快速回覆按鈕', !items.includes('已結束的舊記者會'), JSON.stringify(items));
+check('批次 85：30 天內辦過的有按鈕', items.includes('二十天前的記者會'), JSON.stringify(items));
 check('沒有 kb 的場次不占按鈕位置（草稿在 fixture 裡 has_kb=false）',
   !items.includes('草稿場次（日期填了很久以前）'), JSON.stringify(items));
 check('未來場次的按鈕有出現', items.includes('即將舉行的記者會'), JSON.stringify(items));
