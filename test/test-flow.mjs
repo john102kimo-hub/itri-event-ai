@@ -94,11 +94,17 @@ let pass = 0, fail = 0;
 // 1 對 1 與群組的按鈕列現在都長成「導覽在最前面 → 這場的內容提問 → 邀訪窗口」（批次 48）。
 // 測試改成檢查這個形狀，不要寫死整個陣列——寫死的話，之後每加一顆導覽鈕就要改一輪測試，
 // 而真正該保護的是「往外的路在最前面」跟「同仁自訂的提問還在」這兩件事。
+// 批次 84：按鈕只有一份來源（api/line.js 的 BTN），1 對 1 與群組同一排：
+// 🏠 📅 ＋ 這場的內容提問 ＋ 📊 🔬 📞 🙋。比對一律看**送出的字**（text），不看顯示的 label。
+const qrTexts = (chips) => (chips || []).map(c => (typeof c === 'object' && c ? (c.text ?? c.label) : c));
+const NAV_TAIL_TEXTS = ['產業趨勢分析', '想問什麼技術', '媒體邀訪需求', '找真人'];
+const HOME_MENU_TEXTS = ['最近有哪些活動', '產業趨勢分析', '想問什麼技術', '媒體邀訪需求', '找真人', '使用說明'];
+const CAL_TAIL_TEXTS = ['產業趨勢分析', '想問什麼技術', '媒體邀訪需求', '找真人', '使用說明'];
 function chipsLookRight(chips, expectContent) {
-  const texts = (chips || []).map(c => (typeof c === 'object' && c ? c.text : c));
+  const texts = qrTexts(chips);
   return texts[0] === '回首頁' && texts[1] === '最近有哪些活動' &&
     expectContent.every(t => texts.includes(t)) &&
-    texts[texts.length - 1] === '媒體邀訪需求';
+    JSON.stringify(texts.slice(-4)) === JSON.stringify(NAV_TAIL_TEXTS);
 }
 function check(label, cond, detail) {
   if (cond) pass++; else { fail++; console.log(`❌ ${label}${detail ? '\n   ' + detail : ''}`); }
@@ -467,7 +473,7 @@ check('只 @ 沒接問題 → 友善自我介紹，同時帶出「最近活動�
   out[0]?.kind === 'text' && /米亞/.test(out[0].text) && /最近有哪些活動/.test(out[0].text) && /媒體邀訪需求/.test(out[0].text),
   JSON.stringify(out));
 check('只 @ 沒接問題也附快速回覆按鈕，記者不用自己打字就能點問（含新增的產業趨勢分析／想問什麼技術）',
-  JSON.stringify(out[0]?.quickReply) === JSON.stringify(['最近有哪些活動', '產業趨勢分析', '想問什麼技術', '媒體邀訪需求', '使用說明']),
+  JSON.stringify(qrTexts(out[0]?.quickReply)) === JSON.stringify(HOME_MENU_TEXTS) /* 批次 84：起點選單，多了找真人 */,
   JSON.stringify(out[0]?.quickReply));
 check('只 @ 沒接問題也算「有回答」，續問視窗要續命——不然按鈕點下去（沒有 @）會被當成沒被 @ 安靜吃掉，按鈕變成按了沒反應',
   state.bindings.get('Cgroup1')?.groupSessionUntil > Date.now(), JSON.stringify(state.bindings.get('Cgroup1')));
@@ -545,7 +551,7 @@ check('智慧兜底的 system prompt 明確禁止生成事實內容（這條是�
   /不要提供任何事實內容/.test(out.find(o => o.kind === 'fallback')?.sys || ''),
   (out.find(o => o.kind === 'fallback')?.sys || '').slice(0, 120));
 check('智慧兜底照樣附上四條路的入口按鈕，記者不用自己打字',
-  JSON.stringify(out.at(-1)?.quickReply) === JSON.stringify(['最近有哪些活動', '產業趨勢分析', '想問什麼技術', '媒體邀訪需求', '找真人', '使用說明']) /* 批次 81 加了「找真人」 */,
+  JSON.stringify(qrTexts(out.at(-1)?.quickReply)) === JSON.stringify(HOME_MENU_TEXTS) /* 批次 81 加了「找真人」 */,
   JSON.stringify(out.at(-1)?.quickReply));
 
 // 輸出守門：模型講太多、或吐回來的其實是 askAnthropic() 自己的失敗訊息時，一律退回
@@ -728,11 +734,24 @@ check('活動沒設定自訂 chips 時（semi 的 fixture 是空字串）退回�
 // 不用等問完第一題才第一次看到
 reset(); await freshModule();
 out = await send('#quad');
-check('#代碼綁定確認訊息本身不附 chips（避免跟 ask_name 擷取衝突）',
-  !(out[0]?.quickReply?.length > 0), JSON.stringify(out));
+// 🔄 批次 84：原本刻意不附 chips（怕記者按了短短的自訂提問被當成媒體名稱吃掉）。現在
+// 附上「略過」＋這場整排，吃掉的風險改在 ask_name 擷取那邊擋（按鈕上的字不當名稱），見下一段。
+check('#代碼綁定確認訊息帶「略過」＋這場的整排按鈕（批次 84）',
+  qrTexts(out[0]?.quickReply)[0] === '略過' && chipsLookRight(out[0]?.quickReply.slice(1), ['重點', '應用']),
+  JSON.stringify(out[0]?.quickReply));
 out = await send('中央社');
 check('回覆媒體名稱、ask_name 解決之後，「已記錄」那則就附上 chips',
   chipsLookRight(out[0]?.quickReply, ['重點', '應用']), JSON.stringify(out));
+
+// 批次 84：接上之後直接按這場的自訂提問「應用」（兩個字、沒有問號，長得就像媒體名稱）
+// ——要當成問題回答，不能記成媒體名稱、回一句「已記錄」就把問題吞掉。
+reset(); await freshModule();
+await send('#quad');
+out = await send('應用');
+check('ask_name 等待中按了這場的快速提問 → 當成問題回答，不被記成媒體名稱（批次 84）',
+  out.some(o => o.kind === 'answer') && !/已記錄/.test(out.map(o => o.text || '').join('')), JSON.stringify(out.map(o => o.kind + ':' + String(o.text || '').slice(0, 30))));
+check('那個人的媒體名稱沒有被寫成「應用」', state.bindings.get('U_reporter')?.media_name !== '應用',
+  JSON.stringify(state.bindings.get('U_reporter')));
 
 // 職員模式問活動內容一樣要看得到 chips（同一支 answerQuestion()，沒有另外分岔邏輯）
 reset(); await freshModule();
@@ -846,7 +865,7 @@ check('沒綁定活動時問邀訪需求 → 直接給全域技術主題選單�
 {
   const labels = (out[0]?.quickReply || []).map(i => (typeof i === 'object' ? i.label : i));
   check('全域選單含活動名稱／技術主題／其他，且不超過 13 顆',
-    labels.includes('活動名稱') && labels.includes('生醫') && labels.includes('其他') && labels.length <= 13,
+    labels.includes('📅 某一場的窗口') /* 批次 84：原本叫「活動名稱」 */ && labels.includes('生醫') && labels.includes('其他') && labels.length <= 13,
     JSON.stringify(labels));
   const texts = (out[0]?.quickReply || []).map(i => (typeof i === 'object' ? i.text : i));
   check('主題按鈕送出的文字帶「邀訪：」前綴，不會跟記者自己打字問問題撞在一起',
@@ -984,7 +1003,7 @@ out = await send('回首頁'); // 按鈕已改名，見情境 1 的說明
   // （回報的截圖：正式站只有一場有資料的活動時，整排只剩兩顆，看起來很空，而且另外
   // 兩條路從來沒出現在這裡）。驗的是「四條路都在、順序固定」，不是「某一顆在最後」。
   check('「回首頁」的按鈕列在活動之後固定接上四條路的入口',
-    JSON.stringify(labels.slice(-4)) === JSON.stringify(['產業趨勢分析', '想問什麼技術', '媒體邀訪需求', '使用說明']), JSON.stringify(labels));
+    JSON.stringify(qrTexts(out[0]?.quickReply).slice(-5)) === JSON.stringify(CAL_TAIL_TEXTS), JSON.stringify(labels));
   // 回報的意見：按鈕不夠明顯，容易被忽略——文字裡也要有這個入口，不能只靠按鈕。
   check('「回首頁」的文字裡也提到媒體邀訪需求（不只靠按鈕）',
     /媒體邀訪需求/.test(out[0]?.text || ''), out[0]?.text);
@@ -994,7 +1013,7 @@ out = await send('最近有哪些活動');
 {
   const labels = (out[0]?.quickReply || []).map(i => (typeof i === 'object' ? i.label : i));
   check('綁定中查「最近有哪些活動」的按鈕列也一樣固定接上四條路的入口',
-    JSON.stringify(labels.slice(-4)) === JSON.stringify(['產業趨勢分析', '想問什麼技術', '媒體邀訪需求', '使用說明']), JSON.stringify(labels));
+    JSON.stringify(qrTexts(out[0]?.quickReply).slice(-5)) === JSON.stringify(CAL_TAIL_TEXTS), JSON.stringify(labels));
   check('綁定中查活動列表的文字裡也提到媒體邀訪需求', /媒體邀訪需求/.test(out[0]?.text || ''), out[0]?.text);
 }
 
@@ -1006,7 +1025,7 @@ out = await send('最近如何');
 {
   const labels = (out[0]?.quickReply || []).map(i => (typeof i === 'object' ? i.label : i));
   check('沒綁定時查活動列表的按鈕列也一樣固定接上四條路的入口',
-    JSON.stringify(labels.slice(-4)) === JSON.stringify(['產業趨勢分析', '想問什麼技術', '媒體邀訪需求', '使用說明']), JSON.stringify(labels));
+    JSON.stringify(qrTexts(out[0]?.quickReply).slice(-5)) === JSON.stringify(CAL_TAIL_TEXTS), JSON.stringify(labels));
   check('沒綁定時查活動列表的文字裡也提到媒體邀訪需求', /媒體邀訪需求/.test(out[0]?.text || ''), out[0]?.text);
 }
 out = await send('媒體邀訪需求');
@@ -1045,9 +1064,8 @@ check('最終回覆附上警語＋公關窗口聯絡資訊，用使用者要求�
 // 覆蓋不到記者問的領域是常態，「這裡沒有，可以改從工研院自己的技術報導找」本來就
 // 該是預設出口，而不是讓記者自己猜下一步要打什麼（見情境 19 的回報截圖）。
 check('最終回覆附快速回覆按鈕（跨路入口／活動列表／媒體邀訪需求），不是只丟一句話就結束',
-  out.some(o => o.kind === 'text' && JSON.stringify(o.quickReply) === JSON.stringify([
-    { label: '工研院的半導體技術', text: '工研院 半導體' }, '最近有哪些活動', '媒體邀訪需求'
-  ])),
+  out.some(o => o.kind === 'text' && o.quickReply?.[0]?.label === '工研院的半導體技術' &&
+    JSON.stringify(qrTexts(o.quickReply)) === JSON.stringify(['工研院 半導體', '最近有哪些活動', '想問什麼技術', '媒體邀訪需求', '找真人'])),
   JSON.stringify(out));
 
 // 實際回報的問題：點「產業趨勢分析」這顆按鈕，AI 沒有直接摘要最新幾則，反而列了
@@ -1511,7 +1529,7 @@ out = await send('最近有哪些活動');
   const labels = (out[0]?.quickReply || []).map(i => (typeof i === 'object' ? i.label : i));
   check('活動清單的按鈕總數沒有超過 LINE 的 13 顆上限', labels.length <= 13, `${labels.length} 顆：${JSON.stringify(labels)}`);
   check('四條路的入口真的都在（不是被上限截掉）',
-    ['產業趨勢分析', '想問什麼技術', '媒體邀訪需求', '使用說明'].every(x => labels.includes(x)), JSON.stringify(labels));
+    CAL_TAIL_TEXTS.every(x => qrTexts(out[0]?.quickReply).includes(x)), JSON.stringify(labels));
 }
 
 // ── 情境 21：被拉進群組（join 事件）＋ 群組續問視窗的守門（批次 28）─────────────
@@ -1534,7 +1552,7 @@ check('並且點名「@ 選單裡找不到我」這個實際會遇到的狀況�
 check('同時把四條路都講出來，群組成員不用自己猜能問什麼',
   ['活動', '產業趨勢', '工研院', '邀訪'].every(x => (out[0]?.text || '').includes(x)), out[0]?.text);
 check('附上快速回覆按鈕，第一個想試的人不用先學會怎麼 @',
-  JSON.stringify(out[0]?.quickReply) === JSON.stringify(['最近有哪些活動', '產業趨勢分析', '想問什麼技術', '媒體邀訪需求', '使用說明']),
+  JSON.stringify(qrTexts(out[0]?.quickReply)) === JSON.stringify(HOME_MENU_TEXTS),
   JSON.stringify(out[0]?.quickReply));
 check('join 之後續問視窗有開——不然上面那排按鈕（送出的是沒有 @ 的純文字）按了會沒反應',
   state.bindings.get('Cgroup1')?.groupSessionUntil > Date.now(), JSON.stringify(state.bindings.get('Cgroup1')));
@@ -2102,8 +2120,8 @@ out = await send('這場的重點是什麼');
   const texts = chips.map(c => (typeof c === 'object' ? c.text : c));
   check('同仁放了 20 顆自訂提問時，導覽仍然在最前面',
     texts[0] === '回首頁' && texts[1] === '最近有哪些活動', JSON.stringify(texts));
-  check('邀訪窗口仍然在最後一顆，沒有被 LINE 從尾巴截掉',
-    texts[texts.length - 1] === '媒體邀訪需求', JSON.stringify(texts));
+  check('功能那四顆（含邀訪窗口、找真人）仍然在最後，沒有被 LINE 從尾巴截掉',
+    JSON.stringify(texts.slice(-4)) === JSON.stringify(NAV_TAIL_TEXTS), JSON.stringify(texts));
   check('⚠️ 總數剛好卡在 LINE 的 13 顆硬上限', chips.length === 13, `${chips.length} 顆`);
 }
 
@@ -2753,7 +2771,7 @@ for (const [label, text, mustInclude] of [
   check(`閒聊「${text}」（${label}）→ 不呼叫模型（沒有 kind:'fallback' 這個節點）`,
     !out.some(o => o.kind === 'fallback'), JSON.stringify(out.map(o => o.kind)));
   check(`閒聊「${text}」（${label}）→ 照樣附上四條路的入口按鈕，不是丟一句話就沒了`,
-    JSON.stringify(out.at(-1)?.quickReply) === JSON.stringify(['最近有哪些活動', '產業趨勢分析', '想問什麼技術', '媒體邀訪需求', '找真人', '使用說明']) /* 批次 81 加了「找真人」 */,
+    JSON.stringify(qrTexts(out.at(-1)?.quickReply)) === JSON.stringify(HOME_MENU_TEXTS) /* 批次 81 加了「找真人」 */,
     JSON.stringify(out.at(-1)?.quickReply));
 }
 
@@ -2803,7 +2821,7 @@ for (const [label, text] of [
   check(`「${text}」（${label}）→ 不呼叫模型（沒有 kind:'answer'／'fallback' 節點，是 detectMetaIntent 直接攔下的固定文案）`,
     !out.some(o => o.kind === 'answer' || o.kind === 'fallback'), JSON.stringify(out.map(o => o.kind)));
   check(`「${text}」（${label}）→ 照樣附上四條路的入口按鈕`,
-    JSON.stringify(out[0]?.quickReply) === JSON.stringify(['最近有哪些活動', '產業趨勢分析', '想問什麼技術', '媒體邀訪需求', '使用說明']),
+    JSON.stringify(qrTexts(out[0]?.quickReply)) === JSON.stringify(HOME_MENU_TEXTS),
     JSON.stringify(out[0]?.quickReply));
 }
 

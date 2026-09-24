@@ -98,6 +98,7 @@ export function reset() {
   state.itriFetchFail = false;
   state.itriKeywordMustInclude = '';
   state.fallbackReply = null; // null＝用上面的預設假回覆，見 installFetchStub() 的兜底分支
+  state.anthropicFail = null; // 批次 85：'auth'＝金鑰失效（401）、'overload'＝過載（529），見 installFetchStub()
   state.noDataKeyword = ''; // 非空＝模擬「這場答不出來」，見 installFetchStub() 的問答分支
   state.newsDigestText = ''; // 非空＝模擬「官網補查那支模型」吐出這段話（批次 44）
   state.memories = [];       // bot_memory 的列（批次 46）：[時間, 範圍, 類型, 內容, 建立者, 狀態]
@@ -414,6 +415,13 @@ export function installFetchStub() {
   globalThis.fetch = async (url, opts) => {
     const u = String(url);
     if (u.includes('api.anthropic.com')) {
+      // 批次 85：模擬 Anthropic 那邊出事（2026-09-24 正式站真的發生過金鑰失效）。
+      if (state.anthropicFail === 'auth') {
+        return { ok: false, status: 401, json: async () => ({ type: 'error', error: { type: 'authentication_error', message: 'API key is invalid.' } }) };
+      }
+      if (state.anthropicFail === 'overload') {
+        return { ok: false, status: 529, json: async () => ({ type: 'error', error: { type: 'overloaded_error', message: 'Overloaded' } }) };
+      }
       const body = JSON.parse(opts.body);
       const sys = body.system?.[0]?.text || '';
       // 批次 36 起 system 可能有第二個區塊（跨場次相關資料，見 api/line.js

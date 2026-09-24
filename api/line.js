@@ -42,7 +42,7 @@ import {
 } from '../lib/line.js';
 import { buildCalendarCards, buildAllCalendarCards, routeIntent, formatCalendarReply, calendarQuickReplyItems } from '../lib/router.js';
 import {
-  detectMetaIntent, detectCourtesy, isOrgWideNewsAsk, isHumanRequest, matchEventByName, HELP_TEXT, ORG_INTRO_TEXT, buildWelcomeFlex,
+  detectMetaIntent, detectCourtesy, isOrgWideNewsAsk, isHumanRequest, matchEventByName, MENU_WORDS, HELP_TEXT, ORG_INTRO_TEXT, buildWelcomeFlex,
   buildRichMenuDefinition, ALL_MENUS, REPORTER_MENU, STAFF_MENU, findEventMentioned
 } from '../lib/menu.js';
 import {
@@ -58,6 +58,7 @@ import { saveEventPhoto } from '../lib/photo-upload.js';
 import { addPhoto, pendingPhotos, consumePhotos } from '../lib/photo-inbox.js';
 import { isPreEventMode } from '../lib/prompt.js';
 import { lineBindUrl } from '../lib/line-link.js';
+import { reportAiFailure } from '../lib/ai-alert.js';
 import {
   eventChecklist, formatProgressOverview, buildEventCardFlex, formatEventCardText,
   formatNudgeMessage, previewLink
@@ -949,6 +950,8 @@ async function askAnthropic(systemPrompt, userText, history = [], { extraSystem 
     const data = await response.json();
     if (!response.ok) {
       console.error('Anthropic API 錯誤:', data.error?.message);
+      // 批次 85：金鑰失效／額度用完這種不會自己好的錯誤，LINE 通知管理員（見 lib/ai-alert.js）
+      await reportAiFailure({ status: response.status, message: data.error?.message, where: 'LINE 問答' });
       return '抱歉，目前無法取得回應，請稍後再試或洽現場工作人員。';
     }
     // LINE 不渲染 Markdown，統一在這個出口清一次——見 stripMarkdownForLine() 的說明。
@@ -1023,16 +1026,34 @@ const CONTACT_MENU_LABEL = '媒體邀訪需求';
 // 學過一次「按鈕列最後一格的『媒體邀訪需求』不夠明顯，滑一排按鈕容易漏看」，那次
 // 的補救是把入口寫進文字裡。這排在群組裡是唯一的出口，藏在 8 顆自訂提問後面等於
 // 沒有——手機一次只看得到兩三顆。
-const NAV_HEAD = [
-  { label: '🏠 回首頁', text: '回首頁' },            // 解除綁定＋列出全部活動與其他功能
-  { label: '📅 其他活動', text: '最近有哪些活動' }    // 只列清單、不解除綁定，點活動名稱直接換過去
-];
-const NAV_TAIL = [
-  { label: '📊 產業趨勢', text: '產業趨勢分析' },
-  { label: '🔬 問技術', text: '想問什麼技術' },
-  { label: '📞 邀訪窗口', text: CONTACT_MENU_LABEL }
-];
+//
+// ── 批次 84：按鈕只有一份來源 ─────────────────────────────────────────────
+// 測試同仁回報：「可否下列小按鈕可以長駐？有時點進去最近活動，下面小按鈕就會變只有
+// 幾個或是不見」。LINE 的快速回覆本來就不能常駐（只掛在最新一則訊息上，按下去或聊天室
+// 有任何新訊息就收掉——官方文件寫明的行為），能做的是**每一則回覆都帶著同一套按鈕**。
+// 盤點（tools/line-button-audit）抓到的是另一回事：同一個功能在不同回覆裡寫成不同的字
+// （「最近有哪些活動」「📅 其他活動」）、有的四顆有的六顆、「找真人」只有兜底那則有——
+// 每一處各寫一份清單，遲早漂開。所以全部收成下面這一份，各處只挑要哪幾顆。
+//
+// ⚠️ text（按下去送出的字）一個都沒改，只改顯示的 label：detectMetaIntent()／
+// GROUP_FIXED_BUTTONS／isOwnButtonText() 認的都是 text，改 text 就是「按了沒反應」
+// （批次 30／32 踩過）。
+const BTN = {
+  home: { label: '🏠 回首頁', text: '回首頁' },            // 解除綁定＋列出全部活動與其他功能
+  others: { label: '📅 其他活動', text: '最近有哪些活動' }, // 已在某一場：只列清單、不解除綁定
+  events: { label: '📅 最近活動', text: '最近有哪些活動' }, // 還沒選場次時的同一顆
+  trend: { label: '📊 產業趨勢', text: '產業趨勢分析' },
+  tech: { label: '🔬 問技術', text: '想問什麼技術' },
+  contact: { label: '📞 邀訪窗口', text: CONTACT_MENU_LABEL },
+  human: { label: '🙋 找真人', text: '找真人' },           // 批次 81：記者任何時候都找得到真人
+  help: { label: '❓ 使用說明', text: '使用說明' }
+};
+const NAV_HEAD = [BTN.home, BTN.others];
+const NAV_TAIL = [BTN.trend, BTN.tech, BTN.contact, BTN.human];
+// 呼叫端沒給按鈕時的預設（群組與 1 對 1 記者都用這一排，見 replyOrPush()）。
 const NAV_ALL = [...NAV_HEAD, ...NAV_TAIL];
+// 還沒進任何一場時的起點：歡迎詞、只叫米亞、兜底、使用說明、收尾語。
+const HOME_MENU = [BTN.events, BTN.trend, BTN.tech, BTN.contact, BTN.human, BTN.help];
 
 // LINE 的 id 前綴：使用者 U、群組 C、聊天室 R（官方文件的慣例，很穩定）。判斷錯的
 // 代價也只是「群組少一排導覽」或「1 對 1 多一排」，不會壞掉。
@@ -1041,11 +1062,17 @@ const isGroupTarget = id => /^[CR]/.test(String(id || ''));
 // replyOrPushMessages() 收的是原始訊息物件，不像 replyOrPush() 會幫忙把字串陣列
 // 轉成 quickReply。使用說明那則要自己組一份——格式跟 lib/line.js 的 buildQuickReply()
 // 一樣（LINE 的 quick reply 物件），只是這裡只需要固定這幾顆。
-function buildHelpQuickReply() {
-  const items = ['最近有哪些活動', '產業趨勢分析', '想問什麼技術', CONTACT_MENU_LABEL];
+function toQuickReply(items) {
   return {
-    items: items.map(text => ({ type: 'action', action: { type: 'message', label: text, text } }))
+    items: items.map(i => {
+      const label = typeof i === 'object' ? i.label : i;
+      const text = typeof i === 'object' ? (i.text ?? i.label) : i;
+      return { type: 'action', action: { type: 'message', label: toTraditionalTW(label).slice(0, 20), text } };
+    })
   };
+}
+function buildHelpQuickReply() {
+  return toQuickReply(HOME_MENU.filter(b => b !== BTN.help));
 }
 
 // ⚠️ 這一層是「群組導覽不會漏掉」的結構性保證（批次 43），不是方便而已。
@@ -1063,10 +1090,23 @@ function buildHelpQuickReply() {
 //
 // 只在「呼叫端沒有自己給按鈕」時才補：給了就代表那則訊息有更貼切的選項（活動清單、
 // 邀訪主題、這場的快速提問…），不要覆蓋掉。
+//
+// 🔄 批次 84：1 對 1 的記者也補。原本只補群組，理由是 1 對 1 有圖文選單——但圖文選單
+// 是收合的（批次 48 學過），而且 LINE 電腦版根本不顯示圖文選單（官方文件）。盤點抓到
+// 1 對 1 換場確認、「想問什麼技術」的提問這幾則一顆按鈕都沒有，記者看到的就是「按鈕
+// 不見了」。職員不補（見 markStaff()）：職員有自己那組 STAFF_QUICK_REPLIES，塞一排記者
+// 按鈕只會讓人以為被踢出職員模式。
 async function replyOrPush(replyToken, targetId, text, quickReplyItems) {
+  const store = requestCtx.getStore();
   const items = (quickReplyItems && quickReplyItems.length) ? quickReplyItems
-    : (isGroupTarget(targetId) ? NAV_ALL : quickReplyItems);
+    : (isGroupTarget(targetId) || !store?.staff) ? NAV_ALL : quickReplyItems;
   return replyOrPushRaw(replyToken, targetId, text, items, { quoteToken: takeQuoteToken(targetId) });
+}
+
+// 這一次請求是在服務職員（1 對 1 職員模式）——replyOrPush() 就不幫他補記者的按鈕列。
+function markStaff() {
+  const store = requestCtx.getStore();
+  if (store) store.staff = true;
 }
 
 // ── 群組回答引用原問題（批次 83）──────────────────────────────────────────
@@ -1110,7 +1150,7 @@ function eventContentChips(rawEvent) {
   return custom.length ? custom : DEFAULT_CHIPS;
 }
 
-function eventQuickChips(rawEvent, { group = false } = {}) {
+function eventQuickChips(rawEvent, { reserve = 0 } = {}) { // 呼叫端傳的 group 已經不影響結果（批次 84）
   // ⚠️ LINE quick reply 硬上限 13 顆，超過的會被 buildQuickReply() 從尾巴截掉。
   //
   // 🔄 批次 48 修正了批次 40 的一個判斷錯誤。批次 40 只在群組加導覽，理由寫成
@@ -1127,9 +1167,38 @@ function eventQuickChips(rawEvent, { group = false } = {}) {
   //   1 對 1 ：2 顆往外 ＋ 10 顆內容 ＋ 邀訪窗口     ＝ 13
   // 1 對 1 少放「產業趨勢／問技術」那兩顆，是因為那兩條路不是用來「脫困」的，而且
   // 圖文選單展開後就有——真正被回報找不到的是「回首頁」。
-  const contentChips = eventContentChips(rawEvent).slice(0, group ? 8 : 10);
-  if (!group) return [...NAV_HEAD, ...contentChips, CONTACT_MENU_LABEL];
+  //
+  // 🔄 批次 84：1 對 1 與群組改成同一排（2 顆往外 ＋ 最多 7 顆內容 ＋ 4 顆功能 ＝ 13）。
+  // 測試同仁回報「按鈕有時只有幾個」，盤點看到的是兩個場景、兩種排法、兩種字——同一個
+  // 記者在群組跟 1 對 1 之間切換，要重新認一次按鈕。一致比多擠三顆自訂提問重要：
+  // 同仁設的自訂提問預設 5 題，7 顆放得下；「找真人」在每一則答案底下都要看得到（批次 81）。
+  // reserve：呼叫端要在最前面多放幾顆自己的（例如補問媒體名稱的「略過」），從內容那段讓位，
+  // 導覽的 6 顆永遠不被擠掉。
+  const contentChips = eventContentChips(rawEvent).slice(0, Math.max(0, 7 - reserve));
   return [...NAV_HEAD, ...contentChips, ...NAV_TAIL];
+}
+
+// 「想問什麼技術」那則的一鍵範例（批次 84）。送出的是「工研院 ＸＸ」：CROSS_TOPIC_TECH_RE
+// 認得這個格式（中間只能有一個空白，所以「AI晶片」不留空格），群組裡任何人按都算數。
+const TECH_EXAMPLE_BUTTONS = [
+  { label: '機器人', text: '工研院 機器人' },
+  { label: '半導體', text: '工研院 半導體' },
+  { label: 'AI 晶片', text: '工研院 AI晶片' }
+];
+
+// 補問媒體名稱時的按鈕：最前面一顆「略過」，後面照樣是這場的整排按鈕（批次 84）。
+function mediaNameChips(event) {
+  return [{ label: '略過', text: '略過' }, ...eventQuickChips(event, { reserve: 1 })];
+}
+
+// 答完第一題之後補問媒體名稱（push）。
+// ⚠️ 批次 84 的主因之一：測試同仁回報「點進去最近活動，下面小按鈕就不見了」。1 對 1
+// 第一次點活動 → 答案（帶一整排按鈕）→ 緊接著這則補問。LINE 只顯示**最新一則**訊息的
+// 按鈕，而這則以前一顆都沒帶——答案底下那排剛出現就被收掉。所以這則要帶著同一排。
+async function askMediaNameLater(userId, event) {
+  await setBindingNote(userId, 'ask_name');
+  await pushMessage(userId, '對了，方便留個貴媒體的名稱嗎？（打名稱即可，或點「略過」——之後就不會再問了）',
+    mediaNameChips(event));
 }
 
 // 回報的意見：記者被引導「請直接輸入想問的活動名稱，或從下面挑一場」（換場、或
@@ -1157,10 +1226,12 @@ function eventQuickChips(rawEvent, { group = false } = {}) {
 // limit）＋ 下面 4 顆固定 ＝ 12，永遠塞得下；就算哪天把活動上限調大，也要先確認
 // 加起來不超過 13，不然會被 buildQuickReply() 從尾巴截掉——被截掉的正好是這四顆
 // 固定入口，等於白加。
+// 🔄 批次 84：固定那幾顆改用 BTN（跟其他回覆同一套字與圖示），並補上「🙋 找真人」。
+// 活動 8 顆 ＋ 功能 5 顆 ＝ 13，剛好是上限。
 function calendarQuickRepliesForReporter(cards) {
   return [
     ...calendarQuickReplyItems(cards),
-    '產業趨勢分析', '想問什麼技術', CONTACT_MENU_LABEL, '使用說明'
+    BTN.trend, BTN.tech, BTN.contact, BTN.human, BTN.help
   ];
 }
 
@@ -1299,10 +1370,11 @@ async function getIndustryTrendDigest() {
 // （萬一剛好在問某場跟「生醫」有關的活動內容，不會被誤判成在找邀訪窗口）。
 async function sendGlobalContactMenu(replyToken, userId) {
   const items = [
-    { label: '活動名稱', text: '最近有哪些活動' },
+    { label: '📅 某一場的窗口', text: '最近有哪些活動' }, // 批次 84：原本標成「活動名稱」，看不出按了會怎樣
     ...GLOBAL_CONTACT_TOPICS.map(t => ({ label: t, text: `邀訪：${t}` })),
-    { label: '其他', text: '邀訪：其他' }
-  ];
+    { label: '其他', text: '邀訪：其他' },
+    BTN.human // 批次 84：主題選單裡也找得到真人；主題哪天變多，先被擠掉的是這顆，不是主題
+  ].slice(0, 13);
   await replyOrPush(replyToken, userId,
     '請問想了解哪個技術領域，或想找哪一場活動的邀訪窗口？可以直接點下面按鈕，或輸入活動名稱。',
     items);
@@ -1395,7 +1467,9 @@ async function industryTrendContactLine() {
 // 題」的場景才該拿掉。
 function crossTopicKeyword(text) {
   const kw = stripTechQueryFiller(text)
-    .replace(/產業|趨勢|市場|現況|分析|重點|方面|領域|相關|如何|怎樣|怎麼樣|現在|目前|未來|今年/g, '')
+    // 批次 84：補上疑問詞。按「產業趨勢分析」送進來的固定句「最近有哪些產業趨勢重點」
+    // 原本被抽成「有哪些」，按鈕變成「工研院的有哪些技術」。
+    .replace(/產業|趨勢|市場|現況|分析|重點|方面|領域|相關|如何|怎樣|怎麼樣|現在|目前|未來|今年|有哪些|哪些|有什麼|什麼|有沒有|嗎|呢/g, '')
     .trim();
   return /^[^\s]{2,8}$/.test(kw) ? kw : '';
 }
@@ -1414,7 +1488,7 @@ async function answerIndustryTrend(replyToken, targetId, text) {
     // 抓取失敗（網路問題、IEK 網站改版）——誠實說抓不到，不要硬答或裝死。
     await replyOrPush(replyToken, targetId,
       `這部分我暫時抓不到最新的產業趨勢資料，真不好意思 🙏${contactLine}`,
-      [...crossItem, '最近有哪些活動', CONTACT_MENU_LABEL]);
+      [...crossItem, BTN.events, BTN.tech, BTN.contact, BTN.human]);
     return;
   }
 
@@ -1451,7 +1525,7 @@ async function answerIndustryTrend(replyToken, targetId, text) {
   const linksBlock = urls.length ? `\n\n🔗 原文連結：\n${urls.join('\n')}` : '';
   const reply = `${aiReply}${linksBlock}${contactLine}`;
   console.log(`[line] industry_trend q="${text.slice(0, 60)}" reply="${reply.slice(0, 200)}"`);
-  await replyOrPush(replyToken, targetId, reply, [...crossItem, '最近有哪些活動', CONTACT_MENU_LABEL]);
+  await replyOrPush(replyToken, targetId, reply, [...crossItem, BTN.events, BTN.tech, BTN.contact, BTN.human]);
   // 記住這一輪聊的是產業趨勢——下一則如果只是個裸名詞（截圖裡的「太空」），
   // routeIntent() 才接得回這個話題，不會掉進「我沒抓到您想問哪一場活動」。
   // 放在送出回覆之後：這是加分功能，寫失敗（setRecentTopic 自己吞例外）也絕對不能
@@ -1506,7 +1580,7 @@ async function answerTechQuery(replyToken, targetId, keywordText) {
     // answerIndustryTrend() 抓取失敗那條路同一個原則。
     await replyOrPush(replyToken, targetId,
       '這部分我暫時抓不到工研院官網的最新資料，真不好意思 🙏 建議直接洽媒體邀訪窗口。',
-      [...crossItem, CONTACT_MENU_LABEL, '最近有哪些活動']);
+      [...crossItem, BTN.events, BTN.trend, BTN.contact, BTN.human]);
     return;
   }
   if (!items.length) {
@@ -1515,7 +1589,7 @@ async function answerTechQuery(replyToken, targetId, keywordText) {
     // 窗口讓記者換個管道問，不要硬答或東拼西湊。
     await replyOrPush(replyToken, targetId,
       `工研院官網新聞中心目前沒有找到跟「${keyword}」直接相關的報導。想從產業面切入的話我這邊還有 IEK 的產業趨勢摘要可以查；要找人談，直接洽媒體邀訪窗口會有專人協助確認。`,
-      [...crossItem, CONTACT_MENU_LABEL, '最近有哪些活動']);
+      [...crossItem, BTN.events, BTN.trend, BTN.contact, BTN.human]);
     return;
   }
 
@@ -1548,7 +1622,7 @@ async function answerTechQuery(replyToken, targetId, keywordText) {
 
   const reply = `${aiReply}${linksBlock}${contactLine}`;
   console.log(`[line] tech_query kw="${keyword}" reply="${reply.slice(0, 200)}"`);
-  await replyOrPush(replyToken, targetId, reply, [...crossItem, CONTACT_MENU_LABEL, '最近有哪些活動']);
+  await replyOrPush(replyToken, targetId, reply, [...crossItem, BTN.events, BTN.trend, BTN.contact, BTN.human]);
   // 跟 answerIndustryTrend() 同一個道理：記住這一輪聊的是工研院技術，下一則只打一個
   // 技術名詞（「那光通訊呢」的省略講法）才接得回來，見 getRecentTopic() 的說明。
   // 問句與答案節錄一併記下，理由同 answerIndustryTrend() 那段（批次 58）。
@@ -1609,7 +1683,7 @@ async function answerLatestNews(replyToken, targetId, question) {
   const reply = `${aiReply}${linksBlock}\n\n想看某一則的細節，直接打標題裡的關鍵字就可以；要安排採訪請洽媒體邀訪窗口。`;
   console.log(`[line] latest_news items=${items.length} reply="${reply.slice(0, 200)}"`);
   await replyOrPush(replyToken, targetId, reply,
-    ['產業趨勢分析', '想問什麼技術', CONTACT_MENU_LABEL, '最近有哪些活動']);
+    [BTN.events, BTN.trend, BTN.tech, BTN.contact, BTN.human]);
   // 記住這一輪聊的是工研院自己的新聞：下一則只打一個技術名詞（「那半導體呢」的省略
   // 講法）才接得回 tech_query，見 getRecentTopic() 的說明。
   // 問句與答案節錄一併記下，理由同 answerIndustryTrend() 那段（批次 58）——這條路
@@ -2058,6 +2132,21 @@ const GROUP_ANSWER_RULE = '這一題是在多人 LINE 群組裡問的，群組�
 // 只認「要整份稿子」的講法。刻意不收「完整版」「逐字稿」：「有完整版影片嗎？」「有沒有
 // 逐字稿？」問的不是新聞稿，後面接一段「完整新聞稿比較長…」就是答非所問。
 const GROUP_FULL_TEXT_RE = /(完整|整篇|整份)的?(新聞)?稿|新聞稿的?(全文|全部|完整)|全文|完整的?內容|整篇(貼|給|傳|發)/;
+// 「要哪一場的完整新聞稿」那排按鈕送出的字（批次 85）。固定格式，才能不靠模型、直接認出是哪一場，
+// 群組裡別人按也認得（見 isOwnButtonText()）。有人照這個格式自己打字，意思也一樣。
+const FULL_TEXT_PICK_RE = /^給我《(.+)》的完整新聞稿$/;
+function fullTextPickButton(name) {
+  return { label: name, text: `給我《${name}》的完整新聞稿` };
+}
+async function fullTextPickEvent(text) {
+  const m = String(text || '').trim().match(FULL_TEXT_PICK_RE);
+  if (!m) return null;
+  const name = m[1].trim();
+  const row = (await getAllEventRows()).find(r => String(r[1] || '').trim() === name);
+  const event = row ? rowToEvent(row) : null;
+  return isUsable(event) ? event : null;
+}
+
 function groupFullTextTail(event) {
   const url = lineBindUrl(event.id);
   return url
@@ -2592,7 +2681,7 @@ async function handleStaffMessage(replyToken, userId, text) {
     console.log(`[line] 職員退出 user=${userId}`);
     await replyOrPush(replyToken, userId,
       '已退出職員模式 ✅\n\n您現在跟一般記者看到的一樣，下方選單也換回記者版。\n要再進來，重新輸入一次密語即可。',
-      ['最近有哪些活動', '使用說明']);
+      HOME_MENU);
     return;
   }
 
@@ -2626,8 +2715,9 @@ async function handleStaffMessage(replyToken, userId, text) {
     await handleMetaIntent(replyToken, userId, text, metaIntent, null, {});
     return;
   }
-  if (metaIntent === 'help' || metaIntent === 'switch') {
+  if (metaIntent === 'help' || metaIntent === 'switch' || metaIntent === 'menu') {
     // 職員的「使用說明／回首頁」＝職員功能表，不是記者那份說明影片。
+    // 「選單」（批次 84）也一樣：職員要叫回的是職員那組按鈕。
     await sendStaffMenu(replyToken, userId);
     return;
   }
@@ -2987,7 +3077,7 @@ async function sendHumanContact(replyToken, targetId, text, binding, { speakerId
   if (notified) lines.push('\n我也轉告公關同仁了，他們看到會在這個對話直接回你；急的話直接打電話比較快。');
   console.log(`[line] 找真人 target=${targetId} group=${group} notified=${notified}`);
   await replyOrPush(replyToken, targetId, lines.join('\n'),
-    group ? undefined : ['媒體邀訪需求', '最近有哪些活動', '使用說明']);
+    [BTN.contact, BTN.events, BTN.trend, BTN.tech, BTN.help]); // 批次 84：不放「找真人」自己
 }
 
 async function handleMetaIntent(replyToken, userId, text, metaIntent, binding, { speakerId = '', group = false } = {}) {
@@ -3020,8 +3110,20 @@ async function handleMetaIntent(replyToken, userId, text, metaIntent, binding, {
     // 按鈕照樣給：綁定中是這場的快速提問（他可能還想問），沒綁定是四條路。
     const current = binding?.event_id ? await getEventById(binding.event_id) : null;
     const chips = isUsable(current) ? eventQuickChips(current, { group })
-      : (group ? undefined : ['最近有哪些活動', '產業趨勢分析', '想問什麼技術', CONTACT_MENU_LABEL]);
+      : HOME_MENU; // 批次 84：群組與 1 對 1 同一排（原本群組拿到的是預設導覽、1 對 1 少了找真人）
     await replyOrPush(replyToken, userId, (group ? COURTESY_REPLIES_GROUP : COURTESY_REPLIES)[metaIntent], chips);
+    return;
+  }
+
+  if (metaIntent === 'menu') {
+    // 叫出按鈕（批次 84，見 lib/menu.js MENU_EXACT_RE）。正在問某一場就給那場的整排，
+    // 否則給起點那排。純按鈕、不呼叫模型、不寫 qa_log。
+    const current = binding?.event_id ? await getEventById(binding.event_id) : null;
+    await replyOrPush(replyToken, userId,
+      isUsable(current)
+        ? `按鈕在下面 👇 目前在問的是《${current.name}》，也可以直接打字問。`
+        : '按鈕在下面 👇 想問什麼也可以直接打字。',
+      isUsable(current) ? eventQuickChips(current) : HOME_MENU);
     return;
   }
 
@@ -3055,7 +3157,7 @@ async function handleMetaIntent(replyToken, userId, text, metaIntent, binding, {
         quickReply: buildHelpQuickReply()
       }
     ]);
-    if (!ok) await replyOrPush(replyToken, userId, HELP_TEXT, ['最近有哪些活動']);
+    if (!ok) await replyOrPush(replyToken, userId, HELP_TEXT, HOME_MENU.filter(b => b !== BTN.help));
     return;
   }
 
@@ -3107,8 +3209,12 @@ async function handleMetaIntent(replyToken, userId, text, metaIntent, binding, {
     // 名稱，answerTechQuery() 需要記者給關鍵字才查得到東西。先問一次、記一個
     // 一次性旗標，下一則不管記者打什麼都當成技術名稱去查，見 handleTechQueryMessage()。
     await setContactPending(userId, pendingNoteFor(TECH_QUERY_PENDING_NOTE, userId, speakerId));
+    // 批次 84：原本這則一顆按鈕都沒有（1 對 1），記者得自己想要打什麼。例句直接做成按鈕，
+    // 送出的是「工研院 ＸＸ」這個固定格式——群組裡別人按也認得（isOwnButtonText() 的
+    // CROSS_TOPIC_TECH_RE），不會因為旗標綁在發問者身上就按了沒反應。
     await replyOrPush(replyToken, userId,
-      '請問您想了解工研院哪一項技術呢？直接輸入技術名稱即可，例如：機器人、半導體封裝、AI 晶片。');
+      '請問您想了解工研院哪一項技術呢？直接輸入技術名稱即可，例如：機器人、半導體封裝、AI 晶片。',
+      [...TECH_EXAMPLE_BUTTONS, BTN.home, BTN.events, BTN.trend, BTN.contact, BTN.human]);
     return;
   }
 
@@ -3117,7 +3223,7 @@ async function handleMetaIntent(replyToken, userId, text, metaIntent, binding, {
     // 的一整套坑同一個形狀），見 lib/menu.js ORG_INTRO_TEXT 的說明。附上整套入口
     // 按鈕，記者問完機構簡介不會卡在死巷子裡，跟 sendFallbackGuide() 同一個道理。
     await replyOrPush(replyToken, userId, ORG_INTRO_TEXT,
-      ['最近有哪些活動', '產業趨勢分析', '想問什麼技術', CONTACT_MENU_LABEL, '使用說明']);
+      HOME_MENU);
     return;
   }
 
@@ -3249,10 +3355,21 @@ async function handleUnbound(replyToken, userId, text, { silentOnOther = false, 
       await answerQuestion(replyToken, userId, event, existingName, text, { memory: remember, speakerId });
       // 只在「這個人從沒被問過」時才順手問一次，而且不擋住剛剛的答案——用 push
       // 補問，記者不用先回答完媒體名稱才拿得到他真正想要的內容。
-      if (askMediaName && !existingName) {
-        await setBindingNote(userId, 'ask_name');
-        await pushMessage(userId, '對了，方便留個貴媒體的名稱嗎？（打名稱即可，或回「略過」——之後就不會再問了）');
-      }
+      if (askMediaName && !existingName) await askMediaNameLater(userId, event);
+      return;
+    }
+  }
+
+  // 要的是「某一場的完整新聞稿」，但沒講哪一場、目前也沒在問哪一場（批次 85）。以前掉到兜底
+  // 「這句我不太確定該從哪邊幫您找答案」——其實我們很清楚他要什麼，只是不知道哪一場。
+  // 反問一次，每一場一顆按鈕，按下去直接給那一場（見 FULL_TEXT_PICK_RE）。
+  if (!silentOnOther && GROUP_FULL_TEXT_RE.test(text)) {
+    const named = event_ids.map(id => cards.find(c => c.id === id)).filter(c => c?.has_kb);
+    const picks = named.length ? named.map(c => c.name) : calendarQuickReplyItems(cards);
+    if (picks.length) {
+      await replyOrPush(replyToken, userId,
+        `想要哪一場的完整新聞稿呢？點下面的活動就給您：\n${picks.map(n => '・' + n).join('\n')}`,
+        [...picks.map(fullTextPickButton), BTN.events, BTN.human].slice(0, 13));
       return;
     }
   }
@@ -3515,7 +3632,7 @@ async function composeFallbackReply(text) {
 // 那組，並且補一句「這裡是職員模式」——同仁在職員模式裡拿到一整排記者按鈕會以為
 // 自己被踢出去了。
 async function sendFallbackGuide(replyToken, targetId, text, { staff = false } = {}) {
-  const chips = staff ? STAFF_QUICK_REPLIES : ['最近有哪些活動', '產業趨勢分析', '想問什麼技術', CONTACT_MENU_LABEL, '找真人', '使用說明'];
+  const chips = staff ? STAFF_QUICK_REPLIES : HOME_MENU;
   // 批次 81：每一條兜底都要留一條通往真人的路（世新事件的教訓：AI 答不出來又找不到人）。
   // 寫死在程式裡接在最後，不交給模型——兜底那支本來就禁止模型講聯絡方式。
   const staffTail = staff ? '\n\n（您在職員模式，打「使用說明」可以看內部功能。）' : '';
@@ -3544,7 +3661,7 @@ async function sendFallbackGuide(replyToken, targetId, text, { staff = false } =
       [
         { label: `${kw}的產業趨勢`, text: `${kw}產業趨勢` },
         { label: `工研院的${kw}技術`, text: `工研院 ${kw}` },
-        ...(staff ? ['最近有哪些新聞', '使用說明'] : ['最近有哪些活動', CONTACT_MENU_LABEL])
+        ...(staff ? ['最近有哪些新聞', '使用說明'] : [BTN.events, BTN.contact, BTN.human])
       ]);
     return;
   }
@@ -3672,6 +3789,7 @@ async function isOwnButtonText(groupId, text, speakerId) {
 
   if (GROUP_FIXED_BUTTONS.has(s)) return true;      // 固定選單詞
   if (/^邀訪[:：]/.test(s)) return true;             // 全域邀訪主題（機器產生的格式）
+  if (FULL_TEXT_PICK_RE.test(s)) return true;         // 「要哪一場的完整新聞稿」那排（批次 85）
   // 兩顆導流按鈕——見 CROSS_TOPIC_*_RE 的說明。批次 34 補上，不再破例。
   if (CROSS_TOPIC_TECH_RE.test(s) || CROSS_TOPIC_TREND_RE.test(s)) return true;
 
@@ -3739,7 +3857,8 @@ async function ownChipEventId(groupId, text) {
 // 卻不在這份清單上——群組按了等於沒按（視窗外被守門擋掉，視窗內它不是問句也被擋掉）。
 // 偏偏是「記者任何時候都要找得到真人」的那一顆。
 const GROUP_FIXED_BUTTONS = new Set([
-  '最近有哪些活動', '產業趨勢分析', '想問什麼技術', CONTACT_MENU_LABEL, '使用說明', '回首頁', '找真人'
+  '最近有哪些活動', '產業趨勢分析', '想問什麼技術', CONTACT_MENU_LABEL, '使用說明', '回首頁', '找真人',
+  ...MENU_WORDS // 批次 84：群組裡按鈕被別人的訊息收掉了，打「選單」叫回來，不用 @
 ]);
 
 // 群組續問視窗內，明講要找真人／承辦人的話一律放行（批次 83）。刻意比 lib/menu.js 的
@@ -3865,7 +3984,7 @@ async function handleGroupEvent(replyToken, ev) {
     if (mentioned) {
       await replyOrPush(replyToken, groupId,
         '你好，我是工研院 AI 助手米亞 🙂\n想了解最近有哪些活動、產業趨勢、工研院技術，或是媒體邀訪需求，都歡迎直接問我！\n請在 @ 我的後面接著打問題（或用「米亞」開頭，例如「米亞 最近有哪些活動」），也可以點下面的按鈕：',
-        ['最近有哪些活動', '產業趨勢分析', '想問什麼技術', CONTACT_MENU_LABEL, '使用說明']);
+        HOME_MENU);
       // 這則回覆本身也附了按鈕，記者點下去送出的是沒有 @ 的純文字——續問視窗沒開
       // 的話會被 handleGroupEvent() 開頭那段「沒被 @ 又不在視窗內 → 安靜」擋掉，
       // 按鈕就變成「按了沒反應」。跟其餘所有「有回答」的路徑一樣，這裡也要續命。
@@ -3945,7 +4064,7 @@ async function handleGroupJoin(replyToken, ev) {
       '',
       '要不要先看看目前有哪些活動？點下面的按鈕就可以。'
     ].join('\n'),
-    ['最近有哪些活動', '產業趨勢分析', '想問什麼技術', CONTACT_MENU_LABEL, '使用說明']);
+    HOME_MENU);
   // 上面那排按鈕送出的是沒有 @ 的純文字，要靠續問視窗才接得住——見這支開頭的 ⚠️。
   await touchGroupSession(groupId);
 }
@@ -3987,6 +4106,16 @@ async function handleGroupMessage(replyToken, groupId, text, { mentioned, speake
       binding = await getBinding(groupId);
       console.log(`[line] 群組點了舊按鈕，綁定接回 event=${owned.eventId} text="${text.slice(0, 40)}"`);
     }
+  }
+
+  // 按了「給我《ＸＸ》的完整新聞稿」（批次 85）：接上那一場。群組版的答案照群組規則只給重點，
+  // 後面自動接一對一拿全文的連結（見 GROUP_FULL_TEXT_RE）。
+  const pickedFullText = await fullTextPickEvent(text);
+  if (pickedFullText) {
+    await upsertBinding(groupId, pickedFullText.id, '');
+    await answerQuestion(replyToken, groupId, pickedFullText, '（群組提問）', '給我完整新聞稿', { group: true, speakerId });
+    await touchGroupSession(groupId);
+    return;
   }
 
   const metaIntent = detectMetaIntent(text);
@@ -4140,11 +4269,13 @@ async function handleEvent(ev) {
     // 有三步驟與按鈕的 Flex 圖卡（見 lib/menu.js buildWelcomeFlex）。
     // Flex 送失敗（欄位打錯、LINE 版本太舊）不能讓新記者收到一片空白，
     // 所以退回原本那則純文字歡迎詞——文案本身仍然是完整可用的引導。
-    const ok = await replyOrPushMessages(ev.replyToken, userId, [buildWelcomeFlex()]);
+    // 批次 84：圖卡本身也掛上起點按鈕——盤點抓到加好友這則一顆按鈕都沒有；手機的圖文
+    // 選單要先點開才看得到，LINE 電腦版則完全不顯示圖文選單（官方文件）。
+    const ok = await replyOrPushMessages(ev.replyToken, userId, [{ ...buildWelcomeFlex(), quickReply: toQuickReply(HOME_MENU) }]);
     if (!ok) {
       await replyOrPush(ev.replyToken, userId,
         '感謝加入好友！\n\n請掃描活動現場的 QR code，或直接輸入「#活動代碼」開始問答；也可以直接打活動名稱，或點下面的按鈕看看目前有哪些活動。\n\n本帳號會記錄您的提問內容以改善新聞服務，不會蒐集您的個人資料。',
-        ['最近有哪些活動', '使用說明']);
+        HOME_MENU);
     }
     return;
   }
@@ -4179,6 +4310,7 @@ async function handleEvent(ev) {
     // 批次 79：職員傳照片 → 問要加到哪一場。記者傳照片照舊回「看不到」。
     // 限流照樣算：一次傳十張照片不能變成十次沒上限的處理。
     if ((ev.message?.type === 'image' || ev.message?.type === 'file') && await isStaffAuthenticated(userId)) {
+      markStaff();
       if (rateLimited(userId)) {
         await replyOrPush(replyToken, userId, '傳得太快了，請稍候片刻再傳。');
         return;
@@ -4237,6 +4369,7 @@ async function handleEvent(ev) {
   // 職員模式（批次 4）：密語比對與已登入狀態一律最優先判斷，整段接管、不再往下走
   // #代碼／reporter 流程——職員用自然語言下所有指令，不用記兩套語法。
   if (isPasscodeMatch(text)) {
+    markStaff();
     if (await isStaffAuthenticated(userId)) {
       await replyOrPush(replyToken, userId, '您已經是職員模式了，直接問我就可以，不用再輸入一次密語。', staffChips());
       return;
@@ -4250,6 +4383,7 @@ async function handleEvent(ev) {
     return;
   }
   if (await isStaffAuthenticated(userId)) {
+    markStaff();
     await handleStaffMessage(replyToken, userId, text);
     return;
   }
@@ -4261,12 +4395,21 @@ async function handleEvent(ev) {
     if (isUsable(event)) {
       await upsertBinding(userId, event.id, 'ask_name');
       await replyOrPush(replyToken, userId,
-        `已為您接上《${event.name}》✅\n\n請問您是哪家媒體？（方便新聞聯絡人後續服務，打媒體名稱即可，或回「略過」）\n\n之後就可以直接問問題了。`);
+        `已為您接上《${event.name}》✅\n\n請問您是哪家媒體？（方便新聞聯絡人後續服務，打媒體名稱即可，或點「略過」）\n\n之後就可以直接問問題了。`,
+        mediaNameChips(event));
       return;
     }
     // 代碼對不上——很可能是把活動「代碼」跟活動「名稱」搞混了，把 # 拿掉當一般
     // 文字重新路由一次，不要只回「找不到」就結束，記者不會知道代碼跟名稱是兩回事。
     await handleUnbound(replyToken, userId, code || text);
+    return;
+  }
+
+  // 按了「給我《ＸＸ》的完整新聞稿」（批次 85）：直接接上那一場、給全文，不經過路由。
+  const pickedFullText = await fullTextPickEvent(text);
+  if (pickedFullText) {
+    await upsertBinding(userId, pickedFullText.id, '');
+    await answerQuestion(replyToken, userId, pickedFullText, await getStoredMediaName(userId), '給我完整新聞稿', { memory: true });
     return;
   }
 
@@ -4309,17 +4452,17 @@ async function handleEvent(ev) {
       // 題數」跟「今日問答」就被按活動清單按鈕的動作灌水，跟記者真的發問混在一起，
       // report.html 給長官看的數字失真。改成單純回一句換場確認，不呼叫 AI、不寫
       // qa_log——跟 #代碼綁定拿到的「已為您接上」同一種純確認訊息。
-      await replyOrPush(replyToken, userId, `已為您換到《${target.name}》✅ 請直接問問題即可。`);
+      // 批次 84：1 對 1 這則原本一顆按鈕都沒有（群組版批次 40 就補了），剛換過來正是最需要
+      // 看到「這場能問什麼」的時候。
+      await replyOrPush(replyToken, userId, `已為您換到《${target.name}》✅ 請直接問問題即可。`,
+        eventQuickChips(target));
       // ⚠️ 實際回報的坑：換場這條路一直都不會問媒體名稱——不管換過去之前有沒有
       // 被問過。原本只有「掃 QR／#代碼」跟「自然語言軟綁定」兩條路會問，這位記者
       // 從頭到尾都是靠打活動名稱換場，於是永遠沒被問過，後台分析永遠看到
       // 「（未填寫）」。補問邏輯跟 handleUnbound() 的軟綁定分支同一套：只在「這個人
       // 從沒被問過」才問（media_name 已有值就不重問），而且用 push 補問，不擋住
       // 剛剛送出的換場確認。
-      if (!binding.media_name) {
-        await setBindingNote(userId, 'ask_name');
-        await pushMessage(userId, '對了，方便留個貴媒體的名稱嗎？（打名稱即可，或回「略過」——之後就不會再問了）');
-      }
+      if (!binding.media_name) await askMediaNameLater(userId, target);
       return;
     }
   }
@@ -4343,7 +4486,9 @@ async function handleEvent(ev) {
   // 兩者目前不會同時發生，但要做批次 5 時請先看 LINE-PLAN.md 這段的完整說明。
   if (binding.note === 'ask_name') {
     await setBindingNote(userId, ''); // 一次性：不管這則判斷結果如何，用掉就清掉
-    if (looksLikeNameOrSkip(text)) {
+    // 批次 84：補問那則現在帶著這場的快速提問按鈕——記者按了「合作廠商」這種短短的
+    // 自訂提問，不能被當成媒體名稱記下來、回一句「已記錄」就把問題吞掉。
+    if (looksLikeNameOrSkip(text) && !eventContentChips(event).includes(text)) {
       const isSkip = /^(略過|skip|跳過)$/i.test(text);
       await setMediaName(userId, isSkip ? '（未提供）' : sanitize(mediaNameOf(text), 40));
       // 這裡就是記者準備開始問問題的第一個時間點，順手把快速提問按鈕帶上——

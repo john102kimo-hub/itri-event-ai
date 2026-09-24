@@ -7,6 +7,7 @@
 import { readRange, appendRows, warmAuth } from '../lib/sheets.js';
 import { buildSystemPrompt, resolveEventContent, formatEventBasics } from '../lib/prompt.js';
 import { toTraditionalTW, createTraditionalStream, ZH_TW_RULE } from '../lib/zh-tw.js';
+import { reportAiFailure } from '../lib/ai-alert.js';
 
 // 這支是記者看得到的出口，跟 api/line.js 一樣要過繁體轉換（CLAUDE.md 第 1、2 條）。
 // 批次 82 之前這裡完全沒有接：LINE 在批次 45 補了兩層防線，網頁版一層都沒有——
@@ -227,6 +228,7 @@ export default async function handler(req, res) {
         detail = j.error?.message || '';
       } catch (e) { /* 回應不是 JSON 就沒有細節可記 */ }
       console.error('Anthropic API 錯誤:', response.status, detail);
+      await reportAiFailure({ status: response.status, message: detail, where: '網頁版記者問答' }); // 批次 85
       return res.status(response.status).json({ error: friendlyApiError(response.status) });
     }
 

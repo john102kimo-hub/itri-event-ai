@@ -23,6 +23,7 @@ import { checkStructuredContent } from '../lib/structured-check.js';
 import { checkGeoDraft } from '../lib/geo-draft-check.js';
 import { BRAND_DEFAULT, BRAND_KEY, BRAND_ALIAS_RE, canonList, resolveOrg, tallyOrgs } from '../lib/geo-orgs.js';
 import { buildPeerSeries, selfTrend } from '../lib/geo-benchmark.js';
+import { reportAiFailure } from '../lib/ai-alert.js';
 
 const SHEETS = {
   geo_prompts: ['id', 'topic', 'prompt', 'keyword', 'brand', 'competitors', 'active', 'created_at'],
@@ -182,7 +183,10 @@ async function anthropic(body, timeoutMs = 15_000) {
     signal: AbortSignal.timeout(timeoutMs),
   });
   const data = await res.json();
-  if (!res.ok) throw new Error(data.error?.message || `Anthropic ${res.status}`);
+  if (!res.ok) {
+    await reportAiFailure({ status: res.status, message: data.error?.message, where: 'GEO 檢查' }); // 批次 85
+    throw new Error(data.error?.message || `Anthropic ${res.status}`);
+  }
   return data;
 }
 

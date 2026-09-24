@@ -21,6 +21,7 @@
 import { readRange, appendRows, ensureSheets } from '../lib/sheets.js';
 import { toTraditionalTW } from '../lib/zh-tw.js';
 import { resolveOutlet, resolveRole, buildPersonaBlock } from '../lib/training-persona.js';
+import { reportAiFailure } from '../lib/ai-alert.js';
 
 const CACHE_TTL_MS = 60 * 1000; // 60 秒；同仁改完知識庫應該很快能在訓練模式看到新版
 
@@ -824,7 +825,10 @@ export default async function handler(req, res) {
     }
 
     const data = await response.json();
-    if (!response.ok) return res.status(response.status).json({ error: data.error?.message || 'API 錯誤' });
+    if (!response.ok) {
+      await reportAiFailure({ status: response.status, message: data.error?.message, where: '媒體訓練' }); // 批次 85
+      return res.status(response.status).json({ error: data.error?.message || 'API 錯誤' });
+    }
 
     if (data.stop_reason === 'max_tokens') {
       console.warn('training 回應被截斷', event_id, mode);
