@@ -21,7 +21,7 @@ import { readRange, appendRows, updateRange, ensureSheets } from '../lib/sheets.
 import { fetchNewsjackCandidates } from '../lib/newsjacking.js';
 import { checkStructuredContent } from '../lib/structured-check.js';
 import { checkGeoDraft } from '../lib/geo-draft-check.js';
-import { BRAND_DEFAULT, canonList, tallyOrgs } from '../lib/geo-orgs.js';
+import { BRAND_DEFAULT, BRAND_KEY, BRAND_ALIAS_RE, canonList, resolveOrg, tallyOrgs } from '../lib/geo-orgs.js';
 import { buildPeerSeries, selfTrend } from '../lib/geo-benchmark.js';
 
 const SHEETS = {
@@ -84,6 +84,26 @@ const nowTW = () => new Date().toLocaleString('zh-TW', { timeZone: 'Asia/Taipei'
 
 async function safeRead(range) {
   try { return await readRange(range); } catch { return []; }
+}
+
+/**
+ * 從一張表拿掉幾列：留下來的往上補齊、底下補空白，**一次寫完**（批次 82）。
+ *
+ * 以前的寫法是兩步——先把整張表清成空白、再把留下來的寫回去。第二步失敗（Sheets 429、
+ * 網路瞬斷、function 在兩步之間被砍掉）時，**整張表歸零**：所有題目或所有活動標記一次
+ * 消失，而且只有當下按刪除的人看得到錯誤。exposure.js 在 FIX-PLAN P0 #5 修過一模一樣
+ * 的形狀，這裡的三處（刪題目、刪事件標記、停止追蹤）當時漏掉了。
+ * 一次 values.update 要嘛整批成功、要嘛整批沒動，不會停在「清空了但還沒寫回」。
+ *
+ * rows 是剛讀到的第 2 列起的資料；lastCol 是這張表最後一欄的字母；width 是欄數。
+ * 每一列都補滿到 width 欄——Sheets 讀回來的列會省略尾端空格，不補滿的話，往上搬的
+ * 那一列比較短時，原本那一格的舊內容會殘留在右邊。
+ */
+async function rewriteRows(tab, lastCol, width, rows, kept) {
+  if (!rows.length || kept.length === rows.length) return;
+  const pad = (r) => Array.from({ length: width }, (_, i) => (r && r[i] !== undefined ? r[i] : ''));
+  const out = [...kept.map(pad), ...Array.from({ length: rows.length - kept.length }, () => pad(null))];
+  await updateRange(`${tab}!A2:${lastCol}${rows.length + 1}`, out);
 }
 
 /**
@@ -322,11 +342,20 @@ const JUDGE_SCHEMA = {
   additionalProperties: false,
 };
 
+// 判官的「同義寫法」提示（批次 82）。以前寫死一行 ITRI 的同義詞，不管題目追蹤的品牌是誰
+// 都塞同一行；而且沒講「工研院底下的所／中心也算」——回答只寫「產科國際所」「IEK」時，
+// 判官判成沒提到工研院，排行那邊（lib/geo-orgs.js）卻把它們算成工研院，兩邊對不起來。
+function brandSynonyms(brand) {
+  if (resolveOrg(brand).key !== BRAND_KEY) return '';
+  return '（同義寫法：工研院、工業技術研究院、ITRI、Industrial Technology Research Institute 都算同一個；'
+    + '工研院底下的研究所／中心——例如產科國際所、IEK、ISTI、材化所、電光所——被點名時，也算提到工研院）';
+}
+
 function judgePrompt({ brand, competitors, question, answer }) {
   return `以下是一段 AI 助理針對某個問題的回答。請只做客觀觀察，不要評價好壞。
 
 【要觀察的品牌】${brand}
-（同義寫法：ITRI、工業技術研究院、Industrial Technology Research Institute 都算同一個）
+${brandSynonyms(brand)}
 
 【這個領域常見的相關單位（僅供參考，不是完整名單，且這份參考名單偏向法人／學研機構，
 不代表只該找這一類——回答裡出現名單以外的機構、或民間企業，一樣要抓出來，不要被這份名單的味道帶偏）】
@@ -504,7 +533,9 @@ const GEN_SCHEMA = {
   additionalProperties: false,
 };
 
-const BRAND_RE = /工研院|工業技術研究院|ITRI|IEK|ISTI/i;
+// 問句裡出現工研院任何一種寫法＝自問自答（批次 82 起統一用 lib/geo-orgs.js 那一份：
+// 補了簡體全名、英文全名，並修掉「nitride」「statistics」被當成 ITRI／ISTI 的誤判）
+const BRAND_RE = BRAND_ALIAS_RE;
 
 function genPrompt(keyword) {
   return `你要為「AI 搜尋能見度追蹤」設計探測問句。
@@ -1786,10 +1817,7 @@ export default async function handler(req, res) {
       }
 
       const kept = evRows.filter((r) => r[0] && r[0] !== body.id);
-      if (evRows.length) {
-        await updateRange(`geo_events!A2:H${evRows.length + 1}`, evRows.map(() => new Array(8).fill('')));
-      }
-      if (kept.length) await updateRange(`geo_events!A2:H${kept.length + 1}`, kept);
+      await rewriteRows('geo_events', 'H', 8, evRows, kept);
 
       return ok(res, { success: true, removed: stopped, keyword, kept_shared: stopped === 0 && (shared || !!ownIds) });
     }
@@ -1842,8 +1870,7 @@ export default async function handler(req, res) {
     if (body.action === 'prompt_delete') {
       const rows = await safeRead('geo_prompts!A2:H');
       const kept = rows.filter((r) => r[0] && r[0] !== body.id);
-      if (rows.length) await updateRange(`geo_prompts!A2:H${rows.length + 1}`, rows.map(() => new Array(8).fill('')));
-      if (kept.length) await updateRange(`geo_prompts!A2:H${kept.length + 1}`, kept);
+      await rewriteRows('geo_prompts', 'H', 8, rows, kept);
       return ok(res, { success: true });
     }
 
@@ -1870,8 +1897,7 @@ export default async function handler(req, res) {
     if (body.action === 'event_delete') {
       const rows = await safeRead('geo_events!A2:H');
       const kept = rows.filter((r) => r[0] && r[0] !== body.id);
-      if (rows.length) await updateRange(`geo_events!A2:H${rows.length + 1}`, rows.map(() => new Array(8).fill('')));
-      if (kept.length) await updateRange(`geo_events!A2:H${kept.length + 1}`, kept);
+      await rewriteRows('geo_events', 'H', 8, rows, kept);
       return ok(res, { success: true });
     }
 

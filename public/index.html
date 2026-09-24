@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>工研院活動溝通 AI 平台</title>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.3.0/tabler-icons.min.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.3.0/dist/tabler-icons.min.css">
 <style>
 :root {
   --primary: #0F9E7A;
@@ -175,12 +175,15 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); min-
 .cal-legend span { display: inline-flex; align-items: center; gap: 5px; }
 .cal-legend i { font-size: 10px; }
 .cal-grid {
-  display: grid; grid-template-columns: repeat(7,1fr); gap: 1px;
+  /* minmax(0,1fr) 不是 1fr（批次 82）：1fr 的下限是「內容最小寬度」，某一天的活動名稱
+     是一整條不換行的色塊時，那一欄會被撐寬、其他欄被擠——手機上星期五、六兩欄直接
+     被推到畫面外看不到。minmax(0,…) 讓七欄永遠等寬，長名稱照樣用 … 截斷。 */
+  display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 1px;
   background: var(--border); border: 1px solid var(--border);
   border-radius: var(--radius); overflow: hidden;
 }
 .cal-dow { background: #f9fafb; padding: 8px; text-align: center; font-size: 0.75rem; font-weight: 700; color: var(--muted); }
-.cal-cell { background: white; min-height: 104px; padding: 6px; cursor: pointer; transition: background 0.15s; }
+.cal-cell { background: white; min-height: 104px; padding: 6px; cursor: pointer; transition: background 0.15s; min-width: 0; }
 .cal-cell:hover { background: #f9fafb; }
 .cal-cell.other-month { background: #fafafa; cursor: default; }
 .cal-cell.other-month .cal-date { color: #d1d5db; }
@@ -296,6 +299,13 @@ textarea.form-control { min-height: 200px; resize: vertical; line-height: 1.6; }
 .draft-banner i { color: var(--accent); font-size: 20px; flex-shrink: 0; }
 .draft-banner .draft-text { flex: 1; min-width: 180px; }
 .draft-banner .btn { padding: 6px 12px; font-size: 0.8rem; flex-shrink: 0; white-space: nowrap; }
+.line-qr-box { text-align: center; }
+.line-qr-box canvas { width: 240px; max-width: 100%; height: auto; border: 1px solid var(--border); border-radius: 12px; }
+.line-qr-warn { background: #fff7ed; border: 1px solid #fed7aa; color: #9a3412; border-radius: 10px; padding: 10px 12px; font-size: 0.82rem; line-height: 1.6; margin-bottom: 14px; text-align: left; }
+.line-qr-row { display: flex; gap: 8px; align-items: center; margin-top: 10px; }
+.line-qr-row code { flex: 1; min-width: 0; overflow-wrap: anywhere; background: #f9fafb; border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font-size: 0.78rem; text-align: left; }
+.line-qr-steps { text-align: left; font-size: 0.82rem; color: var(--muted); line-height: 1.8; margin: 12px 0 4px; padding-left: 18px; }
+.line-qr-staff { margin-top: 18px; padding-top: 14px; border-top: 1px dashed var(--border); text-align: left; font-size: 0.82rem; color: var(--muted); line-height: 1.7; }
 .color-preview { display: inline-block; width: 20px; height: 20px; border-radius: 4px; vertical-align: middle; margin-left: 8px; border: 1px solid var(--border); }
 
 /* Toast */
@@ -316,10 +326,38 @@ textarea.form-control { min-height: 200px; resize: vertical; line-height: 1.6; }
 
 /* 響應式 */
 @media (max-width: 768px) {
-  #sidebar { display: none; }
-  #main { margin-left: 0; }
+  /* 手機：左側選單改成底部選單列（批次 82）。
+     以前是直接 display:none、沒有任何替代——手機上只看得到「活動管理」，問答分析、
+     邀訪窗口分工、成效報告、AI 能見度全部進不去，連登出都沒有按鈕。 */
+  #sidebar {
+    top: auto; right: 0; bottom: 0; width: auto;
+    flex-direction: row; align-items: stretch;
+    overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none;
+    padding-bottom: env(safe-area-inset-bottom);
+    box-shadow: 0 -2px 10px rgba(0,0,0,0.15);
+  }
+  #sidebar::-webkit-scrollbar { display: none; }
+  .sidebar-logo { display: none; }
+  #sidebar .nav-item {
+    flex: 0 0 auto; width: auto; flex-direction: column; justify-content: center;
+    gap: 2px; padding: 8px 12px; font-size: 0.7rem; white-space: nowrap; text-align: center;
+  }
+  #sidebar .nav-item i { font-size: 20px; }
+  .sidebar-bottom { margin: 0; padding: 0 12px; border-top: none; display: flex; align-items: center; }
+  .logout-btn { flex-direction: column; gap: 2px; font-size: 0.7rem; white-space: nowrap; }
+  .logout-btn i { font-size: 20px; }
+  #main { margin-left: 0; padding-bottom: calc(64px + env(safe-area-inset-bottom)); }
+  .topbar { padding: 12px 16px; flex-wrap: wrap; gap: 10px; }
+  .topbar-actions { flex-wrap: wrap; }
+  .content { padding: 16px; }
+  #toast { right: 16px; left: 16px; bottom: calc(80px + env(safe-area-inset-bottom)); }
   .stats-grid { grid-template-columns: repeat(2,1fr); }
   .events-grid { grid-template-columns: 1fr; }
+}
+/* iPhone 對字級小於 16px 的輸入框，一點下去整頁自動放大、而且不會縮回來（批次 68 在
+   媒體訓練頁踩過）。只在手機／觸控裝置放大，桌機維持原本比較緊湊的字級。 */
+@media (max-width: 768px), (pointer: coarse) {
+  input:not([type=checkbox]):not([type=radio]):not([type=color]):not([type=file]), select, textarea, .form-control { font-size: 16px !important; }
 }
 </style>
 </head>
@@ -648,6 +686,28 @@ textarea.form-control { min-height: 200px; resize: vertical; line-height: 1.6; }
   </div>
 </div>
 
+<!-- LINE QR（批次 82）：每一場專屬、掃了直接接上這一場的 LINE 入口 -->
+<div id="line-qr-modal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeLineQr()">
+  <div class="modal" style="width:440px">
+    <h2><i class="ti ti-brand-line" style="color:#06C755"></i> <span id="line-qr-title">LINE QR</span></h2>
+    <div id="line-qr-warn" class="line-qr-warn" style="display:none"></div>
+    <div class="line-qr-box"><canvas id="line-qr-canvas"></canvas></div>
+    <ol class="line-qr-steps">
+      <li>記者用手機相機或 LINE 掃這個 QR</li>
+      <li>LINE 會打開 AI 新聞助理的對話框，輸入框已經帶好這一場的代碼</li>
+      <li>按「傳送」就接上這一場，之後直接打字發問（第一次用的記者，請他順手按「加入好友」）</li>
+    </ol>
+    <div class="line-qr-row"><code id="line-qr-url"></code><button class="btn btn-outline" onclick="copyLineQr('url')">複製連結</button></div>
+    <div class="line-qr-row"><code id="line-qr-code"></code><button class="btn btn-outline" onclick="copyLineQr('code')">複製代碼</button></div>
+    <div class="form-hint">代碼給不方便掃碼的記者：加好友後直接傳這串文字（含 # 號）。</div>
+    <div class="line-qr-staff" id="line-qr-staff"></div>
+    <div class="modal-actions">
+      <button class="btn btn-outline" onclick="closeLineQr()">關閉</button>
+      <button class="btn btn-primary" onclick="downloadLineQr()"><i class="ti ti-download"></i> 下載 QR 圖檔（可列印）</button>
+    </div>
+  </div>
+</div>
+
 <!-- Toast -->
 <div id="toast"></div>
 
@@ -774,6 +834,7 @@ async function loadEvents() {
     const data = await res.json();
     if (data.error) throw new Error(data.error);
     state.events = data.events || [];
+    state.line = data.line || {};
     renderEvents();
     updateEventFilter();
     updateEventCount();
@@ -889,6 +950,10 @@ function renderEvents() {
           <button class="action-btn" onclick="copyLink('${escHtml(ev.id)}')">
             <i class="ti ti-copy"></i> 記者連結
           </button>
+          ${state.line && state.line.basic_id ? `
+          <button class="action-btn" onclick="openLineQr('${escHtml(ev.id)}')" title="記者掃了直接在 LINE 接上這一場">
+            <i class="ti ti-qrcode"></i> LINE QR
+          </button>` : ''}
           <button class="action-btn" onclick="copyEditLink('${escHtml(ev.id)}', this)" title="給負責同仁自行更新內容用；對方只能改這一場，看不到後台與數據">
             <i class="ti ti-user-edit"></i> 同仁編輯連結
           </button>
@@ -1787,6 +1852,120 @@ async function openTraining(eventId, btn) {
     toast('開啟媒體訓練失敗：' + e.message);
   }
   if (btn) { btn.disabled = false; btn.innerHTML = original; }
+}
+
+// ── LINE QR（批次 82）───────────────────────────────────────
+// LINE-PLAN.md 第 7 節早就定好的記者入口：line.me/R/oaMessage/{官方帳號ID}/?%23{活動代碼}。
+// 以前後台沒有這顆按鈕，承辦人得自己組網址、自己找工具做 QR，漏一個 %23 記者就接不上。
+// 連結組法跟後端 lib/line-link.js 同一套（那邊也給記者頁的「用 LINE 問」用）。
+// QR 在瀏覽器裡畫（public/vendor/qrcode.js），不把網址送到任何第三方服務。
+let lineQrState = null;
+function lineBindUrlFor(eventId) {
+  const id = String((state.line && state.line.basic_id) || '');
+  return `https://line.me/R/oaMessage/${encodeURIComponent(id)}/?${encodeURIComponent('#' + eventId)}`;
+}
+function loadQrLib() {
+  if (window.qrcode) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const sc = document.createElement('script');
+    sc.src = '/vendor/qrcode.js';
+    sc.onload = () => resolve();
+    sc.onerror = () => reject(new Error('QR 產生器載入失敗'));
+    document.head.appendChild(sc);
+  });
+}
+// 畫成一張可以直接印的圖：QR＋活動名稱＋一句說明。記者會現場多半是貼在背板或桌卡上，
+// 只有一塊黑白方格的話，沒人知道掃了是要幹嘛。
+function drawLineQr(canvas, url, title) {
+  const qr = qrcode(0, 'M');
+  qr.addData(url);
+  qr.make();
+  const n = qr.getModuleCount(), cell = 12, quiet = 4 * cell;
+  const size = n * cell + quiet * 2;
+  const capH = 150;
+  canvas.width = size; canvas.height = size + capH;
+  const g = canvas.getContext('2d');
+  g.fillStyle = '#ffffff'; g.fillRect(0, 0, canvas.width, canvas.height);
+  g.fillStyle = '#000000';
+  for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) {
+    if (qr.isDark(r, c)) g.fillRect(quiet + c * cell, quiet + r * cell, cell, cell);
+  }
+  const font = '"PingFang TC","Noto Sans TC","Microsoft JhengHei",sans-serif';
+  g.textAlign = 'center';
+  g.fillStyle = '#1a1a2e';
+  g.font = `bold 30px ${font}`;
+  // 活動名稱太長就折兩行，第二行還放不下才加 …
+  const lines = [];
+  let cur = '';
+  for (const ch of String(title || '')) {
+    if (g.measureText(cur + ch).width > size - 48) { lines.push(cur); cur = ch; if (lines.length === 2) break; }
+    else cur += ch;
+  }
+  if (lines.length < 2 && cur) lines.push(cur);
+  if (lines.length === 2 && lines.join('').length < String(title || '').length) lines[1] = lines[1].slice(0, -1) + '…';
+  lines.slice(0, 2).forEach((t, i) => g.fillText(t, size / 2, size + 20 + i * 40));
+  g.fillStyle = '#06C755';
+  g.font = `bold 24px ${font}`;
+  g.fillText('用 LINE 掃描，直接問 AI 新聞助理', size / 2, size + 20 + 2 * 40 + 14);
+}
+async function openLineQr(eventId) {
+  const ev = state.events.find(e => e.id === eventId);
+  if (!ev) return;
+  const url = lineBindUrlFor(eventId);
+  lineQrState = { ev, url };
+  document.getElementById('line-qr-title').textContent = ev.name + '｜LINE QR';
+  document.getElementById('line-qr-url').textContent = url;
+  document.getElementById('line-qr-code').textContent = '#' + eventId;
+  // 未發布／已封存的場次，LINE 那邊會當作不存在（api/line.js isUsable()）：記者掃了接不上
+  const warn = document.getElementById('line-qr-warn');
+  const bad = ev.status === 'draft' ? '這場還沒發布：記者現在掃了會接不上。可以先印，記得在記者會前按「發布」。'
+    : ev.status === 'archived' ? '這場已封存：記者掃了會接不上。' : '';
+  warn.textContent = bad;
+  warn.style.display = bad ? 'block' : 'none';
+  const add = state.line && state.line.add_friend_url;
+  document.getElementById('line-qr-staff').innerHTML = add
+    ? `<b>給同仁：</b>用這個連結加 AI 新聞助理好友，再傳一次<b>職員密語</b>，就能在 LINE 上查進度、改活動資料、傳照片。<div class="line-qr-row"><code>${escHtml(add)}</code><button class="btn btn-outline" onclick="copyLineQr('friend')">複製</button></div>`
+    : '';
+  document.getElementById('line-qr-modal').style.display = 'flex';
+  try {
+    await loadQrLib();
+    drawLineQr(document.getElementById('line-qr-canvas'), url, ev.name);
+  } catch (e) {
+    toast(e.message + '，請重新整理後再試；連結與代碼仍可直接複製');
+  }
+}
+function closeLineQr() {
+  document.getElementById('line-qr-modal').style.display = 'none';
+}
+async function copyLineQr(kind) {
+  if (!lineQrState) return;
+  const text = kind === 'url' ? lineQrState.url
+    : kind === 'code' ? '#' + lineQrState.ev.id
+    : (state.line && state.line.add_friend_url) || '';
+  try {
+    await navigator.clipboard.writeText(text);
+    toast(kind === 'code' ? '代碼已複製' : '連結已複製');
+  } catch (e) {
+    toast('複製失敗，請直接選取文字複製');
+  }
+}
+// 用 Blob 網址下載，不用 data: 網址——有些瀏覽器對 data: 網址不理 download 屬性，
+// 存下來的檔名會變成「download」，承辦人一次下載好幾場就分不出哪張是哪場。
+function downloadLineQr() {
+  if (!lineQrState) return;
+  const canvas = document.getElementById('line-qr-canvas');
+  if (!canvas.width) return toast('QR 還沒畫好，請稍候再按一次');
+  const name = `LINE-QR-${lineQrState.ev.name.replace(/[\\/:*?"<>|]/g, '').slice(0, 40)}.png`;
+  canvas.toBlob((blob) => {
+    if (!blob) return toast('圖檔產生失敗，請重新整理後再試');
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  }, 'image/png');
 }
 
 let toastTimer;

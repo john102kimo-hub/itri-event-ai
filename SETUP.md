@@ -28,7 +28,7 @@
 |---|---|
 | `LINE_CHANNEL_SECRET` | LINE Developers Console → Messaging API channel 的 Channel secret。用來驗證每個 webhook 請求真的來自 LINE，**這把沒設對，任何人都能偽造 LINE 的名義打你的 webhook**。 |
 | `LINE_CHANNEL_ACCESS_TOKEN` | 同頁的 Channel access token（要選「長期」，不是那種會過期的短期權杖）。用來呼叫 LINE 的回覆／推播 API。 |
-| `LINE_BASIC_ID` | 官方帳號的 LINE ID（`@` 開頭），用來組記者掃碼用的 QR 連結；`api/line.js` 本身不需要這個值，是給後台產生 QR 用（批次 3 才會用到）。 |
+| `LINE_BASIC_ID` | 官方帳號的 LINE ID（`@` 開頭）。後台活動卡片的「**LINE QR**」（每場專屬、記者掃了直接接上那一場）與記者頁的「用 LINE 問」入口都靠它組連結（見 `lib/line-link.js`）；**沒設定時這兩個入口都不會出現**。`api/line.js` 本身不需要這個值。 |
 
 設完到 LINE Developers Console → Messaging API → Webhook URL 填 `https://itri-event-ai.vercel.app/api/line`，按 **Verify** 應顯示 Success。
 
@@ -164,7 +164,8 @@ Vercel Hobby（免費）方案規定：**一次部署最多 12 個 Serverless Fu
 ## 日常使用流程（你自己辦一場）
 
 1. 登入後台 → **新增活動** → 貼入新聞稿 → 儲存
-2. 複製「記者連結」 → 傳給媒體
+2. 複製「記者連結」 → 傳給媒體；要用 LINE 的話按活動卡片的「**LINE QR**」下載 QR 圖，印在報到處或背板
+   （記得先按「發布」——未發布的場次記者掃了接不上）
 3. 活動結束後 → 同仁在編輯頁上傳監測公司給的「OO露出清單.doc」→ 後台看「提問 × 露出」交叉分析
 4. **分析** 看問題熱點 → **匯出 CSV** 製作結案報告，或直接開「成效報告」頁印給主管
 5. 下次記者會 → 再新增一個活動，同一個平台管理

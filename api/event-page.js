@@ -25,8 +25,25 @@
 import fs from 'fs';
 import path from 'path';
 import { readRange } from '../lib/sheets.js';
+import { resolveOrg, BRAND_KEY } from '../lib/geo-orgs.js';
 
-const RANGE = 'events!A2:K';
+// 讀到 M 欄（L 時間、M 地點）：結構化資料的 Event 要有 location 才完整（批次 82）
+const RANGE = 'events!A2:M';
+
+// 主辦單位是工研院時，結構化資料要把「同一個機構的所有名字」一次講清楚（批次 82）。
+// 生成式引擎靠 alternateName／sameAs 把「工研院」「工業技術研究院」「ITRI」認成同一個
+// 實體；只寫一個「工研院」，有人用英文問 ITRI 時，這頁就對不上。
+// ⚠️ 以前這裡的 @type 是 NewsMediaOrganization（新聞媒體），等於跟搜尋引擎說工研院是
+// 一家媒體——改成 ResearchOrganization（schema.org 的研究機構，Organization 的子類別）。
+const ITRI_ENTITY = {
+  '@type': 'ResearchOrganization',
+  '@id': 'https://www.itri.org.tw/#organization',
+  name: '工業技術研究院',
+  alternateName: ['工研院', 'ITRI', 'Industrial Technology Research Institute'],
+  url: 'https://www.itri.org.tw',
+  sameAs: ['https://www.itri.org.tw', 'https://en.wikipedia.org/wiki/Industrial_Technology_Research_Institute']
+};
+const isItri = (organizer) => resolveOrg(organizer).key === BRAND_KEY;
 const SITE = 'https://itri-event-ai.vercel.app';
 
 // 生成式引擎的爬蟲。分開列出來，之後要單獨停掉哪一家比較好改。
@@ -260,7 +277,8 @@ async function serveEventPage(req, res) {
     date: row[5] || '',
     chips: row[6] || '',
     images: row[7] || '',
-    organizer: row[9] || '工研院'
+    organizer: row[9] || '工研院',
+    venue: row[12] || ''
   };
 
   const concluded = isConcluded(ev.status);
@@ -272,22 +290,22 @@ async function serveEventPage(req, res) {
   const ogImage = firstImageUrl(ev.images);
 
   // ── head 注入：title / meta / Open Graph / JSON-LD ────────────────
+  const org = isItri(ev.organizer)
+    ? ITRI_ENTITY
+    : { '@type': 'Organization', '@id': `${SITE}/#organization`, name: ev.organizer };
+  const orgRef = { '@id': org['@id'] };
   const jsonLd = {
     '@context': 'https://schema.org',
     '@graph': [
-      {
-        '@type': 'NewsMediaOrganization',
-        '@id': `${SITE}/#organization`,
-        name: ev.organizer,
-        url: SITE
-      },
+      org,
       {
         '@type': 'Event',
         name: ev.name,
         eventStatus: 'https://schema.org/EventScheduled',
         eventAttendanceMode: 'https://schema.org/OfflineEventAttendanceMode',
         ...(isoDate ? { startDate: isoDate } : {}),
-        organizer: { '@id': `${SITE}/#organization` },
+        ...(ev.venue ? { location: { '@type': 'Place', name: ev.venue, address: ev.venue } } : {}),
+        organizer: orgRef,
         description: summary,
         url: pageUrl
       }
@@ -300,7 +318,8 @@ async function serveEventPage(req, res) {
       '@type': 'NewsArticle',
       headline: ev.name.slice(0, 110),
       ...(isoDate ? { datePublished: isoDate } : {}),
-      publisher: { '@id': `${SITE}/#organization` },
+      publisher: orgRef,
+      author: orgRef,
       mainEntityOfPage: pageUrl,
       articleBody: pressBody
     });
@@ -340,7 +359,7 @@ async function serveEventPage(req, res) {
 <article id="geo-article">
   <div class="geo-tag">記者會已結束 · 新聞資料存檔</div>
   <h1>${esc(ev.name)}</h1>
-  <div class="geo-meta">${esc(ev.organizer)}${isoDate ? ` · ${esc(isoDate)}` : ''}</div>
+  <div class="geo-meta">${isItri(ev.organizer) ? '工業技術研究院（工研院／ITRI）' : esc(ev.organizer)}${isoDate ? ` · ${esc(isoDate)}` : ''}</div>
   ${chipList.length ? `<div class="geo-topics"><h2>本場次提供資料</h2><ul>${chipList.map(c => `<li>${esc(c)}</li>`).join('')}</ul></div>` : ''}
   ${pressBody ? `<div class="geo-body"><h2>新聞資料全文</h2>
       ${renderBody(pressBody)}
@@ -376,14 +395,16 @@ async function serveEventPage(req, res) {
     margin-top: 40px; padding-top: 16px; border-top: 1px solid #e5e7eb;
     font-size: 0.8rem; color: #9ca3af;
   }
-  /* 存檔模式：藏掉聊天介面，只留文章 */
+  /* 存檔模式：藏掉聊天介面，只留文章。
+     照片區不藏（批次 82）：public/event.html 會把它搬進文章裡，會後回來補抓新聞照的
+     記者要找得到。它在搬進來之前住在 #messages 裡，跟著 #messages 一起藏著。 */
   body.archive-mode #media-banner,
   body.archive-mode #welcome,
   body.archive-mode #chips,
+  body.archive-mode #chip-dock,
   body.archive-mode #messages,
   body.archive-mode #input-area,
-  body.archive-mode #status-dot,
-  body.archive-mode #image-gallery { display: none !important; }
+  body.archive-mode #status-dot { display: none !important; }
 </style>`;
 
     html = html

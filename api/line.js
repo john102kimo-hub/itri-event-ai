@@ -32,7 +32,7 @@
 
 import { AsyncLocalStorage } from 'async_hooks';
 import { readRange, appendRows, updateRange, ensureSheets } from '../lib/sheets.js';
-import { toTraditionalTW } from '../lib/zh-tw.js';
+import { toTraditionalTW, ZH_TW_RULE } from '../lib/zh-tw.js';
 import { buildSystemPrompt, resolveEventContent, formatEventBasics } from '../lib/prompt.js';
 import {
   readRawBody, verifySignature, replyOrPush as replyOrPushRaw, replyOrPushMessages, startLoading, pushImages,
@@ -789,7 +789,7 @@ const ANSWER_MODEL = 'claude-sonnet-5';
 // 放在這支裡而不是各個呼叫端的 prompt：這裡是**所有**模型呼叫的唯一入口，寫一次
 // 四條問答路線（活動、產業趨勢、技術查詢、官網補查）與兜底文案全部受惠，不會有人
 // 新增一條路線時忘記加。
-const ZH_TW_RULE = '用字：一律使用台灣慣用的繁體中文與台灣用語，絕對不可以出現簡體字（包含最後那句警語）。記者用英文或其他語言提問時才跟著改用該語言。';
+// 句子本身住在 lib/zh-tw.js（批次 82 搬過去，網頁版問答 api/chat.js 也要帶同一句）。
 
 // ── 版面規則（批次 59）──────────────────────────────────────────────────────
 // 回報（附兩張截圖）：「文字排版很亂 能夠精進嗎 整體上」。兩張是不同的壞法：
@@ -2051,7 +2051,7 @@ async function handleSetupRichMenu(replyToken, userId) {
 
     const created = {};
     for (const menu of ALL_MENUS) {
-      const imgRes = await fetch(`${SITE}/richmenu-${menu.key}.png`);
+      const imgRes = await fetch(`${SITE}/richmenu-${menu.key}.png`, { signal: AbortSignal.timeout(15_000) });
       if (!imgRes.ok) throw new Error(`抓取 ${menu.name} 底圖失敗 ${imgRes.status}`);
       const id = await createRichMenu(buildRichMenuDefinition(menu));
       await uploadRichMenuImage(id, Buffer.from(await imgRes.arrayBuffer()), 'image/png');

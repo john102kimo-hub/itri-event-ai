@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>GEO｜AI 能見度追蹤 — 工研院活動溝通 AI 平台</title>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.3.0/tabler-icons.min.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.3.0/dist/tabler-icons.min.css">
 <style>
   :root{
     --primary:#0F9E7A; --primary-dark:#0a7a60; --primary-light:rgba(15,158,122,0.08);
@@ -338,6 +338,12 @@
     body.print-brief .card:has(#brief-out){border:none;padding:0;margin:0}
     body.print-brief .brief-box{border:none;padding:0;margin:0}
     body.print-brief #brief-out .slide{max-width:none;width:100%;border:none;box-shadow:none}
+  }
+
+  /* iPhone 對字級小於 16px 的輸入框，一點下去整頁自動放大、而且不會縮回來（批次 68 在
+     媒體訓練頁踩過，批次 82 補齊其他頁）。只在手機／觸控裝置放大，桌機維持原本的字級。 */
+  @media (max-width: 768px), (pointer: coarse) {
+    input:not([type=checkbox]):not([type=radio]):not([type=color]):not([type=file]), select, textarea { font-size: 16px !important; }
   }
 </style>
 </head>
@@ -1386,6 +1392,11 @@ const BRIEF_ICON = {
   spark:    'M16 18a2 2 0 0 1 2 2a2 2 0 0 1 2-2a2 2 0 0 1-2-2a2 2 0 0 1-2 2zM16 6a2 2 0 0 1 2 2a2 2 0 0 1 2-2a2 2 0 0 1-2-2a2 2 0 0 1-2 2zM9 18a6 6 0 0 1 6-6a6 6 0 0 1-6-6a6 6 0 0 1-6 6a6 6 0 0 1 6 6z',
 };
 const briefIcon = (k) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="${BRIEF_ICON[k]||BRIEF_ICON.check}"/></svg>`;
+// 工研院的所有寫法——鏡射 lib/geo-orgs.js 的 BRAND_ALIAS_RE（靜態頁不能 import），
+// test/test-review82.mjs 會比對兩邊逐字相同。以前這頁只認「工研院|ITRI」，
+// 問句寫「工業技術研究院」照樣放行；而且沒有字詞邊界，「nitride」會被當成 ITRI。
+const BRAND_ALIAS_RE = /工研院|工業技術研究院|工业技术研究院|\b(?:ITRI|IEK|ISTI)\b|Industrial\s+Technology\s+Research\s+Institute/i;
+
 const BRIEF_TILE = {
   lead_brand:  ['building', '開頭就是工研院'],
   lead_number: ['chart',    '開頭就有數字'],
@@ -1420,7 +1431,7 @@ function draftBriefHtml(b, a, afterText, keyword){
   }).join('');
   // 引用示意：AI 那一格只放稿子裡**原本就有的那一句**，不另外編 AI 的回答；標明「示意」。
   const kw = String(keyword||'').trim();
-  const quote = a.quote ? esc(a.quote).replace(/工研院/g, '<b>工研院</b>') : '';
+  const quote = a.quote ? esc(a.quote).replace(new RegExp(BRAND_ALIAS_RE.source, 'gi'), (m) => `<b>${m}</b>`) : '';
   const chat = quote ? `<div class="chat"><div class="tag">示意｜有人問 AI 時，這篇稿子裡最可能被整句引用的一句</div>
       <div class="bub u"><div>${kw ? `「${esc(kw)}」有什麼新消息？` : '這個議題有什麼新消息？'}</div>${briefIcon('user')}</div>
       <div class="bub ai">${briefIcon('spark')}<div>「${quote}」</div></div></div>` : '';
@@ -2299,7 +2310,7 @@ async function startTracking(reuse){
 async function savePrompt(){
   const prompt = document.getElementById('np-prompt').value.trim();
   if(!prompt) return toast('請填問句');
-  if(/工研院|ITRI/i.test(prompt) && !confirm('這句話裡出現「工研院」，那等於自問自答，量到的分數會虛高。仍要新增嗎？')) return;
+  if(BRAND_ALIAS_RE.test(prompt) && !confirm('這句話裡出現工研院（或工業技術研究院、ITRI），那等於自問自答，量到的分數會虛高。仍要新增嗎？')) return;
   const kw = document.getElementById('np-keyword').value.trim();
   const r = await post({ action:'prompt_save', prompt:{ topic: kw || '未分類', keyword: kw, prompt }});
   if(r.error) return toast(r.error);

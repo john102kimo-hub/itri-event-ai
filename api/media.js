@@ -220,7 +220,10 @@ export default async function handler(req, res) {
           if (idx(n) < 0) return res.status(422).json({ error: `CSV 缺少必要欄位：${n}` });
         }
 
-        const existing = (await safeRead('media_roster!A2:N')).map(parseRow);
+        // ⚠️ 這裡用 readRange，不用 safeRead（批次 82）：safeRead 讀失敗會回空陣列，匯入就會
+        // 以為「目前一個記者都沒有」，接著把新名單從第 2 列起整片蓋上去——既有記者的
+        // 路線、離職標記、備註全部被別人的資料覆蓋。讀不到就停下來請他再試一次。
+        const existing = (await readRange('media_roster!A2:N')).map(parseRow);
         const byId = new Map(existing.map((r) => [r.id, r]));
         let created = 0, updated = 0;
 
@@ -257,10 +260,15 @@ export default async function handler(req, res) {
           r.invited_count, r.confirmed_count, r.declined_count, r.last_invited,
           r.status, r.note, r.updated_at, r.updated_by,
         ]);
-        // 整批覆寫（先清空再寫），避免用 append 造成同一 id 重複列
-        const old = await safeRead('media_roster!A2:N');
-        if (old.length) await updateRange(`media_roster!A2:N${old.length + 1}`, old.map(() => new Array(14).fill('')));
-        if (rowsOut.length) await updateRange(`media_roster!A2:N${rowsOut.length + 1}`, rowsOut);
+        // 整批覆寫（不用 append，避免同一 id 重複列）。⚠️ 一次寫完，不要「先清空再寫」
+        // （批次 82）：兩步寫法在第二步失敗時整份記者名單歸零。現在是新名單補滿、比舊名單
+        // 短的部分補空白，同一個 values.update 一起送出，要嘛全部換成新的、要嘛完全沒動。
+        const old = await readRange('media_roster!A2:N');
+        const height = Math.max(old.length, rowsOut.length);
+        const blank = () => new Array(14).fill('');
+        const full = [...rowsOut.map((r) => [...r, ...blank()].slice(0, 14)),
+          ...Array.from({ length: height - rowsOut.length }, blank)];
+        if (height) await updateRange(`media_roster!A2:N${height + 1}`, full);
 
         return res.status(200).json({ success: true, created, updated, total: all.length });
       }

@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>成效報告 — 工研院活動溝通 AI 平台</title>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.3.0/tabler-icons.min.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.3.0/dist/tabler-icons.min.css">
 <style>
   :root{
     --primary:#0F9E7A; --primary-dark:#0a7a60; --primary-light:rgba(15,158,122,0.08);
@@ -64,6 +64,12 @@
     .no-print{display:none!important}
     .kpi,.ev-card{break-inside:avoid;box-shadow:none}
     .section-label{margin-top:18px}
+  }
+
+  /* iPhone 對字級小於 16px 的輸入框，一點下去整頁自動放大、而且不會縮回來（批次 68 在
+     媒體訓練頁踩過，批次 82 補齊其他頁）。只在手機／觸控裝置放大，桌機維持原本的字級。 */
+  @media (max-width: 768px), (pointer: coarse) {
+    input:not([type=checkbox]):not([type=radio]):not([type=color]):not([type=file]), select, textarea { font-size: 16px !important; }
   }
 </style>
 </head>
