@@ -1871,6 +1871,12 @@ function hasChinese(text) {
 // budgetMs（批次 57）：這條路總共能花多少時間，由呼叫端從「這次請求還剩多少」算出來
 // （見 answerQuestion() 那段的說明）。時間用完就停在目前的結果上——補查是加分，
 // 不能讓它把已經算好的答案一起拖下水。
+function newsMentions(item, kw) {
+  const norm = (x) => String(x || '').toLowerCase().replace(/\s+/g, '');
+  const k = norm(kw);
+  return !!k && norm(`${item?.title || ''}${item?.abstract || ''}`).includes(k);
+}
+
 async function itriNewsHintBlock(keywords, { chinese = true, question = '', budgetMs = LOOKUP_BUDGET_MS } = {}) {
   const until = Date.now() + budgetMs;
   const list = [...new Set((Array.isArray(keywords) ? keywords : [keywords])
@@ -1892,8 +1898,12 @@ async function itriNewsHintBlock(keywords, { chinese = true, question = '', budg
         break;
       }
       const res = await fetchItriNews(candidate);
-      if (res.ok && res.items.length) { kw = candidate; items = res.items; break; }
-      console.log(`[line] 補查官網 kw="${candidate}" 查無資料，試下一個候選`);
+      // 批次 86：官網搜尋是全文比對，「天氣」撈得到內文順帶提過天氣的能源新聞。這裡附的是
+      // 「這題的相關報導」，標題或摘要沒提到這個詞的就不算——寧可不附，也不要附一篇答非所問的。
+      const relevant = res.ok ? res.items.filter(it => newsMentions(it, candidate)) : [];
+      if (relevant.length) { kw = candidate; items = relevant; break; }
+      if (res.ok && res.items.length) console.log(`[line] 補查官網 kw="${candidate}" 有 ${res.items.length} 筆，但標題／摘要都沒提到，不附`);
+      else console.log(`[line] 補查官網 kw="${candidate}" 查無資料，試下一個候選`);
     }
     if (!items.length) return '';
     console.log(`[line] 補查官網命中 kw="${kw}" ${items.length} 筆`);
@@ -3511,6 +3521,25 @@ function detectChitchat(text) {
   return null;
 }
 
+// 已經在問某一場時也攔閒聊（批次 86）。
+// 回報（群組截圖）：綁著「眺望 2027」那場時打「米亞 天氣如何」，這句被當成那場的問題送進
+// answerQuestion()：模型婉拒得很得體，但它標了「答不出來」，程式就拿「天氣」去工研院官網
+// 補查，官網是全文比對，撈到一篇內文提到天氣的能源管理新聞，整段「官網有相關報導」接在
+// 後面——答非所問，還算成一題提問。沒綁定時這句早就有寫死的俏皮話（sendFallbackGuide()），
+// 綁定中卻繞過了它。
+//
+// 兩個刻意的例外：
+//   - repair（「答錯了」「看不懂」）不攔：綁定中要連同上一輪交給模型重答，見 CHITCHAT_REPAIR_RE。
+//   - 天氣收得更窄：綁定中「活動當天下雨會照常嗎」是真的活動問題，不能被「天氣」兩個字
+//     攔下來。只攔整句就是在問天氣本身的講法。
+const CHITCHAT_WEATHER_ONLY_RE = /^(米亞)?[\s，,]*((今天|明天|後天|現在|這幾天|週末|那天|當天|活動當天|那邊|現場)的?)?(天氣|氣溫)(如何|怎樣|怎麼樣|好嗎|好不好|呢)?[\s\p{P}\p{S}]*$|^(米亞)?[\s，,]*(今天|明天|後天|當天|活動當天)?(會不會下雨|會下雨嗎|會冷嗎|會熱嗎|會不會冷|會不會熱)[\s\p{P}\p{S}]*$/u;
+function detectBoundChitchat(text) {
+  const kind = detectChitchat(text);
+  if (!kind || kind === 'repair') return null;
+  if (kind === 'weather' && !CHITCHAT_WEATHER_ONLY_RE.test(String(text || '').trim())) return null;
+  return kind;
+}
+
 // 三句都經過人審——風趣但不離題，收尾都帶回這個帳號真的能幫上忙的事。這份文案就是
 // 「風趣」這件事唯一被允許存在的地方，不留給模型現場發揮（理由見上）。
 //
@@ -4177,6 +4206,15 @@ async function handleGroupMessage(replyToken, groupId, text, { mentioned, speake
     return;
   }
 
+  // 綁定中的閒聊（批次 86）：只在真的叫了米亞時攔——續問視窗內同事之間的「在嗎？」
+  // 照樣交給下面的路由判斷要不要安靜，不能因為這段就開口。
+  const boundChitchat = mentioned ? detectBoundChitchat(text) : null;
+  if (boundChitchat) {
+    await replyOrPush(replyToken, groupId, CHITCHAT_FIXED_REPLIES[boundChitchat], eventQuickChips(event));
+    await touchGroupSession(groupId);
+    return;
+  }
+
   // 跟 1:1 那段同一套邏輯（完整說明見 handleEvent()）：綁定是預設值不是鎖，問句
   // 明確指向別場才自動換，其餘留在原場。群組共用一份綁定，換場會影響整個群組
   // 接下來的預設場次——跟現有「打整句活動名稱換台」本來就是同一種風險，不是
@@ -4498,6 +4536,14 @@ async function handleEvent(ev) {
     }
     // 不像名稱、比較像直接問問題 → 不回「已記錄」，直接當問題往下走，
     // 記者不會因為系統誤判而被迫多問一次。
+  }
+
+  // 綁定中的閒聊（批次 86，見 detectBoundChitchat()）：寫死的回覆＋這場的按鈕，不呼叫模型、
+  // 不補查官網、不寫 qa_log。
+  const boundChitchat = detectBoundChitchat(text);
+  if (boundChitchat) {
+    await replyOrPush(replyToken, userId, CHITCHAT_FIXED_REPLIES[boundChitchat], eventQuickChips(event));
+    return;
   }
 
   // 綁定不再是鎖，是預設值：每則問題都用同一支 routeIntent()（跟未綁定時
