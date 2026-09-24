@@ -20,6 +20,7 @@ import { generateId, generateEditCode } from '../lib/ids.js';
 import { del } from '@vercel/blob';
 import { CONTACTS_DIR_RANGE, ensureContactsDirectorySheet } from '../lib/contacts-directory.js';
 import { resolveEventContent } from '../lib/prompt.js';
+import { lineBindUrl, lineAddFriendUrl, lineBasicId } from '../lib/line-link.js';
 
 // 跟 events 的 knowledge_base 同一個上限理由：Google Sheets 單一儲存格上限約 5 萬字元，
 // 這份清單目前十幾行遠遠用不到，留餘裕只是避免同仁哪天貼了整份含備註的原始文件進來。
@@ -122,13 +123,18 @@ export default async function handler(req, res) {
           chips: row[6] || '', images: row[7] || '',
           invite_letter: row[16] || '', invite_letter_chips: row[17] || ''
         });
+        // ⚠️ P 欄（邀訪窗口分工：關鍵字｜姓名｜電話｜LINE ID）不外送（批次 82）。
+        // 這是公開、免登入的端點，前台根本沒用到這一欄；以前照樣回傳，等於任何人打一次
+        // 網址就拿得到每場技術窗口同仁的姓名、分機與私人 LINE ID。記者要找人走 LINE 的
+        // 邀訪流程（一次只給對應的那一位），不是整份名單。
         return res.status(200).json({
           event: {
             id: row[0], name: row[1], color: row[2] || '#0F9E7A',
             status: publicFields.status, created_at: row[5] || '', event_date: publicFields.event_date,
             chips: publicFields.chips, images: publicFields.images, greeting: row[8] || '',
             event_time: row[11] || '', venue: row[12] || '', event_type: row[13] || '', press_contact: row[14] || '',
-            contacts: row[15] || ''
+            // 「用 LINE 問」的入口（沒設定 LINE_BASIC_ID 時是空字串，前台就不顯示）
+            line_url: lineBindUrl(row[0])
           }
         });
       }
@@ -193,21 +199,36 @@ export default async function handler(req, res) {
             event_time: r[11] || '', venue: r[12] || '', event_type: r[13] || '', press_contact: r[14] || '',
             contacts: r[15] || ''
           }));
-        return res.status(200).json({ events });
+        // LINE 官方帳號資訊（批次 82）：給活動卡片的「LINE QR」與「同仁加入 LINE」用，
+        // 沒設定 LINE_BASIC_ID 時都是空字串，後台就不顯示那兩個入口。
+        return res.status(200).json({
+          events,
+          line: { basic_id: lineBasicId(), add_friend_url: lineAddFriendUrl() }
+        });
       }
 
       // 預設：公開列表（不含知識庫、不含編輯碼、不含 draft——記者與之後的 LINE 都走這支，
-      // draft 混進來就等於預告工研院還沒發布的場次）
+      // draft 混進來就等於預告工研院還沒發布的場次）。
+      // ⚠️ 不含 P 欄邀訪窗口分工（同仁姓名／電話／LINE ID），理由見 get_public 那段。
+      // ⚠️ chips／images 跟 get_public 一樣先過 resolveEventContent()：活動前（邀請函模式）
+      // 不給正式照片。以前只有 get_public 擋了，這支沒擋——活動前的正式照片網址打一次
+      // /api/events 就全部拿得到，批次 10.1「公開頁面也要擋」等於只擋了一半。
       const events = rows
         .filter(r => r[0] && r[4] !== 'archived' && r[4] !== 'draft')
-        .map(r => ({
-          id: r[0], name: r[1], color: r[2] || '#0F9E7A',
-          status: r[4] || 'active', created_at: r[5] || '', event_date: r[5] || '',
-          chips: r[6] || '', images: r[7] || '', greeting: r[8] || '', organizer: r[9] || '工研院',
-          has_kb: !!(r[3] && String(r[3]).trim()),
-          event_time: r[11] || '', venue: r[12] || '', event_type: r[13] || '', press_contact: r[14] || '',
-          contacts: r[15] || ''
-        }));
+        .map(r => {
+          const pub = resolveEventContent({
+            status: r[4] || 'active', event_date: r[5] || '',
+            chips: r[6] || '', images: r[7] || '',
+            invite_letter: r[16] || '', invite_letter_chips: r[17] || ''
+          });
+          return {
+            id: r[0], name: r[1], color: r[2] || '#0F9E7A',
+            status: r[4] || 'active', created_at: r[5] || '', event_date: r[5] || '',
+            chips: pub.chips, images: pub.images, greeting: r[8] || '', organizer: r[9] || '工研院',
+            has_kb: !!(r[3] && String(r[3]).trim()),
+            event_time: r[11] || '', venue: r[12] || '', event_type: r[13] || '', press_contact: r[14] || ''
+          };
+        });
       return res.status(200).json({ events });
     } catch (err) {
       return res.status(500).json({ error: err.message });

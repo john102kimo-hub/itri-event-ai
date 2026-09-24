@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>媒體訓練模式</title>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.3.0/tabler-icons.min.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.3.0/dist/tabler-icons.min.css">
 <style>
   :root {
     --primary: #e85d04;
@@ -1001,9 +1001,7 @@ async function init() {
   }
 
   try {
-    const res = await fetch('/api/events');
-    const data = await res.json();
-    const events = data.events || [];
+    const events = await loadTrainingEvents();
 
     if (!eventId) {
       // 沒有指定活動 → 顯示選擇器
@@ -1019,7 +1017,7 @@ async function init() {
       document.getElementById('event-subtitle').textContent = 'AI 記者實戰演練（綜合所有活動）';
       document.title = '彙整媒體訓練';
     } else {
-      const event = events.find(e => e.id === eventId);
+      const event = events.find(e => e.id === eventId) || await loadOneEvent(eventId);
       if (event) {
         eventName = event.name;
         document.getElementById('event-title').textContent = event.name + ' — 媒體訓練';
@@ -1032,6 +1030,35 @@ async function init() {
   document.getElementById('loading').style.display = 'none';
   renderLastSession();
   offerResume();
+}
+
+// 活動清單（批次 82）。以前一律打公開列表 /api/events——那支刻意不含「未發布」的場次，
+// 而主管最常練的正是還沒發布、下週才要開記者會的那一場：頁首只剩「媒體訓練模式」、
+// 帶走的報告寫「工研院活動」，後台選擇器裡也找不到那一場。
+// 後台登入的人改拿後台列表（含未發布，不含已封存）；拿同仁編輯碼進來的只會練自己那一場，
+// 名稱由 loadOneEvent() 用同一組編輯碼去讀。
+async function loadTrainingEvents() {
+  if (TRAINING_PWD) {
+    try {
+      const r = await fetch('/api/events?action=list_admin', { headers: { 'X-Admin-Password': TRAINING_PWD } });
+      if (r.ok) {
+        const d = await r.json();
+        return (d.events || []).filter(e => e.status !== 'archived');
+      }
+    } catch (e) { /* 退回公開列表 */ }
+  }
+  const r = await fetch('/api/events');
+  const d = await r.json();
+  return d.events || [];
+}
+async function loadOneEvent(id) {
+  if (!TRAINING_CODE || !id || id === 'all') return null;
+  try {
+    const r = await fetch(`/api/events?action=get_edit&id=${encodeURIComponent(id)}&code=${encodeURIComponent(TRAINING_CODE)}`);
+    if (!r.ok) return null;
+    const d = await r.json();
+    return d && d.name ? { id: d.id, name: d.name } : null;
+  } catch (e) { return null; }
 }
 
 function showEventSelector(events) {

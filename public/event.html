@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>AI 新聞助理</title>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.3.0/tabler-icons.min.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.3.0/dist/tabler-icons.min.css">
 <style>
   :root {
     --primary: #0F9E7A;
@@ -70,9 +70,13 @@
     white-space: nowrap; display: none;
   }
 
-  /* Welcome card */
+  /* Welcome card
+     ⚠️ 歡迎卡、快速提問、活動照片都放在 #messages（對話捲動區）裡面，不是釘在上方（批次 82）。
+     以前三塊都是 flex-shrink:0 固定在畫面上，iPhone 上五顆快速提問＋三張照片就吃掉六成畫面，
+     對話區只剩兩百多 px，鍵盤一跳出來幾乎看不到 AI 的回答。現在它們跟著對話一起往上捲走，
+     快速提問在第一次提問後收成輸入框上方的一列（#chip-dock），隨時點得到、只佔一行。 */
   #welcome {
-    margin: 12px 16px 0;
+    margin: 4px 0 0;
     background: var(--card);
     border: 1px solid var(--border);
     border-radius: var(--radius);
@@ -83,10 +87,18 @@
     flex-shrink: 0;
   }
   #welcome strong { color: var(--primary); }
+  .line-link {
+    display: inline-flex; align-items: center; gap: 5px; margin-top: 8px;
+    font-size: 0.8rem; font-weight: 600; color: #06C755; text-decoration: none;
+  }
+  .line-link i { font-size: 18px; }
+  #welcome .line-link { display: flex; }
+  #geo-article .geo-contact { margin-top: 24px; font-size: 0.9rem; }
+  #geo-article #image-gallery { margin-top: 28px; }
 
   /* Quick chips */
   #chips {
-    padding: 10px 16px;
+    padding: 0;
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
@@ -104,10 +116,19 @@
     font-family: var(--font);
   }
   .chip:hover { background: var(--primary-light); border-color: var(--primary); color: var(--primary); }
+  /* 第一次提問後，快速提問收成輸入框上方的一列，左右滑動 */
+  #chip-dock {
+    display: flex; gap: 8px; overflow-x: auto; flex-shrink: 0;
+    padding: 8px 16px; background: white; border-top: 1px solid var(--border);
+    -webkit-overflow-scrolling: touch; scrollbar-width: none;
+  }
+  #chip-dock::-webkit-scrollbar { display: none; }
+  #chip-dock #chips { flex-wrap: nowrap; }
+  #chip-dock .chip { flex: 0 0 auto; white-space: nowrap; padding: 5px 12px; font-size: 0.8rem; }
 
   /* Image gallery */
   #image-gallery {
-    padding: 10px 16px 4px;
+    padding: 0 0 4px;
     flex-shrink: 0;
   }
   #image-gallery-title { font-size: 0.82rem; color: var(--muted); margin-bottom: 8px; display: flex; align-items: center; gap: 6px; }
@@ -351,19 +372,6 @@
   <span id="media-saved"><i class="ti ti-check"></i> 已記錄</span>
 </div>
 
-<div id="welcome">
-  歡迎使用 <strong id="welcome-name">AI 新聞助理</strong>，直接提問即可，無需登入。
-</div>
-
-<div id="chips"></div>
-
-<!-- 圖片資源（若活動有設定）-->
-<div id="image-gallery" style="display:none">
-  <div id="image-gallery-title">
-    <i class="ti ti-photo"></i> 活動圖片資料(新聞照、技術照等)
-  </div>
-  <div id="image-gallery-grid"></div>
-</div>
 
 <!-- Lightbox -->
 <div id="lightbox" onclick="closeLightbox(event)">
@@ -375,11 +383,27 @@
   </a>
 </div>
 
-<div id="messages"></div>
+<div id="messages">
+  <div id="welcome">
+    歡迎使用 <strong id="welcome-name">AI 新聞助理</strong>，直接提問即可，無需登入。
+  </div>
+
+  <div id="chips"></div>
+
+  <!-- 圖片資源（若活動有設定）-->
+  <div id="image-gallery" style="display:none">
+    <div id="image-gallery-title">
+      <i class="ti ti-photo"></i> 活動圖片資料(新聞照、技術照等)
+    </div>
+    <div id="image-gallery-grid"></div>
+  </div>
+</div>
+
+<div id="chip-dock" hidden></div>
 
 <div id="input-area">
-  <textarea id="user-input" rows="1" placeholder="請輸入您的問題…（Enter 送出，Shift+Enter 換行）"></textarea>
-  <button id="send-btn"><i class="ti ti-send"></i></button>
+  <textarea id="user-input" rows="1" placeholder="請輸入您的問題…"></textarea>
+  <button id="send-btn" aria-label="送出問題" title="送出"><i class="ti ti-send"></i></button>
 </div>
 
 <script>
@@ -389,6 +413,11 @@ let hist = [];
 let eventColor = '#0F9E7A';
 let mediaName = '';
 let isWaiting = false;
+
+// 手機沒有 Shift+Enter 可按，提示只給有實體鍵盤的裝置；手機上那串字還會折成兩行被切掉
+const INPUT_HINT = (window.matchMedia && matchMedia('(pointer: coarse)').matches)
+  ? '請輸入您的問題…'
+  : '請輸入您的問題…（Enter 送出，Shift+Enter 換行）';
 
 // 預設快速問題（若活動未自訂則使用）
 const defaultChips = [
@@ -412,7 +441,7 @@ function unlockChat() {
   const btn = document.getElementById('send-btn');
   inp.disabled = false;
   btn.disabled = false;
-  inp.placeholder = '請輸入您的問題… （Enter 送出，Shift+Enter 換行）';
+  inp.placeholder = INPUT_HINT;
 }
 
 async function init() {
@@ -421,20 +450,47 @@ async function init() {
   try {
     // 只取這一個活動（不再撈回全部活動清單，降低資訊外洩）
     const res = await fetch(`/api/events?action=get_public&id=${encodeURIComponent(eventId)}`);
-    const data = await res.json();
+    const data = await res.json().catch(() => ({}));
     const event = data.event;
 
-    if (!event) { showError('此活動不存在，請確認網址是否正確。'); return; }
+    if (!event) {
+      showError(res.status === 404 || res.ok
+        ? '此活動不存在，請確認網址是否正確。'
+        : '目前連不上活動資料，請稍後重新整理一次。');
+      return;
+    }
+
+    // 套用活動設定（色碼格式不對就退回預設，避免同仁填錯格式讓整頁 CSS 變數失效）。
+    // 已結束的存檔頁也要套——以前這段排在「已結束」判斷之後，存檔頁永遠是預設綠色。
+    eventColor = /^#[0-9A-Fa-f]{6}$/.test(event.color || '') ? event.color : '#0F9E7A';
+    document.documentElement.style.setProperty('--primary', eventColor);
+    // 深色版
+    document.documentElement.style.setProperty('--primary-dark', shadeColor(eventColor, -15));
+    document.documentElement.style.setProperty('--primary-light', hexToRgba(eventColor, 0.08));
 
     // 已結束活動：鎖定前台，禁止提問
     if (event.status === 'ended') {
       document.getElementById('loading').style.display = 'none';
       // 伺服器端已把新聞資料存檔渲染進來時，改顯示存檔文章，不要蓋鎖定畫面
-      if (document.getElementById('geo-article')) {
+      const article = document.getElementById('geo-article');
+      if (article) {
         document.body.classList.add('archive-mode');
         document.getElementById('event-title').textContent = event.name;
         document.getElementById('event-subtitle').textContent = '記者會已結束 · 新聞資料存檔';
         document.title = event.name + ' — 新聞資料存檔';
+        // 會後回來找照片、找聯絡人的記者：照片與新聞聯絡人照樣給（批次 82）。
+        // 以前存檔頁把照片區整個藏起來，記者會後要補抓新聞照反而找不到。
+        // 這兩樣只在瀏覽器端補上——爬蟲不執行 JS，承辦人的電話不會被搜尋引擎收錄
+        // （跟 api/event-page.js extractPressBody() 在【聯絡窗口】截斷是同一個立場）。
+        const foot = article.querySelector('.geo-foot');
+        if (renderGallery(event.images)) article.insertBefore(document.getElementById('image-gallery'), foot);
+        if (event.press_contact) {
+          const p = document.createElement('p');
+          p.className = 'geo-contact';
+          p.textContent = '新聞聯絡人：' + event.press_contact;
+          article.insertBefore(p, foot);
+        }
+        addLineLink(article, foot, event.line_url, '還有問題？用 LINE 問 AI 新聞助理（會自動帶入這一場）');
         return;
       }
       document.getElementById('error-screen').style.background = '#fffbeb';
@@ -447,17 +503,11 @@ async function init() {
       return;
     }
 
-    // 套用活動設定（色碼格式不對就退回預設，避免同仁填錯格式讓整頁 CSS 變數失效）
-    eventColor = /^#[0-9A-Fa-f]{6}$/.test(event.color || '') ? event.color : '#0F9E7A';
-    document.documentElement.style.setProperty('--primary', eventColor);
-    // 深色版
-    document.documentElement.style.setProperty('--primary-dark', shadeColor(eventColor, -15));
-    document.documentElement.style.setProperty('--primary-light', hexToRgba(eventColor, 0.08));
-
     document.getElementById('event-title').textContent = event.name;
     document.getElementById('event-subtitle').textContent = 'AI 新聞助理 · 無需登入';
     document.getElementById('welcome-name').textContent = event.name;
     document.title = event.name + ' — AI 新聞助理';
+    addLineLink(document.getElementById('welcome'), null, event.line_url, '也可以用 LINE 問（會自動帶入這一場，會後也能隨時問）');
 
     // 快速問題：優先使用活動自訂 chips，否則用預設
     const chipsEl = document.getElementById('chips');
@@ -472,44 +522,7 @@ async function init() {
       chipsEl.appendChild(btn);
     });
 
-    // 圖片資源（若活動有設定）；每行格式為「網址」或「網址|圖說」
-    // 分隔符半形｜全形都收：同仁在中文輸入法下打出來的多半是全形「｜」，
-    // 只認半形的話整串圖說會被當成網址的一部分，圖就永遠載不出來。
-    if (event.images) {
-      const lines = event.images.split('\n').map(s => s.trim()).filter(Boolean);
-      const items = lines.map(line => {
-        const i = line.search(/[|｜]/);
-        return i === -1 ? { url: line, caption: '' } : { url: line.slice(0, i).trim(), caption: line.slice(i + 1).trim() };
-      });
-      if (items.length) {
-        const gallery = document.getElementById('image-gallery');
-        const grid = document.getElementById('image-gallery-grid');
-        gallery.style.display = 'block';
-        // 每張都載不出來時整區收掉，免得記者只看到一個空的「活動圖片資料」標題
-        let alive = items.length;
-        items.forEach(({ url, caption }) => {
-          const item = document.createElement('div');
-          item.className = 'gallery-item';
-          const img = document.createElement('img');
-          img.src = url;
-          img.className = 'gallery-img';
-          img.alt = caption || '活動圖片';
-          img.onerror = () => {
-            item.style.display = 'none';
-            if (--alive === 0) gallery.style.display = 'none';
-          };
-          img.onclick = () => openLightbox(url, caption);
-          item.appendChild(img);
-          if (caption) {
-            const cap = document.createElement('div');
-            cap.className = 'gallery-caption';
-            cap.textContent = caption;
-            item.appendChild(cap);
-          }
-          grid.appendChild(item);
-        });
-      }
-    }
+    renderGallery(event.images);
 
     // 初始問候改到填寫媒體名稱後（confirmMediaModal）才顯示，避免重複
 
@@ -517,8 +530,68 @@ async function init() {
     lockUntilMedia();
     showMediaModal(event);
   } catch (err) {
-    showError('載入活動資料失敗：' + err.message);
+    // 以前直接把 err.message 印給記者看（「Failed to fetch」「Unexpected token <」）——
+    // 記者看不懂，也不知道下一步該做什麼。原文留在 console 給除錯用。
+    console.error('載入活動資料失敗:', err);
+    showError('目前連不上活動資料，請確認網路後重新整理一次。');
   }
+}
+
+// 圖片資源（若活動有設定）；每行格式為「網址」或「網址|圖說」
+// 分隔符半形｜全形都收：同仁在中文輸入法下打出來的多半是全形「｜」，
+// 只認半形的話整串圖說會被當成網址的一部分，圖就永遠載不出來。
+// 回傳有沒有畫出任何一張（存檔頁要知道要不要把照片區搬進文章裡）。
+function renderGallery(raw) {
+  if (!raw) return false;
+  const lines = String(raw).split('\n').map(s => s.trim()).filter(Boolean);
+  const items = lines.map(line => {
+    const i = line.search(/[|｜]/);
+    return i === -1 ? { url: line, caption: '' } : { url: line.slice(0, i).trim(), caption: line.slice(i + 1).trim() };
+  }).filter(it => it.url);
+  if (!items.length) return false;
+  const gallery = document.getElementById('image-gallery');
+  const grid = document.getElementById('image-gallery-grid');
+  gallery.style.display = 'block';
+  // 每張都載不出來時整區收掉，免得記者只看到一個空的「活動圖片資料」標題
+  let alive = items.length;
+  items.forEach(({ url, caption }) => {
+    const item = document.createElement('div');
+    item.className = 'gallery-item';
+    const img = document.createElement('img');
+    img.src = url;
+    img.className = 'gallery-img';
+    img.alt = caption || '活動圖片';
+    img.loading = 'lazy';
+    img.onerror = () => {
+      item.style.display = 'none';
+      if (--alive === 0) gallery.style.display = 'none';
+    };
+    img.onclick = () => openLightbox(url, caption);
+    item.appendChild(img);
+    if (caption) {
+      const cap = document.createElement('div');
+      cap.className = 'gallery-caption';
+      cap.textContent = caption;
+      item.appendChild(cap);
+    }
+    grid.appendChild(item);
+  });
+  return true;
+}
+
+// 「用 LINE 問」的入口（批次 82）。line_url 由後端組好（見 api/events.js get_public），
+// 內容是 line.me/R/oaMessage 連結：手機點了直接打開 LINE、輸入框已經帶好「#這一場的代碼」，
+// 按送出就接上這一場。後台沒設定 LINE_BASIC_ID 時後端不給，這裡就什麼都不畫。
+function addLineLink(parent, before, url, label) {
+  if (!parent || !/^https:\/\/line\.me\//.test(url || '')) return;
+  const a = document.createElement('a');
+  a.className = 'line-link';
+  a.href = url;
+  a.target = '_blank';
+  a.rel = 'noopener';
+  a.innerHTML = '<i class="ti ti-brand-line"></i> ';
+  a.appendChild(document.createTextNode(label));
+  parent.insertBefore(a, before);
 }
 
 function showError(msg) {
@@ -634,14 +707,39 @@ function addMessage(role, text) {
 }
 
 // 一鍵複製 AI 回答（去掉 Markdown 記號，方便記者直接引用）
+//
+// ⚠️ 記者多半是在 LINE 裡點連結打開這頁的——LINE 內建瀏覽器（以及部分 App 內嵌頁）
+// 常常拿不到 navigator.clipboard，原本 .catch(() => {}) 直接吞掉，記者按了「複製」
+// 什麼事都沒發生、也沒有任何提示。改成退回舊式的 execCommand('copy')，兩條都失敗
+// 才老實說「請長按文字自行複製」。
 function copyText(text, btn) {
   const plain = text.replace(/\*\*/g, '').replace(/^#{1,6}\s*/gm, '').replace(/\*/g, '');
-  navigator.clipboard.writeText(plain).then(() => {
-    const orig = btn.innerHTML;
-    btn.classList.add('copied');
-    btn.innerHTML = '<i class="ti ti-check"></i> 已複製';
-    setTimeout(() => { btn.innerHTML = orig; btn.classList.remove('copied'); }, 1600);
-  }).catch(() => {});
+  const done = (ok) => {
+    const orig = btn.dataset.orig || btn.innerHTML;
+    btn.dataset.orig = orig;
+    btn.classList.toggle('copied', ok);
+    btn.innerHTML = ok ? '<i class="ti ti-check"></i> 已複製' : '請長按文字自行複製';
+    setTimeout(() => { btn.innerHTML = orig; btn.classList.remove('copied'); }, ok ? 1600 : 2600);
+  };
+  const legacy = () => {
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = plain;
+      ta.setAttribute('readonly', '');
+      ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0;font-size:16px';
+      document.body.appendChild(ta);
+      ta.select();
+      ta.setSelectionRange(0, plain.length);
+      const ok = document.execCommand('copy');
+      ta.remove();
+      return ok;
+    } catch (e) { return false; }
+  };
+  if (navigator.clipboard && window.isSecureContext) {
+    navigator.clipboard.writeText(plain).then(() => done(true)).catch(() => done(legacy()));
+  } else {
+    done(legacy());
+  }
 }
 
 function showTyping() {
@@ -703,6 +801,9 @@ async function streamReply(res) {
   }
 
   document.getElementById('typing')?.remove();
+  // 答到一半斷掉（後端逾時、模型那端出錯）：已經出現的那一段留著，後面補一句說明，
+  // 不要讓記者以為那就是完整答案、直接拿去引用。
+  if (acc && errMsg) acc += '\n\n' + errMsg;
   const reply = acc || errMsg || '抱歉，發生錯誤。';
   if (!msgEl) {
     addMessage('ai', reply);
@@ -725,9 +826,10 @@ async function sendMessage(text) {
   if (!q) return;
   isWaiting = true;
 
-  // 首次提問後收合歡迎卡，釋放（尤其手機）對話空間
+  // 首次提問後收合歡迎卡，釋放（尤其手機）對話空間；快速提問收成輸入框上方的一列
   const welcomeEl = document.getElementById('welcome');
   if (welcomeEl) welcomeEl.style.display = 'none';
+  dockChips();
 
   document.getElementById('user-input').value = '';
   document.getElementById('user-input').style.height = 'auto';
@@ -772,6 +874,15 @@ async function sendMessage(text) {
   isWaiting = false;
 }
 
+// 快速提問從對話區頂端搬到輸入框上方，改成一列左右滑（只做一次）
+function dockChips() {
+  const dock = document.getElementById('chip-dock');
+  const chips = document.getElementById('chips');
+  if (!dock || !chips || chips.parentElement === dock || !chips.children.length) return;
+  dock.appendChild(chips);
+  dock.hidden = false;
+}
+
 // Enter 送出
 document.getElementById('user-input').addEventListener('keydown', e => {
   if (e.isComposing || e.keyCode === 229) return; // 中文輸入法選字時的 Enter，不當作送出
@@ -791,21 +902,40 @@ function escHtml(str) {
 }
 
 // Markdown → HTML（AI 回應用）
+//
+// 網址要在跳脫 HTML「之前」先挑出來（批次 82）。舊寫法先把 & 換成 &amp; 再找網址，
+// 規則是「非空白字元都算網址」——中文句子裡網址後面通常直接接中文，不會空一格，
+// 於是「詳見 https://www.itri.org.tw/xxx，歡迎洽詢。」整串中文都被當成網址的一部分，
+// 點下去是一個不存在的頁面；帶 ?a=1&b=2 的網址則反過來在 & 被切斷。
+// 現在網址只收 URL 允許的 ASCII 字元，句尾的英文標點也不算網址。
+const URL_RE = /https?:\/\/[A-Za-z0-9\-._~:/?#\[\]@!$&'()*+,;=%]+/g;
+function splitTrailingPunct(url) {
+  let u = url, tail = '';
+  for (;;) {
+    const last = u.slice(-1);
+    if (/[.,;:!?'"]/.test(last) || (last === ')' && !u.includes('('))) { tail = last + tail; u = u.slice(0, -1); }
+    else break;
+  }
+  return [u, tail];
+}
 function renderMarkdown(text) {
-  let s = text
-    .replace(/&/g,'&amp;')
-    .replace(/</g,'&lt;')
-    .replace(/>/g,'&gt;');
-
+  const esc = (x) => x.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  // 先把網址換成佔位符（\u0000編號\u0000），跳脫與粗體規則都碰不到它，最後再換回連結
+  const links = [];
+  let s = String(text || '').replace(URL_RE, (m) => {
+    const [url, tail] = splitTrailingPunct(m);
+    links.push(url);
+    return '\u0000' + (links.length - 1) + '\u0000' + tail;
+  });
+  s = esc(s);
   s = s.replace(/^#{1,6}\s*/gm, '');
   s = s.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
   s = s.replace(/\*([^*\n]+?)\*/g, '<em>$1</em>');
-  s = s.replace(
-    /(https?:\/\/[^\s&<>"]+)/g,
-    '<a href="$1" target="_blank" rel="noopener">$1</a>'
-  );
   s = s.replace(/\n/g, '<br>');
-  return s;
+  return s.replace(/\u0000(\d+)\u0000/g, (_, i) => {
+    const u = esc(links[+i]);
+    return `<a href="${u}" target="_blank" rel="noopener">${u}</a>`;
+  });
 }
 
 // 圖片燈筱

@@ -51,6 +51,7 @@ export const replyOrPush = (...a) => line.replyOrPush(...a);
 export const replyOrPushMessages = (...a) => line.replyOrPushMessages(...a);
 export const startLoading = (...a) => line.startLoading(...a);
 export const pushImages = (...a) => line.pushImages(...a);
+export const replyTextWithImages = (...a) => line.replyTextWithImages(...a);
 export const createRichMenu = (...a) => line.createRichMenu(...a);
 export const uploadRichMenuImage = (...a) => line.uploadRichMenuImage(...a);
 export const setDefaultRichMenu = (...a) => line.setDefaultRichMenu(...a);

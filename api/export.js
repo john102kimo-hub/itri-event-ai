@@ -6,9 +6,11 @@ import { readRange } from '../lib/sheets.js';
 
 // CSV 公式注入防護：記者輸入以 =／+／-／@ 開頭的內容，管理員用 Excel 開啟時
 // 會被當公式執行；在前面補一個單引號讓 Excel 只當純文字顯示。
+// Tab 與歸位字元（\t、\r）開頭也要擋（批次 82）：Excel 會先吃掉開頭的空白字元，
+// 「\t=HYPERLINK(...)」一樣會被當成公式（OWASP CSV Injection 列的完整字元集）。
 const csvCell = (v) => {
   let s = String(v ?? '');
-  if (/^[=+\-@]/.test(s)) s = "'" + s;
+  if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
   return `"${s.replace(/"/g, '""')}"`;
 };
 

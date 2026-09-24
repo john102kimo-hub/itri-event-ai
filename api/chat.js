@@ -6,6 +6,25 @@
 
 import { readRange, appendRows, warmAuth } from '../lib/sheets.js';
 import { buildSystemPrompt, resolveEventContent, formatEventBasics } from '../lib/prompt.js';
+import { toTraditionalTW, createTraditionalStream, ZH_TW_RULE } from '../lib/zh-tw.js';
+
+// 這支是記者看得到的出口，跟 api/line.js 一樣要過繁體轉換（CLAUDE.md 第 1、2 條）。
+// 批次 82 之前這裡完全沒有接：LINE 在批次 45 補了兩層防線，網頁版一層都沒有——
+// 截圖裡那句「内容仅供参考，以工研院官网新闻稿或发言为准。」網頁版照樣會原樣出現，
+// 而且網頁版用的是 Haiku，比 LINE 那邊的模型更容易寫出簡體。
+
+// 模型那端出狀況時，記者看到的是一句中文，不是「Overloaded」這種 API 原文。
+// 原文照樣寫進 log（console.error），除錯用的資訊不會少。
+function friendlyApiError(status) {
+  if (status === 429 || status === 529 || status === 503) return '目前詢問的人比較多，請稍候幾秒再問一次。';
+  return '暫時無法取得回應，請稍後再試，或洽現場新聞聯絡人。';
+}
+const STREAM_BROKEN_MSG = '（連線中斷，這一題沒有答完，請再問一次。）';
+
+// 整次請求的時間上限。vercel.json 給這支 60 秒，時間到 function 會被直接砍掉，
+// 記者只會看到三個點一直跳、最後變成「連線錯誤」。55 秒先自己停下來，還來得及
+// 送出一句說明、把已經答出來的部分寫進 qa_log（跟 api/line.js REQUEST_BUDGET_MS 同一個道理）。
+const REQUEST_BUDGET_MS = 55_000;
 
 // 活動設定快取（60 秒；記者會現場臨時改稿也能很快生效）
 const eventCache = new Map();
@@ -112,6 +131,7 @@ async function logQA({ event_id, eventName, media_name, question, reply }) {
 }
 
 export default async function handler(req, res) {
+  const startedAt = Date.now();
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST,OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -142,6 +162,10 @@ export default async function handler(req, res) {
     }));
   if (!trimmed.length) return res.status(400).json({ error: '請求格式錯誤' });
 
+  // 串流途中出錯時，catch 要拿得到「已經送出去的那一段」與活動資訊來寫 qa_log
+  let reply = '';
+  let logCtx = null;
+  let zh = null;
   try {
     // 先把 Google 的 access token 熱起來（不 await），讓它跟模型生成平行跑；
     // 等到最後要寫 qa_log 時 token 通常已經備妥，省下一趟 OAuth 往返。
@@ -166,6 +190,8 @@ export default async function handler(req, res) {
           ? lastUserMsg.content
           : (lastUserMsg.content?.[0]?.text || ''));
 
+    logCtx = { event_id, eventName, media_name, question };
+
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
@@ -173,14 +199,19 @@ export default async function handler(req, res) {
         'x-api-key': apiKey,
         'anthropic-version': '2023-06-01'
       },
+      // 涵蓋「等回應」與「讀串流」兩段：時間到，下面的 reader.read() 一樣會丟例外，
+      // 走進 catch 送出說明，不會等到被 Vercel 砍掉。從請求一進來就起算——前面讀
+      // Sheets 若卡在配額重試，花掉的時間也要扣掉（最少留 5 秒給模型）。
+      signal: AbortSignal.timeout(Math.max(5_000, REQUEST_BUDGET_MS - (Date.now() - startedAt))),
       body: JSON.stringify({
         model: 'claude-haiku-4-5-20251001',
         max_tokens: 4096,
         stream: !!stream,
         // 知識庫在 60 秒快取視窗內逐 byte 穩定，加 ephemeral cache 讓同場記者連續發問時
-        // 讀取只收 0.1 倍價（記者會現場正是這種「同一份知識庫、多人連續提問」的場景）
+        // 讀取只收 0.1 倍價（記者會現場正是這種「同一份知識庫、多人連續提問」的場景）。
+        // ZH_TW_RULE 是固定字串，放進這塊不影響快取。
         system: [
-          { type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } },
+          { type: 'text', text: systemPrompt + '\n' + ZH_TW_RULE, cache_control: { type: 'ephemeral' } },
           // 活動基本資料＋現在時間：每分鐘在變，放在快取區塊之後，不打散上面那塊的快取
           ...(basicsBlock ? [{ type: 'text', text: basicsBlock }] : [])
         ],
@@ -190,18 +221,21 @@ export default async function handler(req, res) {
 
     // 錯誤一律在切換成 SSE 之前處理掉，這樣還能回乾淨的 JSON 錯誤碼給前端
     if (!response.ok) {
-      let msg = 'API 錯誤';
+      let detail = '';
       try {
         const j = await response.json();
-        msg = j.error?.message || msg;
-      } catch (e) { /* 回應不是 JSON 就沿用預設訊息 */ }
-      return res.status(response.status).json({ error: msg });
+        detail = j.error?.message || '';
+      } catch (e) { /* 回應不是 JSON 就沒有細節可記 */ }
+      console.error('Anthropic API 錯誤:', response.status, detail);
+      return res.status(response.status).json({ error: friendlyApiError(response.status) });
     }
 
     if (!stream) {
       const data = await response.json();
-      const reply = data.content?.[0]?.text || '抱歉，無法取得回應。';
-      await logQA({ event_id, eventName, media_name, question, reply });
+      // 不能寫死 content[0]：第一塊不保證是文字（見 api/line.js askAnthropic() 的說明）
+      const text = (data.content || []).filter(b => b?.type === 'text').map(b => b.text).join('\n').trim();
+      reply = toTraditionalTW(text) || '抱歉，無法取得回應。';
+      await logQA({ ...logCtx, reply });
       return res.status(200).json({ reply });
     }
 
@@ -217,8 +251,16 @@ export default async function handler(req, res) {
 
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
+    // 繁體出口的串流版：模型的每一小段先進這裡，湊到標點才轉換、才送出（見 lib/zh-tw.js）
+    zh = createTraditionalStream();
+    const send = (t) => {
+      if (!t) return;
+      reply += t;
+      res.write(`data: ${JSON.stringify({ t })}\n\n`);
+      res.flush?.();
+    };
     let buf = '';
-    let reply = '';
+    let brokenMidway = false;
 
     for (;;) {
       const { done, value } = await reader.read();
@@ -233,29 +275,43 @@ export default async function handler(req, res) {
         let evt;
         try { evt = JSON.parse(payload); } catch (e) { continue; }
         if (evt.type === 'content_block_delta' && evt.delta?.type === 'text_delta') {
-          reply += evt.delta.text;
-          res.write(`data: ${JSON.stringify({ t: evt.delta.text })}\n\n`);
-          res.flush?.();
+          send(zh.push(evt.delta.text));
         } else if (evt.type === 'error') {
-          res.write(`data: ${JSON.stringify({ error: evt.error?.message || 'API 錯誤' })}\n\n`);
+          // 串流途中模型那端出錯（例如 overloaded）：原文記 log，記者看中文
+          console.error('Anthropic 串流錯誤:', evt.error?.type, evt.error?.message);
+          brokenMidway = true;
         }
       }
     }
+    send(zh.flush());
 
+    if (brokenMidway) {
+      res.write(`data: ${JSON.stringify({ error: reply ? STREAM_BROKEN_MSG : friendlyApiError(529) })}\n\n`);
+    }
     if (!reply) reply = '抱歉，無法取得回應。';
     // 先告訴前端「講完了」，輸入框立刻解鎖；寫 Sheets 排在這之後，記者不必等它。
     res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
     res.flush?.();
 
-    await logQA({ event_id, eventName, media_name, question, reply });
+    await logQA({ ...logCtx, reply: brokenMidway ? reply + '\n' + STREAM_BROKEN_MSG : reply });
     return res.end();
   } catch (err) {
-    console.error(err);
+    console.error('chat 失敗:', err?.name, err?.message);
+    const timedOut = err?.name === 'TimeoutError' || err?.name === 'AbortError';
     // 已經切成 SSE 就不能再改 status code，只能用事件把錯誤帶回去
     if (res.headersSent) {
-      try { res.write(`data: ${JSON.stringify({ error: '伺服器錯誤，請稍後再試。' })}\n\n`); } catch (e) {}
+      try {
+        // 還囤在繁體轉換器裡、沒來得及送出的那幾個字，先送完再說明中斷
+        const tail = zh ? zh.flush() : '';
+        if (tail) { reply += tail; res.write(`data: ${JSON.stringify({ t: tail })}\n\n`); }
+        res.write(`data: ${JSON.stringify({ error: reply ? STREAM_BROKEN_MSG : '伺服器錯誤，請稍後再試。' })}\n\n`);
+        res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+      } catch (e) {}
+      // 已經答出來的那一段記者看得到，後台也要看得到（記者可能已經拿去引用了）
+      if (logCtx && reply) await logQA({ ...logCtx, reply: reply + '\n' + STREAM_BROKEN_MSG });
       return res.end();
     }
+    if (timedOut) return res.status(504).json({ error: '這一題想得比較久，還沒回來。請再問一次，或把問題問得更具體一點。' });
     return res.status(500).json({ error: '伺服器錯誤，請稍後再試。' });
   }
 }
