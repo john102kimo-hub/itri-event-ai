@@ -3,7 +3,8 @@
 // failWrites 設成 n，就讓第 n 次寫入丟例外（模擬寫到一半 Sheets 429）。
 export const book = {};
 export const calls = [];
-export const ctl = { failWrites: 0, failReads: new Set() };
+// strictTabs（批次 84）：讀不存在的分頁時照真的 Sheets API 丟「Unable to parse range」。
+export const ctl = { failWrites: 0, failReads: new Set(), strictTabs: false };
 
 const colNum = (s) => [...s].reduce((n, c) => n * 26 + c.charCodeAt(0) - 64, 0);
 function parse(range) {
@@ -30,11 +31,13 @@ export function reset() {
   calls.length = 0;
   ctl.failWrites = 0;
   ctl.failReads.clear();
+  ctl.strictTabs = false;
 }
 export async function readRange(range) {
   calls.push(['read', range]);
   const { tab, c1, r1, c2, r2 } = parse(range);
   if (ctl.failReads.has(tab)) throw new Error('模擬 Sheets 讀取失敗');
+  if (ctl.strictTabs && !book[tab]) throw new Error(`Unable to parse range: ${range}`);
   const rows = book[tab] || [];
   const out = [];
   for (let i = r1; i <= Math.min(r2, rows.length - 1); i++) {
@@ -70,7 +73,18 @@ export async function updateRange(range, values) {
   return {};
 }
 export async function listSheets() { return Object.keys(book).map((title, i) => ({ title, sheetId: i + 1 })); }
-export async function batchUpdate() { return {}; }
+// 批次 84：支援 deleteDimension（刪整列），sheetId 對應 listSheets() 的編號。
+export async function batchUpdate(requests = []) {
+  maybeFail('batch', JSON.stringify(requests).slice(0, 80));
+  const titles = Object.keys(book);
+  for (const r of requests) {
+    const d = r?.deleteDimension?.range;
+    if (!d || d.dimension !== 'ROWS') continue;
+    const tab = titles[d.sheetId - 1];
+    if (tab) book[tab].splice(d.startIndex, d.endIndex - d.startIndex);
+  }
+  return {};
+}
 export async function ensureSheets(spec) {
   for (const t of Object.keys(spec)) if (!book[t]) book[t] = [spec[t].map(String)];
   return [];

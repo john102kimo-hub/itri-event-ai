@@ -15,7 +15,7 @@
 // GET  ?action=contacts_directory&password=..     → 全域技術窗口分工原始文字（後台編輯用）
 // POST {action:'contacts_directory_save',password,content} → 整份覆蓋儲存
 
-import { readRange, appendRows, updateRange, ensureSheets } from '../lib/sheets.js';
+import { readRange, appendRows, updateRange, ensureSheets, listSheets, batchUpdate } from '../lib/sheets.js';
 import { generateId, generateEditCode } from '../lib/ids.js';
 import { del } from '@vercel/blob';
 import { CONTACTS_DIR_RANGE, ensureContactsDirectorySheet } from '../lib/contacts-directory.js';
@@ -78,6 +78,11 @@ function buildContentRow(existing, b) {
     pick(b.invite_letter_chips, 17, '')             // R invite_letter_chips（活動前快速提問）
   ];
 }
+
+// events 分頁 A～R 的欄名（跟試算表第 1 列同一套），events_trash 備份沿用。
+const EVENT_SHEET_HEADERS = ['id', 'name', 'color', 'knowledge_base', 'status', 'created_at', 'chips', 'images',
+  'greeting', 'organizer', 'edit_code', 'event_time', 'venue', 'event_type', 'press_contact', 'contacts',
+  'invite_letter', 'invite_letter_chips'];
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -364,6 +369,57 @@ export default async function handler(req, res) {
           e[11] || '', e[12] || '', e[13] || '', e[14] || '', e[15] || '', e[16] || '', e[17] || ''
         ];
         await updateRange(`events!A${rowIndex + 2}:R${rowIndex + 2}`, [updated]);
+        return res.status(200).json({ success: true });
+      }
+
+      // ── 永久刪除（批次 84）─────────────────────────────────────────────
+      // 回報：「後台可以多一個刪除鍵嗎？不然像這種測試活動，就算封存還是會在，甚至 LINE
+      // 也抓得到」。封存只是狀態，資料列還在：後台勾「顯示封存」看得到，LINE 職員模式
+      // 也刻意查得到 draft／archived（見 lib/staff.js 開頭）。測試用的場次要真的消失，
+      // 只能把那一列刪掉。
+      //
+      // 三道保險，因為這是整個系統唯一不能復原的按鈕：
+      //   ① 只刪「未發布」或「已封存」的場次。進行中／已結束的要先封存——記者可能正在用、
+      //      後台數據（問答紀錄）也掛在它身上，一次誤按不能直接讓它消失。
+      //   ② 刪之前先把整列原封不動抄到 events_trash 分頁（加上刪除時間）。真的刪錯了，
+      //      把那一列貼回 events 就回來了。
+      //   ③ 刪那一列之前再讀一次確認「那一列還是這場」——兩個人同時刪不同場時，列號會
+      //      位移，不能刪到別場。
+      // 問答紀錄（qa_log）不動：那是歷史，後台的分析與匯出照樣查得到當時的紀錄。
+      if (action === 'delete') {
+        if (!id) return res.status(400).json({ error: '缺少活動 ID' });
+        const rows = await readRange(RANGE);
+        const rowIndex = rows.findIndex(r => r[0] === id);
+        if (rowIndex === -1) return res.status(404).json({ error: '活動不存在' });
+        const e = rows[rowIndex];
+        const st = e[4] || 'active';
+        if (st !== 'draft' && st !== 'archived') {
+          return res.status(409).json({ error: '進行中或已結束的活動不能直接刪除，請先封存再刪除' });
+        }
+
+        await ensureSheets({ events_trash: ['deleted_at', ...EVENT_SHEET_HEADERS] });
+        const deletedAt = new Date().toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' });
+        const full = Array.from({ length: 18 }, (_, i) => e[i] ?? '');
+        await appendRows('events_trash!A:S', [[deletedAt, ...full]]);
+
+        const sheetRow = rowIndex + 2; // RANGE 從第 2 列開始
+        const recheck = await readRange(`events!A${sheetRow}:A${sheetRow}`);
+        if ((recheck[0]?.[0] || '') !== id) {
+          return res.status(409).json({ error: '活動清單剛好有變動，請重新整理後再刪一次' });
+        }
+        const sheet = (await listSheets()).find(p => p.title === 'events');
+        if (!sheet) return res.status(500).json({ error: '找不到 events 分頁' });
+        await batchUpdate([{
+          deleteDimension: { range: { sheetId: sheet.sheetId, dimension: 'ROWS', startIndex: sheetRow - 1, endIndex: sheetRow } }
+        }]);
+
+        // 跟封存一樣，順手清掉自家 Blob 上的照片（備份裡留著網址，但檔案不留）。
+        const blobUrls = String(e[7] || '').split('\n').map(x => x.trim()).filter(Boolean)
+          .map(line => { const i = line.search(/[|｜]/); return i === -1 ? line : line.slice(0, i).trim(); })
+          .filter(url => url.includes('.public.blob.vercel-storage.com'));
+        if (blobUrls.length) {
+          try { await del(blobUrls); } catch (err) { console.error('刪除活動時刪除 Blob 圖片失敗:', err.message); }
+        }
         return res.status(200).json({ success: true });
       }
 
