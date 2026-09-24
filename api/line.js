@@ -35,14 +35,14 @@ import { readRange, appendRows, updateRange, ensureSheets } from '../lib/sheets.
 import { toTraditionalTW, ZH_TW_RULE } from '../lib/zh-tw.js';
 import { buildSystemPrompt, resolveEventContent, formatEventBasics } from '../lib/prompt.js';
 import {
-  readRawBody, verifySignature, replyOrPush as replyOrPushRaw, replyOrPushMessages, startLoading, pushImages,
+  readRawBody, verifySignature, replyOrPush as replyOrPushRaw, replyOrPushMessages, startLoading, replyTextWithImages,
   createRichMenu, uploadRichMenuImage, setDefaultRichMenu, listRichMenus, deleteRichMenu,
   linkRichMenuToUser, unlinkRichMenuFromUser,
   isBotMentioned, stripMentionText, pushMessage
 } from '../lib/line.js';
 import { buildCalendarCards, buildAllCalendarCards, routeIntent, formatCalendarReply, calendarQuickReplyItems } from '../lib/router.js';
 import {
-  detectMetaIntent, detectCourtesy, isOrgWideNewsAsk, matchEventByName, HELP_TEXT, ORG_INTRO_TEXT, buildWelcomeFlex,
+  detectMetaIntent, detectCourtesy, isOrgWideNewsAsk, isHumanRequest, matchEventByName, HELP_TEXT, ORG_INTRO_TEXT, buildWelcomeFlex,
   buildRichMenuDefinition, ALL_MENUS, REPORTER_MENU, STAFF_MENU, findEventMentioned
 } from '../lib/menu.js';
 import {
@@ -57,6 +57,7 @@ import { proposeChange, applyChange, findLastChangeBy, fieldLabel, displayValue,
 import { saveEventPhoto } from '../lib/photo-upload.js';
 import { addPhoto, pendingPhotos, consumePhotos } from '../lib/photo-inbox.js';
 import { isPreEventMode } from '../lib/prompt.js';
+import { lineBindUrl } from '../lib/line-link.js';
 import {
   eventChecklist, formatProgressOverview, buildEventCardFlex, formatEventCardText,
   formatNudgeMessage, previewLink
@@ -83,7 +84,7 @@ const EVENTS_RANGE = 'events!A2:R'; // P 欄是 contacts（邀訪窗口分工）
 // getGroupSessionUntil()／touchGroupSession() 的說明。
 // H 欄是「上一則剛回答完的是哪一類非活動題」，1 對 1 與群組都會用到，見
 // getRecentTopic()／setRecentTopic() 的說明。
-const LINE_USERS_RANGE = 'line_users!A2:I'; // I 欄是 last_turn（上一輪對話記憶），見 getRecentTurn()
+const LINE_USERS_RANGE = 'line_users!A2:J'; // I 欄是 last_turn（上一輪對話記憶），見 getRecentTurn()；J 欄是群組裡每個人各自的上一輪，見 setGroupTurn()
 const BIND_TTL_MS = 6 * 60 * 60 * 1000; // 6 小時；沒有這個 TTL，記者三個月後問別場會被鎖在當初掃的那一場
 const CACHE_TTL_MS = 60 * 1000; // 跟 api/chat.js 的 eventCache 同一套邏輯
 
@@ -192,7 +193,7 @@ async function ensureLineUsersSheet() {
   if (sheetsEnsuredAt === Infinity) return;
   if (Date.now() - sheetsEnsuredAt < ENSURE_RETRY_MS) return;
   try {
-    await ensureSheets({ line_users: ['line_user_id', 'event_id', 'media_name', 'bound_at', 'last_active', 'note', 'group_session_until', 'last_topic', 'last_turn'] });
+    await ensureSheets({ line_users: ['line_user_id', 'event_id', 'media_name', 'bound_at', 'last_active', 'note', 'group_session_until', 'last_topic', 'last_turn', 'group_turns'] });
     sheetsEnsuredAt = Infinity; // 建好了就永遠不用再確認
   } catch (e) {
     console.error('ensureSheets(line_users) 失敗，60 秒後再試:', e.message);
@@ -465,9 +466,9 @@ async function recentTopicContext(targetId) {
 // 回放。換場之後回放上一場的問答，等於把另一場的內容當成這一場的脈絡餵給模型，
 // 那正是換錯場那種「記者不會發現答案來自別場」的風險。
 //
-// ⚠️ 群組刻意不開這個記憶（呼叫端傳 memory:false）——群組裡多個人交錯提問，
-// 「上一輪」很可能是別人的問題，把它當成這個人的脈絡回放進去，製造出來的正是這次
-// 要修的「答非所問」。1 對 1 才有「上一輪就是同一個人講的」這個前提。
+// ⚠️ 群組不用這一格（呼叫端傳 memory:false）——群組裡多個人交錯提問，整個群組共用
+// 一份「上一輪」，很可能是別人的問題，回放進去製造的正是「答非所問」。批次 83 起群組
+// 改成**照發問的人**各記各的，存在 J 欄，見 setGroupTurn()。
 //
 // 存 Sheets 而不是行程內的 Map，理由跟 getRecentTopic() 完全一樣（Vercel 執行個體
 // 隨時可能被回收，記者讀完答案再打字中間隔幾十秒很正常）。格式用 JSON 存一格：
@@ -516,6 +517,57 @@ async function buildTurnHistory(targetId, eventId) {
   const turn = await getRecentTurn(targetId);
   if (!turn || turn.event_id !== String(eventId || '')) return [];
   return [{ role: 'user', content: turn.q }, { role: 'assistant', content: turn.a }];
+}
+
+// ── 群組：每個人各記各的上一題（J 欄，批次 83）────────────────────────────
+// 批次 28 決定群組不開對話記憶，理由是「群組多人交錯提問，上一輪多半是別人的問題」——
+// 那個顧慮是對的，要改的是記憶的單位：跟著**發問的那個人**記，不是跟著整個群組記。
+// 於是群組裡也接得住「那良率呢？」這種省略式追問，而且只會接上**同一個人**的上一題，
+// 別人剛問的不會混進來。
+//
+// ⚠️ 用獨立的 J 欄，不能借 I 欄：群組那一列的 I 欄已經被產業趨勢／技術題的話題記憶
+// 用掉了（見 setRecentTopic()，那份節錄是路由判「追問」的依據），兩邊搶同一格會互相
+// 蓋掉。
+// 格式：{ "<LINE userId>": { t, e, q, a }, … }，只留 TURN_TTL_MS 內、最近
+// GROUP_TURN_MAX_SPEAKERS 位（控制儲存格大小；一段時間內會連續追問的人不會太多）。
+// 拿不到發問者的 userId（LINE 在使用者沒同意時可能不給）就不記——寧可沒記憶，也不要
+// 把別人的上一題當成他的。同一群組兩人同時發問、剛好落在不同執行個體時，後寫的會蓋掉
+// 先寫的那一位——頂多是那一位的下一題沒有脈絡，退回原本「不記」的行為，可以接受。
+const GROUP_TURN_MAX_SPEAKERS = 6;
+function parseGroupTurns(raw) {
+  try {
+    const o = raw ? JSON.parse(raw) : null;
+    return o && typeof o === 'object' && !Array.isArray(o) ? o : {};
+  } catch { return {}; }
+}
+async function buildGroupTurnHistory(groupId, speakerId, eventId) {
+  if (!speakerId) return [];
+  const rows = await getAllLineUserRows();
+  const t = parseGroupTurns(rows.find(r => r[0] === groupId)?.[9])[speakerId];
+  if (!t || !t.q || !t.a || String(t.e || '') !== String(eventId || '')) return [];
+  if (Date.now() - (Number(t.t) || 0) > TURN_TTL_MS) return [];
+  return [{ role: 'user', content: String(t.q) }, { role: 'assistant', content: String(t.a) }];
+}
+async function setGroupTurn(groupId, speakerId, eventId, question, answer) {
+  if (!speakerId) return;
+  try {
+    await ensureLineUsersSheet();
+    const rows = await readRange(LINE_USERS_RANGE);
+    const idx = rows.findIndex(r => r[0] === groupId);
+    if (idx === -1) return; // 走到這裡群組一定已經有綁定那一列，理論上不會發生
+    const now = Date.now();
+    const all = parseGroupTurns(rows[idx][9]);
+    all[speakerId] = { t: now, e: String(eventId || ''), q: sanitize(question, TURN_Q_MAX), a: sanitize(answer, TURN_A_MAX) };
+    const kept = Object.entries(all)
+      .filter(([, v]) => v && now - (Number(v.t) || 0) <= TURN_TTL_MS)
+      .sort((a, b) => (Number(b[1].t) || 0) - (Number(a[1].t) || 0))
+      .slice(0, GROUP_TURN_MAX_SPEAKERS);
+    await updateRange(`line_users!J${idx + 2}`, [[JSON.stringify(Object.fromEntries(kept))]]);
+  } catch (e) {
+    console.error('setGroupTurn 失敗:', e.message);
+  } finally {
+    invalidateLineUsersCache();
+  }
 }
 
 // 每次我們真的在群組裡回答了什麼，就呼叫這支幫時間窗續命。跟 upsertBinding() 分開
@@ -1014,7 +1066,26 @@ function buildHelpQuickReply() {
 async function replyOrPush(replyToken, targetId, text, quickReplyItems) {
   const items = (quickReplyItems && quickReplyItems.length) ? quickReplyItems
     : (isGroupTarget(targetId) ? NAV_ALL : quickReplyItems);
-  return replyOrPushRaw(replyToken, targetId, text, items);
+  return replyOrPushRaw(replyToken, targetId, text, items, { quoteToken: takeQuoteToken(targetId) });
+}
+
+// ── 群組回答引用原問題（批次 83）──────────────────────────────────────────
+// 群組裡常常好幾個人輪流問，答案又要等十幾秒才出來（群組沒有「輸入中」動畫，見批次
+// 60）——中間別人已經又講了幾句，米亞的答案出現時，沒人看得出這段在回誰的哪一題，
+// 體感就是「答非所問」。LINE 的 quoteToken 可以讓回覆「引用」原本那則訊息（跟使用者
+// 自己長按訊息→回覆一樣的樣子），一眼看得出來。
+//
+// 跟批次 43 群組導覽同一招：包在 replyOrPush() 這一層，不去五十幾個呼叫點各補一個
+// 參數——token 放在這一次請求的 context 裡（見 handler 的 requestCtx），第一則回覆
+// 拿去用、用完就清掉，同一次處理後面再送的訊息不重複引用。1 對 1 不引用：只有兩個人，
+// 看得出在回誰，引用只會多佔畫面。引用不了（token 過期等）時 lib/line.js 會拿掉引用
+// 再送一次，不會因此漏掉答案。
+function takeQuoteToken(targetId) {
+  const store = requestCtx.getStore();
+  if (!store?.quoteToken || !isGroupTarget(targetId)) return undefined;
+  const q = store.quoteToken;
+  store.quoteToken = null;
+  return q;
 }
 
 // LINE quick reply 上限 13 顆，扣掉固定的「媒體邀訪需求」那一格，內容 chips 最多留
@@ -1842,7 +1913,11 @@ async function answerFromItriNews(keyword, items, question, chinese, timeoutMs =
   }
 }
 
-async function answerQuestion(replyToken, userId, rawEvent, mediaName, text, { allowPreEventSubstitution = true, switchNotice = '', memory = false, group = false } = {}) {
+async function answerQuestion(replyToken, userId, rawEvent, mediaName, text, { allowPreEventSubstitution = true, switchNotice = '', memory = false, group = false, speakerId = '' } = {}) {
+  // 是不是群組，直接看對象的 id（C／R 開頭），不靠呼叫端記得傳 group:true（批次 83）。
+  // 實測抓到的：群組裡點活動清單的按鈕 → handleUnbound() 軟綁定後答第一題，那條路沒傳
+  // group，第一則答案掛的是 1 對 1 那排按鈕（少了產業趨勢、問技術），也沒套群組規則。
+  group = group || isGroupTarget(userId);
   // 活動前只給媒體邀請函、不給正式新聞稿與照片（見 lib/prompt.js resolveEventContent()
   // 的說明）。放在這裡而不是呼叫端各自判斷，理由跟下面的邀訪窗口比對一樣：1 對 1、
   // 群組最後都走這支，寫一次兩邊都受惠。
@@ -1878,10 +1953,11 @@ async function answerQuestion(replyToken, userId, rawEvent, mediaName, text, { a
   // 它更正已經過時的內容（改地點、改時間），只寫「補充資料」的話，模型看到兩個互相
   // 矛盾的說法時不知道該信哪一個。
   const factBlock = formatFactBlock(await getMemories(), event.id);
-  const systemPrompt = buildSystemPrompt(event, lineExtraRules(event)) + factBlock;
-  // 上一輪對話（只在 1 對 1、且上一輪答的就是這一場時才有東西）——「那成本呢」這種
-  // 省略式續問要接得住，靠的就是這兩則；見 buildTurnHistory() 的說明。
-  const history = memory ? await buildTurnHistory(userId, event.id) : [];
+  const systemPrompt = buildSystemPrompt(event, [...lineExtraRules(event), ...(group ? [GROUP_ANSWER_RULE] : [])]) + factBlock;
+  // 上一輪對話——「那成本呢」這種省略式續問要接得住，靠的就是這兩則；見
+  // buildTurnHistory() 的說明。群組照「發問的那個人」各記各的（批次 83，見 setGroupTurn()）。
+  const history = memory ? await buildTurnHistory(userId, event.id)
+    : group ? await buildGroupTurnHistory(userId, speakerId, event.id) : [];
 
   // ── 跨場次（批次 36）──────────────────────────────────────────────────
   // 回報的意見：「這一定要切來切去特定活動專屬回答系統嗎？不能一體適用？」
@@ -1945,24 +2021,25 @@ async function answerQuestion(replyToken, userId, rawEvent, mediaName, text, { a
   if (lookupKeywords.length && lookupBudget < LOOKUP_MIN_MS) {
     console.log(`[line] 補查官網跳過：這次請求只剩 ${msLeft()}ms，先把答案送出去`);
   }
-  const reply = switchNotice + aiReply + newsHint;
+  // 群組裡要全文：模型只給重點（GROUP_ANSWER_RULE），一對一拿全文的連結由程式接上——
+  // 網址一個字都不能錯，不交給模型寫。
+  const fullTextTail = group && GROUP_FULL_TEXT_RE.test(text) ? groupFullTextTail(event) : '';
+  const reply = switchNotice + aiReply + newsHint + fullTextTail;
   // 診斷用途，不是必要邏輯：路由判斷得準不準、AI 答得順不順，靠這行在 Vercel Logs
   // 裡直接看得到，不用另外接工具。刻意截斷長度，避免整份新聞稿灌爆單行 log。
   console.log(`[line] answer event=${event.id} status=${event.status} q="${text.slice(0, 60)}" reply="${reply.slice(0, 200)}"`);
   // 每則答案都附上這場的快速提問按鈕（同仁自訂的 chips，或沒設定時的預設問題）——
   // 跟網頁版一樣，chips 不是「選過一次就收起來」的一次性選單，而是隨時都在，記者
   // 問完一題還想繼續問別的方向，點一下就好，不用自己想下一句要打什麼。
-  await replyOrPush(replyToken, userId, reply, eventQuickChips(event, { group }));
+  const chips = eventQuickChips(event, { group });
   if (event.images && looksLikePhotoRequest(text)) {
-    // 附圖是錦上添花、獨立一次 push：reply token 已經被上面那則文字答案用掉了，
-    // 這裡本來就只能用 push；就算某張照片網址被 LINE 拒絕，也只記 log，不能讓
-    // 附圖失敗連累記者根本沒收到文字答案（文字答案早在上一行就已經送出去了）。
-    try {
-      const res = await pushImages(userId, event.images);
-      if (!res.ok && !res.skipped) console.error('LINE 附圖 push 失敗:', res.status);
-    } catch (e) {
-      console.error('LINE 附圖 push 例外:', e.message);
-    }
+    // 照片跟文字答案同一則 reply 送出（批次 83）——以前照片另外 push，而群組的 push 是照
+    // 成員人數計費的，大群組問幾次照片就能用光整個帳號一個月的額度。照片網址被 LINE
+    // 拒絕時會自動退回只送文字，不會連累答案，見 lib/line.js replyTextWithImages()。
+    await replyTextWithImages(replyToken, userId, reply, chips, event.images,
+      { quoteToken: takeQuoteToken(userId), isGroup: group });
+  } else {
+    await replyOrPush(replyToken, userId, reply, chips);
   }
   await logQa(event, mediaName, text, reply);
   // 記下這一輪，讓下一則的省略式續問接得回來。放在最後（答案早就送出去了）而且
@@ -1972,6 +2049,20 @@ async function answerQuestion(replyToken, userId, rawEvent, mediaName, text, { a
   // 存 aiReply（已切掉標記、不含補查來的連結區塊）——那些連結是給人點的線索，
   // 回放給模型當對話脈絡只會變成雜訊。
   if (memory) await setRecentTurn(userId, event.id, text, aiReply);
+  else if (group) await setGroupTurn(userId, speakerId, event.id, text, aiReply);
+}
+
+// 群組問答多一條規則（批次 83）。群組裡還有其他人：一整篇新聞稿貼進去，所有人的畫面
+// 都被洗掉一大段，而且 LINE 單則 5000 字，長稿本來就會被截斷。
+const GROUP_ANSWER_RULE = '這一題是在多人 LINE 群組裡問的，群組裡還有其他人在聊天：只回答這一題的重點，比平常更精簡。記者要完整新聞稿、全文或完整內容時，不要把全文貼進群組，只給 5 行以內的重點摘要——程式會在後面自動附上一對一取得全文的方式，你不用自己寫連結或教他怎麼拿。';
+// 只認「要整份稿子」的講法。刻意不收「完整版」「逐字稿」：「有完整版影片嗎？」「有沒有
+// 逐字稿？」問的不是新聞稿，後面接一段「完整新聞稿比較長…」就是答非所問。
+const GROUP_FULL_TEXT_RE = /(完整|整篇|整份)的?(新聞)?稿|新聞稿的?(全文|全部|完整)|全文|完整的?內容|整篇(貼|給|傳|發)/;
+function groupFullTextTail(event) {
+  const url = lineBindUrl(event.id);
+  return url
+    ? `\n\n📄 完整新聞稿比較長，就不在群組裡整篇貼出來了。想要全文，點這個連結跟我一對一（會自動帶入這一場），傳送之後再打「給我完整新聞稿」：\n${url}`
+    : '\n\n📄 完整新聞稿比較長，就不在群組裡整篇貼出來了。想要全文，加我好友之後私訊我「給我完整新聞稿」。';
 }
 
 // ── 安裝圖文選單（職員指令）─────────────────────────────────────────
@@ -2930,7 +3021,7 @@ async function handleMetaIntent(replyToken, userId, text, metaIntent, binding, {
     const current = binding?.event_id ? await getEventById(binding.event_id) : null;
     const chips = isUsable(current) ? eventQuickChips(current, { group })
       : (group ? undefined : ['最近有哪些活動', '產業趨勢分析', '想問什麼技術', CONTACT_MENU_LABEL]);
-    await replyOrPush(replyToken, userId, COURTESY_REPLIES[metaIntent], chips);
+    await replyOrPush(replyToken, userId, (group ? COURTESY_REPLIES_GROUP : COURTESY_REPLIES)[metaIntent], chips);
     return;
   }
 
@@ -2998,7 +3089,7 @@ async function handleMetaIntent(replyToken, userId, text, metaIntent, binding, {
       if (isUsable(current)) {
         console.log(`[line] 綁定中問新聞稿 → 答這一場 event=${current.id} q="${text.slice(0, 40)}"`);
         await answerQuestion(replyToken, userId, current, group ? '（群組提問）' : (binding.media_name || ''), text,
-          { group, memory: !group });
+          { group, memory: !group, speakerId });
         return;
       }
     }
@@ -3109,9 +3200,9 @@ async function sendCalendarReply(replyToken, targetId, cards, currentEvent) {
 // 分析永遠看到「（未填寫）」，沒辦法統計哪些媒體來過。群組不能問——一個群組裡有
 // 多個不同媒體的人，「貴媒體名稱」這句話對群組沒有意義，group 呼叫端傳 false。
 //
-// remember（批次 28）：軟綁定命中、直接答一題時要不要開對話記憶。1 對 1 開、群組
-// 不開，理由見 getRecentTurn() 的說明（群組多人交錯，上一輪多半是別人的問題）。
-async function handleUnbound(replyToken, userId, text, { silentOnOther = false, askMediaName = true, remember = true, staff = false } = {}) {
+// remember（批次 28）：軟綁定命中、直接答一題時要不要開 1 對 1 的對話記憶（I 欄）。
+// 群組傳 false——群組是照發問的人各記各的（speakerId → J 欄，批次 83，見 setGroupTurn()）。
+async function handleUnbound(replyToken, userId, text, { silentOnOther = false, askMediaName = true, remember = true, staff = false, speakerId = '' } = {}) {
   const rows = await getAllEventRows();
   const cards = buildCalendarCards(rows);
   // 上一則剛回答完的是不是產業趨勢／工研院技術題——沒有這個提示，記者接著打的
@@ -3119,7 +3210,9 @@ async function handleUnbound(replyToken, userId, text, { silentOnOther = false, 
   // getRecentTopic() 開頭那段回報的截圖。讀的是 getBinding() 早就載入的那份 60 秒
   // 快取，不會多打一次 Sheets。
   const topicCtx = await recentTopicContext(userId);
-  const { intent, event_ids, confidence, tech_keyword } = await routeIntent(text, cards, topicCtx);
+  // groupChatter（批次 83）：群組裡沒被叫到的訊息，提醒路由「群組成員彼此也在聊天」——
+  // silentOnOther 為 true 的情況正好就是這種（見 lib/router.js 的說明）。
+  const { intent, event_ids, confidence, tech_keyword } = await routeIntent(text, cards, { ...topicCtx, groupChatter: silentOnOther });
   console.log(`[line] reporter route q="${text.slice(0, 60)}" → intent=${intent} event_ids=${JSON.stringify(event_ids)} confidence=${confidence} topic=${topicCtx.currentTopic || '-'}`);
 
   if (intent === 'calendar') {
@@ -3153,7 +3246,7 @@ async function handleUnbound(replyToken, userId, text, { silentOnOther = false, 
       // 媒體名稱是跟著這個人走的（見 getStoredMediaName 的說明），不是這場才有——
       // 之前來問過別場、報過名字或按過略過的人，這裡沿用，不用再問一次。
       const existingName = askMediaName ? await getStoredMediaName(userId) : '';
-      await answerQuestion(replyToken, userId, event, existingName, text, { memory: remember });
+      await answerQuestion(replyToken, userId, event, existingName, text, { memory: remember, speakerId });
       // 只在「這個人從沒被問過」時才順手問一次，而且不擋住剛剛的答案——用 push
       // 補問，記者不用先回答完媒體名稱才拿得到他真正想要的內容。
       if (askMediaName && !existingName) {
@@ -3335,6 +3428,12 @@ const CHITCHAT_FIXED_REPLIES = {
 const COURTESY_REPLIES = {
   thanks: '不客氣 🙂 之後想到什麼，直接打給我就好。',
   ack: '好的 🙂 還有想問的，隨時打給我。'
+};
+// 群組版（批次 83）：群組裡「直接打給我」不成立——過了續問視窗，沒 @ 我、沒用「米亞」
+// 開頭，我是不會回的（那正是群組不插話的規矩）。講清楚怎麼叫我，下次才叫得動。
+const COURTESY_REPLIES_GROUP = {
+  thanks: '不客氣 🙂 之後想到什麼，@我或用「米亞」開頭叫我就好。',
+  ack: '好的 🙂 還有想問的，@我或用「米亞」開頭叫我。'
 };
 
 // 任何 routeIntent() 判不出來的訊息最後都會走到這裡（1 對 1 的 handleUnbound()、
@@ -3636,9 +3735,17 @@ async function ownChipEventId(groupId, text) {
   return null;
 }
 
+// ⚠️ 「找真人」（批次 83 補上）：批次 81 在兜底的按鈕列放了這顆，1 對 1 按得動，群組裡
+// 卻不在這份清單上——群組按了等於沒按（視窗外被守門擋掉，視窗內它不是問句也被擋掉）。
+// 偏偏是「記者任何時候都要找得到真人」的那一顆。
 const GROUP_FIXED_BUTTONS = new Set([
-  '最近有哪些活動', '產業趨勢分析', '想問什麼技術', CONTACT_MENU_LABEL, '使用說明', '回首頁'
+  '最近有哪些活動', '產業趨勢分析', '想問什麼技術', CONTACT_MENU_LABEL, '使用說明', '回首頁', '找真人'
 ]);
+
+// 群組續問視窗內，明講要找真人／承辦人的話一律放行（批次 83）。刻意比 lib/menu.js 的
+// isHumanRequest() 窄：那支為了 1 對 1「寧可多攔」，連「你不行啦」「給我電話」都收，
+// 在群組裡那是同事之間會講的話，放行就是插話——這裡只認句子裡明講了要找哪一種人的講法。
+const GROUP_HUMAN_WORD_RE = /真人|人工|客服|承辦|公關/;
 
 async function looksAddressedToBot(groupId, text, speakerId) {
   const s = String(text || '').trim();
@@ -3656,6 +3763,10 @@ async function looksAddressedToBot(groupId, text, speakerId) {
   // 晚上吃什麼」——有「什麼」，會被 ② 當成提問放行，接下來全看模型判不判得出是閒聊。
   // 句子明講在問「大家／各位／你們」，對象就不是米亞；沒提到米亞就安靜。
   if (/大家|各位|你們|妳們|誰要|有人要|有沒有人/.test(s) && !/米亞/.test(s)) return false;
+
+  // ②-後 明講要找真人（批次 83，見 GROUP_HUMAN_WORD_RE 的說明）。「我要找真人」「轉人工」
+  // 沒有問號也沒有疑問詞，② 接不住；記者任何時候都要找得到真人，不能被守門擋掉。
+  if (isHumanRequest(s) && GROUP_HUMAN_WORD_RE.test(s)) return true;
 
   // ② 一句提問（中文或英文，見 GROUP_QUESTION_EN_RE 的說明）
   if (GROUP_QUESTION_RE.test(s) || GROUP_QUESTION_EN_RE.test(s)) return true;
@@ -3904,7 +4015,7 @@ async function handleGroupMessage(replyToken, groupId, text, { mentioned, speake
     // 裡對著別人的閒聊插話，但按鈕是**我們自己請對方按的**，按了沒反應永遠是 bug，
     // 不是體貼。推不出場次時 handleUnbound() 會反問「您想問哪一場」並附上清單——
     // 多問一句，比裝作沒看到好得多。
-    await handleUnbound(replyToken, groupId, text, { silentOnOther: !mentioned && !ownButton, askMediaName: false, remember: false });
+    await handleUnbound(replyToken, groupId, text, { silentOnOther: !mentioned && !ownButton, askMediaName: false, remember: false, speakerId });
     await touchGroupSession(groupId); // 不管有沒有真的答上，只要走到這裡就算還在互動，續命
     return;
   }
@@ -3945,7 +4056,7 @@ async function handleGroupMessage(replyToken, groupId, text, { mentioned, speake
   // currentTopic 的理由跟 1 對 1 那段完全一樣（見 handleEvent() 同一行的說明）。
   const routed = pinGenericTechQueryToEvent(
     await routeIntent(text, buildCalendarCards(await getAllEventRows()),
-      { currentEventId: event.id, ...(await recentTopicContext(groupId)) }),
+      { currentEventId: event.id, ...(await recentTopicContext(groupId)), groupChatter: !mentioned && !ownButton }),
     text, event.id);
 
   // 回報的意見：批次 14 只擋得住「明確 @ 別人」這種訊號很強的情況，續問視窗內
@@ -3999,7 +4110,7 @@ async function handleGroupMessage(replyToken, groupId, text, { mentioned, speake
     }
   }
 
-  await answerQuestion(replyToken, groupId, answerEvent, '（群組提問）', text, { switchNotice, group: true });
+  await answerQuestion(replyToken, groupId, answerEvent, '（群組提問）', text, { switchNotice, group: true, speakerId });
   await touchGroupSession(groupId);
 }
 
@@ -4390,10 +4501,14 @@ export default async function handler(req, res) {
 
   // 這一次 function 呼叫的死線（見 msLeft() 的說明）。從這裡起算——LINE 那邊的
   // reply token 也是 60 秒，兩個時鐘一起起跑最貼近實情。
-  await requestCtx.run({ deadlineAt: Date.now() + REQUEST_BUDGET_MS }, async () => {
+  await requestCtx.run({ deadlineAt: Date.now() + REQUEST_BUDGET_MS, quoteToken: null }, async () => {
     // 依序處理、不平行——記者會現場的量級不需要平行處理，依序執行也不會讓同一批
     // webhook 裡的多個事件互搶 Anthropic／Sheets 配額。
     for (const ev of events) {
+      // 這一則要引用的訊息（只有群組會用到，見 takeQuoteToken()）。每一則事件重設一次，
+      // 前一則沒用掉的 token 不能漏到下一則的回覆上。
+      const store = requestCtx.getStore();
+      if (store) store.quoteToken = ev?.message?.quoteToken || null;
       try {
         await handleEvent(ev);
       } catch (e) {

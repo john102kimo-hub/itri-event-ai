@@ -105,6 +105,7 @@ export function reset() {
   state.sheetLatencyMs = 0;  // 批次 80：>0 時每次讀寫都延遲，讓同時進來的兩個請求真的交錯（測競態用）
   state.photoInbox = [];     // 批次 80：line_photo_inbox 的列 [LINE ID, messageId, 時戳, 已用]
   state.photoUploads = [];   // 批次 79：saveEventPhoto() 被呼叫的紀錄 [eventId, messageId]
+  state.imagePushes = [];    // 批次 83：pushImages() 被呼叫的紀錄（群組裡不該再有）
   state.photoFailIds = [];   // 這些 messageId 模擬下載失敗        // event_changes 的列（批次 78）：[時間, LINE ID, 姓名, 活動 id, 活動名稱, 欄位, 改前, 改後, 來源]
   state.answerText = ''; // 非空＝模擬模型吐出這段原始文字，見 installFetchStub() 的問答分支
   state.loadingCalls.length = 0;
@@ -120,7 +121,8 @@ function bindingRows() {
     id, b.event_id || '', b.media_name || '', b.bound_at ? String(b.bound_at) : '', String(Date.now()), b.note || '',
     b.groupSessionUntil ? String(b.groupSessionUntil) : '',
     b.lastTopic || '',
-    b.lastTurn || ''
+    b.lastTurn || '',
+    b.groupTurns || ''   // J 欄（批次 83）：群組裡每位發問者各自的上一輪
   ]);
 }
 
@@ -145,7 +147,8 @@ export const sheets = {
         event_id: r[1], media_name: r[2], bound_at: Number(r[3]), note: r[5],
         groupSessionUntil: r[6] ? Number(r[6]) : 0,
         lastTopic: r[7] || '',
-        lastTurn: r[8] || ''
+        lastTurn: r[8] || '',
+        groupTurns: r[9] || ''
       });
     }
     if (range.startsWith('line_staff!')) state.staff.push(...rows.map(r => [...r]));
@@ -182,7 +185,7 @@ export const sheets = {
       if (row) values[0].forEach((v, i) => { row[staffM[1].charCodeAt(0) - 65 + i] = v; });
       return;
     }
-    const m = range.match(/^line_users!([A-I])(\d+)(?::([A-I])(\d+))?$/);
+    const m = range.match(/^line_users!([A-J])(\d+)(?::([A-J])(\d+))?$/);
     if (!m) return;
     const rowNum = Number(m[2]);
     const keys = [...state.bindings.keys()];
@@ -202,6 +205,7 @@ export const sheets = {
       if (col === 6) b.groupSessionUntil = v === '' ? 0 : Number(v);
       if (col === 7) b.lastTopic = v;
       if (col === 8) b.lastTurn = v;
+      if (col === 9) b.groupTurns = v;
     });
   },
   // 回傳空陣列＝「分頁本來就存在」，不觸發 lib/contacts-directory.js 的
@@ -212,9 +216,16 @@ export const sheets = {
 
 // ── lib/line.js（只換掉會對外送東西的那幾支）─────────────────────────
 export const line = {
-  async replyOrPush(replyToken, userId, text, quickReplyItems) {
+  // quoteToken：批次 83 起群組回答會引用記者那一則問題，測試要驗得到「引用了哪一則」。
+  async replyOrPush(replyToken, userId, text, quickReplyItems, opts = {}) {
     // to：批次 78 起要驗「通知是推給管理員、不是推給改資料的人」
-    sent.push({ kind: 'text', text, quickReply: quickReplyItems || [], to: userId, push: replyToken === null });
+    sent.push({ kind: 'text', text, quickReply: quickReplyItems || [], to: userId, push: replyToken === null, quoteToken: opts?.quoteToken || null });
+    return true;
+  },
+  // 批次 83：文字答案＋照片同一則 reply 送出（不再另外 push，群組 push 照人數計費）。
+  // 記成一則文字（既有斷言都靠 out[0] 拿文字答案），照片另外記在 images 上。
+  async replyTextWithImages(replyToken, userId, text, quickReplyItems, images, opts = {}) {
+    sent.push({ kind: 'text', text, quickReply: quickReplyItems || [], to: userId, push: replyToken === null, quoteToken: opts?.quoteToken || null, images: String(images || ''), isGroup: !!opts?.isGroup });
     return true;
   },
   // messages 原封不動帶出來：使用說明現在是「影片 ＋ 文字」兩則一起送（批次 46），
@@ -232,7 +243,8 @@ export const line = {
   async startLoading(userId, seconds) {
     state.loadingCalls.push({ userId, seconds });
   },
-  async pushImages() { return { ok: true, skipped: true }; },
+  // 批次 83：記下來——群組裡不該再有照片 push（照人數計費），測試要驗得到。
+  async pushImages(userId, images) { (state.imagePushes ||= []).push({ to: userId, images }); return { ok: true, skipped: true }; },
   async createRichMenu() { return 'rm_fake'; },
   async uploadRichMenuImage() { return true; },
   async setDefaultRichMenu() { return true; },
@@ -362,8 +374,14 @@ function looksLikeTopicFollowUp(text, topicAnswer) {
   return false;
 }
 
-function fakeReporterRoute(text, currentEventHint, topicHint, topicAnswer) {
+function fakeReporterRoute(text, currentEventHint, topicHint, topicAnswer, groupChatter = false) {
   const ids = matchEventIds(text);
+  // 批次 83：群組裡沒被叫到的訊息，路由會多收到一段「群組成員彼此也在聊天」的提示
+  // （lib/router.js GROUP_CHATTER_HINT）。這裡模擬模型照那段提示做：問「你／你們」私事、
+  // 行程的判 other。只是夠測試用的近似，不是在測模型判得準不準。
+  if (groupChatter && /^(那)?(你|妳|你們|妳們|我們)[^?？]{0,12}(到|在哪|拿到|集合|出發|吃|去|來)/.test(text)) {
+    return { intent: 'other', event_ids: [], confidence: 'low' };
+  }
   // 綁定中、而且句子裡有「這場／這次／現場」這種指稱詞 → 在問這一場的事，判 qa。
   // 這是在模擬 lib/router.js currentEventId 那塊提示的精神（「看起來像是在延續、
   // 追問這場活動的內容，請判成 qa」）。批次 57 補上：detectMetaIntent() 那邊同時
@@ -424,7 +442,7 @@ export function installFetchStub() {
       // 路由呼叫跟問答呼叫都打同一個端點，用 system prompt 的特徵分辨
       const json = o => ({ ok: true, json: async () => ({ content: [{ type: 'text', text: JSON.stringify(o) }] }) });
       if (sys.includes('內部職員助理')) return json(fakeStaffRoute(userText));
-      if (sys.includes('意圖判斷器')) return json(fakeReporterRoute(userText, currentEventHint, topicHint, topicAnswer));
+      if (sys.includes('意圖判斷器')) return json(fakeReporterRoute(userText, currentEventHint, topicHint, topicAnswer, /群組成員彼此之間也在聊天/.test(allSys)));
 
       // 智慧兜底（api/line.js composeFallbackReply()）——四條路都對不上時，用米亞的
       // 口吻針對記者這一句講一段貼題的話。這裡回一段固定的假回覆，並把記者原話一起

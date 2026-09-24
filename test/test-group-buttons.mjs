@@ -90,6 +90,10 @@ await harvest('全域邀訪窗口清單', await tap('媒體邀訪需求', { ment
 await harvest('產業趨勢分析', await tap('產業趨勢分析', { mentionSelf: true }));
 await harvest('工研院技術查詢', await tap('工研院 半導體', { mentionSelf: true }));
 await harvest('使用說明', await tap('使用說明', { mentionSelf: true }));
+// 批次 83：兜底那則回覆的按鈕列上有「找真人」（批次 81 加的），採集路徑以前沒走到兜底，
+// 於是那顆在群組按了沒反應也沒人發現——正是這支測試開頭講的「漏掉的那一顆」。
+await harvest('兜底（對不上任何一條路）', await tap('幫我查一下這個', { mentionSelf: true }));
+await harvest('找真人', await tap('找真人', { mentionSelf: true }));
 // 沒設定自訂 chips 的場次 → 預設五題
 reset(); await freshModule();
 await harvest('預設 chips（semi）', await tap('半導體先進封裝技術發表會的重點', { mentionSelf: true }));
