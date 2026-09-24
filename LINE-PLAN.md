@@ -5583,12 +5583,12 @@ QR 用」。**但從來沒有任何一支程式讀這個變數**——承辦人�
 
 #### 三、額度：群組的 push 很貴（已改）
 
-LINE 官方文件：「計算的則數是**送達的人數**……一次 push 送到五個人的聊天室，就算五則」
-（[Send messages](https://developers.line.biz/en/docs/messaging-api/sending-messages/)）；
+LINE 官方文件：「計算的則數是**傳送對象的人數**」，而且「一次請求裡放幾個訊息物件，不影響
+計算的則數」（[Send messages](https://developers.line.biz/en/docs/messaging-api/sending-messages/)）；
 reply 則**不計入**額度（[Pricing](https://developers.line.biz/en/docs/messaging-api/pricing/)）。
 `lib/line.js` 原本的註解寫「push 會計費，但輕用量每月 200 則，記者量級用不完」——那是 1 對 1
-的算法。群組裡問照片，照片是另外 push 的：30 人的群組問三四次照片，就用光整個帳號一個月的
-額度，之後**所有** push 都會失敗（含 reply token 失效時的退路）。
+的算法。群組裡問照片，照片是另外 push 的：30 人的群組每問一次照片就算 30 則，問到第七次
+（30×7＝210）就超過 200 則，之後**所有** push 都會失敗（含 reply token 失效時的退路）。
 
 改成照片跟文字答案**同一則 reply** 送出（`replyTextWithImages()`，一則文字＋最多 4 張照片）。
 LINE 送出當下只檢查網址格式、不抓圖，所以一張圖打不開不會讓整則失敗；真的被拒就退回只送文字，
