@@ -24,7 +24,9 @@ const DEFAULT_IEK_HTML = `<div class="listItem row no-gutters"><article class="c
 // lib/itri-news.js 抓的工研院官網新聞中心清單假 HTML（結構節錄自實測的真實網站
 // 原始碼，見 test-itri-news.mjs 開頭的說明）。同樣獨立成常數，理由跟上面
 // DEFAULT_CONTACTS_DIRECTORY 一樣。
-const DEFAULT_ITRI_HTML = `<dl class="Bb_dotted pic_list sline" id="divContent"><dt><img src='x.webp' alt='x'></dt><dd><a href='ListStyle.aspx?DisplayStyle=01_content&SiteID=1&MmmID=1036276263153520257&MGID=115082015023981066' class='title'>&#24037;&#30740;&#38498;&#25884;AMRA&#25171;&#36896;&#36275;&#22411;&#27231;&#22120;&#20154;&#26032;&#27161;&#28310;</a><div class='Lb'><p>日期：2026/08/20</p></div><p>&#27231;&#22120;&#20154;&#25033;&#29992;&#33853;&#22320;&#30340;&#26368;&#22823;&#35506;&#38988;&#65292;&#24050;&#32147;&#24478;&#25171;&#36896;&#29986;&#21697;&#12290;</p></dd></dl>`;
+// 批次 86：多一則「院士／得獎名單」的報導——補查官網改成「標題或摘要要真的提到那個詞」才附，
+// 原本只有一則機器人新聞、卻拿「院士」去查的測試，在真的官網上本來就不會命中。
+const DEFAULT_ITRI_HTML = `<dl class="Bb_dotted pic_list sline" id="divContent"><dt><img src='x.webp' alt='x'></dt><dd><a href='ListStyle.aspx?DisplayStyle=01_content&SiteID=1&MmmID=1036276263153520257&MGID=115082015023981066' class='title'>&#24037;&#30740;&#38498;&#25884;AMRA&#25171;&#36896;&#36275;&#22411;&#27231;&#22120;&#20154;&#26032;&#27161;&#28310;</a><div class='Lb'><p>日期：2026/08/20</p></div><p>&#27231;&#22120;&#20154;&#25033;&#29992;&#33853;&#22320;&#30340;&#26368;&#22823;&#35506;&#38988;&#65292;&#24050;&#32147;&#24478;&#25171;&#36896;&#29986;&#21697;&#12290;</p></dd><dt><img src='y.webp' alt='y'></dt><dd><a href='ListStyle.aspx?DisplayStyle=01_content&SiteID=1&MmmID=1036276263153520257&MGID=115090715023981099' class='title'>工研院第十屆院士授證 年度得獎名單同步揭曉</a><div class='Lb'><p>日期：2026/09/07</p></div><p>工研院今日舉行院士授證典禮，並公布年度得獎名單與受證院士。</p></dd></dl>`;
 
 export const state = {
   events: [
