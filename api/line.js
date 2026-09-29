@@ -43,8 +43,12 @@ import {
 import { buildCalendarCards, buildAllCalendarCards, routeIntent, formatCalendarReply, calendarQuickReplyItems } from '../lib/router.js';
 import {
   detectMetaIntent, detectCourtesy, isOrgWideNewsAsk, isHumanRequest, matchEventByName, MENU_WORDS, HELP_TEXT, ORG_INTRO_TEXT, buildWelcomeFlex,
-  buildRichMenuDefinition, ALL_MENUS, REPORTER_MENU, STAFF_MENU, findEventMentioned
+  buildRichMenuDefinition, ALL_MENUS, REPORTER_MENU, REPORTER_MENU_REG, STAFF_MENU, findEventMentioned
 } from '../lib/menu.js';
+import {
+  listOpenCampaigns, listRegistrationTopics, loadCampaigns, findRegistrationsForLineUser, bindRegistrationToLine, parseRegBindText,
+  buildRegistrationFlex, buildRegistrationText, describeSessions
+} from '../lib/registration.js';
 import {
   isPasscodeMatch, isStaffAuthenticated, authenticateStaff, routeStaffIntent,
   createDraftEvent, editLink, trainingLink, ensureEventEditCode, getEventRawById,
@@ -2227,6 +2231,105 @@ async function applyStaffMenu(userId) {
   }
 }
 
+// ── 媒體報名（批次 88）────────────────────────────────────────────────
+// 資料層與規則在 lib/registration.js；這裡只負責「米亞這一端」：
+//   ① 「我要報名」→ 一張卡片，點開是 LINE 內建瀏覽器裡的報名表（不是在聊天室一題一題問）
+//   ② 報名完成頁的「用 LINE 連結我的報名」→ 「#報名 R7K3M」→ 把這個 LINE 帳號連到那筆報名
+// 兩條都是固定程式回覆，不呼叫模型。
+// 「我要報名」這類講法只有在「真的有報名可講」時才攔（開放中，或剛截止一週內）。都沒有的時候當一般
+// 訊息，照原本的路徑走（綁定中交給那場問答、沒綁定交給路由／兜底）——上線後只要沒開任何報名活動，
+// 米亞對「報名」「怎麼報名」的反應跟以前完全一樣，不會憑空多出一句「目前沒有開放報名」蓋掉問答。
+async function resolveMetaIntent(text) {
+  const intent = detectMetaIntent(text);
+  if (intent !== 'register') return intent;
+  const { open, closed } = await listRegistrationTopics();
+  return open.length || closed.length ? intent : null;
+}
+
+async function handleRegisterIntent(replyToken, targetId, { group = false, staff = false } = {}) {
+  let campaigns = await listOpenCampaigns();
+  if (!staff && !campaigns.length) {
+    // 剛截止的活動：老實說已截止，並附上媒體聯絡人（後台「媒體聯絡人」欄），比沉默或亂答有用
+    const { closed } = await listRegistrationTopics();
+    if (closed.length) {
+      const c = closed[0];
+      await replyOrPush(replyToken, targetId,
+        `《${c.title}》的媒體報名已經截止了。\n\n` +
+        (c.contact ? `如果還想採訪，請直接聯絡媒體聯絡人：\n${c.contact}` : '如果還想採訪，請打「找真人」，同仁會協助您。'),
+        HOME_MENU);
+      return;
+    }
+  }
+  if (staff) {
+    // 職員看得到草稿（測試中）的報名活動，才能在上線前自己走一遍
+    try {
+      campaigns = (await loadCampaigns()).filter(c => c.status !== 'closed')
+        .map(c => (c.status === 'draft' ? { ...c, title: `${c.title}（測試中）` } : c));
+    } catch { /* 讀不到就退回一般記者看到的 */ }
+  }
+  if (!campaigns.length) {
+    await replyOrPush(replyToken, targetId,
+      '目前沒有開放報名的活動。\n\n有新的媒體報名開放時，這裡會第一時間放出來。想看看有哪些活動可以打「最近有哪些活動」，要找窗口打「媒體邀訪需求」。',
+      HOME_MENU);
+    return;
+  }
+  // 群組裡不帶任何人的身分：卡片是全群組看得到的，把某個人的簽章放上去就等於轉發給所有人
+  const userId = group ? '' : targetId;
+  const regs = group ? [] : await findRegistrationsForLineUser(targetId);
+  const flex = { ...twFlex(buildRegistrationFlex(campaigns, regs, { userId })), quickReply: quickReplyOf(HOME_MENU) };
+  const ok = await replyOrPushMessages(replyToken, targetId, [flex]);
+  if (!ok) {
+    await replyOrPush(replyToken, targetId, toTraditionalTW(buildRegistrationText(campaigns, regs, { userId })), HOME_MENU);
+  }
+}
+
+// 自報的媒體名稱順手記進 line_users（跟 #代碼綁定時問的那個是同一欄）：報名時他已經填過單位了，
+// 之後米亞不必再問一次「方便留個貴媒體的名稱嗎？」。原本是空的或他之前選了「略過」才寫。
+async function rememberMediaNameFromRegistration(userId, outlet) {
+  const name = sanitize(outlet, 40);
+  if (!name) return;
+  try {
+    await ensureLineUsersSheet();
+    const rows = await readRange(LINE_USERS_RANGE);
+    const idx = rows.findIndex(r => r[0] === userId);
+    if (idx === -1) await appendRows('line_users!A:F', [[userId, '', name, '', String(Date.now()), '']]);
+    else if (!rows[idx][2] || rows[idx][2] === '（未提供）') await updateRange(`line_users!C${idx + 2}`, [[name]]);
+  } catch (e) {
+    console.error('報名後記錄媒體名稱失敗（不影響綁定）:', e.message);
+  } finally {
+    invalidateLineUsersCache();
+  }
+}
+
+async function handleRegBind(replyToken, userId, code) {
+  let r;
+  try {
+    r = await bindRegistrationToLine(code, userId);
+  } catch (e) {
+    console.error('綁定報名失敗:', e.message);
+    await replyOrPush(replyToken, userId, '報名資料暫時讀不到，請稍後再按一次；如果一直不行，打「找真人」，同仁會協助您。', HOME_MENU);
+    return;
+  }
+  if (!r.ok) {
+    const msg = {
+      not_found: '找不到這個報名編號 🤔 請回到報名完成的頁面，再按一次「用 LINE 連結我的報名」。如果還是不行，打「找真人」，同仁會協助您。',
+      taken: '這筆報名已經連結到另一個 LINE 帳號了。如果那不是您本人，請打「找真人」，同仁會協助處理。',
+      inactive: '這筆報名已經取消了。要重新報名，請打「我要報名」。',
+      has_other: `您的 LINE 已經連結另一筆報名${r.reg?.name ? `（${r.reg.name}）` : ''}，同一個活動只能連結一筆。要看或修改請打「我要報名」。`
+    }[r.reason] || '這筆報名暫時連結不了，請打「找真人」，同仁會協助您。';
+    await replyOrPush(replyToken, userId, msg, HOME_MENU);
+    return;
+  }
+  await rememberMediaNameFromRegistration(userId, r.reg.outlet);
+  const lines = r.campaign ? describeSessions(r.campaign, r.reg.sessions) : [];
+  await replyOrPush(replyToken, userId,
+    `${r.already ? '這筆報名早就連結好了' : '已連結您的報名'} ✅\n\n` +
+    `${r.campaign ? `《${r.campaign.title}》\n` : ''}${r.reg.name}｜${r.reg.outlet}\n` +
+    `已報名 ${r.reg.sessions.length} 場：\n${lines.map(t => `・${t}`).join('\n')}\n\n` +
+    '想改場次，打「我要報名」就找得到；議程、交通、報到時間，也可以直接問我。',
+    HOME_MENU);
+}
+
 async function handleSetupRichMenu(replyToken, userId) {
   if (!process.env.LINE_CHANNEL_ACCESS_TOKEN) {
     await replyOrPush(replyToken, userId, '尚未設定 LINE_CHANNEL_ACCESS_TOKEN，無法建立圖文選單。', staffChips());
@@ -2239,8 +2342,13 @@ async function handleSetupRichMenu(replyToken, userId) {
     // 失敗，記者就會看到一個完全沒有選單的帳號。
     const before = await listRichMenus();
 
+    // 批次 88：有開放中的媒體報名 → 記者選單用「報名版」（多一格媒體報名）；報名結束後再打一次
+    // 「設定圖文選單」就換回原本那套。兩套底圖各自一張（public/richmenu-{key}.png）。
+    const reporterMenu = (await listOpenCampaigns()).length ? REPORTER_MENU_REG : REPORTER_MENU;
+    const menusToSetup = [reporterMenu, STAFF_MENU];
+
     const created = {};
-    for (const menu of ALL_MENUS) {
+    for (const menu of menusToSetup) {
       const imgRes = await fetch(`${SITE}/richmenu-${menu.key}.png`, { signal: AbortSignal.timeout(15_000) });
       if (!imgRes.ok) throw new Error(`抓取 ${menu.name} 底圖失敗 ${imgRes.status}`);
       const id = await createRichMenu(buildRichMenuDefinition(menu));
@@ -2251,7 +2359,7 @@ async function handleSetupRichMenu(replyToken, userId) {
     // 記者選單設為預設（所有人），職員再逐一覆蓋成職員選單。
     // per-user 連結的優先度高於預設，所以記者永遠看不到「新增活動」「後台數據」
     // 這些內部功能的入口。
-    await setDefaultRichMenu(created[REPORTER_MENU.key]);
+    await setDefaultRichMenu(created[reporterMenu.key]);
 
     const staffIds = await listActiveStaffIds();
     let linked = 0;
@@ -2268,7 +2376,7 @@ async function handleSetupRichMenu(replyToken, userId) {
     console.log(`[line] 圖文選單已設定 ${JSON.stringify(created)} 職員綁定 ${linked}/${staffIds.length} 清掉舊的 ${before.length} 個`);
     await replyOrPush(replyToken, userId,
       '圖文選單已設定完成 ✅\n\n' +
-      `【記者看到的】\n${REPORTER_MENU.buttons.map(b => `・${b.label}`).join('\n')}\n\n` +
+      `【記者看到的${reporterMenu === REPORTER_MENU_REG ? '（報名版）' : ''}】\n${reporterMenu.buttons.map(b => `・${b.label}`).join('\n')}\n\n` +
       `【職員看到的】（已套用到 ${linked} 位職員）\n${STAFF_MENU.buttons.map(b => `・${b.label}`).join('\n')}\n\n` +
       '記者不會看到職員那一套。已經加過好友的人可能要把對話關掉重開才會看到。',
       staffChips());
@@ -2720,9 +2828,10 @@ async function handleStaffMessage(replyToken, userId, text) {
   // routeStaffIntent() 用語意判。六顆職員按鈕會不會被這裡誤攔，測試有釘住。
   const metaIntent = detectMetaIntent(text);
   if (metaIntent === 'news' || metaIntent === 'industry_trend'
-      || metaIntent === 'tech_query' || metaIntent === 'contacts' || metaIntent === 'org_intro') {
+      || metaIntent === 'tech_query' || metaIntent === 'contacts' || metaIntent === 'org_intro'
+      || metaIntent === 'register') {
     console.log(`[line] staff 借用記者端意圖 intent=${metaIntent} q="${text.slice(0, 40)}"`);
-    await handleMetaIntent(replyToken, userId, text, metaIntent, null, {});
+    await handleMetaIntent(replyToken, userId, text, metaIntent, null, { staff: true });
     return;
   }
   if (metaIntent === 'help' || metaIntent === 'switch' || metaIntent === 'menu') {
@@ -3090,7 +3199,7 @@ async function sendHumanContact(replyToken, targetId, text, binding, { speakerId
     [BTN.contact, BTN.events, BTN.trend, BTN.tech, BTN.help]); // 批次 84：不放「找真人」自己
 }
 
-async function handleMetaIntent(replyToken, userId, text, metaIntent, binding, { speakerId = '', group = false } = {}) {
+async function handleMetaIntent(replyToken, userId, text, metaIntent, binding, { speakerId = '', group = false, staff = false } = {}) {
   // ask_name 是「#代碼綁定後問了媒體名稱，下一則要試著擷取」的一次性旗標。
   // 記者在那個視窗裡改按了選單按鈕，代表他跳過了報名字這件事，旗標要當場作廢——
   // 不清掉的話，等他選完活動再回來打的第一句真正的問題，會被 looksLikeNameOrSkip()
@@ -3267,6 +3376,13 @@ async function handleMetaIntent(replyToken, userId, text, metaIntent, binding, {
       // 這場活動兩個都沒設定 → 往下退到全域技術窗口清單，比什麼都拿不到好。
     }
     await sendGlobalContactMenu(replyToken, userId);
+    return;
+  }
+
+  // 媒體報名（批次 88，見 lib/registration.js）。固定程式回覆、不呼叫模型：報名入口答偏一次，
+  // 就是少一位記者。
+  if (metaIntent === 'register') {
+    await handleRegisterIntent(replyToken, userId, { group, staff });
     return;
   }
 
@@ -4149,7 +4265,7 @@ async function handleGroupMessage(replyToken, groupId, text, { mentioned, speake
     return;
   }
 
-  const metaIntent = detectMetaIntent(text);
+  const metaIntent = await resolveMetaIntent(text);
   if (metaIntent) {
     await handleMetaIntent(replyToken, groupId, text, metaIntent, binding, { speakerId, group: true });
     await touchGroupSession(groupId); // 這一輪有回答 → 續問視窗重新計時
@@ -4311,7 +4427,10 @@ async function handleEvent(ev) {
     // 所以退回原本那則純文字歡迎詞——文案本身仍然是完整可用的引導。
     // 批次 84：圖卡本身也掛上起點按鈕——盤點抓到加好友這則一顆按鈕都沒有；手機的圖文
     // 選單要先點開才看得到，LINE 電腦版則完全不顯示圖文選單（官方文件）。
-    const ok = await replyOrPushMessages(ev.replyToken, userId, [{ ...buildWelcomeFlex(), quickReply: toQuickReply(HOME_MENU) }]);
+    // 批次 88：有開放中的媒體報名時，歡迎卡最上面多一顆「媒體報名」。查詢失敗當作沒有，
+    // 不能讓新記者因為報名資料表讀不到就收不到歡迎卡（listOpenCampaigns() 自己吞例外）。
+    const hasRegistration = (await listOpenCampaigns()).length > 0;
+    const ok = await replyOrPushMessages(ev.replyToken, userId, [{ ...buildWelcomeFlex('', { registration: hasRegistration }), quickReply: toQuickReply(HOME_MENU) }]);
     if (!ok) {
       await replyOrPush(ev.replyToken, userId,
         '感謝加入好友！\n\n請掃描活動現場的 QR code，或直接輸入「#活動代碼」開始問答；也可以直接打活動名稱，或點下面的按鈕看看目前有哪些活動。\n\n本帳號會記錄您的提問內容以改善新聞服務，不會蒐集您的個人資料。',
@@ -4422,6 +4541,13 @@ async function handleEvent(ev) {
       STAFF_QUICK_REPLIES);
     return;
   }
+  // 報名頁按「用 LINE 連結我的報名」送來的「#報名 R7K3M」（批次 88）。必須排在職員判斷與一般
+  // 「#活動代碼」之前：它也是 # 開頭，晚一步就會被當成活動代碼、回一句「找不到活動」。
+  const regBindCode = parseRegBindText(text);
+  if (regBindCode) {
+    await handleRegBind(replyToken, userId, regBindCode);
+    return;
+  }
   if (await isStaffAuthenticated(userId)) {
     markStaff();
     await handleStaffMessage(replyToken, userId, text);
@@ -4456,7 +4582,7 @@ async function handleEvent(ev) {
   const binding = await getBinding(userId);
 
   // 活動列表／換一場／使用說明——不管有沒有綁定都要先攔，見 handleMetaIntent() 的說明
-  const metaIntent = detectMetaIntent(text);
+  const metaIntent = await resolveMetaIntent(text);
   if (metaIntent) {
     console.log(`[line] meta intent=${metaIntent} user=${userId} q="${text.slice(0, 40)}"`);
     await handleMetaIntent(replyToken, userId, text, metaIntent, binding);

@@ -21,6 +21,14 @@
       "destination": "/report.html"
     },
     {
+      "source": "/register",
+      "destination": "/register.html"
+    },
+    {
+      "source": "/registrations",
+      "destination": "/registrations.html"
+    },
+    {
       "source": "/geo",
       "destination": "/geo.html"
     },
@@ -45,6 +53,9 @@
     },
     "api/training.js": {
       "maxDuration": 60
+    },
+    "api/events.js": {
+      "maxDuration": 30
     },
     "api/event-page.js": {
       "includeFiles": "public/event.html"

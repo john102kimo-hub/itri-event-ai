@@ -8,6 +8,8 @@
 // 用法（開發機要有 Chromium，這支不會在 Vercel 上執行）：
 //   node assets/build-richmenu.mjs
 //   CHROME=/path/to/chrome node assets/build-richmenu.mjs   # 指定瀏覽器
+//   node assets/build-richmenu.mjs reporter-reg              # 只產指定的（可多個 key）；沒帶＝全部重產
+//   （批次 88：新增報名版選單時，不想把另外兩張現成的底圖一起用不同機器的字型重畫一遍）
 //
 // 改完記得在 LINE 用職員模式重打一次「設定圖文選單」，線上才會換成新的圖。
 
@@ -15,7 +17,7 @@ import { writeFileSync, mkdtempSync } from 'fs';
 import { execFileSync } from 'child_process';
 import { tmpdir } from 'os';
 import { join, resolve, dirname } from 'path';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 import { ALL_MENUS, RICH_MENU_SIZE, buildRichMenuDefinition } from '../lib/menu.js';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -36,7 +38,9 @@ const CHROME_CANDIDATES = [
   '/usr/bin/chromium',
   '/usr/bin/chromium-browser',
   '/usr/bin/google-chrome',
-  '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
+  '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+  'C:\Program Files\Google\Chrome\Application\chrome.exe',
+  'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe'
 ].filter(Boolean);
 
 function html(menu) {
@@ -51,7 +55,7 @@ function html(menu) {
   * { margin:0; padding:0; box-sizing:border-box; }
   html, body { width:${width}px; height:${height}px; overflow:hidden; }
   body {
-    font-family:"WenQuanYi Zen Hei","Noto Sans CJK TC",sans-serif;
+    font-family:"WenQuanYi Zen Hei","Noto Sans CJK TC","Microsoft JhengHei","PingFang TC",sans-serif;
     background:#FFFFFF;
     display:grid;
     /* 逐格寫死像素，數值來自 buildRichMenuDefinition() 的可點區域（見檔案上方）。
@@ -96,7 +100,9 @@ function findChrome() {
 const chrome = findChrome();
 const tmp = mkdtempSync(join(tmpdir(), 'richmenu-'));
 
+const only = process.argv.slice(2);
 for (const menu of ALL_MENUS) {
+  if (only.length && !only.includes(menu.key)) continue;
   const src = join(tmp, `${menu.key}.html`);
   const out = join(ROOT, 'public', `richmenu-${menu.key}.png`);
   writeFileSync(src, html(menu));
@@ -106,7 +112,7 @@ for (const menu of ALL_MENUS) {
     `--window-size=${width},${height}`,
     `--screenshot=${out}`,
     '--default-background-color=FFFFFFFF',
-    `file://${src}`
+    pathToFileURL(src).href
   ], { stdio: ['ignore', 'ignore', 'pipe'] });
   console.log(`✅ public/richmenu-${menu.key}.png  （${menu.name}：${menu.buttons.map(b => b.label).join('／')}）`);
 }

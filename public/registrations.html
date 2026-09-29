@@ -1,0 +1,467 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex,nofollow">
+<title>媒體報名 — 工研院活動溝通 AI 平台</title>
+<style>
+  :root { --primary:#0F9E7A; --primary-dark:#0a7a60; --primary-light:rgba(15,158,122,0.08); --text:#1a1a2e; --muted:#6b7280; --bg:#f0f4f7; --card:#fff; --border:#e5e7eb; --radius:12px; --danger:#dc2626; --warn:#b45309; --line:#06C755; --font:'PingFang TC','Noto Sans TC','Microsoft JhengHei',sans-serif; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: var(--font); background: var(--bg); color: var(--text); line-height: 1.55; font-size: 15px; }
+  a { color: var(--primary-dark); }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 24px 20px 90px; }
+
+  #gate { position: fixed; inset: 0; background: linear-gradient(135deg,#0b3d30,#0F9E7A); display: flex; align-items: center; justify-content: center; padding: 20px; z-index: 50; }
+  #gate-box { background: #fff; border-radius: 20px; padding: 36px 30px; width: 100%; max-width: 380px; text-align: center; box-shadow: 0 24px 64px rgba(0,0,0,.25); }
+  #gate-box h1 { font-size: 1.25rem; margin-bottom: 6px; }
+  #gate-box p { color: var(--muted); font-size: .88rem; margin-bottom: 22px; }
+  #gate-box input { width: 100%; border: 2px solid var(--border); border-radius: 12px; padding: 13px; font: inherit; font-size: 1rem; text-align: center; outline: none; margin-bottom: 12px; }
+  #gate-err { color: var(--danger); font-size: .82rem; margin-top: 8px; min-height: 18px; }
+
+  .top { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+  .top h1 { font-size: 1.3rem; margin-right: auto; }
+  .btn { border: none; border-radius: 10px; padding: 9px 15px; font: inherit; font-size: .88rem; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; background: var(--primary); color: #fff; text-decoration: none; }
+  .btn.outline { background: #fff; color: var(--text); border: 1px solid var(--border); }
+  .btn.small { padding: 5px 10px; font-size: .8rem; border-radius: 8px; }
+  .btn.danger { background: #fff; color: var(--danger); border: 1px solid #fecaca; }
+  .btn:disabled { opacity: .5; cursor: default; }
+  select, input[type=text], input[type=search], textarea { font: inherit; font-size: .9rem; border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; background: #fff; outline: none; }
+  select:focus, input:focus, textarea:focus { border-color: var(--primary); }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; margin-bottom: 16px; }
+  .card h2 { font-size: 1rem; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .card h2 small { font-weight: 400; color: var(--muted); font-size: .8rem; }
+  .pill { display: inline-block; font-size: .75rem; font-weight: 700; border-radius: 999px; padding: 2px 10px; }
+  .pill.open { background: #dcfce7; color: #166534; } .pill.draft { background: #fef3c7; color: #92400e; } .pill.closed { background: #e5e7eb; color: #4b5563; }
+  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 12px; }
+  .kpi { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; }
+  .kpi .n { font-size: 1.7rem; font-weight: 800; color: var(--primary); line-height: 1.1; }
+  .kpi .l { font-size: .78rem; color: var(--muted); margin-top: 3px; }
+  .kpi.warn .n { color: var(--warn); }
+  .linkrow { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .linkrow code { flex: 1; min-width: 200px; background: #f9fafb; border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font-size: .82rem; overflow-wrap: anywhere; }
+  .qrs { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 18px; margin-top: 16px; }
+  .qrs .q { text-align: center; }
+  .qrs canvas { width: 200px; max-width: 100%; height: auto; border: 1px solid var(--border); border-radius: 10px; }
+  .qrs .q b { display: block; margin-top: 6px; }
+  .qrs .q span { display: block; color: var(--muted); font-size: .8rem; margin-bottom: 6px; }
+  .tip { background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 10px; padding: 10px 12px; font-size: .85rem; color: #166534; margin-top: 14px; line-height: 1.7; }
+
+  table { width: 100%; border-collapse: collapse; font-size: .86rem; }
+  th { text-align: left; color: var(--muted); font-weight: 600; font-size: .78rem; padding: 8px 8px; border-bottom: 2px solid var(--border); white-space: nowrap; }
+  td { padding: 9px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  tr.cancelled td { color: #9ca3af; text-decoration: line-through; }
+  tr.cancelled td.act { text-decoration: none; }
+  tr.test td { background: #fffbeb; }
+  .sess-tags { display: flex; flex-wrap: wrap; gap: 4px; }
+  .tag { background: var(--primary-light); color: var(--primary-dark); border-radius: 6px; padding: 1px 7px; font-size: .75rem; font-weight: 700; }
+  .flag { font-size: .72rem; border-radius: 6px; padding: 1px 6px; font-weight: 600; white-space: nowrap; }
+  .flag.yes { background: #dcfce7; color: #166534; } .flag.no { background: #fef3c7; color: #92400e; } .flag.maybe { background: #e0e7ff; color: #3730a3; } .flag.unknown { background: #f3f4f6; color: #6b7280; }
+  .flag.line { background: #dcfce7; color: #166534; }
+  .bar-row { display: grid; grid-template-columns: 210px 1fr 60px; gap: 10px; align-items: center; padding: 6px 4px; cursor: pointer; border-radius: 8px; }
+  .bar-row:hover, .bar-row.sel { background: var(--primary-light); }
+  .bar-row .name { font-size: .85rem; } .bar-row .name b { color: var(--primary-dark); margin-right: 6px; }
+  .bar-row .name small { color: var(--muted); display: block; font-size: .74rem; }
+  .bar-row .track { background: #eef2f1; border-radius: 6px; height: 14px; overflow: hidden; }
+  .bar-row .fill { background: var(--primary); height: 100%; border-radius: 6px; min-width: 2px; }
+  .bar-row .num { text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .filters { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
+  .filters label { font-size: .82rem; color: var(--muted); display: inline-flex; gap: 5px; align-items: center; cursor: pointer; }
+  .muted { color: var(--muted); } .small { font-size: .8rem; }
+  .empty { text-align: center; color: var(--muted); padding: 30px 0; }
+
+  .modal { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: none; align-items: flex-start; justify-content: center; padding: 30px 14px; overflow: auto; z-index: 40; }
+  .modal.show { display: flex; }
+  .modal .box { background: #fff; border-radius: 16px; padding: 22px; width: 100%; max-width: 760px; }
+  .modal h2 { margin-bottom: 14px; font-size: 1.1rem; }
+  .fld { margin-bottom: 14px; }
+  .fld label { display: block; font-weight: 600; font-size: .86rem; margin-bottom: 4px; }
+  .fld .help { color: var(--muted); font-size: .78rem; margin-top: 3px; line-height: 1.6; }
+  .fld input[type=text], .fld select, .fld textarea { width: 100%; }
+  .fld textarea { min-height: 90px; resize: vertical; }
+  .fld textarea.mono { font-family: ui-monospace, 'Cascadia Mono', Menlo, monospace; font-size: .82rem; min-height: 230px; line-height: 1.6; }
+  .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .errs { background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; border-radius: 10px; padding: 10px 14px; font-size: .84rem; margin-bottom: 12px; line-height: 1.7; }
+  .errs ul { margin-left: 1.2em; }
+  .actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 8px; flex-wrap: wrap; }
+  .chk { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 6px; }
+  .chk label { font-weight: 400; display: flex; gap: 6px; align-items: flex-start; font-size: .84rem; }
+  #toast { position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%); background: #111827; color: #fff; padding: 10px 18px; border-radius: 10px; font-size: .88rem; opacity: 0; transition: opacity .2s; pointer-events: none; z-index: 60; }
+  #toast.show { opacity: 1; }
+  @media (max-width: 720px) { .bar-row { grid-template-columns: 1fr 50px; } .bar-row .track { grid-column: 1 / -1; order: 3; } .row2 { grid-template-columns: 1fr; } .scroll-x { overflow-x: auto; } table { min-width: 760px; } }
+</style>
+</head>
+<body>
+
+<div id="gate"><div id="gate-box">
+  <h1>📝 媒體報名</h1>
+  <p>請輸入管理員密碼</p>
+  <input id="gate-input" type="password" placeholder="管理員密碼" autocomplete="current-password" onkeydown="if(event.key==='Enter')unlock()">
+  <button class="btn" style="width:100%;justify-content:center;padding:13px" onclick="unlock()">進入</button>
+  <div id="gate-err"></div>
+</div></div>
+
+<div class="wrap" id="page" style="display:none">
+  <div class="top">
+    <h1>📝 媒體報名</h1>
+    <select id="sel-camp" onchange="pick(this.value)"></select>
+    <button class="btn outline" onclick="load()">重整</button>
+    <button class="btn outline" onclick="openEdit(false)">編輯設定</button>
+    <button class="btn outline" onclick="openEdit(true)">＋ 新增報名活動</button>
+    <a class="btn outline" href="/">← 後台</a>
+  </div>
+
+  <div id="empty" class="card empty" style="display:none">
+    還沒有報名活動。按右上角「＋ 新增報名活動」，貼上場次清單就能開始。
+  </div>
+
+  <div id="main" style="display:none">
+    <div class="card" id="c-link"></div>
+    <div class="kpis" id="kpis" style="margin-bottom:16px"></div>
+    <div class="card"><h2>各場報名人數 <small>點一場，下面的名單只看那一場</small></h2><div id="bars"></div></div>
+    <div class="card">
+      <h2>報名名單 <small id="list-count"></small></h2>
+      <div class="filters">
+        <input type="search" id="q" placeholder="搜尋姓名、媒體、Email、手機" oninput="renderList()" style="min-width:230px">
+        <select id="f-sess" onchange="renderList()"></select>
+        <label><input type="checkbox" id="f-out" onchange="renderList()"> 只看名單外</label>
+        <label><input type="checkbox" id="f-can" onchange="renderList()"> 顯示已取消</label>
+        <label><input type="checkbox" id="f-test" onchange="load()"> 含測試</label>
+        <span style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn outline small" onclick="copyCol('email')">複製 Email</button>
+          <button class="btn outline small" onclick="copyCol('phone')">複製手機</button>
+          <button class="btn small" onclick="exportCsv()">匯出 CSV</button>
+        </span>
+      </div>
+      <div class="scroll-x"><table><thead><tr>
+        <th>編號</th><th>姓名／媒體</th><th>Email／手機</th><th>場次</th><th>選填</th><th>名單</th><th>報名時間</th><th></th>
+      </tr></thead><tbody id="tb"></tbody></table></div>
+      <div id="noRows" class="empty" style="display:none">沒有符合的報名</div>
+    </div>
+  </div>
+</div>
+
+<!-- 編輯報名活動 -->
+<div class="modal" id="m-edit"><div class="box">
+  <h2 id="m-edit-title">報名活動設定</h2>
+  <div class="errs" id="m-errs" style="display:none"></div>
+  <div class="row2">
+    <div class="fld"><label>活動代碼</label><input type="text" id="e-id" placeholder="tw2027"><div class="help">網址用的短代碼，英文小寫、數字、連字號。建立後不能改。</div></div>
+    <div class="fld"><label>狀態</label><select id="e-status">
+      <option value="draft">草稿（有連結的人才進得來；送出的是測試報名）</option>
+      <option value="open">開放報名</option><option value="closed">已截止</option></select>
+      <div class="help">要對外發邀請函前，先用「草稿」自己測一輪，再改成「開放報名」。</div></div>
+  </div>
+  <div class="fld"><label>活動名稱</label><input type="text" id="e-title"></div>
+  <div class="fld"><label>報名截止時間（選填）</label><input type="text" id="e-closes" placeholder="2026-10-27 12:00　（只寫日期＝當天 23:59 截止）"><div class="help">到了就自動關閉，不用記得手動改狀態。台灣時間。</div></div>
+  <div class="fld"><label>報名頁上方說明</label><textarea id="e-intro"></textarea></div>
+  <div class="fld"><label>場次清單</label><textarea class="mono" id="e-sessions" spellcheck="false"></textarea>
+    <div class="help">一行一場：<b>代碼｜日期｜時間｜名稱｜場地｜備註｜狀態｜詳細資料網址</b>（後四項選填）。日期可寫 2026-10-28 或 10/28；時間寫 09:30-12:00；狀態寫 開放／截止／額滿／取消（不寫＝開放）。<br>
+    可以整批從 Excel 或 Word 貼過來，欄位之間用「｜」或「|」。存檔時任何一行有問題都會退回，並指出是哪一行。</div></div>
+  <div class="fld"><label>選填項目（選填）</label><textarea id="e-options" style="min-height:80px" spellcheck="false"></textarea>
+    <div class="help">一行一項：<b>代碼｜顯示文字｜限定場次｜類型</b>。限定場次可空（＝任何場次都顯示）；類型寫 number 是 0–9 的人數選單，不寫就是勾選。<br>例：<code>meal｜需要餐盒（12:00 後領取）｜A1</code></div></div>
+  <div class="fld"><label>媒體聯絡人（顯示在報名頁最下方）</label><textarea id="e-contact" style="min-height:70px"></textarea><div class="help">Email 和電話會自動變成可點的連結。</div></div>
+  <div class="fld"><label>個資告知（報名頁送出鈕上方，選填）</label><textarea id="e-privacy" style="min-height:90px"></textarea><div class="help">留空＝不顯示（預設不放）。之後想放，貼在這裡就會出現在送出鈕上方。</div></div>
+  <div class="fld"><label>報名完成後的「加米亞 LINE」說明（一行一點）</label><textarea id="e-pitch" style="min-height:80px"></textarea><div class="help">留空＝使用預設。只寫米亞現在真的做得到的事。</div></div>
+  <div class="actions"><button class="btn outline" onclick="closeModal('m-edit')">取消</button><button class="btn" id="e-save" onclick="saveEdit()">儲存</button></div>
+</div></div>
+
+<!-- 改單筆的場次 -->
+<div class="modal" id="m-sess"><div class="box" style="max-width:560px">
+  <h2 id="m-sess-title">修改場次</h2>
+  <div class="chk" id="m-sess-list"></div>
+  <div class="actions"><button class="btn outline" onclick="closeModal('m-sess')">取消</button><button class="btn" onclick="saveSess()">儲存</button></div>
+</div></div>
+
+<div id="toast"></div>
+
+<script>
+'use strict';
+let PWD = '', DATA = null, CUR = '', FSESS = '', editingNew = false, editSessId = '';
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const API = '/api/events';
+
+// 範例：眺望～2027 的 16 場，時間、場地、場次名稱取自 IEK 官網的活動頁（2026-09-29 核對）：
+// https://iekweb2.iek.org.tw/IEKConf/Client/confinfo.aspx?mode=confinfo&conf_no=303869255
+// 每場最後一欄是該場的詳細議程頁（session_id 不是照順序排的，別自己推）。
+const IEK = 'https://iekweb2.iek.org.tw/IEKConf/Client/confinfo.aspx?mode=agenda&conf_no=303869255&session_id=';
+const SAMPLE = {
+  id: 'tw2027', title: '眺望～2027產業發展趨勢研討會',
+  intro: '誠摯邀請媒體朋友蒞臨採訪。媒體請直接在本頁報名（不需要到 IEK 官網購票），勾選要採訪的場次，約 1 分鐘完成；報名後仍可回來修改。',
+  sessions: [
+    ['A1', '2026-10-28', '09:00-11:50', '活動開幕暨專刊發表《無人科技》', '201 廳', '09:00 報到、09:15 媒體聯訪', 3558],
+    ['A2', '2026-10-28', '13:30-16:35', '通訊', '402 廳', '', 3559],
+    ['B1', '2026-10-29', '09:30-12:00', '全球AI競局', '402AB 廳', '', 3560],
+    ['B2', '2026-10-29', '13:30-16:00', 'AI應用與產業、組織轉型', '402AB 廳', '', 3561],
+    ['C1', '2026-10-30', '09:00-11:50', '半導體', '402 廳', '', 3562],
+    ['C2', '2026-10-30', '13:30-16:40', '智慧移動載具', '402 廳', '', 3563],
+    ['D1', '2026-11-02', '09:00-11:50', '石化與新材料', '402AB 廳', '', 3566],
+    ['D2', '2026-11-02', '13:20-16:00', '特用與綠色化學', '402AB 廳', '', 3567],
+    ['E1', '2026-11-03', '09:00-12:00', '生醫', '402AB 廳', '', 3568],
+    ['E2', '2026-11-03', '13:30-16:30', '健康照護', '402AB 廳', '', 3569],
+    ['F1', '2026-11-04', '09:00-11:55', 'AI 產業', '402 廳', '', 3570],
+    ['F2', '2026-11-04', '13:30-16:50', '電子零組件', '402 廳', '', 3573],
+    ['G1', '2026-11-05', '09:10-11:40', '先進電子材料', '402 廳', '', 3572],
+    ['G2', '2026-11-05', '13:30-16:30', '智慧機械 × AI機器人', '402 廳', '', 3571],
+    ['H1', '2026-11-06', '09:00-11:50', '全球市場展望', '402 廳', '', 3574],
+    ['H2', '2026-11-06', '13:30-16:30', '電力建設', '402 廳', '', 3565]
+  ].map(([code, date, time, title, room, note, sid]) => [code, date, time, title, room, note, '', IEK + sid].join('｜')).join('\n'),
+  options: ['interview｜想參加 09:15 媒體聯訪（名額有限，由主辦單位另行確認）｜A1', 'meal｜需要餐盒（活動結束後領取）｜A1', 'party｜同行人數（含攝影，不含本人）｜｜number'].join('\n'),
+  contact: '工研院行銷傳播處 朱則瑋\nitriA70541@itri.org.tw\n0934-267-766'
+};
+
+function toast(msg) { const t = $('toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove('show'), 2200); }
+async function call(method, action, params = {}) {
+  const headers = { 'X-Admin-Password': PWD };
+  let res;
+  if (method === 'GET') res = await fetch(`${API}?${new URLSearchParams({ action, ...params })}`, { headers });
+  else res = await fetch(API, { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ action, ...params }) });
+  return res;
+}
+async function callJson(method, action, params) {
+  const res = await call(method, action, params);
+  let data = {}; try { data = await res.json(); } catch {}
+  if (!res.ok) { const e = new Error(data.error || `錯誤 ${res.status}`); e.status = res.status; e.details = data.details; throw e; }
+  return data;
+}
+
+async function unlock() {
+  PWD = $('gate-input').value;
+  $('gate-err').textContent = '';
+  try { await load(); sessionStorage.setItem('itri_pwd', PWD); $('gate').style.display = 'none'; $('page').style.display = 'block'; }
+  catch (e) { $('gate-err').textContent = e.status === 401 ? '密碼錯誤' : e.message; }
+}
+async function load(keepCur = true) {
+  const includeTest = $('f-test') && $('f-test').checked ? '1' : '';
+  DATA = await callJson('GET', 'reg_admin_list', { c: keepCur ? CUR : '', include_test: includeTest });
+  CUR = DATA.current;
+  render();
+}
+function pick(id) { CUR = id; FSESS = ''; load(); }
+
+/* ── 畫面 ───────────────────────────────────────────── */
+function statusPill(s) { return `<span class="pill ${s}">${{ open: '開放報名', draft: '草稿（測試中）', closed: '已截止' }[s] || s}</span>`; }
+function render() {
+  const has = DATA.campaigns.length > 0;
+  $('empty').style.display = has ? 'none' : 'block';
+  $('main').style.display = has ? 'block' : 'none';
+  const sel = $('sel-camp');
+  sel.innerHTML = DATA.campaigns.map((c) => `<option value="${esc(c.id)}"${c.id === CUR ? ' selected' : ''}>${esc(c.title)}（${esc(c.id)}）</option>`).join('');
+  sel.style.display = DATA.campaigns.length > 1 ? '' : 'none';
+  if (!has) return;
+  const camp = DATA.campaigns.find((c) => c.id === CUR);
+  renderLink(camp); renderKpis(); renderBars();
+  $('f-sess').innerHTML = `<option value="">全部場次</option>` + DATA.sessions.map((s) => `<option value="${esc(s.code)}"${s.code === FSESS ? ' selected' : ''}>${esc(s.code)} ${esc(s.md)} ${esc(s.title)}</option>`).join('');
+  renderList();
+}
+function renderLink(camp) {
+  const url = DATA.links.form;
+  const line = DATA.line;
+  $('c-link').innerHTML = `
+    <h2>${esc(camp.title)} ${statusPill(camp.status)} <small>${camp.closes_at ? '截止：' + esc(camp.closes_at) : '未設定截止時間'}</small></h2>
+    <div class="linkrow"><code id="form-url">${esc(url)}</code>
+      <button class="btn outline small" onclick="copyText($('form-url').textContent)">複製連結</button>
+      <a class="btn outline small" href="${esc(url)}" target="_blank" rel="noopener">開啟報名頁 ↗</a>
+      <select id="quick-status" onchange="quickStatus(this.value)" title="快速切換狀態">
+        <option value="">切換狀態…</option><option value="draft">改成草稿</option><option value="open">開放報名</option><option value="closed">已截止</option></select></div>
+    ${camp.status === 'draft' ? `<div class="tip" style="background:#fffbeb;border-color:#fde68a;color:#92400e">目前是<b>草稿</b>：只有拿到連結的人開得到，送出的報名會標成「測試」、不列入統計。測完請按下面「清除測試報名」，再改成「開放報名」。<button class="btn outline small" style="margin-left:8px" onclick="clearTests()">清除測試報名（${DATA.stats.test}）</button></div>` : ''}
+    <div class="qrs">
+      <div class="q"><canvas id="qr-form"></canvas><b>① 報名 QR</b><span>邀請函的主角：大按鈕＋這個 QR</span><button class="btn outline small" onclick="dlQr('qr-form','報名QR')">下載圖檔</button></div>
+      ${line.basic_id ? `<div class="q"><canvas id="qr-line"></canvas><b>② 米亞 LINE QR（選用）</b><span>邀請函放小一點，文字寫「報名後想隨時查議程、交通」</span><button class="btn outline small" onclick="dlQr('qr-line','米亞LINE_QR')">下載圖檔</button></div>` : `<div class="q muted small" style="align-self:center">尚未設定 LINE_BASIC_ID，這裡不會出現米亞 QR。</div>`}
+    </div>
+    <div class="tip"><b>邀請函怎麼放才不會搞混：</b>報名是<b>唯一必做的事</b>（大按鈕＋QR，放上面）；米亞 LINE 放<b>下面小小的「選用」</b>，文字寫清楚好處。手機讀者給<b>連結按鈕</b>（QR 用手機掃自己螢幕掃不了），列印或桌機讀者才靠 QR。兩個 QR 底下各自寫一句話，顏色不要一樣。</div>`;
+  loadQr().then(() => {
+    drawQr($('qr-form'), url, '掃碼報名', camp.title, '#0F9E7A');
+    if (line.basic_id && $('qr-line')) drawQr($('qr-line'), line.add_friend_url, '加米亞 LINE 好友（選用）', '議程、交通、報到時間，隨時問', '#06C755');
+  });
+}
+function renderKpis() {
+  const s = DATA.stats, t = DATA.option_totals;
+  const opts = DATA.options.map((o) => `<div class="kpi"><div class="n">${t[o.key] || 0}</div><div class="l">${esc(o.label.replace(/（.*$/, ''))}${o.type === 'number' ? '（人）' : ''}</div></div>`).join('');
+  $('kpis').innerHTML = `
+    <div class="kpi"><div class="n">${s.people}</div><div class="l">報名人數</div></div>
+    <div class="kpi"><div class="n">${s.outlets}</div><div class="l">媒體家數</div></div>
+    <div class="kpi"><div class="n">${s.line_bound}</div><div class="l">已連結 LINE</div></div>
+    ${s.out_of_roster == null ? `<div class="kpi"><div class="n">–</div><div class="l">名單外（尚未匯入記者名單）</div></div>` : `<div class="kpi warn"><div class="n">${s.out_of_roster}</div><div class="l">名單外，需要確認</div></div>`}
+    ${opts}
+    ${s.cancelled ? `<div class="kpi"><div class="n">${s.cancelled}</div><div class="l">已取消</div></div>` : ''}`;
+}
+function renderBars() {
+  const max = Math.max(1, ...DATA.per_session.map((p) => p.count));
+  const by = Object.fromEntries(DATA.per_session.map((p) => [p.code, p]));
+  let lastDate = '';
+  $('bars').innerHTML = DATA.sessions.map((s) => {
+    const p = by[s.code] || { count: 0, outlets: 0 };
+    const head = s.date !== lastDate ? `<div class="small muted" style="margin:${lastDate ? '10px' : '0'} 0 2px 4px"><b>${esc(s.dateLabel)}</b></div>` : '';
+    lastDate = s.date;
+    return `${head}<div class="bar-row${FSESS === s.code ? ' sel' : ''}" onclick="filterSess('${esc(s.code)}')">
+      <div class="name"><b>${esc(s.code)}</b>${esc(s.title)}<small>${esc(s.time)}${s.status !== 'open' ? '・' + ({ closed: '已截止', full: '額滿', cancelled: '已取消' }[s.status]) : ''}</small></div>
+      <div class="track"><div class="fill" style="width:${p.count ? Math.max(3, p.count / max * 100) : 0}%"></div></div>
+      <div class="num">${p.count}<small class="muted" style="font-weight:400"> 人</small></div></div>`;
+  }).join('');
+}
+function filterSess(code) { FSESS = FSESS === code ? '' : code; $('f-sess').value = FSESS; renderBars(); renderList(); }
+function visibleRegs() {
+  const q = $('q').value.trim().toLowerCase();
+  const fs = $('f-sess').value; FSESS = fs;
+  return DATA.regs.filter((g) => {
+    if (!$('f-can').checked && g.status !== 'active') return false;
+    if ($('f-out').checked && g.roster !== 'no' && g.roster !== 'maybe') return false;
+    if (fs && !g.sessions.includes(fs)) return false;
+    if (q && ![g.name, g.outlet, g.email, g.phone, g.phone_label, g.reg_id].join(' ').toLowerCase().includes(q)) return false;
+    return true;
+  });
+}
+function optText(g) {
+  return DATA.options.map((o) => {
+    const v = g.options[o.key];
+    if (!v) return '';
+    return o.type === 'number' ? `${esc(o.label.replace(/（.*$/, ''))} ${esc(v)}` : esc(o.label.replace(/（.*$/, ''));
+  }).filter(Boolean).join('<br>');
+}
+function renderList() {
+  const rows = visibleRegs();
+  $('list-count').textContent = `${rows.length} 筆`;
+  $('noRows').style.display = rows.length ? 'none' : 'block';
+  $('tb').innerHTML = rows.map((g) => `
+    <tr class="${g.status !== 'active' ? 'cancelled' : ''}${g.test ? ' test' : ''}">
+      <td><code>${esc(g.reg_id)}</code>${g.test ? '<br><span class="flag no">測試</span>' : ''}${g.dup ? `<br><span class="flag no" title="同一個 Email 有 ${g.dup + 1} 列，已合併計算">重複×${g.dup + 1}</span>` : ''}</td>
+      <td><b>${esc(g.name)}</b><br><span class="muted">${esc(g.outlet)}</span>${g.note ? `<br><span class="small" style="color:var(--warn)">📝 ${esc(g.note)}</span>` : ''}</td>
+      <td>${esc(g.email)}<br><span class="muted">${esc(g.phone_label)}</span></td>
+      <td><div class="sess-tags">${g.sessions.map((c) => `<span class="tag">${esc(c)}</span>`).join('')}</div></td>
+      <td class="small">${optText(g)}</td>
+      <td>${{ yes: '<span class="flag yes">名單內</span>', no: '<span class="flag no">名單外</span>', maybe: '<span class="flag maybe" title="名字在記者名單裡，但媒體不同">同名不同媒體</span>', unknown: '<span class="flag unknown">–</span>' }[g.roster]}${g.line_bound ? '<br><span class="flag line" style="margin-top:3px;display:inline-block">LINE</span>' : ''}</td>
+      <td class="small muted">${esc((g.created_at || '').replace('T', ' ').replace('+08:00', '').slice(5, 16))}</td>
+      <td class="act" style="white-space:nowrap">
+        <button class="btn outline small" onclick="editSess('${esc(g.reg_id)}')">場次</button>
+        <button class="btn outline small" onclick="editNote('${esc(g.reg_id)}')">備註</button>
+        ${g.status === 'active' ? `<button class="btn danger small" onclick="setStatus('${esc(g.reg_id)}','cancelled')">取消</button>` : `<button class="btn outline small" onclick="setStatus('${esc(g.reg_id)}','active')">恢復</button>`}
+        <button class="btn danger small" onclick="setStatus('${esc(g.reg_id)}','deleted')" title="從名單移除（試算表裡那一列還在，標成 deleted）">刪除</button>
+      </td></tr>`).join('');
+}
+
+/* ── 操作 ───────────────────────────────────────────── */
+async function update(regId, patch, okMsg) {
+  try { await callJson('POST', 'reg_admin_update', { reg_id: regId, ...patch }); toast(okMsg || '已更新'); await load(); }
+  catch (e) { alert(e.message); }
+}
+function setStatus(id, status) {
+  if (status === 'deleted' && !confirm('確定要把這筆報名從名單移除嗎？（試算表裡那一列還在，標成 deleted，找得回來）')) return;
+  update(id, { status }, { cancelled: '已取消', active: '已恢復', deleted: '已移除' }[status]);
+}
+function editNote(id) {
+  const g = DATA.regs.find((x) => x.reg_id === id);
+  const v = prompt('備註（只有後台看得到）', g ? g.note : '');
+  if (v !== null) update(id, { note: v }, '備註已儲存');
+}
+function editSess(id) {
+  const g = DATA.regs.find((x) => x.reg_id === id); if (!g) return;
+  editSessId = id;
+  $('m-sess-title').textContent = `修改場次：${g.name}（${g.outlet}）`;
+  $('m-sess-list').innerHTML = DATA.sessions.map((s) => `<label><input type="checkbox" value="${esc(s.code)}"${g.sessions.includes(s.code) ? ' checked' : ''}> <span><b>${esc(s.code)}</b> ${esc(s.md)} ${esc(s.title)}</span></label>`).join('');
+  $('m-sess').classList.add('show');
+}
+async function saveSess() {
+  const codes = [...document.querySelectorAll('#m-sess-list input:checked')].map((i) => i.value);
+  if (!codes.length) return alert('至少要留一個場次；要整筆取消請用「取消」。');
+  closeModal('m-sess'); update(editSessId, { sessions: codes }, '場次已更新');
+}
+async function quickStatus(v) {
+  if (!v) return;
+  const c = DATA.campaigns.find((x) => x.id === CUR);
+  try { await callJson('POST', 'reg_admin_save_campaign', { ...c, status: v }); toast('狀態已更新'); await load(); } catch (e) { alert(e.message); }
+}
+async function clearTests() {
+  if (!confirm(`確定清除 ${DATA.stats.test} 筆測試報名嗎？`)) return;
+  try { const r = await callJson('POST', 'reg_admin_clear_tests', { c: CUR }); toast(`已清除 ${r.cleared} 筆`); await load(); } catch (e) { alert(e.message); }
+}
+function copyText(t) { navigator.clipboard.writeText(t).then(() => toast('已複製'), () => prompt('請手動複製：', t)); }
+function copyCol(kind) {
+  const rows = visibleRegs().filter((g) => g.status === 'active');
+  const list = [...new Set(rows.map((g) => (kind === 'email' ? g.email : g.phone)).filter(Boolean))];
+  if (!list.length) return toast('目前沒有可複製的資料');
+  navigator.clipboard.writeText(kind === 'email' ? list.join('; ') : list.join('\n')).then(() => toast(`已複製 ${list.length} 筆${kind === 'email' ? ' Email（用分號隔開，可直接貼進密件副本）' : '手機（一行一筆）'}`), () => alert('複製失敗，請改用匯出 CSV'));
+}
+async function exportCsv() {
+  try {
+    const res = await call('GET', 'reg_export', { c: CUR, all: $('f-can').checked ? '1' : '' });
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || '匯出失敗');
+    const blob = await res.blob();
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `媒體報名_${CUR}_${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a); a.click(); a.remove();
+  } catch (e) { alert(e.message); }
+}
+
+/* ── 編輯報名活動 ───────────────────────────────────── */
+function openEdit(isNew) {
+  editingNew = isNew;
+  const c = isNew ? null : DATA.campaigns.find((x) => x.id === CUR);
+  if (!isNew && !c) return openEdit(true);
+  $('m-edit-title').textContent = isNew ? '新增報名活動' : '報名活動設定';
+  $('m-errs').style.display = 'none';
+  $('e-id').value = isNew ? SAMPLE.id : c.id; $('e-id').disabled = !isNew;
+  $('e-status').value = isNew ? 'draft' : c.status;
+  $('e-title').value = isNew ? SAMPLE.title : c.title;
+  $('e-closes').value = isNew ? '' : c.closes_at;
+  $('e-intro').value = isNew ? SAMPLE.intro : c.intro;
+  $('e-sessions').value = isNew ? SAMPLE.sessions : c.sessions_text;
+  $('e-options').value = isNew ? SAMPLE.options : c.options_text;
+  $('e-contact').value = isNew ? SAMPLE.contact : c.contact;
+  $('e-privacy').value = isNew ? '' : c.privacy;
+  $('e-pitch').value = isNew ? '' : c.line_pitch;
+  $('m-edit').classList.add('show');
+}
+async function saveEdit() {
+  const btn = $('e-save'); btn.disabled = true;
+  const errs = $('m-errs'); errs.style.display = 'none';
+  try {
+    const body = {
+      id: $('e-id').value, title: $('e-title').value, status: $('e-status').value, closes_at: $('e-closes').value,
+      intro: $('e-intro').value, sessions_text: $('e-sessions').value, options_text: $('e-options').value,
+      contact: $('e-contact').value, privacy: $('e-privacy').value, line_pitch: $('e-pitch').value
+    };
+    const r = await callJson('POST', 'reg_admin_save_campaign', body);
+    CUR = r.id; closeModal('m-edit'); toast(r.created ? '已建立' : '已儲存'); await load();
+  } catch (e) {
+    errs.innerHTML = `<b>${esc(e.message)}</b>` + (e.details ? `<ul>${e.details.map((d) => `<li>${esc(d)}</li>`).join('')}</ul>` : '');
+    errs.style.display = 'block'; errs.scrollIntoView({ block: 'nearest' });
+  } finally { btn.disabled = false; }
+}
+function closeModal(id) { $(id).classList.remove('show'); }
+
+/* ── QR（在瀏覽器裡畫，不把網址送給任何第三方）─────────── */
+function loadQr() {
+  if (window.qrcode) return Promise.resolve();
+  return new Promise((resolve) => { const s = document.createElement('script'); s.src = '/vendor/qrcode.js'; s.onload = resolve; s.onerror = resolve; document.head.appendChild(s); });
+}
+function drawQr(canvas, url, headline, sub, color) {
+  if (!canvas || !window.qrcode) return;
+  const qr = qrcode(0, 'M'); qr.addData(url); qr.make();
+  const n = qr.getModuleCount(), cell = 12, quiet = 4 * cell, size = n * cell + quiet * 2, cap = 130;
+  canvas.width = size; canvas.height = size + cap;
+  const g = canvas.getContext('2d');
+  g.fillStyle = '#fff'; g.fillRect(0, 0, canvas.width, canvas.height); g.fillStyle = '#000';
+  for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) if (qr.isDark(r, c)) g.fillRect(quiet + c * cell, quiet + r * cell, cell, cell);
+  const font = '"PingFang TC","Noto Sans TC","Microsoft JhengHei",sans-serif';
+  g.textAlign = 'center'; g.fillStyle = color; g.font = `bold 34px ${font}`;
+  g.fillText(headline, size / 2, size + 22);
+  g.fillStyle = '#4b5563'; g.font = `24px ${font}`;
+  let s = String(sub || ''); while (g.measureText(s).width > size - 40 && s.length > 4) s = s.slice(0, -1);
+  g.fillText(s === sub ? s : s + '…', size / 2, size + 66);
+}
+function dlQr(id, name) {
+  const c = $(id); if (!c) return;
+  c.toBlob((b) => { const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = `${name}_${CUR}.png`; document.body.appendChild(a); a.click(); a.remove(); });
+}
+
+// 從後台（同分頁導覽）帶密碼進來時免登入
+(function () {
+  const p = sessionStorage.getItem('itri_pwd');
+  if (p) { PWD = p; load(false).then(() => { $('gate').style.display = 'none'; $('page').style.display = 'block'; }).catch(() => { sessionStorage.removeItem('itri_pwd'); }); }
+})();
+</script>
+</body>
+</html>

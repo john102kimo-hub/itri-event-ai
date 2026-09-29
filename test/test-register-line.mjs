@@ -1,0 +1,335 @@
+// 批次 88 的測試（LINE 那一半）：米亞的「我要報名」卡片、報名完成頁按鈕送來的「#報名 代碼」綁定、
+// 加好友歡迎卡、報名期間的圖文選單。資料層與網頁 API 在 test-register.mjs。
+// 跑的是真的 api/line.js、lib/registration.js；Sheets 是通用的假試算表、LINE 是 fakes.mjs 的假 LINE。
+import { register } from 'node:module';
+import { createHmac } from 'node:crypto';
+import { EventEmitter } from 'node:events';
+register('./loader-reg.mjs', import.meta.url);
+
+process.env.LINE_CHANNEL_SECRET = 'testsecret';
+process.env.LINE_CHANNEL_ACCESS_TOKEN = 'testtoken';
+process.env.ANTHROPIC_API_KEY = 'test';
+process.env.GOOGLE_SPREADSHEET_ID = 'sheet';
+process.env.LINE_BASIC_ID = '@mia123';
+process.env.LINE_STAFF_PASSCODE = 'openseasame';
+
+const F = await import('./fakes.mjs');
+const { sent, state, line, reset: resetLine, installFetchStub } = F;
+const S = await import('./fakes-sheets82.mjs');
+const R = await import('../lib/registration.js');
+const { REPORTER_MENU, REPORTER_MENU_REG, STAFF_MENU, detectMetaIntent, buildWelcomeFlex } = await import('../lib/menu.js');
+
+let pass = 0, fail = 0;
+function check(label, cond, detail) {
+  if (cond) { pass++; console.log(`✅ ${label}`); }
+  else { fail++; console.log(`❌ ${label}${detail !== undefined ? '\n   ' + String(detail).slice(0, 600) : ''}`); }
+}
+
+// 每個情境重新載入 api/line.js（連同它 import 的 lib/），清掉模組層的 60 秒快取
+let handler, seq = 0;
+async function fresh() {
+  handler = (await import(new URL(`../api/line.js?v=${++seq}`, import.meta.url).href)).default;
+}
+function req(events) {
+  const body = JSON.stringify({ events });
+  const r = new EventEmitter();
+  r.method = 'POST';
+  r.headers = { 'x-line-signature': createHmac('sha256', 'testsecret').update(Buffer.from(body)).digest('base64') };
+  setImmediate(() => { r.emit('data', Buffer.from(body)); r.emit('end'); });
+  return r;
+}
+const res = { status() { return this; }, json() { return this; }, end() { return this; }, setHeader() { return this; }, send() { return this; } };
+async function fire(events) { sent.length = 0; await handler(req(events), res); return [...sent]; }
+const msg = (text, userId = 'Ureporter0001') => ({ type: 'message', replyToken: 'rt_' + Math.random(), source: { type: 'user', userId }, message: { type: 'text', text } });
+const say = (text, userId) => fire([msg(text, userId)]);
+const follow = (userId = 'Ureporter0001') => fire([{ type: 'follow', replyToken: 'rt_' + Math.random(), source: { type: 'user', userId } }]);
+const groupSay = (text, groupId = 'Cgroup0001') => fire([{
+  type: 'message', replyToken: 'rt_' + Math.random(), source: { type: 'group', groupId, userId: 'Uspeaker0001' },
+  message: { type: 'text', text: '@米亞 ' + text, mention: { mentionees: [{ index: 0, length: 4, type: 'user', userId: 'Ubot', isSelf: true }] } }
+}]);
+
+// ── 假資料 ────────────────────────────────────────────────────────────
+const SESSIONS = [
+  'A1｜2026-10-28｜09:30-12:00｜開幕論壇暨專刊發表｜201 廳',
+  'A2｜2026-10-28｜13:30-16:35｜通訊',
+  'B1｜2026-10-29｜09:30-12:00｜全球AI競局'
+].join('\n');
+function campaignRow(over = {}) {
+  return R.campaignToRow({
+    id: 'tw2027', title: '眺望2027 產業發展趨勢研討會', status: 'open', intro: '', sessions_text: SESSIONS, options_text: '',
+    privacy: '', contact: '', closes_at: '2099-12-31', line_pitch: '', created_at: '2026-09-29T10:00:00+08:00', updated_at: '', ...over
+  });
+}
+function regRow(over = {}) {
+  return R.regToRow({
+    reg_id: 'RABCDE', campaign_id: 'tw2027', created_at: '2026-10-01T10:00:00+08:00', updated_at: '2026-10-01T10:00:00+08:00',
+    name: '王小明', outlet: '經濟日報', email: 'wang@example.com', phone: '0912345678', sessions: ['A1', 'B1'], options: {},
+    line_user_id: '', edit_token: 'tok_' + 'x'.repeat(20), status: 'active', source: 'web', note: '', bound_at: '', ...over
+  });
+}
+const EVENT_HEADER = ['id', 'name', 'color', 'knowledge_base', 'status', 'created_at', 'chips', 'images', 'greeting', 'organizer', 'edit_code', 'event_time', 'venue', 'event_type', 'press_contact', 'contacts', 'invite_letter', 'invite_letter_chips'];
+function seed({ campaigns = [], regs = [] } = {}) {
+  S.reset(); resetLine();
+  S.book.events = [EVENT_HEADER, ['quad', '經濟部四足機器人國產研發平台發表記者會', '#0F9E7A', '【新聞稿】四足機器人…', 'active', '2099-08-08', '', '', '', '工研院', 'code1']];
+  S.book.line_users = [['line_user_id', 'event_id', 'media_name', 'bound_at', 'last_active', 'note', 'group_session_until', 'last_topic', 'last_turn', 'group_turns']];
+  S.book.reg_campaigns = [R.CAMPAIGN_HEADERS, ...campaigns];
+  S.book.registrations = [R.REG_HEADERS, ...regs];
+}
+// 註冊之外的任何 AI 呼叫都算錯：報名這幾條路是固定程式回覆
+let aiCalls = 0;
+function guardAi() {
+  aiCalls = 0;
+  globalThis.fetch = async (url) => {
+    if (String(url).includes('api.anthropic.com')) { aiCalls++; throw new Error('報名流程不該呼叫 AI'); }
+    throw new Error('unexpected fetch ' + url);
+  };
+}
+const flexOf = (out) => out.find((o) => o.kind === 'flex')?.messages?.[0];
+const bubblesOf = (flex) => (flex?.contents?.type === 'carousel' ? flex.contents.contents : [flex?.contents]).filter(Boolean);
+const uriOf = (bubble) => bubble?.footer?.contents?.[0]?.action?.uri || '';
+const labelOf = (bubble) => bubble?.footer?.contents?.[0]?.action?.label || '';
+const paramsOf = (uri) => Object.fromEntries(new URL(uri).searchParams);
+const bookRegs = () => S.book.registrations.slice(1);
+
+// ═══ 一、意圖判斷 ═════════════════════════════════════════════════════
+console.log('\n── 一、哪些話算「要報名入口」 ──');
+for (const t of ['我要報名', '報名', '媒體報名', '怎麼報名', '如何報名', '報名連結', '我的報名', '查報名', '修改報名', '取消報名', '我報名了嗎', '眺望2027報名', '可以報名嗎？']) {
+  check(`「${t}」→ register`, detectMetaIntent(t) === 'register', detectMetaIntent(t));
+}
+for (const t of ['報名費用多少', '報名截止是什麼時候', '以後會開放報名嗎？', '這場需要報名嗎', '我要報名費用', '怎麼報名才能拿到新聞稿', '報名人數有限制嗎']) {
+  check(`「${t}」是真的提問，不攔（交給問答）`, detectMetaIntent(t) !== 'register', detectMetaIntent(t));
+}
+check('報名版選單那一格送出的字一定認得（不然就是按了沒反應）', detectMetaIntent(REPORTER_MENU_REG.buttons.find((b) => b.label === '媒體報名').text) === 'register');
+check('報名版只換掉一格（回首頁 → 媒體報名），其他五格跟原本一模一樣',
+  REPORTER_MENU_REG.buttons.length === 6 && REPORTER_MENU_REG.buttons.filter((b, i) => b.text !== REPORTER_MENU.buttons[i].text).length === 1 &&
+  REPORTER_MENU_REG.buttons.map((b) => b.label).join('/') === '最近有哪些活動/媒體報名/想問什麼技術/新聞稿全文/產業趨勢分析/媒體邀訪需求');
+check('報名版的名稱與原本的不同（LINE 那邊用名稱找選單）', REPORTER_MENU_REG.name !== REPORTER_MENU.name && REPORTER_MENU_REG.key !== REPORTER_MENU.key);
+check('歡迎卡沒開報名時完全不變（2 顆按鈕）', buildWelcomeFlex().contents.footer.contents.length === 2);
+{
+  const w = buildWelcomeFlex('', { registration: true });
+  const texts = w.contents.footer.contents.map((b) => b.action.text);
+  check('歡迎卡開報名時多一顆，而且排第一、是主按鈕', JSON.stringify(texts) === JSON.stringify(['我要報名', '最近有哪些活動', '使用說明']) && w.contents.footer.contents[0].style === 'primary' && w.contents.footer.contents[1].style === 'secondary');
+  for (const t of texts) check(`歡迎卡按鈕「${t}」認得`, detectMetaIntent(t) !== null);
+}
+
+// ═══ 二、沒有報名可講：米亞的行為跟以前完全一樣 ═══════════════════════
+console.log('\n── 二、沒有開放中的報名 → 「報名」照原本的路徑走（上線後沒開活動＝零行為改變）──');
+// 日期一律相對今天算：「剛截止一週內才攔」的判斷用真實時鐘，寫死日期過幾個月測試就會自己壞掉
+const ymd = (days) => new Date(Date.now() + days * 864e5 + 8 * 3600e3).toISOString().slice(0, 10);
+const sessionsAround = (days) => `Z1｜${ymd(days)}｜09:00-11:00｜測試場次`;
+seed(); guardAi(); await fresh();
+{
+  let out = await follow();
+  check('加好友：歡迎卡照舊只有 2 顆按鈕', out[0]?.kind === 'flex' && out[0].messages[0].contents.footer.contents.length === 2);
+  out = await say('我要報名');
+  check('★ 一個報名活動都沒有 → 不攔：不回「目前沒有開放報名」、不回卡片，交給原本的路徑（這裡是路由，所以有去問 AI）',
+    !/目前沒有開放報名/.test(out[0]?.text || '') && !flexOf(out) && aiCalls >= 1, JSON.stringify(out).slice(0, 300) + ' ai=' + aiCalls);
+  aiCalls = 0;
+  out = await say('怎麼報名', 'Ubound000001');
+  check('「怎麼報名」也一樣照舊', !/目前沒有開放報名/.test(out[0]?.text || '') && !flexOf(out));
+}
+seed({ campaigns: [campaignRow({ status: 'draft', id: 'draftone', title: '草稿' })] }); guardAi(); await fresh();
+{
+  const out = await say('我要報名');
+  check('★ 只有草稿 → 對記者等於沒有，不攔、不外露草稿的存在', !/草稿|測試/.test(JSON.stringify(out)) && !flexOf(out) && aiCalls >= 1);
+}
+seed({ campaigns: [campaignRow({ id: 'long-ago', title: '早就辦完的活動', status: 'closed', sessions_text: sessionsAround(-30) })] }); guardAi(); await fresh();
+{
+  const out = await say('我要報名');
+  check('★ 已截止而且最後一場是一個月前 → 不再攔（不會永遠回「已截止」）', !/已經截止/.test(out[0]?.text || '') && !flexOf(out) && aiCalls >= 1);
+}
+seed({ campaigns: [campaignRow({ id: 'just-shut', title: '剛截止的活動', status: 'closed', sessions_text: sessionsAround(+3), contact: '工研院行銷傳播處 朱則瑋\nitriA70541@itri.org.tw\n0934-267-766' })] }); guardAi(); await fresh();
+{
+  const out = await say('我要報名');
+  check('剛截止（場次還沒辦）→ 老實說已截止，附上媒體聯絡人', out[0]?.kind === 'text' && /《剛截止的活動》的媒體報名已經截止了/.test(out[0].text) && /朱則瑋/.test(out[0].text) && /0934-267-766/.test(out[0].text), JSON.stringify(out));
+  check('這則是固定程式回覆：不呼叫 AI、帶整排按鈕', aiCalls === 0 && out[0].quickReply.length >= 5);
+}
+seed({ campaigns: [campaignRow({ id: 'late', title: '過了截止時間的活動', status: 'open', closes_at: '2020-01-01', sessions_text: sessionsAround(+3), contact: '' })] }); guardAi(); await fresh();
+{
+  const out = await say('我要報名');
+  check('狀態還是 open 但過了截止時間 → 也是「已截止」；沒填聯絡人就請他打「找真人」', /已經截止了/.test(out[0]?.text || '') && /找真人/.test(out[0]?.text || ''), JSON.stringify(out));
+}
+seed({ campaigns: [campaignRow()] });
+S.ctl.failReads.add('reg_campaigns'); guardAi(); await fresh();
+{
+  const f = await follow();
+  check('★ 報名資料表讀不到時，新記者照樣收到歡迎卡（報名是加分，不能拖垮加好友）', f[0]?.kind === 'flex', JSON.stringify(f));
+  const out = await say('我要報名');
+  check('★ 讀不到時「我要報名」也不炸，當作沒有報名、照原本的路徑走', out.length >= 1 && !flexOf(out) && !/已經截止/.test(out[0]?.text || ''), JSON.stringify(out));
+  S.ctl.failReads.clear();
+}
+
+// ═══ 三、有開放中的報名 ═══════════════════════════════════════════════
+console.log('\n── 三、「我要報名」卡片 ──');
+seed({ campaigns: [campaignRow()] }); guardAi(); await fresh();
+const UID = 'Ureporter0001';
+{
+  let out = await follow();
+  const btn = out[0].messages[0].contents.footer.contents.map((b) => b.action.text);
+  check('加好友：歡迎卡多了「我要報名」，排第一', btn[0] === '我要報名' && btn.length === 3, JSON.stringify(btn));
+
+  out = await say('我要報名', UID);
+  const flex = flexOf(out);
+  check('回一張 Flex 卡片（不是在聊天室一題一題問）', flex?.type === 'flex' && bubblesOf(flex).length === 1, JSON.stringify(out).slice(0, 300));
+  const b = bubblesOf(flex)[0];
+  const uri = uriOf(b);
+  check('按鈕是開網頁（uri），標題是「填寫報名表」', b.footer.contents[0].action.type === 'uri' && labelOf(b) === '填寫報名表');
+  check('網址指向報名頁與這個活動', uri.startsWith('https://itri-event-ai.vercel.app/register?') && paramsOf(uri).c === 'tw2027', uri);
+  check('★ 網址帶著簽章過的 LINE 身分，而且驗得回同一個人', R.verifyLineToken(paramsOf(uri).u) === UID, uri);
+  check('網址不含原始 userId 明文以外的個資、沒有編輯碼', !('t' in paramsOf(uri)) && uri.length < 1000, String(uri.length));
+  check('卡片上有活動名稱、日期範圍與場數', JSON.stringify(b.header).includes('眺望2027') && JSON.stringify(b.header).includes('10/28（三） – 10/29（四）') && JSON.stringify(b.header).includes('共 3 場'), JSON.stringify(b.header));
+  check('altText 是一句有用的話（鎖定畫面只看得到這行）', /媒體報名/.test(flex.altText) && flex.altText.length < 400);
+  check('卡片底下掛著整排導覽按鈕', (flex.quickReply?.items || []).length >= 5);
+  check('繁體字：卡片文字沒有簡體字', !/[们这们个报么对话]/.test(JSON.stringify(flex)));
+  check('不呼叫 AI', aiCalls === 0);
+  check('沒寫入任何報名資料（點卡片才是開始填）', bookRegs().length === 0);
+}
+{
+  for (const t of ['報名', '怎麼報名', '我的報名']) {
+    const out = await say(t, UID);
+    check(`打「${t}」得到同一張卡片`, bubblesOf(flexOf(out)).length === 1 && paramsOf(uriOf(bubblesOf(flexOf(out))[0])).c === 'tw2027');
+  }
+  const other = await say('我要報名', 'Uother000001');
+  const uOther = paramsOf(uriOf(bubblesOf(flexOf(other))[0])).u;
+  check('★ 不同人拿到的簽章不同、各自驗得回自己', R.verifyLineToken(uOther) === 'Uother000001' && uOther !== paramsOf(uriOf(bubblesOf(flexOf(await say('我要報名', UID)))[0])).u);
+}
+console.log('\n── 三之二、兩個活動同時開放 → 輪播卡片 ──');
+seed({ campaigns: [campaignRow(), campaignRow({ id: 'other', title: '另一場說明會' })] }); await fresh();
+{
+  const out = await say('我要報名', UID);
+  const bs = bubblesOf(flexOf(out));
+  check('每個活動一張', bs.length === 2 && flexOf(out).contents.type === 'carousel');
+  check('各自指向自己的活動', paramsOf(uriOf(bs[0])).c === 'tw2027' && paramsOf(uriOf(bs[1])).c === 'other');
+}
+
+// ═══ 四、已連結報名的人 ═══════════════════════════════════════════════
+console.log('\n── 四、已經連結報名的人再打「我要報名」 ──');
+seed({ campaigns: [campaignRow()], regs: [regRow({ line_user_id: UID, bound_at: '2026-10-01T10:05:00+08:00' })] }); await fresh();
+{
+  const out = await say('我要報名', UID);
+  const b = bubblesOf(flexOf(out))[0];
+  const text = JSON.stringify(b.body);
+  check('顯示「您已報名 2 場」與場次內容', text.includes('您已報名 2 場') && text.includes('A1 10/28（三）09:30-12:00 開幕論壇暨專刊發表') && text.includes('B1 10/29（四）'), text);
+  check('按鈕變成「修改我的報名」', labelOf(b) === '修改我的報名');
+  const p = paramsOf(uriOf(b));
+  check('★ 連結帶編輯碼（打開就是修改模式）、不再帶 LINE 簽章', p.t === 'tok_' + 'x'.repeat(20) && !('u' in p), uriOf(b));
+  const stranger = await say('我要報名', 'Ustranger001');
+  check('★ 別的 LINE 帳號看不到這個人的報名', !JSON.stringify(flexOf(stranger)).includes('您已報名') && !JSON.stringify(flexOf(stranger)).includes('tok_'));
+}
+seed({ campaigns: [campaignRow()], regs: [regRow({ line_user_id: UID, status: 'cancelled' })] }); await fresh();
+{
+  const out = await say('我要報名', UID);
+  check('已取消的報名不再顯示成「已報名」，回到「填寫報名表」', labelOf(bubblesOf(flexOf(out))[0]) === '填寫報名表');
+}
+
+// ═══ 五、報名完成頁按「用 LINE 連結我的報名」→ #報名 代碼 ═══════════════
+console.log('\n── 五、#報名 代碼 綁定 ──');
+seed({ campaigns: [campaignRow()], regs: [regRow()] }); guardAi(); await fresh();
+{
+  let out = await say('#報名 RABCDE', UID);
+  check('綁定成功：回確認，列出姓名／媒體／場次', out[0]?.kind === 'text' && /已連結您的報名 ✅/.test(out[0].text) && /王小明｜經濟日報/.test(out[0].text) && /A1 10\/28（三）09:30-12:00 開幕論壇暨專刊發表/.test(out[0].text), JSON.stringify(out));
+  check('★ 不會被當成活動代碼（沒有「找不到活動」那類回覆）', !/找不到|沒有這場|活動代碼/.test(out[0]?.text || ''));
+  check('那一列寫進了 LINE userId 與綁定時間', bookRegs()[0][10] === UID && /^\d{4}-/.test(bookRegs()[0][15]));
+  const lu = S.book.line_users.find((r) => r[0] === UID);
+  check('自報的媒體名稱同時記進 line_users（之後米亞不用再問「貴媒體名稱」）', lu && lu[2] === '經濟日報', JSON.stringify(S.book.line_users));
+  check('回覆帶整排按鈕', out[0].quickReply.length >= 5);
+  out = await say('＃報名 rabcde', UID);
+  check('再送一次（全形井號、小寫）→ 「早就連結好了」，不重複寫', /早就連結好了/.test(out[0]?.text || '') && bookRegs().length === 1);
+  out = await say('#報名 RABCDE', 'Uintruder001');
+  check('★ 已被另一個 LINE 帳號連結 → 拒絕，原本的連結不變', /已經連結到另一個 LINE 帳號/.test(out[0]?.text || '') && bookRegs()[0][10] === UID, JSON.stringify(out));
+  out = await say('#報名 RZZZZZ', 'Unew0000001');
+  check('不存在的編號 → 白話指引', /找不到這個報名編號/.test(out[0]?.text || ''));
+  check('不呼叫 AI', aiCalls === 0);
+}
+seed({ campaigns: [campaignRow()], regs: [regRow(), regRow({ reg_id: 'RSECON', email: 'b@x.com', name: '李大華' })] }); await fresh();
+{
+  await say('#報名 RABCDE', UID);
+  const out = await say('#報名 RSECON', UID);
+  check('同一個 LINE 帳號在同一個活動只能連結一筆', /已經連結另一筆報名（王小明）/.test(out[0]?.text || '') && bookRegs()[1][10] === '', JSON.stringify(out));
+}
+seed({ campaigns: [campaignRow()], regs: [regRow({ status: 'cancelled' })] }); await fresh();
+{
+  const out = await say('#報名 RABCDE', UID);
+  check('已取消的報名不能連結', /已經取消/.test(out[0]?.text || '') && bookRegs()[0][10] === '');
+}
+seed({ campaigns: [campaignRow()], regs: [regRow()] });
+S.ctl.failReads.add('registrations'); await fresh();
+{
+  const out = await say('#報名 RABCDE', UID);
+  check('★ 試算表暫時讀不到 → 白話道歉並指出路，不沉默', out[0]?.kind === 'text' && /暫時讀不到/.test(out[0].text) && /找真人/.test(out[0].text), JSON.stringify(out));
+  S.ctl.failReads.clear();
+}
+console.log('\n── 五之二、一般 #活動代碼 不受影響 ──');
+seed({ campaigns: [campaignRow()], regs: [regRow()] }); await fresh();
+{
+  const out = await say('#quad', UID);
+  check('#quad 照舊接上那一場活動（不被報名綁定攔走）', /已為您接上/.test(out[0]?.text || ''), JSON.stringify(out));
+  check('報名資料沒被動到', bookRegs()[0][10] === '');
+  const out2 = await say('#報名', UID);
+  check('只打「#報名」沒有代碼 → 走原本的流程，不當成綁定', bookRegs()[0][10] === '' && !/已連結您的報名/.test(out2[0]?.text || ''));
+}
+
+// ═══ 六、群組 ═════════════════════════════════════════════════════════
+console.log('\n── 六、群組裡叫米亞報名 ──');
+seed({ campaigns: [campaignRow()], regs: [regRow({ line_user_id: 'Uspeaker0001' })] }); guardAi(); await fresh();
+{
+  const out = await groupSay('我要報名');
+  const b = bubblesOf(flexOf(out))[0];
+  check('群組也接得住，回卡片', !!b && labelOf(b) === '填寫報名表', JSON.stringify(out).slice(0, 300));
+  const uri = uriOf(b);
+  check('★ 群組的連結不帶任何人的身分與編輯碼（全群組都看得到這張卡）', !('u' in paramsOf(uri)) && !('t' in paramsOf(uri)) && !JSON.stringify(flexOf(out)).includes('您已報名'), uri);
+}
+
+// ═══ 七、職員 ═════════════════════════════════════════════════════════
+console.log('\n── 七、職員模式 ──');
+seed({ campaigns: [campaignRow({ status: 'draft', id: 'test1', title: '測試用報名' })], regs: [] }); await fresh();
+installFetchStub();
+{
+  await say('openseasame', 'Ustaff000001');
+  let out = await say('我要報名', 'Ustaff000001');
+  const b = bubblesOf(flexOf(out))[0];
+  check('職員看得到草稿（測試中）的報名活動，才能上線前自己走一遍', !!b && JSON.stringify(b.header).includes('（測試中）'), JSON.stringify(out).slice(0, 300));
+  check('連結指向那個草稿活動', paramsOf(uriOf(b)).c === 'test1');
+  out = await say('#報名 RNOPE1', 'Ustaff000001');
+  check('職員也能用 #報名 綁定（不會被送去職員 AI 路由）', /找不到這個報名編號/.test(out[0]?.text || ''), JSON.stringify(out));
+  const reporter = await say('我要報名', 'Ureporter0009');
+  check('同一個時間，一般記者仍然看不到草稿（沒有卡片、也不提測試）', !flexOf(reporter) && !/測試中|test1/.test(JSON.stringify(reporter)));
+}
+
+// ═══ 八、圖文選單依有沒有開放報名挑版本 ═══════════════════════════════
+console.log('\n── 八、「設定圖文選單」：報名期間用報名版，結束後換回 ──');
+async function setupMenu() {
+  const created = [];
+  const uploaded = [];
+  let defaultId = null;
+  const base = globalThis.fetch;
+  globalThis.fetch = async (url, o) => {
+    if (String(url).includes('/richmenu-')) { uploaded.push(String(url).split('/').pop()); return { ok: true, status: 200, arrayBuffer: async () => new ArrayBuffer(8) }; }
+    return base(url, o);
+  };
+  line.createRichMenu = async (def) => { created.push(def.name); return 'rm_' + created.length; };
+  line.uploadRichMenuImage = async () => true;
+  line.setDefaultRichMenu = async (id) => { defaultId = id; return true; };
+  const out = await say('設定圖文選單', 'Ustaff000001');
+  globalThis.fetch = base;
+  return { created, uploaded, defaultId, text: out[0]?.text || '' };
+}
+seed({ campaigns: [campaignRow()] }); await fresh(); installFetchStub();
+{
+  await say('openseasame', 'Ustaff000001');
+  const r = await setupMenu();
+  check('有開放中的報名 → 建的是「報名版」＋職員版', r.created.join('|') === `${REPORTER_MENU_REG.name}|${STAFF_MENU.name}`, r.created.join('|'));
+  check('抓的底圖是 richmenu-reporter-reg.png 與 richmenu-staff.png', r.uploaded.join('|') === 'richmenu-reporter-reg.png|richmenu-staff.png', r.uploaded.join('|'));
+  check('報名版設為預設選單（所有記者）', r.defaultId === 'rm_1');
+  check('完成訊息寫明這次裝的是報名版，並列出「媒體報名」', /（報名版）/.test(r.text) && /媒體報名/.test(r.text), r.text);
+}
+seed({ campaigns: [campaignRow({ status: 'closed' })] }); await fresh(); installFetchStub();
+{
+  await say('openseasame', 'Ustaff000001');
+  const r = await setupMenu();
+  check('報名結束後再設定一次 → 換回原本那套', r.created.join('|') === `${REPORTER_MENU.name}|${STAFF_MENU.name}` && r.uploaded[0] === 'richmenu-reporter.png', r.created.join('|'));
+  check('完成訊息沒有「報名版」字樣', !/（報名版）/.test(r.text));
+}
+
+console.log(`\n批次 88（LINE × 報名）測試：${pass} 通過，${fail} 失敗`);
+if (fail) process.exit(1);
