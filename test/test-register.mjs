@@ -9,6 +9,12 @@ process.env.GOOGLE_SPREADSHEET_ID = 'sheet';
 process.env.LINE_CHANNEL_SECRET = 'testsecret';
 process.env.LINE_BASIC_ID = '@mia123';
 
+// 假時鐘：測試裡所有「現在」都固定在 2026-09-29 中午（台灣時間），離眺望 10/28 還有一個月。
+// 不固定的話，過了 10/28 這些用 10/28、10/29 場次的測試會因為「場次辦完了」而自己壞掉。
+let clock = Date.UTC(2026, 8, 29, 4, 0, 0);
+Date.now = () => clock;
+const setClock = (iso) => { clock = new Date(iso).getTime(); };
+
 const { book, calls, ctl, reset } = await import('./fakes-sheets82.mjs');
 const R = await import('../lib/registration.js');
 const API = await import('../lib/registration-api.js');
@@ -490,6 +496,67 @@ await seedCampaign();
   const all = await adminGet({ action: 'reg_export', c: 'tw2027', all: '1' });
   check('all=1 連取消的一起匯出（狀態欄看得出來）', all.text.includes('取消的人') && all.text.includes('已取消'));
   check('找不到的活動 → 404', (await adminGet({ action: 'reg_export', c: 'nope' })).statusCode === 404 || true);
+}
+
+
+// ═══ 十、活動結束後，報名自己消失 ═════════════════════════════════════
+console.log('\n── 十、活動結束後：場次自動消失、活動自動關閉 ──');
+await seedCampaign({ closes_at: '' });   // 連截止時間都沒設：全靠「場次辦完就關」
+{
+  const cfg0 = (await get({ action: 'reg_config', c: 'tw2027' })).body.campaign;
+  check('活動前：16 場都沒結束、活動開放', cfg0.sessions.every((s) => !s.ended) && cfg0.closed === false);
+  const early = await post(person({ sessions: ['A1', 'A2', 'B1'], options: { meal: true } }));
+  const token = early.body.token;
+  check('先報名 A1、A2、B1', early.statusCode === 200 && regRows()[0][8] === 'A1,A2,B1');
+
+  // 10/28 12:30：A1（09:30–12:00）辦完了，A2（13:30 開始）還沒
+  setClock('2026-10-28T12:30:00+08:00');
+  R.invalidateCampaignCache();
+  const cfg1 = (await get({ action: 'reg_config', c: 'tw2027' })).body.campaign;
+  const a1 = cfg1.sessions.find((s) => s.code === 'A1'), a2 = cfg1.sessions.find((s) => s.code === 'A2');
+  check('★ A1 辦完 → 標 ended、disabled、狀態 ended；A2 還開著', a1.ended === true && a1.disabled === true && a1.status === 'ended' && a2.ended === false && a2.disabled === false);
+  check('活動本身還開著（後面還有 14 場）', cfg1.closed === false);
+  const late = await post(person({ email: 'late@x.com', sessions: ['A1'] }));
+  check('★ 新報名勾已經辦完的 A1 → 400「已經結束」', late.statusCode === 400 && /A1.*已經結束/.test(late.body.error), JSON.stringify(late.body));
+  const ok2 = await post(person({ email: 'late@x.com', sessions: ['A2', 'C1'] }));
+  check('沒辦完的場次照常報', ok2.statusCode === 200);
+  // 帶編輯碼修改：A1 不在這次勾選裡（頁面已經不顯示它），但辦完的場次是紀錄，不會被拿掉
+  const edit = await post(person({ sessions: ['B1', 'E1'], t: token, options: { meal: true } }));
+  check('★ 編輯時辦完的 A1 不會被拿掉（其餘照這次勾的：A2 拿掉、E1 加上）', edit.statusCode === 200 && regRows()[0][8] === 'A1,B1,E1', regRows()[0][8]);
+  const add = await post(person({ sessions: ['A1', 'B1'], t: token }));
+  check('原本就報了 A1 的人再送出含 A1，不會被擋', add.statusCode === 200 && regRows()[0][8] === 'A1,B1', regRows()[0][8]);
+  const ov = (await adminGet({ action: 'reg_admin_list', c: 'tw2027' })).body;
+  check('後台：各場的 ended 旗標（A1 已結束、A2 未結束），活動仍是收報名中', ov.sessions.find((s) => s.code === 'A1').ended === true && ov.sessions.find((s) => s.code === 'A2').ended === false && ov.campaigns[0].accepting === true);
+
+  // 11/6 17:00：最後一場（H2 16:30）也辦完了
+  setClock('2026-11-06T17:00:00+08:00');
+  R.invalidateCampaignCache();
+  const cfg2 = (await get({ action: 'reg_config', c: 'tw2027' })).body.campaign;
+  check('★ 所有場次都辦完 → 活動自動關閉（狀態明明還是 open、也沒設截止時間）', cfg2.closed === true);
+  const shut = await post(person({ email: 'x@x.com', sessions: ['H2'] }));
+  check('自動關閉之後送出報名 → 409，請他洽聯絡人', shut.statusCode === 409 && shut.body.closed === true && /聯絡人/.test(shut.body.error));
+  const ov2 = (await adminGet({ action: 'reg_admin_list', c: 'tw2027' })).body;
+  check('後台看得出「已自動截止」（accepting=false），狀態欄仍寫 open', ov2.campaigns[0].accepting === false && ov2.campaigns[0].status === 'open');
+  const c0 = (await R.getCampaign('tw2027', { fresh: true }));
+  check('campaignAcceptsSubmissions 給的原因是 ended', R.campaignAcceptsSubmissions(c0, Date.now()).reason === 'ended');
+  check('LINE 用的清單：不再是開放中的活動', (await R.listOpenCampaigns()).length === 0);
+  const topics = await R.listRegistrationTopics();
+  check('剛結束 → 還在「剛截止一週內」清單裡（米亞會回「已截止」而不是沉默）', topics.open.length === 0 && topics.closed.length === 1);
+  setClock('2026-11-14T12:00:00+08:00');
+  R.invalidateCampaignCache();
+  const topics2 = await R.listRegistrationTopics();
+  check('辦完一週後 → 兩邊都空，米亞的「報名」回到原本的處理', topics2.open.length === 0 && topics2.closed.length === 0);
+  setClock('2026-09-29T12:00:00+08:00');
+  R.invalidateCampaignCache();
+}
+{
+  // 有設截止時間的：以截止時間為準，不受場次影響；有場次辦完也不影響其他場
+  await seedCampaign({ closes_at: '2026-10-27 12:00' });
+  setClock('2026-10-27T12:01:00+08:00');
+  R.invalidateCampaignCache();
+  check('設了截止時間 → 過了就關（場次還沒辦也一樣）', (await get({ action: 'reg_config', c: 'tw2027' })).body.campaign.closed === true);
+  setClock('2026-09-29T12:00:00+08:00');
+  R.invalidateCampaignCache();
 }
 
 console.log(`\n批次 88（報名資料層）測試：${pass} 通過，${fail} 失敗`);

@@ -210,7 +210,7 @@ async function init() {
   campaign = r.data.campaign;
   document.title = `${campaign.title}｜媒體報名`;
   $('#h-title').textContent = campaign.title;
-  const live = campaign.sessions;
+  const live = campaign.sessions.filter((s) => !s.ended); // 辦完的場次自動不算
   if (live.length) {
     const a = live[0], z = live[live.length - 1];
     $('#h-when').textContent = `${a.date === z.date ? a.dateLabel : `${a.dateLabel} – ${z.dateLabel}`}　共 ${live.length} 場`;
@@ -265,9 +265,12 @@ function renderForm(prefill) {
 
   const sess = el('div', { class: 'card', id: 'sess-card' },
     el('h2', {}, el('span', { class: 'step', text: '2' }), '要採訪哪幾場？', el('span', { class: 'req', text: '*' })));
-  const days = [...new Set(c.sessions.map((s) => s.date))];
+  // 已經辦完的場次自動從表單消失；只有這個人原本報了的才留著（鎖住、標「已結束」），
+  // 紀錄不會因為他改別的欄位或別的場次被拿掉（伺服器端也會保留）。
+  const shown = c.sessions.filter((s) => !s.ended || (pre.sessions || []).includes(s.code));
+  const days = [...new Set(shown.map((s) => s.date))];
   days.forEach((d) => {
-    const list = c.sessions.filter((s) => s.date === d);
+    const list = shown.filter((s) => s.date === d);
     const day = el('div', { class: 'day' }, el('div', { class: 'day-head' }, el('b', { text: list[0].dateLabel }),
       list.filter((s) => !s.disabled).length > 1 ? el('button', { type: 'button', text: '全選這天', onclick: () => toggleDay(list) }) : null));
     list.forEach((s) => day.append(sessionCard(s, (pre.sessions || []).includes(s.code))));
@@ -314,12 +317,12 @@ function field(name, label, type, attrs, hint) {
     input, hint ? el('div', { class: 'hint', text: hint }) : null, el('div', { class: 'msg', role: 'alert' }));
 }
 function sessionCard(s, on) {
-  const cb = el('input', { type: 'checkbox', name: 'sess', value: s.code, disabled: s.disabled && !on ? true : null });
+  const cb = el('input', { type: 'checkbox', name: 'sess', value: s.code, disabled: ((s.disabled && !on) || s.ended) ? true : null });
   cb.checked = !!on;
-  const card = el('label', { class: 'sess' + (s.disabled && !on ? ' off' : ''), 'data-code': s.code },
+  const card = el('label', { class: 'sess' + ((s.disabled && !on) || s.ended ? ' off' : ''), 'data-code': s.code },
     cb, el('span', { class: 'box' }),
     el('span', { class: 's-main' },
-      el('span', { class: 's-top' }, el('b', { text: s.code }), s.time, s.disabled ? el('span', { class: 's-badge', text: s.status === 'full' ? '額滿' : '已截止' }) : null),
+      el('span', { class: 's-top' }, el('b', { text: s.code }), s.time, s.disabled ? el('span', { class: 's-badge', text: s.ended ? '已結束' : s.status === 'full' ? '額滿' : '已截止' }) : null),
       el('span', { class: 's-title', text: s.title }),
       (s.room || s.note) ? el('span', { class: 's-meta', text: [s.room, s.note].filter(Boolean).join('・') }) : null),
     s.url ? el('a', { class: 's-more', href: s.url, target: '_blank', rel: 'noopener', text: '詳細', onclick: (e) => e.stopPropagation() }) : null);

@@ -77,6 +77,10 @@
     {
       "path": "/api/geo?action=cron&calibrate=1",
       "schedule": "0 12 1 * *"
+    },
+    {
+      "path": "/api/line?action=cron_menu",
+      "schedule": "0 19 * * *"
     }
   ]
 }

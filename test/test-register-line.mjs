@@ -12,6 +12,14 @@ process.env.ANTHROPIC_API_KEY = 'test';
 process.env.GOOGLE_SPREADSHEET_ID = 'sheet';
 process.env.LINE_BASIC_ID = '@mia123';
 process.env.LINE_STAFF_PASSCODE = 'openseasame';
+process.env.CRON_SECRET = 'cronsecret';
+process.env.LINE_ADMIN_USER_ID = 'Uadmin000001';
+
+// 假時鐘：測試裡所有「現在」都固定在 2026-09-29 中午（台灣時間），離眺望 10/28 還有一個月。
+// 不固定的話，過了 10/28 這些用 10/28、10/29 場次的測試會因為「場次辦完了」而自己壞掉。
+let clock = Date.UTC(2026, 8, 29, 4, 0, 0);
+Date.now = () => clock;
+const setClock = (iso) => { clock = new Date(iso).getTime(); };
 
 const F = await import('./fakes.mjs');
 const { sent, state, line, reset: resetLine, installFetchStub } = F;
@@ -329,6 +337,96 @@ seed({ campaigns: [campaignRow({ status: 'closed' })] }); await fresh(); install
   const r = await setupMenu();
   check('報名結束後再設定一次 → 換回原本那套', r.created.join('|') === `${REPORTER_MENU.name}|${STAFF_MENU.name}` && r.uploaded[0] === 'richmenu-reporter.png', r.created.join('|'));
   check('完成訊息沒有「報名版」字樣', !/（報名版）/.test(r.text));
+}
+
+
+// ═══ 九、報名結束後，圖文選單自動換回（Vercel Cron）════════════════════
+console.log('\n── 九、報名結束後圖文選單自動換回 ──');
+function cronRes() {
+  const r = { statusCode: 200, body: undefined };
+  r.status = (c) => { r.statusCode = c; return r; };
+  r.json = (o) => { r.body = o; return r; };
+  r.end = () => r;
+  r.setHeader = () => r;
+  return r;
+}
+async function runCron(headers = { authorization: 'Bearer cronsecret' }) {
+  const created = [], uploaded = [];
+  const baseFetch = globalThis.fetch;
+  globalThis.fetch = async (url, o) => {
+    if (String(url).includes('/richmenu-')) { uploaded.push(String(url).split('/').pop()); return { ok: true, status: 200, arrayBuffer: async () => new ArrayBuffer(8) }; }
+    return baseFetch(url, o);
+  };
+  line.createRichMenu = async (def) => { created.push(def.name); return 'rm_new' + created.length; };
+  line.uploadRichMenuImage = async () => true;
+  line.setDefaultRichMenu = async () => true;
+  sent.length = 0;
+  const res = cronRes();
+  await handler({ method: 'GET', query: { action: 'cron_menu' }, headers }, res);
+  globalThis.fetch = baseFetch;
+  return { res, created, uploaded, pushes: sent.filter((x) => x.push) };
+}
+const installedMenus = (regVariant) => {
+  F.state.richMenus.length = 0;
+  F.state.richMenus.push({ richMenuId: 'rm_r', name: (regVariant ? REPORTER_MENU_REG : REPORTER_MENU).name }, { richMenuId: 'rm_s', name: STAFF_MENU.name });
+};
+{
+  seed({ campaigns: [campaignRow({ status: 'closed' })] }); await fresh(); guardAi(); installedMenus(true);
+  const r = await runCron();
+  check('★ 報名已結束、目前裝的是報名版 → 自動換回原本那套（記者版＋職員版一起重建）',
+    r.res.statusCode === 200 && r.res.body?.action === 'reverted' && r.created.join('|') === `${REPORTER_MENU.name}|${STAFF_MENU.name}` && r.uploaded.join('|') === 'richmenu-reporter.png|richmenu-staff.png', JSON.stringify([r.res.body, r.created, r.uploaded]));
+  check('換的那天推一則給管理員（不是給記者）', r.pushes.length === 1 && r.pushes[0].to === 'Uadmin000001' && /自動換回/.test(r.pushes[0].text), JSON.stringify(r.pushes));
+  check('不呼叫 AI', aiCalls === 0);
+}
+{
+  seed({ campaigns: [campaignRow()] }); await fresh(); installedMenus(true);
+  const r = await runCron();
+  check('★ 報名還開著 → 什麼都不動、不推播', r.res.body?.action === 'skip' && /還有開放中/.test(r.res.body.why) && r.created.length === 0 && r.pushes.length === 0, JSON.stringify(r.res.body));
+}
+{
+  seed({ campaigns: [campaignRow({ status: 'closed' })] }); await fresh(); installedMenus(false);
+  const r = await runCron();
+  check('目前本來就是原版 → 什麼都不動（每天跑一次不會每天重建選單）', r.res.body?.action === 'skip' && /不是報名版/.test(r.res.body.why) && r.created.length === 0 && r.pushes.length === 0, JSON.stringify(r.res.body));
+}
+{
+  seed({ campaigns: [campaignRow()] }); await fresh(); installedMenus(true);
+  // 沒設截止時間、狀態還是 open，但最後一場（10/29）辦完了 → 自動關 → 選單換回
+  setClock('2026-10-30T09:00:00+08:00');
+  const r = await runCron();
+  check('★ 狀態還是 open、但所有場次都辦完了 → 也算結束，選單換回（不用有人記得去改狀態）', r.res.body?.action === 'reverted', JSON.stringify(r.res.body));
+  setClock('2026-09-29T12:00:00+08:00');
+}
+{
+  seed({ campaigns: [campaignRow({ status: 'closed' })] }); await fresh(); installedMenus(true);
+  const noHeader = await runCron({});
+  const wrong = await runCron({ authorization: 'Bearer nope' });
+  check('沒帶／帶錯 CRON_SECRET → 401，選單完全沒動', noHeader.res.statusCode === 401 && wrong.res.statusCode === 401 && noHeader.created.length + wrong.created.length === 0);
+  const saved = process.env.CRON_SECRET; delete process.env.CRON_SECRET;
+  const unset = await runCron({ authorization: 'Bearer ' });
+  process.env.CRON_SECRET = saved;
+  check('連 CRON_SECRET 都沒設定 → 一律拒絕（這個入口會動到 LINE 帳號的選單）', unset.res.statusCode === 401 && unset.created.length === 0);
+}
+{
+  seed({ campaigns: [campaignRow()] }); await fresh(); installedMenus(true);
+  S.ctl.failReads.add('reg_campaigns');
+  const r = await runCron();
+  check('★ 試算表暫時讀不到 → 500、什麼都不換（不能把「讀不到」當成「報名結束」）', r.res.statusCode === 500 && r.created.length === 0 && r.pushes.length === 0, JSON.stringify([r.res.statusCode, r.res.body]));
+  S.ctl.failReads.clear();
+}
+{
+  // 沒設 LINE token（例如預覽環境）：靜靜跳過
+  seed({ campaigns: [campaignRow({ status: 'closed' })] }); await fresh(); installedMenus(true);
+  const saved = process.env.LINE_CHANNEL_ACCESS_TOKEN; delete process.env.LINE_CHANNEL_ACCESS_TOKEN;
+  const r = await runCron();
+  process.env.LINE_CHANNEL_ACCESS_TOKEN = saved;
+  check('沒有 LINE_CHANNEL_ACCESS_TOKEN → 跳過，不炸', r.res.statusCode === 200 && r.res.body?.action === 'skip' && r.created.length === 0);
+}
+{
+  // GET 的其他用途仍然是 405（這支本來只收 LINE 的 POST）
+  seed(); await fresh();
+  const res = cronRes(); res.end = () => { res.statusCode = 405; return res; };
+  await handler({ method: 'GET', query: {}, headers: {} }, res);
+  check('沒帶 action 的 GET 照舊 405', res.statusCode === 405);
 }
 
 console.log(`\n批次 88（LINE × 報名）測試：${pass} 通過，${fail} 失敗`);

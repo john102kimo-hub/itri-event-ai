@@ -241,7 +241,10 @@ async function load(keepCur = true) {
 function pick(id) { CUR = id; FSESS = ''; load(); }
 
 /* ── 畫面 ───────────────────────────────────────────── */
-function statusPill(s) { return `<span class="pill ${s}">${{ open: '開放報名', draft: '草稿（測試中）', closed: '已截止' }[s] || s}</span>`; }
+function statusPill(s, accepting) {
+  if (s === 'open' && accepting === false) return '<span class="pill closed" title="已過截止時間，或所有場次都辦完了；不用手動改狀態">已自動截止</span>';
+  return `<span class="pill ${s}">${{ open: '開放報名', draft: '草稿（測試中）', closed: '已截止' }[s] || s}</span>`;
+}
 function render() {
   const has = DATA.campaigns.length > 0;
   $('empty').style.display = has ? 'none' : 'block';
@@ -259,7 +262,7 @@ function renderLink(camp) {
   const url = DATA.links.form;
   const line = DATA.line;
   $('c-link').innerHTML = `
-    <h2>${esc(camp.title)} ${statusPill(camp.status)} <small>${camp.closes_at ? '截止：' + esc(camp.closes_at) : '未設定截止時間'}</small></h2>
+    <h2>${esc(camp.title)} ${statusPill(camp.status, camp.accepting)} <small>${camp.closes_at ? '截止：' + esc(camp.closes_at) : '未設定截止時間'}</small></h2>
     <div class="linkrow"><code id="form-url">${esc(url)}</code>
       <button class="btn outline small" onclick="copyText($('form-url').textContent)">複製連結</button>
       <a class="btn outline small" href="${esc(url)}" target="_blank" rel="noopener">開啟報名頁 ↗</a>
@@ -296,7 +299,7 @@ function renderBars() {
     const head = s.date !== lastDate ? `<div class="small muted" style="margin:${lastDate ? '10px' : '0'} 0 2px 4px"><b>${esc(s.dateLabel)}</b></div>` : '';
     lastDate = s.date;
     return `${head}<div class="bar-row${FSESS === s.code ? ' sel' : ''}" onclick="filterSess('${esc(s.code)}')">
-      <div class="name"><b>${esc(s.code)}</b>${esc(s.title)}<small>${esc(s.time)}${s.status !== 'open' ? '・' + ({ closed: '已截止', full: '額滿', cancelled: '已取消' }[s.status]) : ''}</small></div>
+      <div class="name"><b>${esc(s.code)}</b>${esc(s.title)}<small>${esc(s.time)}${s.ended ? '・已結束' : s.status !== 'open' ? '・' + ({ closed: '已截止', full: '額滿', cancelled: '已取消' }[s.status]) : ''}</small></div>
       <div class="track"><div class="fill" style="width:${p.count ? Math.max(3, p.count / max * 100) : 0}%"></div></div>
       <div class="num">${p.count}<small class="muted" style="font-weight:400"> 人</small></div></div>`;
   }).join('');
