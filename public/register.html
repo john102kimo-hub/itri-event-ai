@@ -446,14 +446,14 @@ function renderDone(data, sent) {
     el('div', { class: 'ok', text: '✓', 'aria-hidden': 'true' }),
     el('h2', { text: title }),
     el('div', { class: 'who', text: `${reg.name || sent.name}｜${reg.outlet || sent.outlet}` }));
-  if (data.mode === 'merged') card.append(el('p', { class: 'hint', style: 'margin-top:6px', text: '這次勾選的場次已加進您先前的報名。' }));
+  if (data.mode === 'merged') card.append(el('p', { class: 'hint', style: 'margin-top:6px', text: '這次勾選的場次已加進您先前的報名。姓名、手機等資料沒有更動；要改請用當初報名後的「修改這筆報名」連結，或洽媒體聯絡人。' }));
   const ul = el('ul', { class: 'sum-list' });
   (reg.session_labels || []).forEach((t) => {
     const m = t.match(/^(\S+)\s+(.*)$/);
     ul.append(el('li', {}, m ? el('b', { text: m[1] }) : null, m ? m[2] : t));
   });
-  card.append(el('div', { class: 'hint', style: 'margin-top:16px;text-align:left', text: `已報名 ${reg.sessions.length} 場` }), ul);
-  card.append(el('div', { class: 'regno', text: `報名編號 ${reg.reg_id}` }));
+  card.append(el('div', { class: 'hint', style: 'margin-top:16px;text-align:left', text: data.mode === 'merged' ? `這次加入 ${reg.sessions.length} 場` : `已報名 ${reg.sessions.length} 場` }), ul);
+  if (reg.reg_id) card.append(el('div', { class: 'regno', text: `報名編號 ${reg.reg_id}` }));
   const acts = el('div', { style: 'margin-top:16px;display:flex;gap:10px;flex-wrap:wrap;justify-content:center' });
   if (EDIT_TOKEN) acts.append(el('button', { class: 'btn ghost', type: 'button', text: '修改這筆報名', onclick: async () => {
     const g = await api('reg_get', null, { c: campaign.id, t: EDIT_TOKEN }).catch(() => null);

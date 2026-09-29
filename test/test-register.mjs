@@ -316,8 +316,19 @@ let token1, regId1;
   check('同 Email 再送 → merged，不新增列', r.statusCode === 200 && r.body.mode === 'merged' && regRows().length === 1, JSON.stringify(r.body));
   check('沒帶編輯碼就更新的，不回傳編輯碼', !r.body.token);
   check('場次是聯集（先前的 A1、B1 沒被洗掉）', regRows()[0][8] === 'A1,B1,C1', regRows()[0][8]);
-  check('聯絡資料以最新的為準、選填項目沒動', regRows()[0][7] === '0987654321' && regRows()[0][9] === 'interview=1;meal=1;party=2');
+  check('★ 只靠 Email 對上的更新：聯絡資料不動（手機還是原本的）、選填項目也沒動', regRows()[0][7] === '0912345678' && regRows()[0][9] === 'interview=1;meal=1;party=2', JSON.stringify(regRows()[0]));
   check('同一個報名編號', regRows()[0][0] === regId1);
+  check('★ 沒證明身分的回應不含報名編號、姓名、媒體，也不含綁定連結；場次只回這次自己勾的', r.body.reg.reg_id === '' && r.body.reg.name === '' && r.body.reg.outlet === '' && eq(r.body.reg.sessions, ['C1']) && !r.body.line.bind_url, JSON.stringify(r.body));
+}
+{
+  // 批次 89：知道別人 Email 的人，不能改掉那筆的姓名／媒體／手機，也不能把自己的 LINE 綁上去
+  const ATT = 'Uattacker000000000000000000000001';
+  const before = regRows()[0].slice();
+  const evil = await post(person({ name: '假冒者', outlet: '假媒體', phone: '0999999999', sessions: ['D1'], lu: R.signLineToken(ATT) }));
+  const now = regRows()[0];
+  check('★ 撞 Email 的更新：姓名、媒體、手機都沒被換掉', evil.statusCode === 200 && now[4] === before[4] && now[5] === before[5] && now[7] === before[7], JSON.stringify(now));
+  check('★ 撞 Email 的更新：不會綁上對方的 LINE（也就拿不到編輯碼）', now[10] === '' && evil.body.line.bound === false && (await R.findRegistrationsForLineUser(ATT)).length === 0, JSON.stringify(now));
+  check('★ 拿別人的報名編號去 #報名 之前，先得從公開回應裡拿得到編號——現在拿不到', !JSON.stringify(evil.body).includes(regId1) && !JSON.stringify(evil.body).includes(token1));
 }
 {
   const r = await post(person({ sessions: ['B1', 'E1'], t: token1, options: { party: 1 } }));
