@@ -111,15 +111,6 @@
   .sum-list li:first-child { border-top: none; }
   .sum-list b { color: var(--primary-dark); margin-right: 6px; }
   .regno { font-size: .78rem; color: var(--muted); margin-top: 10px; }
-  .linecard { text-align: left; border: 1.5px solid #cdeedb; background: #f4fcf7; }
-  .linecard h3 { font-size: 1rem; display: flex; align-items: center; gap: 8px; }
-  .linecard h3 .pill { font-size: .72rem; font-weight: 600; background: #dcfce7; color: #166534; border-radius: 999px; padding: 1px 9px; }
-  .linecard ul { margin: 10px 0 14px 1.2em; font-size: .92rem; color: #374151; }
-  .linecard .skip { text-align: center; color: var(--muted); font-size: .82rem; margin-top: 10px; }
-  .qrbox { display: none; text-align: center; margin-top: 4px; }
-  .qrbox canvas { width: 168px; height: 168px; border: 1px solid var(--border); border-radius: 10px; background: #fff; }
-  .qrbox p { font-size: .82rem; color: var(--muted); margin-top: 6px; }
-  @media (hover: hover) and (pointer: fine) { .qrbox.show { display: block; } .linecard .mobile-only { display: none; } }
   footer.contact { margin-top: 22px; font-size: .85rem; color: var(--muted); white-space: pre-line; text-align: center; }
   .center { text-align: center; }
   .spinner { text-align: center; color: var(--muted); padding: 60px 0; }
@@ -446,14 +437,14 @@ function renderDone(data, sent) {
     el('div', { class: 'ok', text: '✓', 'aria-hidden': 'true' }),
     el('h2', { text: title }),
     el('div', { class: 'who', text: `${reg.name || sent.name}｜${reg.outlet || sent.outlet}` }));
-  if (data.mode === 'merged') card.append(el('p', { class: 'hint', style: 'margin-top:6px', text: '這次勾選的場次已加進您先前的報名。' }));
+  if (data.mode === 'merged') card.append(el('p', { class: 'hint', style: 'margin-top:6px', text: '這次勾選的場次已加進您先前的報名。姓名、手機等資料沒有更動；要改請用當初報名後的「修改這筆報名」連結，或洽媒體聯絡人。' }));
   const ul = el('ul', { class: 'sum-list' });
   (reg.session_labels || []).forEach((t) => {
     const m = t.match(/^(\S+)\s+(.*)$/);
     ul.append(el('li', {}, m ? el('b', { text: m[1] }) : null, m ? m[2] : t));
   });
-  card.append(el('div', { class: 'hint', style: 'margin-top:16px;text-align:left', text: `已報名 ${reg.sessions.length} 場` }), ul);
-  card.append(el('div', { class: 'regno', text: `報名編號 ${reg.reg_id}` }));
+  card.append(el('div', { class: 'hint', style: 'margin-top:16px;text-align:left', text: data.mode === 'merged' ? `這次加入 ${reg.sessions.length} 場` : `已報名 ${reg.sessions.length} 場` }), ul);
+  if (reg.reg_id) card.append(el('div', { class: 'regno', text: `報名編號 ${reg.reg_id}` }));
   const acts = el('div', { style: 'margin-top:16px;display:flex;gap:10px;flex-wrap:wrap;justify-content:center' });
   if (EDIT_TOKEN) acts.append(el('button', { class: 'btn ghost', type: 'button', text: '修改這筆報名', onclick: async () => {
     const g = await api('reg_get', null, { c: campaign.id, t: EDIT_TOKEN }).catch(() => null);
@@ -467,46 +458,17 @@ function renderDone(data, sent) {
   nodes.push(contactFooter());
   $('#app').replaceChildren(...nodes);
   scrollTo(0, 0);
-  const qr = $('#qrcv');
-  if (qr) drawQr(qr, data.line.bind_url);
 }
 
-// LINE 導流：只在報名完成之後、而且明講「選用」。沒設定 LINE 官方帳號時整張不出現。
+// LINE 導流（批次 89 縮小）：只在報名完成之後、只有一行小字＋加好友連結。
+// 不再放「用 LINE 連結我的報名」按鈕與 QR——記者不會點，「有沒有連結」對他沒有差別，只對我們有。
+// 從米亞卡片點進來填的人，送出時就已經自動連結了（不需要他多做任何事）。
 function lineCard(line) {
-  if (!line.bound && !line.bind_url && !line.add_friend_url) return null;
-  const pitch = campaign.line_pitch || [];
-  const card = el('div', { class: 'card linecard' },
-    el('h3', {}, '📲 加米亞 LINE 好友', el('span', { class: 'pill', text: '選用' })),
-    el('ul', {}, ...pitch.map((t) => el('li', { text: t }))));
-  if (line.bound) {
-    card.append(el('p', { style: 'font-weight:700;color:#166534', text: '✓ 已連結您的 LINE，米亞會認得您的報名。' }));
-    return card;
-  }
-  if (line.conflict) {
-    card.append(el('p', { class: 'hint', text: '這個 LINE 帳號已經連結過另一筆報名了，所以這筆沒有連結。' }));
-    return card;
-  }
-  const url = line.bind_url || line.add_friend_url;
-  card.append(el('a', { class: 'btn line block mobile-only-btn', href: url, target: '_blank', rel: 'noopener', text: line.bind_url ? '用 LINE 連結我的報名' : '加米亞為好友' }));
-  card.append(el('div', { class: 'skip', text: line.bind_url ? '會開啟 LINE，按「傳送」就連結好了。不加也沒關係，報名已經完成。' : '不加也沒關係，報名已經完成。' }));
-  card.append(el('div', { class: 'qrbox', id: 'qrbox' }, el('canvas', { id: 'qrcv', width: 168, height: 168 }), el('p', { text: '在電腦上？用手機 LINE 掃這個 QR' })));
-  return card;
-}
-function drawQr(canvas, url) {
-  if (!url || !matchMedia('(hover: hover) and (pointer: fine)').matches) return;
-  const go = () => {
-    try {
-      const qr = qrcode(0, 'M'); qr.addData(url); qr.make();
-      const n = qr.getModuleCount(), cell = Math.floor(168 / (n + 4)), off = Math.floor((168 - n * cell) / 2);
-      const g = canvas.getContext('2d');
-      g.fillStyle = '#fff'; g.fillRect(0, 0, 168, 168); g.fillStyle = '#000';
-      for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) if (qr.isDark(r, c)) g.fillRect(off + c * cell, off + r * cell, cell, cell);
-      $('#qrbox').classList.add('show');
-    } catch {}
-  };
-  if (window.qrcode) return go();
-  const sc = document.createElement('script');
-  sc.src = '/vendor/qrcode.js'; sc.onload = go; document.head.appendChild(sc);
+  if (line.bound) return el('p', { class: 'hint', style: 'text-align:center', text: '✓ 已連結您的 LINE，米亞會認得您的報名。' });
+  if (!line.add_friend_url) return null;
+  const pitch = (campaign.line_pitch || [])[0] || '議程、交通、報到時間，隨時問米亞';
+  return el('p', { class: 'hint', style: 'text-align:center' }, `${pitch}　`,
+    el('a', { href: line.add_friend_url, target: '_blank', rel: 'noopener', text: '加米亞好友（選用）' }));
 }
 
 function contactFooter() {

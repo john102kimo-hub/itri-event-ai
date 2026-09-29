@@ -31,6 +31,7 @@
 //     Anthropic」同一條原則；draft／archived 場次一律不進行事曆清單、不會被路由到
 
 import { AsyncLocalStorage } from 'async_hooks';
+import { timingSafeEqual } from 'crypto';
 import { readRange, appendRows, updateRange, ensureSheets } from '../lib/sheets.js';
 import { toTraditionalTW, ZH_TW_RULE } from '../lib/zh-tw.js';
 import { buildSystemPrompt, resolveEventContent, formatEventBasics } from '../lib/prompt.js';
@@ -4822,7 +4823,8 @@ export default async function handler(req, res) {
   if (req.method === 'GET' && req.query?.action === 'cron_menu') {
     const secret = process.env.CRON_SECRET;
     const bearer = String(req.headers?.authorization || '').replace(/^Bearer\s+/i, '');
-    if (!secret || bearer !== secret) return res.status(401).json({ error: 'unauthorized' });
+    const a = Buffer.from(bearer), b = Buffer.from(secret || '');
+    if (!secret || a.length !== b.length || !timingSafeEqual(a, b)) return res.status(401).json({ error: 'unauthorized' });
     try {
       return res.status(200).json(await autoRevertRegistrationMenu());
     } catch (e) {

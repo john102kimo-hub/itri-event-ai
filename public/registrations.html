@@ -165,7 +165,7 @@
     <div class="help">一行一項：<b>代碼｜顯示文字｜限定場次｜類型</b>。限定場次可空（＝任何場次都顯示）；類型寫 number 是 0–9 的人數選單，不寫就是勾選。<br>例：<code>meal｜需要餐盒（12:00 後領取）｜A1</code></div></div>
   <div class="fld"><label>媒體聯絡人（顯示在報名頁最下方）</label><textarea id="e-contact" style="min-height:70px"></textarea><div class="help">Email 和電話會自動變成可點的連結。</div></div>
   <div class="fld"><label>個資告知（報名頁送出鈕上方，選填）</label><textarea id="e-privacy" style="min-height:90px"></textarea><div class="help">留空＝不顯示（預設不放）。之後想放，貼在這裡就會出現在送出鈕上方。</div></div>
-  <div class="fld"><label>報名完成後的「加米亞 LINE」說明（一行一點）</label><textarea id="e-pitch" style="min-height:80px"></textarea><div class="help">留空＝使用預設。只寫米亞現在真的做得到的事。</div></div>
+  <div class="fld"><label>報名完成頁的「加米亞 LINE」說明（只用第一行）</label><textarea id="e-pitch" style="min-height:80px"></textarea><div class="help">留空＝使用預設。報名完成頁只有一行小字加一個「加好友（選用）」連結，這裡的第一行就是那行字；只寫米亞現在真的做得到的事。</div></div>
   <div class="actions"><button class="btn outline" onclick="closeModal('m-edit')">取消</button><button class="btn" id="e-save" onclick="saveEdit()">儲存</button></div>
 </div></div>
 
@@ -289,7 +289,6 @@ function renderKpis() {
   $('kpis').innerHTML = `
     <div class="kpi"><div class="n">${s.people}</div><div class="l">報名人數</div></div>
     <div class="kpi"><div class="n">${s.outlets}</div><div class="l">媒體家數</div></div>
-    <div class="kpi"><div class="n">${s.line_bound}</div><div class="l">已連結 LINE</div></div>
     ${s.out_of_roster == null ? `<div class="kpi"><div class="n">–</div><div class="l">名單外（尚未匯入記者名單）</div></div>` : `<div class="kpi warn"><div class="n">${s.out_of_roster}</div><div class="l">名單外，需要確認</div></div>`}
     ${opts}
     ${s.cancelled ? `<div class="kpi"><div class="n">${s.cancelled}</div><div class="l">已取消</div></div>` : ''}`;
