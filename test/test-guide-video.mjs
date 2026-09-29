@@ -18,8 +18,8 @@ function check(label, cond, detail) {
   if (cond) pass++; else { fail++; console.log(`❌ ${label}${detail ? '\n   ' + detail : ''}`); }
 }
 
-const MP4 = new URL('../public/mia-guide.mp4', import.meta.url);
-const COVER = new URL('../public/mia-guide-cover.jpg', import.meta.url);
+const MP4 = new URL('../public/mia-guide-v2.mp4', import.meta.url);
+const COVER = new URL('../public/mia-guide-v2-cover.jpg', import.meta.url);
 
 check('影片檔存在（HELP_TEXT 會叫 LINE 去抓它）', existsSync(MP4));
 check('封面檔存在', existsSync(COVER));

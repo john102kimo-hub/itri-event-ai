@@ -1,4 +1,4 @@
-# 使用說明影片怎麼重做（public/mia-guide.mp4）
+# 使用說明影片怎麼重做（public/mia-guide-v2.mp4）
 
 記者在 LINE 打「使用說明」時，米亞會直接把這支 30 秒影片播在對話裡（見
 `api/line.js` 的 `handleMetaIntent` `'help'` 分支）。畫面內容來自
@@ -82,8 +82,8 @@ ffmpeg -y -i bgm.wav -i voice/cvo0.wav -i voice/cvo1.wav -i voice/cvo2.wav \
 
 # 合成 ＋ 封面
 ffmpeg -y -i silent.mp4 -i mia-audio.m4a -map 0:v:0 -map 1:a:0 \
-  -c:v copy -c:a copy -movflags +faststart -shortest ../../public/mia-guide.mp4
-ffmpeg -y -ss 1.5 -i ../../public/mia-guide.mp4 -frames:v 1 -q:v 3 ../../public/mia-guide-cover.jpg
+  -c:v copy -c:a copy -movflags +faststart -shortest ../../public/mia-guide-v2.mp4
+ffmpeg -y -ss 1.5 -i ../../public/mia-guide-v2.mp4 -frames:v 1 -q:v 3 ../../public/mia-guide-v2-cover.jpg
 ```
 
 ## 只換聲音、畫面沒動的時候
@@ -92,7 +92,7 @@ ffmpeg -y -ss 1.5 -i ../../public/mia-guide.mp4 -frames:v 1 -q:v 3 ../../public/
 在跑的版本一模一樣，不會因為重錄而多出肉眼看不到的差異：
 
 ```bash
-ffmpeg -y -i ../../public/mia-guide.mp4 -map 0:v:0 -c copy -an silent.mp4
+ffmpeg -y -i ../../public/mia-guide-v2.mp4 -map 0:v:0 -c copy -an silent.mp4
 # 接著跑上面的混音與合成兩段（封面也不用重做，畫面沒變）
 ```
 

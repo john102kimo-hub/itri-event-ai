@@ -3144,7 +3144,9 @@ async function handleMetaIntent(replyToken, userId, text, metaIntent, binding, {
     // 「看」變成一個要主動決定的動作，多數人就滑過去了；LINE 的 video 訊息會直接
     // 在對話裡顯示成可播放的畫面，門檻是零。
     //
-    // 影片是 public/mia-guide.mp4（30 秒、720×1280、約 1.3 MB，遠低於 LINE 的
+    // 影片是 public/mia-guide-v2.mp4（30 秒、9:16、約 11 MB，遠低於 LINE 的
+    // ⚠️ 換影片時檔名要換（v3…）：LINE 依網址快取媒體，同網址換檔它不會重抓，
+    // 使用者會一直看到舊片（批次 87 實測抓到）。
     // 200 MB 上限），封面是第一格的截圖。兩個都必須是 https 直連網址，所以放在自家
     // 站台的 public/ 底下跟著部署走——不依賴任何外部服務，也不會有連結過期的問題。
     //
@@ -3162,8 +3164,8 @@ async function handleMetaIntent(replyToken, userId, text, metaIntent, binding, {
       { type: 'text', text: HELP_TEXT },
       {
         type: 'video',
-        originalContentUrl: `${SITE}/mia-guide.mp4`,
-        previewImageUrl: `${SITE}/mia-guide-cover.jpg`,
+        originalContentUrl: `${SITE}/mia-guide-v2.mp4`,
+        previewImageUrl: `${SITE}/mia-guide-v2-cover.jpg`,
         quickReply: buildHelpQuickReply()
       }
     ]);
