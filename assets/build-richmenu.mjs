@@ -39,8 +39,9 @@ const CHROME_CANDIDATES = [
   '/usr/bin/chromium-browser',
   '/usr/bin/google-chrome',
   '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-  'C:\Program Files\Google\Chrome\Application\chrome.exe',
-  'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe'
+  // Windows：用正斜線——單引號字串裡的反斜線會被吃掉（'C:\Program Files' 會變成 'C:Program Files'）
+  'C:/Program Files/Google/Chrome/Application/chrome.exe',
+  'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'
 ].filter(Boolean);
 
 function html(menu) {

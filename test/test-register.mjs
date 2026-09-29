@@ -168,6 +168,58 @@ reset(); R.resetRegistrationState(); API.resetRateLimit();
   const again = await admin({ ...base, title: '改過的名稱', options_text: OPTIONS });
   check('同代碼再存＝更新，不會長出第二列，建立時間不變',
     again.statusCode === 200 && again.body.created === false && book.reg_campaigns.length === 2 && book.reg_campaigns[1][1] === '改過的名稱');
+  // 「LINE 簡稱」（第 13 欄 M）：歡迎卡按鈕與報名卡片上寫明是報哪個活動（朱朱 9/29 提醒：只寫「媒體報名」記者不知道報什麼）
+  check('欄位定義：第 13 欄是 short_name', R.CAMPAIGN_HEADERS.length === 13 && R.CAMPAIGN_HEADERS[12] === 'short_name' && book.reg_campaigns[0].length === 13);
+  const withShort = await admin({ ...base, short_name: '眺望2027場次' });
+  check('LINE 簡稱存進第 13 欄', withShort.statusCode === 200 && book.reg_campaigns[1][12] === '眺望2027場次', JSON.stringify(book.reg_campaigns[1]));
+  check('存簡稱沒有弄壞其他欄位（名稱、場次、狀態）', book.reg_campaigns[1][1] === 'T' && book.reg_campaigns[1][2] === 'open' && book.reg_campaigns[1][4].startsWith('A1｜2026-10-28'));
+  const ovShort = (await adminGet({ action: 'reg_admin_list' })).body;
+  check('後台列表帶得回簡稱（編輯表單要預填）', ovShort.campaigns.find((c) => c.id === 'tw2027')?.short_name === '眺望2027場次');
+  check('公開的報名頁內容不帶簡稱（那是給 LINE 用的，網頁上不需要）', !('short_name' in (await get({ action: 'reg_config', c: 'tw2027' })).body.campaign));
+  const overlong = await admin({ ...base, short_name: '一二三四五六七八九十一二三四五六七八九十' });
+  check('簡稱超過 16 字 → 截到 16 字，不擋存檔', overlong.statusCode === 200 && [...book.reg_campaigns[1][12]].length === 16, book.reg_campaigns[1][12]);
+  const multiline = await admin({ ...base, short_name: '眺望\n2027' });
+  check('簡稱裡的換行變空白（單行）', multiline.statusCode === 200 && book.reg_campaigns[1][12] === '眺望 2027', JSON.stringify(book.reg_campaigns[1][12]));
+  const noShort = await admin({ ...base });
+  check('沒帶簡稱 → 空字串（LINE 上會寫「媒體報名」）', noShort.statusCode === 200 && book.reg_campaigns[1][12] === '');
+}
+// 正式站的 reg_campaigns 在加簡稱欄之前就已經自動建好了（12 欄）：第一次讀寫時補上表頭，舊資料一格不動
+reset(); R.resetRegistrationState(); API.resetRateLimit();
+{
+  const old12 = R.CAMPAIGN_HEADERS.slice(0, 12);
+  const row12 = ['tw2027', '舊活動', 'open', '介紹', 'A1｜2026-10-28｜09:30-12:00｜開幕論壇暨專刊發表', '', '', '工研院', '2099-12-31 12:00', '', '2026-09-29T10:00:00+08:00', ''];
+  book.reg_campaigns = [old12, row12];
+  book.registrations = [R.REG_HEADERS];
+  const r = await get({ action: 'reg_config', c: 'tw2027' });
+  check('舊版 12 欄的活動讀得出來（簡稱＝空）', r.statusCode === 200 && r.body.campaign.title === '舊活動');
+  check('★ 舊分頁的表頭自動補成 13 欄', eq(book.reg_campaigns[0], R.CAMPAIGN_HEADERS), JSON.stringify(book.reg_campaigns[0]));
+  check('舊資料列一格都沒動', eq(book.reg_campaigns[1].slice(0, 12), row12) && book.reg_campaigns.length === 2);
+  const ov = (await adminGet({ action: 'reg_admin_list' })).body;
+  check('舊活動的簡稱是空字串（LINE 上照舊寫「媒體報名」）', ov.campaigns[0].short_name === '');
+  // 之後在後台編輯這個舊活動 → 寫的是 A:M，簡稱進得去
+  const upd = await admin({ action: 'reg_admin_save_campaign', id: 'tw2027', title: '舊活動', status: 'open', sessions_text: 'A1｜2026-10-28｜09:30-12:00｜開幕論壇暨專刊發表', closes_at: '2099-12-31 12:00', short_name: '眺望2027場次' });
+  check('編輯舊活動 → 簡稱寫進第 13 欄，其他欄位還在', upd.statusCode === 200 && book.reg_campaigns[1][12] === '眺望2027場次' && book.reg_campaigns.length === 2);
+}
+reset(); R.resetRegistrationState(); API.resetRateLimit();
+{
+  // 補表頭只是方便人看試算表：寫入失敗（Sheets 429）不能讓報名頁跟著不能用
+  const old12 = R.CAMPAIGN_HEADERS.slice(0, 12);
+  book.reg_campaigns = [old12, ['tw2027', '舊活動', 'open', '介紹', 'A1｜2026-10-28｜09:30-12:00｜開幕論壇暨專刊發表', '', '', '工研院', '2099-12-31 12:00', '', '2026-09-29T10:00:00+08:00', '']];
+  book.registrations = [R.REG_HEADERS];
+  ctl.failWrites = 1;   // 第一次寫入（補表頭）就失敗
+  const r = await get({ action: 'reg_config', c: 'tw2027' });
+  check('★ 補表頭寫入失敗 → 報名頁照樣讀得到活動（不是 500）', r.statusCode === 200 && r.body.campaign.title === '舊活動', JSON.stringify(r.body));
+  check('表頭沒補成（下次冷啟動再試），資料沒被弄壞', book.reg_campaigns[0].length === 12 && book.reg_campaigns.length === 2);
+  ctl.failWrites = 0;
+}
+reset(); R.resetRegistrationState(); API.resetRateLimit();
+{
+  // 表頭已經是 13 欄時不再寫（每次冷啟動都寫一次表頭沒有意義，也不該在公開讀取路徑上亂寫）
+  await seedCampaign();
+  R.resetRegistrationState();
+  calls.length = 0;
+  await get({ action: 'reg_config', c: 'tw2027' });
+  check('表頭齊全時，冷啟動不會多寫任何東西', !calls.some((c) => c[0] === 'update' || c[0] === 'append'), JSON.stringify(calls));
 }
 
 // ═══ 三、報名頁讀取活動內容 ═══════════════════════════════════════════

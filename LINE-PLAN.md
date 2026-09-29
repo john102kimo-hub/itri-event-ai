@@ -5833,7 +5833,7 @@ draft／archived**（`lib/staff.js`，職員要能管理還沒發布的場次）
 
 | 分頁 | 欄位 |
 |---|---|
-| `reg_campaigns`（A–L） | id, title, status（draft／open／closed）, intro, sessions, options, privacy, contact, closes_at, line_pitch, created_at, updated_at |
+| `reg_campaigns`（A–M） | id, title, status（draft／open／closed）, intro, sessions, options, privacy, contact, closes_at, line_pitch, created_at, updated_at, short_name（LINE 簡稱，見 14） |
 | `registrations`（A–P） | reg_id, campaign_id, created_at, updated_at, name, outlet, email, phone, sessions（逗號）, options（`key=value;`）, line_user_id, edit_token, status（active／cancelled／deleted）, source（web／line，草稿活動尾巴加 `:test`）, note, bound_at |
 
 場次在後台用**一個文字框整批貼**（跟 `contacts`／`chips` 同一種做法）：
@@ -5875,13 +5875,19 @@ draft／archived**（`lib/staff.js`，職員要能管理還沒發布的場次）
    `line_users` 的媒體名稱，之後米亞不必再問「貴媒體名稱」。
 7. **意圖只認整句**（`REGISTER_EXACT_RE`）：「我要報名／怎麼報名／我的報名／我報名了嗎」命中，「報名費用多少」
    「報名截止是什麼時候」「以後會開放報名嗎」不攔，交給問答。命中一律固定程式回覆，不呼叫模型。
-8. **圖文選單變體。** 報名開放期間把「回首頁」那格換成「媒體報名」（`REPORTER_MENU_REG`）——「回首頁」在每則回覆
+8. **圖文選單變體。** 報名開放期間把「回首頁」那格換成報名入口（`REPORTER_MENU_REG`）——「回首頁」在每則回覆
    底下的快速回覆列都有、打字也一直認得；報名只在開放的那一兩週需要永遠看得到的入口。**不是新指令**：
    `handleSetupRichMenu()` 依當下有沒有開放中的活動挑版本，職員照舊打「設定圖文選單」；報名結束後再打一次
    就換回原本那套。底圖 `public/richmenu-reporter-reg.png` 用 `node assets/build-richmenu.mjs reporter-reg`
    產（腳本現在可以只產指定的 key，不會把另外兩張現成的重畫）。⚠️ 這張是在 Windows 上產的，字型與 emoji
    樣式跟原本兩張（Linux）不同，整張自成一格風格；圖示用 📝——原本想用的 🎟（U+1F39F）在部分平台
    會畫成黑色文字符號，要用 emoji-default 的字元。
+   **那一格寫的是活動名，不是「媒體報名」（朱朱 9/29 提醒：籠統的「媒體報名」記者看了不知道報什麼）**：
+   標題「眺望研討會報名」、副標「10/28 起・選場次」（`lib/menu.js` 的 `REG_MENU_TILE`，送出的字仍是「我要報名」）。
+   ⚠️ 選單底圖是一張靜態圖，不像歡迎卡能讀後台的活動名稱——**換活動時要改 `REG_MENU_TILE` 的字、重跑
+   `node assets/build-richmenu.mjs reporter-reg`、重新部署，再打「設定圖文選單」**。字的寬度有測試把關（標題 ≤ 8 個
+   全形字寬、副標 ≤ 12，超過會塞不進格子）。順手修了 `build-richmenu.mjs` 的 Windows 路徑（單引號字串裡的
+   `\P` 反斜線會被吃掉，Chrome 一直找不到，之前是靠 `CHROME=` 環境變數繞過）。
 9. **Sheets 配額。** 報名頁讀活動內容：模組層快取 20 秒＋ `Cache-Control: s-maxage=30`（邀請函一寄出，
    幾十人同時開頁不會把每分鐘 60 次的讀取打光）；送出一次＝讀一次名單＋寫一次。`ensureSheets` 每個
    instance 只確認一次（失敗 60 秒後再試，同 `ensureLineUsersSheet()`）。`vercel.json` 給 `api/events.js` 30 秒：Sheets 限流時
@@ -5913,11 +5919,20 @@ draft／archived**（`lib/staff.js`，職員要能管理還沒發布的場次）
     ④ **報名資料不會自動刪除。** 姓名／Email／手機留在 `registrations` 分頁，因為 11/4 成效一頁還要用報名家數、
        綁定 LINE 人數、每場人數。要不要在活動後 N 天自動匿名化（清掉姓名／Email／手機／LINE userId，保留單位、
        場次、統計），是人要決定的事（保存期限）；還沒做。
+14. **LINE 上的報名入口寫明是哪個活動（朱朱 9/29 提醒）。** 後台「LINE 簡稱」（選填，第 13 欄 `short_name`，最長
+    16 字；預填「眺望2027場次」）決定米亞歡迎卡最上面那顆按鈕與「我要報名」卡片小標怎麼寫：
+    - 有填 → 按鈕「📝 眺望2027場次報名（1 分鐘）」、卡片小標「📝 眺望2027場次報名」；沒填 → 照舊「📝 媒體報名」。
+    - **只有一個活動開放時才用簡稱**；兩個以上同時開放就用通用的「媒體報名」（不偏袒其中一個），卡片各自寫各自的簡稱。
+    - LINE 按鈕文字上限 20 字：放不下先拿掉「（1 分鐘）」，簡稱本身太長（16 字＋表情＋「報名」＝21）就截簡稱、
+      **一定留住結尾的「報名」**（用 UTF-16 長度算，比 LINE 的算法更嚴）。
+    - 正式站的 `reg_campaigns` 在加這一欄之前就已自動建好（12 欄）：`ensureRegSheets()` 第一次會把表頭補成 13 欄
+      （只補表頭、一格資料都不動；表頭齊全時冷啟動不寫任何東西；補表頭失敗只記 log，不影響報名——公開讀取也會走到這裡）。沒填簡稱的舊活動讀回來是空字串，行為跟以前一樣。
+    - 網頁上的報名頁不用簡稱（頁面標題本來就是完整活動名稱），公開的 `reg_config` 也不回傳這一欄。
 
-**驗證**：新增 `test/test-register.mjs`（190 條：場次／選填解析、後台建立、公開讀取、送出與去重、額滿、
-草稿測試、LINE 簽章、防濫用、後台總覽與記者名單對照、CSV、活動結束後場次消失與自動關閉）與 `test/test-register-line.mjs`（99 條：意圖、
+**驗證**：新增 `test/test-register.mjs`（206 條：場次／選填解析、後台建立、公開讀取、送出與去重、額滿、
+草稿測試、LINE 簽章、防濫用、後台總覽與記者名單對照、CSV、活動結束後場次消失與自動關閉）與 `test/test-register-line.mjs`（113 條：意圖、
 歡迎卡、卡片內容與簽章、群組不帶身分、`#報名` 綁定各種失敗、沒有報名可講時不攔（含剛截止一週內回「已截止」、
-日期一律相對今天算）、職員看得到草稿、選單依報名挑版本、報名結束後選單自動換回的各種情況）；兩份測試都把
+日期一律相對今天算）、職員看得到草稿、選單依報名挑版本、選單那一格與歡迎卡按鈕寫明活動、簡稱過長的截法、報名結束後選單自動換回的各種情況）；兩份測試都把
 `Date.now` 固定在 2026-09-29，過了 10/28 也不會因為「場次辦完了」而自己壞掉；
 `test/loader-reg.mjs` 是「通用假試算表＋假 LINE」的混合 loader。`npm test` 全部通過。報名頁與後台頁另外
 用真的 `api/events.js`＋記憶體假試算表在瀏覽器裡實際走過一遍（手機／桌機、送出、修改、LINE 導流卡與 QR、

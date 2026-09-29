@@ -25,7 +25,7 @@ const F = await import('./fakes.mjs');
 const { sent, state, line, reset: resetLine, installFetchStub } = F;
 const S = await import('./fakes-sheets82.mjs');
 const R = await import('../lib/registration.js');
-const { REPORTER_MENU, REPORTER_MENU_REG, STAFF_MENU, detectMetaIntent, buildWelcomeFlex } = await import('../lib/menu.js');
+const { REPORTER_MENU, REPORTER_MENU_REG, REG_MENU_TILE, STAFF_MENU, detectMetaIntent, buildWelcomeFlex } = await import('../lib/menu.js');
 
 let pass = 0, fail = 0;
 function check(label, cond, detail) {
@@ -107,10 +107,17 @@ for (const t of ['我要報名', '報名', '媒體報名', '怎麼報名', '如�
 for (const t of ['報名費用多少', '報名截止是什麼時候', '以後會開放報名嗎？', '這場需要報名嗎', '我要報名費用', '怎麼報名才能拿到新聞稿', '報名人數有限制嗎']) {
   check(`「${t}」是真的提問，不攔（交給問答）`, detectMetaIntent(t) !== 'register', detectMetaIntent(t));
 }
-check('報名版選單那一格送出的字一定認得（不然就是按了沒反應）', detectMetaIntent(REPORTER_MENU_REG.buttons.find((b) => b.label === '媒體報名').text) === 'register');
-check('報名版只換掉一格（回首頁 → 媒體報名），其他五格跟原本一模一樣',
+check('報名版選單那一格送出的字一定認得（不然就是按了沒反應）', detectMetaIntent(REG_MENU_TILE.text) === 'register' && REPORTER_MENU_REG.buttons.some((b) => b.text === REG_MENU_TILE.text));
+check('報名版只換掉一格（回首頁 → 報名），其他五格跟原本一模一樣',
   REPORTER_MENU_REG.buttons.length === 6 && REPORTER_MENU_REG.buttons.filter((b, i) => b.text !== REPORTER_MENU.buttons[i].text).length === 1 &&
-  REPORTER_MENU_REG.buttons.map((b) => b.label).join('/') === '最近有哪些活動/媒體報名/想問什麼技術/新聞稿全文/產業趨勢分析/媒體邀訪需求');
+  REPORTER_MENU_REG.buttons.map((b) => b.label).join('/') === '最近有哪些活動/眺望研討會報名/想問什麼技術/新聞稿全文/產業趨勢分析/媒體邀訪需求');
+check('★ 選單那一格寫明是哪個活動的報名（不是籠統的「媒體報名」——記者不知道報什麼）',
+  /眺望/.test(REG_MENU_TILE.label) && /報名/.test(REG_MENU_TILE.label) && /10\/28/.test(REG_MENU_TILE.sub) && REG_MENU_TILE.label !== '媒體報名', JSON.stringify(REG_MENU_TILE));
+{
+  // 底圖每格約 833px 寬：標題 92px 字（全形一字約 94px）→ 最多 8 個全形字；副標 52px 字 → 最多約 15 個全形字（抓 12 留邊）。半形字算半個。
+  const width = (str) => [...str].reduce((n, ch) => n + (ch.charCodeAt(0) < 0x2000 ? 0.5 : 1), 0);
+  check('選單那一格的字塞得進圖上的格子（標題 ≤ 8 個全形字寬、副標 ≤ 12）', width(REG_MENU_TILE.label) <= 8 && width(REG_MENU_TILE.sub) <= 12, `${width(REG_MENU_TILE.label)} / ${width(REG_MENU_TILE.sub)}`);
+}
 check('報名版的名稱與原本的不同（LINE 那邊用名稱找選單）', REPORTER_MENU_REG.name !== REPORTER_MENU.name && REPORTER_MENU_REG.key !== REPORTER_MENU.key);
 check('歡迎卡沒開報名時完全不變（2 顆按鈕）', buildWelcomeFlex().contents.footer.contents.length === 2);
 {
@@ -118,6 +125,20 @@ check('歡迎卡沒開報名時完全不變（2 顆按鈕）', buildWelcomeFlex(
   const texts = w.contents.footer.contents.map((b) => b.action.text);
   check('歡迎卡開報名時多一顆，而且排第一、是主按鈕', JSON.stringify(texts) === JSON.stringify(['我要報名', '最近有哪些活動', '使用說明']) && w.contents.footer.contents[0].style === 'primary' && w.contents.footer.contents[1].style === 'secondary');
   for (const t of texts) check(`歡迎卡按鈕「${t}」認得`, detectMetaIntent(t) !== null);
+  check('歡迎卡沒有簡稱時，按鈕寫「媒體報名（1 分鐘）」', w.contents.footer.contents[0].action.label === '📝 媒體報名（1 分鐘）', w.contents.footer.contents[0].action.label);
+  const w2 = buildWelcomeFlex('', { registration: R.welcomeButtonLabel({ short_name: '眺望2027場次' }) });
+  check('★ 歡迎卡有簡稱時，按鈕寫明活動（送出的字還是「我要報名」）',
+    w2.contents.footer.contents[0].action.label === '📝 眺望2027場次報名（1 分鐘）' && w2.contents.footer.contents[0].action.text === '我要報名', JSON.stringify(w2.contents.footer.contents[0].action));
+}
+check('registrationLabel：有簡稱＝簡稱＋報名、沒有＝媒體報名、只有空白也算沒有',
+  R.registrationLabel({ short_name: '眺望2027場次' }) === '眺望2027場次報名' && R.registrationLabel({}) === '媒體報名' && R.registrationLabel({ short_name: '   ' }) === '媒體報名' && R.registrationLabel(null) === '媒體報名');
+{
+  // LINE 按鈕文字上限 20 字：簡稱最長 16 字，加上「📝 」「報名」「（1 分鐘）」會超過——超過就拿掉「（1 分鐘）」，不能送出去被 LINE 退件
+  const long = R.welcomeButtonLabel({ short_name: '一二三四五六七八九十一二三四五六' });
+  check('★ 簡稱很長時按鈕字數不超過 LINE 的 20 字上限（連 UTF-16 長度都不超過）、結尾還是完整的「報名」', long.length <= 20 && long.endsWith('報名') && long.startsWith('📝 一二三'), `${long} (${long.length})`);
+  const edge = R.welcomeButtonLabel({ short_name: '一二三四五六七八九十一二三' });   // 13 字：加「（1 分鐘）」會超過 20，拿掉之後剛好放得下
+  check('簡稱中等長度 → 只拿掉「（1 分鐘）」，簡稱完整保留', edge === '📝 一二三四五六七八九十一二三報名', edge);
+  check('簡稱長度上限 16 字（超過的截掉）', R.campaignFromRow(campaignRow({ short_name: '一二三四五六七八九十一二三四五六七八九十' })).short_name.length === 16);
 }
 
 // ═══ 二、沒有報名可講：米亞的行為跟以前完全一樣 ═══════════════════════
@@ -187,6 +208,7 @@ const UID = 'Ureporter0001';
   check('網址不含原始 userId 明文以外的個資、沒有編輯碼', !('t' in paramsOf(uri)) && uri.length < 1000, String(uri.length));
   check('卡片上有活動名稱、日期範圍與場數', JSON.stringify(b.header).includes('眺望2027') && JSON.stringify(b.header).includes('10/28（三） – 10/29（四）') && JSON.stringify(b.header).includes('共 3 場'), JSON.stringify(b.header));
   check('altText 是一句有用的話（鎖定畫面只看得到這行）', /媒體報名/.test(flex.altText) && flex.altText.length < 400);
+  check('卡片小標沒有簡稱時是「📝 媒體報名」', JSON.stringify(b.header).includes('📝 媒體報名'), JSON.stringify(b.header));
   check('卡片底下掛著整排導覽按鈕', (flex.quickReply?.items || []).length >= 5);
   check('繁體字：卡片文字沒有簡體字', !/[们这们个报么对话]/.test(JSON.stringify(flex)));
   check('不呼叫 AI', aiCalls === 0);
@@ -200,6 +222,23 @@ const UID = 'Ureporter0001';
   const other = await say('我要報名', 'Uother000001');
   const uOther = paramsOf(uriOf(bubblesOf(flexOf(other))[0])).u;
   check('★ 不同人拿到的簽章不同、各自驗得回自己', R.verifyLineToken(uOther) === 'Uother000001' && uOther !== paramsOf(uriOf(bubblesOf(flexOf(await say('我要報名', UID)))[0])).u);
+}
+console.log('\n── 三之一、後台填了「LINE 簡稱」→ 歡迎卡與卡片都寫明是哪個活動 ──');
+seed({ campaigns: [campaignRow({ short_name: '眺望2027場次' })] }); guardAi(); await fresh();
+{
+  const out = await follow();
+  const first = out[0].messages[0].contents.footer.contents[0];
+  check('★ 加好友：歡迎卡最上面那顆寫「📝 眺望2027場次報名（1 分鐘）」', first.action.label === '📝 眺望2027場次報名（1 分鐘）' && first.action.text === '我要報名', JSON.stringify(first.action));
+  const card = flexOf(await say('我要報名', UID));
+  check('★ 卡片小標寫「📝 眺望2027場次報名」', JSON.stringify(bubblesOf(card)[0].header).includes('📝 眺望2027場次報名'), JSON.stringify(bubblesOf(card)[0].header));
+  check('簡稱只換字：按鈕、網址、活動名稱都沒變', labelOf(bubblesOf(card)[0]) === '填寫報名表' && paramsOf(uriOf(bubblesOf(card)[0])).c === 'tw2027' && JSON.stringify(bubblesOf(card)[0].header).includes('眺望2027 產業發展趨勢研討會'));
+  check('沒寫入任何報名資料', bookRegs().length === 0);
+}
+seed({ campaigns: [campaignRow({ short_name: '眺望2027場次' }), campaignRow({ id: 'other', title: '另一場說明會', short_name: '另一場' })] }); guardAi(); await fresh();
+{
+  const out = await follow();
+  const first = out[0].messages[0].contents.footer.contents[0];
+  check('兩個活動同時開放 → 歡迎卡用通用的「媒體報名（1 分鐘）」（不偏袒其中一個）', first.action.label === '📝 媒體報名（1 分鐘）', JSON.stringify(first.action));
 }
 console.log('\n── 三之二、兩個活動同時開放 → 輪播卡片 ──');
 seed({ campaigns: [campaignRow(), campaignRow({ id: 'other', title: '另一場說明會' })] }); await fresh();
@@ -329,7 +368,7 @@ seed({ campaigns: [campaignRow()] }); await fresh(); installFetchStub();
   check('有開放中的報名 → 建的是「報名版」＋職員版', r.created.join('|') === `${REPORTER_MENU_REG.name}|${STAFF_MENU.name}`, r.created.join('|'));
   check('抓的底圖是 richmenu-reporter-reg.png 與 richmenu-staff.png', r.uploaded.join('|') === 'richmenu-reporter-reg.png|richmenu-staff.png', r.uploaded.join('|'));
   check('報名版設為預設選單（所有記者）', r.defaultId === 'rm_1');
-  check('完成訊息寫明這次裝的是報名版，並列出「媒體報名」', /（報名版）/.test(r.text) && /媒體報名/.test(r.text), r.text);
+  check('完成訊息寫明這次裝的是報名版，並列出報名那一格的名稱', /（報名版）/.test(r.text) && r.text.includes(`・${REG_MENU_TILE.label}`), r.text);
 }
 seed({ campaigns: [campaignRow({ status: 'closed' })] }); await fresh(); installFetchStub();
 {

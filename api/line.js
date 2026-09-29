@@ -43,11 +43,11 @@ import {
 import { buildCalendarCards, buildAllCalendarCards, routeIntent, formatCalendarReply, calendarQuickReplyItems } from '../lib/router.js';
 import {
   detectMetaIntent, detectCourtesy, isOrgWideNewsAsk, isHumanRequest, matchEventByName, MENU_WORDS, HELP_TEXT, ORG_INTRO_TEXT, buildWelcomeFlex,
-  buildRichMenuDefinition, ALL_MENUS, REPORTER_MENU, REPORTER_MENU_REG, STAFF_MENU, findEventMentioned
+  buildRichMenuDefinition, ALL_MENUS, REPORTER_MENU, REPORTER_MENU_REG, REG_MENU_TILE, STAFF_MENU, findEventMentioned
 } from '../lib/menu.js';
 import {
   listOpenCampaigns, listOpenCampaignsStrict, listRegistrationTopics, loadCampaigns, findRegistrationsForLineUser, bindRegistrationToLine, parseRegBindText,
-  buildRegistrationFlex, buildRegistrationText, describeSessions
+  buildRegistrationFlex, buildRegistrationText, describeSessions, welcomeButtonLabel
 } from '../lib/registration.js';
 import {
   isPasscodeMatch, isStaffAuthenticated, authenticateStaff, routeStaffIntent,
@@ -2376,7 +2376,7 @@ async function handleSetupRichMenu(replyToken, userId) {
   await startLoading(userId, 45);
 
   try {
-    // 批次 88：有開放中的媒體報名 → 記者選單用「報名版」（多一格媒體報名）；報名結束後會自動換回
+    // 批次 88：有開放中的媒體報名 → 記者選單用「報名版」（多一格報名入口）；報名結束後會自動換回
     // 原本那套（見 autoRevertRegistrationMenu()），也可以再打一次「設定圖文選單」馬上換。
     // 兩套底圖各自一張（public/richmenu-{key}.png）。
     const reporterMenu = (await listOpenCampaigns()).length ? REPORTER_MENU_REG : REPORTER_MENU;
@@ -2408,7 +2408,7 @@ async function autoRevertRegistrationMenu() {
   const ownerId = process.env.LINE_ADMIN_USER_ID;
   if (ownerId) {
     // 只有真的換的那天才推一則（一次 1 則，不是行銷推播）
-    try { await pushMessage(ownerId, '報名已結束，圖文選單已自動換回原本那套（沒有「媒體報名」那一格了）。'); }
+    try { await pushMessage(ownerId, `報名已結束，圖文選單已自動換回原本那套（沒有「${REG_MENU_TILE.label}」那一格了）。`); }
     catch (e) { console.error('通知管理員失敗:', e.message); }
   }
   return { action: 'reverted', linked: r.linked };
@@ -4457,8 +4457,10 @@ async function handleEvent(ev) {
     // 選單要先點開才看得到，LINE 電腦版則完全不顯示圖文選單（官方文件）。
     // 批次 88：有開放中的媒體報名時，歡迎卡最上面多一顆「媒體報名」。查詢失敗當作沒有，
     // 不能讓新記者因為報名資料表讀不到就收不到歡迎卡（listOpenCampaigns() 自己吞例外）。
-    const hasRegistration = (await listOpenCampaigns()).length > 0;
-    const ok = await replyOrPushMessages(ev.replyToken, userId, [{ ...buildWelcomeFlex('', { registration: hasRegistration }), quickReply: toQuickReply(HOME_MENU) }]);
+    // 按鈕上的字用後台「LINE 簡稱」（例：眺望2027場次報名），只有一個活動開放時才具體，兩個以上就用通用的。
+    const openNow = await listOpenCampaigns();
+    const registration = openNow.length === 1 ? welcomeButtonLabel(openNow[0]) : openNow.length > 1;
+    const ok = await replyOrPushMessages(ev.replyToken, userId, [{ ...buildWelcomeFlex('', { registration }), quickReply: toQuickReply(HOME_MENU) }]);
     if (!ok) {
       await replyOrPush(ev.replyToken, userId,
         '感謝加入好友！\n\n請掃描活動現場的 QR code，或直接輸入「#活動代碼」開始問答；也可以直接打活動名稱，或點下面的按鈕看看目前有哪些活動。\n\n本帳號會記錄您的提問內容以改善新聞服務，不會蒐集您的個人資料。',
