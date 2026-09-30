@@ -41,7 +41,7 @@ import {
   linkRichMenuToUser, unlinkRichMenuFromUser,
   isBotMentioned, stripMentionText, pushMessage
 } from '../lib/line.js';
-import { buildCalendarCards, buildAllCalendarCards, routeIntent, formatCalendarReply, calendarQuickReplyItems } from '../lib/router.js';
+import { buildCalendarCards, buildAllCalendarCards, routeIntent, formatCalendarReply, calendarQuickReplyItems, matchShownEvents } from '../lib/router.js';
 import {
   detectMetaIntent, detectCourtesy, isOrgWideNewsAsk, isHumanRequest, isEventTopicAsk, isExactMetaAsk, matchEventByName, MENU_WORDS, HELP_TEXT, ORG_INTRO_TEXT, buildWelcomeFlex,
   buildRichMenuDefinition, ALL_MENUS, REPORTER_MENU, REPORTER_MENU_REG, REG_MENU_TILE, STAFF_MENU, findEventMentioned
@@ -371,7 +371,9 @@ async function getGroupSessionUntil(groupId) {
 // 是這次新增的欄位，舊的 line_users 分頁不會自動長出表頭（ensureSheets 只補「整個
 // 分頁不存在」的情況），能少開一欄就少一欄要解釋的空白表頭。
 const TOPIC_TTL_MS = 10 * 60 * 1000; // 10 分鐘：夠讀完一段回答、想一下、再打一個追問的詞
-const VALID_TOPICS = ['industry_trend', 'tech_query'];
+// 'calendar'（批次 101）：剛剛送出過「近期活動」清單。routeIntent() 的 TOPIC_HINTS 沒有
+// 這一項，所以不會影響路由；只給 matchShownEvents() 那條規則判斷「這句是不是在點清單上的名稱」。
+const VALID_TOPICS = ['industry_trend', 'tech_query', 'calendar'];
 
 async function getRecentTopic(targetId) {
   try {
@@ -410,7 +412,7 @@ async function getRecentTopic(targetId) {
 // 活動的問答留在 I 欄才是錯的——那份脈絡已經過期了。
 const TOPIC_TURN_MARK = '#topic:';
 
-async function setRecentTopic(targetId, topic, { question = '', answer = '' } = {}) {
+async function setRecentTopic(targetId, topic, { question = '', answer = '', keepTurn = false } = {}) {
   try {
     await ensureLineUsersSheet();
     const value = topic ? `${topic}@${Date.now()}` : '';
@@ -425,6 +427,9 @@ async function setRecentTopic(targetId, topic, { question = '', answer = '' } = 
     if (idx === -1) {
       if (!value) return; // 沒有列可清，本來就沒有話題記憶
       await appendRows('line_users!A:I', [[targetId, '', '', '', String(Date.now()), '', '', value, turn]]);
+    } else if (keepTurn) {
+      // 只動 H：清單不是一輪問答，不能把綁定中那場的上一輪（I 欄）蓋掉
+      await updateRange(`line_users!H${idx + 2}`, [[value]]);
     } else {
       await updateRange(`line_users!H${idx + 2}:I${idx + 2}`, [[value, turn]]);
     }
@@ -3511,6 +3516,10 @@ async function handleMetaIntent(replyToken, userId, text, metaIntent, binding, {
 // 分支長這樣；抽出來是因為現在有三個呼叫端（固定規則命中、1 對 1 綁定中被 AI 判成
 // calendar、群組綁定中被 AI 判成 calendar），三邊必須長得一模一樣——記者不該從
 // 「怎麼問到的」看得出差別。
+async function noteCalendarShown(targetId) {
+  await setRecentTopic(targetId, 'calendar', { keepTurn: true });
+}
+
 async function sendCalendarReply(replyToken, targetId, cards, currentEvent) {
   const suffix = isUsable(currentEvent)
     ? `\n\n（您目前在問的是《${currentEvent.name}》，直接發問就會回答這一場；想換場點下面的按鈕即可。）`
@@ -3518,6 +3527,7 @@ async function sendCalendarReply(replyToken, targetId, cards, currentEvent) {
   await replyOrPush(replyToken, targetId,
     formatCalendarReply(cards) + suffix + CONTACT_MENU_TEXT_HINT,
     calendarQuickRepliesForReporter(cards));
+  await noteCalendarShown(targetId);
 }
 
 // 沒有有效綁定時的自然語言處理（批次 3）：讓路由判斷這是查活動列表、問特定一場、
@@ -3544,6 +3554,29 @@ async function handleUnbound(replyToken, userId, text, { silentOnOther = false, 
   // getRecentTopic() 開頭那段回報的截圖。讀的是 getBinding() 早就載入的那份 60 秒
   // 快取，不會多打一次 Sheets。
   const topicCtx = await recentTopicContext(userId);
+
+  // 剛看完活動清單、接著點名清單上的某一場（批次 101）：「院士」原本被當成裸主題詞，
+  // 回「產業趨勢還是工研院技術」——米亞明明剛剛才列出「院士授證典禮」。規則層先接，
+  // 不等模型判斷。只有比中清單上的場次才接；比不中就照原流程。
+  if (topicCtx.currentTopic === 'calendar') {
+    const hit = matchShownEvents(cards, text);
+    if (hit.length === 1) {
+      const event = await getEventById(hit[0].id);
+      if (isUsable(event)) {
+        await upsertBinding(userId, event.id);
+        const existingName = askMediaName ? await getStoredMediaName(userId) : '';
+        await answerQuestion(replyToken, userId, event, existingName, `${event.name}的重點資訊`, { memory: remember, speakerId });
+        if (askMediaName && !existingName) await askMediaNameLater(userId, event);
+        return;
+      }
+    } else if (hit.length > 1) {
+      const names = hit.slice(0, 5).map(c => c.name);
+      await replyOrPush(replyToken, userId,
+        `清單裡有幾場跟「${String(text).trim()}」有關，您是想問哪一場？\n${names.map(n => '・' + n).join('\n')}`,
+        names);
+      return;
+    }
+  }
   // groupChatter（批次 83）：群組裡沒被叫到的訊息，提醒路由「群組成員彼此也在聊天」——
   // silentOnOther 為 true 的情況正好就是這種（見 lib/router.js 的說明）。
   const { intent, event_ids, confidence, tech_keyword } = await routeIntent(text, cards, { ...topicCtx, groupChatter: silentOnOther });
@@ -3551,6 +3584,7 @@ async function handleUnbound(replyToken, userId, text, { silentOnOther = false, 
 
   if (intent === 'calendar') {
     await replyOrPush(replyToken, userId, formatCalendarReply(cards) + CONTACT_MENU_TEXT_HINT, calendarQuickRepliesForReporter(cards));
+    await noteCalendarShown(userId);
     return;
   }
 
