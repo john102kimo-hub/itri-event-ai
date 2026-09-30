@@ -67,7 +67,7 @@ function check(label, cond, detail) {
 // 功能按鈕：送出的字 → 唯一允許的顯示字
 const NAV_LABELS = {
   '回首頁': ['🏠 回首頁'],
-  '最近有哪些活動': ['📅 最近活動', '📅 其他活動', '📅 某一場的窗口'],
+  '最近有哪些活動': ['📅 最近活動', '📅 其他活動', '📅 某一場的窗口', '📅 某一場活動窗口'],
   '產業趨勢分析': ['📊 產業趨勢'],
   '想問什麼技術': ['🔬 問技術'],
   '媒體邀訪需求': ['📞 邀訪窗口'],
@@ -181,7 +181,7 @@ console.log('\n── 五、按鈕上的字修正 ──');
   const s = steps.find((x) => x.where === 'dm' && x.name === '產業趨勢分析');
   check('★ 按「產業趨勢分析」不再冒出「工研院的有哪些技術」這顆', !(s.btn || []).some((b) => /有哪些/.test(b.label)), JSON.stringify(s.btn?.map((b) => b.label)));
   const c = steps.find((x) => x.where === 'dm' && x.name === '媒體邀訪需求');
-  check('邀訪窗口選單裡「活動名稱」改成看得懂的「📅 某一場的窗口」', (c.btn || []).some((b) => b.label === '📅 某一場的窗口') && !(c.btn || []).some((b) => b.label === '活動名稱'),
+  check('邀訪窗口選單裡「活動名稱」改成看得懂的「📅 某一場活動窗口」（批次 97）', (c.btn || []).some((b) => b.label === '📅 某一場活動窗口') && !(c.btn || []).some((b) => b.label === '活動名稱'),
     JSON.stringify(c.btn?.map((b) => b.label)));
 }
 

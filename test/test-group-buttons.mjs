@@ -141,7 +141,7 @@ await tap('回首頁', { mentionSelf: true });                                  
   const out = await tap('媒體邀訪需求');
   const last = out.at(-1)?.text || '';
   check('回首頁之後按「媒體邀訪需求」→ 給跨活動的全域窗口清單，不是被接回剛剛那場',
-    /哪個技術領域|哪一場活動的邀訪窗口/.test(last), JSON.stringify(out));
+    /哪一種邀訪窗口/.test(last), JSON.stringify(out));
   check('（同上）不會冒出剛剛那場的專屬窗口', !/陳美玲|王小明/.test(last), last.slice(0, 200));
 }
 for (const nav of ['最近有哪些活動', '產業趨勢分析', '想問什麼技術', '使用說明']) {

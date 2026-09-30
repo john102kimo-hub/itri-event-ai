@@ -296,7 +296,7 @@ reset(); await freshModule();
 state.staff.push(['U_staff', '', '2026-08-27', '', '']);
 out = await send('媒體邀訪需求', 'U_staff');
 check('職員也叫得動邀訪窗口清單（真的那一則，不是功能表裡提到「邀訪」兩個字）',
-  out.some(o => o.kind === 'text' && /想了解哪個技術領域/.test(o.text)), JSON.stringify(out));
+  out.some(o => o.kind === 'text' && /想找哪一種邀訪窗口/.test(o.text)), JSON.stringify(out));
 
 // ⚠️ 這一組是這個修法真正的風險：**職員自己的指令不可以被記者端的意圖攔走**。
 // 被攔走的話同仁就管不了後台了，比原本「問新聞稿拿到清單」嚴重得多。
@@ -483,7 +483,7 @@ check('只 @ 沒接問題也算「有回答」，續問視窗要續命——不�
 // 是全域邀訪窗口清單（見 sendGlobalContactMenu()），不是卡在「找不到活動」。
 out = await sendGroup('媒體邀訪需求', { mentionSelf: false });
 check('點下「只 @」引導附的按鈕（媒體邀訪需求）→ 續問視窗內接得住、不用重新 @，並正確導向全域邀訪窗口清單',
-  out.length > 0 && out[0]?.kind === 'text' && /技術領域/.test(out[0].text), JSON.stringify(out));
+  out.length > 0 && out[0]?.kind === 'text' && /邀訪窗口/.test(out[0].text), JSON.stringify(out));
 
 // 實際回報的答非所問（附截圖）：群組裡 @ 問「妳能幫我什麼」，因為不含「怎麼／
 // 如何」，detectMetaIntent() 舊版的 HELP_ABOUT_BOT_RE 接不住，掉進 routeIntent()
@@ -851,7 +851,7 @@ reset(); await freshModule();
 state.bindings.set('U_reporter', { event_id: 'med', media_name: '', note: '', bound_at: Date.now() });
 out = await send('媒體邀訪需求');
 check('這場活動兩個窗口欄位都沒填 → 退到全域技術窗口清單，不是死路',
-  /請問想了解哪個技術領域/.test(out[0]?.text || ''), out[0]?.text);
+  /請問想找哪一種邀訪窗口/.test(out[0]?.text || ''), out[0]?.text);
 
 // ── 情境 13：全域技術窗口分工（跨活動，不需要先綁定，回報的新功能）───────────
 // fixture 見 test/fakes.mjs 的 state.contactsDirectory：生醫→丁嘉琳、機械→林潔玲、
@@ -861,15 +861,19 @@ check('這場活動兩個窗口欄位都沒填 → 退到全域技術窗口清�
 reset(); await freshModule();
 out = await send('媒體邀訪需求');
 check('沒綁定活動時問邀訪需求 → 直接給全域技術主題選單，不再要求先選活動',
-  /請問想了解哪個技術領域/.test(out[0]?.text || ''), out[0]?.text);
+  /請問想找哪一種邀訪窗口/.test(out[0]?.text || ''), out[0]?.text);
 {
   const labels = (out[0]?.quickReply || []).map(i => (typeof i === 'object' ? i.label : i));
-  check('全域選單含活動名稱／技術主題／其他，且不超過 13 顆',
-    labels.includes('📅 某一場的窗口') /* 批次 84：原本叫「活動名稱」 */ && labels.includes('生醫所') /* 批次 94：以所來分 */ && labels.includes('其他') && labels.length <= 13,
+  check('第一層選單：某一場活動窗口／各技術單位窗口／其他／找真人（批次 97），且不超過 13 顆',
+    labels.includes('📅 某一場活動窗口') && labels.includes('🏢 各技術單位窗口') && labels.includes('其他') && labels.some(l => /找真人/.test(l)) && labels.length <= 13,
     JSON.stringify(labels));
   const texts = (out[0]?.quickReply || []).map(i => (typeof i === 'object' ? i.text : i));
-  check('主題按鈕送出的文字帶「邀訪：」前綴，不會跟記者自己打字問問題撞在一起',
-    texts.includes('邀訪：生醫') && texts.includes('最近有哪些活動'), JSON.stringify(texts));
+  check('按鈕送出的文字帶「邀訪：」前綴，不會跟記者自己打字問問題撞在一起',
+    texts.includes('邀訪：各單位') && texts.includes('邀訪：其他') && texts.includes('最近有哪些活動'), JSON.stringify(texts));
+  out = await send('邀訪：各單位');
+  const unitLabels = (out[0]?.quickReply || []).map(i => (typeof i === 'object' ? i.label : i));
+  const unitTexts = (out[0]?.quickReply || []).map(i => (typeof i === 'object' ? i.text : i));
+  check('第二層：列出各單位（所名），送出「邀訪：主題」', unitLabels.includes('生醫所') && unitTexts.includes('邀訪：生醫') && unitLabels.length <= 13, JSON.stringify(unitLabels));
 }
 
 // 點主題按鈕（送出「邀訪：生醫」）→ 直接回聯絡資訊，不管有沒有綁定活動
@@ -1030,7 +1034,7 @@ out = await send('最近如何');
 }
 out = await send('媒體邀訪需求');
 check('點下去真的會走全域技術窗口清單，不是被當成活動名稱去問答',
-  /請問想了解哪個技術領域/.test(out[0]?.text || ''), out[0]?.text);
+  /請問想找哪一種邀訪窗口/.test(out[0]?.text || ''), out[0]?.text);
 
 // 職員模式自己的活動列表不套用這顆按鈕、也不套用文字提示——「媒體邀訪需求」是
 // 講給記者聽的措辭，同仁已經有整套 STAFF_QUICK_REPLIES，多這些只是用不到的雜訊。
@@ -1700,7 +1704,7 @@ reset(); await freshModule();
 state.bindings.set('Cgroup1', { event_id: '', media_name: '', note: '', bound_at: 0, groupSessionUntil: Date.now() - 60000 }); // 視窗已過期
 out = await sendGroup('媒體邀訪需求', { mentionSelf: false });
 check('續問視窗過期後按「媒體邀訪需求」按鈕 → 照樣接得住，不是按了沒反應',
-  out.length > 0 && /技術領域/.test(out[0]?.text || ''), JSON.stringify(out));
+  out.length > 0 && /邀訪窗口/.test(out[0]?.text || ''), JSON.stringify(out));
 
 // 但「視窗外也接」只放行幾乎不可能在閒聊裡打出來的那幾種，其餘維持安靜——
 // 不然這個放寬就變成新的亂回來源。

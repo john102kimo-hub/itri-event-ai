@@ -38,7 +38,8 @@ console.log('\n── 一、按鈕以所來分 ──');
 reset(); await fresh();
 state.contactsDirectory = ['生醫｜生醫所｜丁嘉琳｜03-1｜｜醫材', '資通｜資通所｜戴孟錚｜03-2｜｜資通訊', '機械｜機械所｜林潔玲｜03-3｜｜機械', '其他｜｜朱則瑋｜03-9｜｜綜合'].join('\n');
 {
-  const out = await dm('U1', '媒體邀訪需求');
+  await dm('U1', '媒體邀訪需求');
+  const out = await dm('U1', '邀訪：各單位');
   const l = labels(out);
   check('★ 按鈕標籤是單位名（生醫所、資通所、機械所），不是領域詞', ['生醫所', '資通所', '機械所'].every((x) => l.includes(x)) && !l.includes('生醫'), JSON.stringify(l));
   const items = out.find((o) => o.kind === 'text')?.quickReply || [];
