@@ -1369,12 +1369,15 @@ function openModal() {
 // 所有「想關掉這個 modal」的入口都走這裡，closeModal() 只負責真的關
 function requestCloseModal(via) {
   if (uploadingCount > 0) { toast('照片還在上傳中，等傳完再關'); return; }
-  if (!isModalDirty()) { closeModal(); return; }
-  saveDraft();
+  // 批次 95：點旁邊「永遠不關」，不論有沒有改動。原本沒改動時會關，但在文字框裡拖曳選字、
+  // 滑鼠放開在視窗外，瀏覽器一樣算「點了旁邊」——這時根本沒有改動，視窗就直接消失了
+  // （回報：編輯活動時不小心點到旁邊就跳掉）。要離開只有「取消」與 ESC 兩條明確的路。
   if (via === 'backdrop') {
-    toast('內容還沒儲存，先幫你留著了。要離開請按「取消」');
+    if (isModalDirty()) { saveDraft(); toast('內容還沒儲存，先幫你留著了。要離開請按「取消」'); }
     return;
   }
+  if (!isModalDirty()) { closeModal(); return; }
+  saveDraft();
   if (!confirm('有內容還沒儲存，確定要關閉嗎？\n\n（會存成草稿，下次打開同一場活動可以還原。）')) return;
   closeModal();
 }

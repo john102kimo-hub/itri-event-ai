@@ -120,7 +120,7 @@ sandbox.showCreateModal('2026-09-20');
 check('新增活動：modal 打開', modalDisplay() === 'flex');
 
 sandbox.requestCloseModal('backdrop');
-check('沒動過任何欄位時，點旁邊照樣關得掉（不擾民）', modalDisplay() === 'none');
+check('★ 沒動過任何欄位時，點旁邊也不會關（拖曳選字放開在外面也會觸發，批次 95）', modalDisplay() === 'flex');
 
 sandbox.showCreateModal('2026-09-20');
 $('input-name').value = '工研院 AI 智慧醫療大平台發表記者會';
@@ -177,7 +177,7 @@ check('　 且草稿仍留著', store.get('itri_event_draft:new')?.includes('這
     $('input-kb').value.includes('原本就存好的內容'));
 
   sandbox.requestCloseModal('backdrop');
-  check('編輯：沒改任何東西時，點旁邊關得掉', modalDisplay() === 'none');
+  check('★ 編輯：沒改任何東西時，點旁邊也不會關（批次 95）', modalDisplay() === 'flex');
 
   await sandbox.showEditModal('ev-semicon');
   $('input-contacts').value = '徐喬涵035915128 XXX';
