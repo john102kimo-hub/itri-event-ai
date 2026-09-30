@@ -6187,6 +6187,20 @@ suspended，音量條整段是 0，5 秒後就誤報「幾乎沒收到聲音」�
   （第一頁 10 個＋`➕ 更多單位`，第二頁 `↩ 上一頁`），13 顆上限內。標籤是所名、送出的仍是固定的「邀訪：主題」。
 - 測試：`test-flow`／`test-batch94`／`test-batch96` 的斷言改成兩層結構；`npm test` 通過。
 
+### 批次 98：答題模型 Sonnet 5 → Sonnet 5.5（2026-09-30）
+
+**要求**（朱朱）：原本用 Sonnet 5 的部分升級成 Sonnet 5.5，Haiku 的部分保留。
+
+- 兩處：LINE 問答（`api/line.js ANSWER_MODEL`）、媒體訓練（`api/training.js`）。價格與 tokenizer 不變（$2／$10 per MTok）。
+- ⚠️ **只換模型 ID 會全面壞掉**：LINE 問答原本送 `thinking: {type:'disabled'}`，5.5 對它回 400——每位記者都會收到「無法取得回應」。
+  改成 `{type:'between_tools'}`（5.5 的「不做延伸思考」寫法：只能搭 effort high 以下，預設 high；不能帶 display／budget_tokens）。
+  媒體訓練沒送 thinking 參數，只換 ID。程式沒用到 temperature／tool_choice／prefill，不受其他破壞性變更影響。
+- 回應解析原本就是挑 `text` 區塊（不寫死 content[0]），5.5 把工具呼叫之間的進度回在 `thinking` 區塊也不受影響。
+- **Haiku 4.5 保留**：路由（`lib/router.js`）、職員路由（`lib/staff.js`）、網頁版問答（`api/chat.js`）。
+- 測試：`test-batch98.mjs`（7 條）檢查送出的請求（模型、thinking 寫法、沒有不收的參數）——假的 Anthropic 不會回 400，所以要直接看請求。
+- ⚠️ 沒辦法在這邊驗證：真的 5.5 的回答品質與延遲。上線後請在 LINE 問幾題（含名單類、新聞稿類），感覺變慢或變差就回報；
+  調整旋鈕見 `ANSWER_MODEL` 上方註解。
+
 ## 6. system prompt 要加的規則
 
 沿用 `api/chat.js` 那份（搬到 `lib/prompt.js` 共用），額外附加：

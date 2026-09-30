@@ -829,11 +829,15 @@ export function tidyLineLayout(input) {
 // ⚠️ 路由（lib/router.js routeIntent）刻意不跟著換：那是分類題、每則訊息都要跑，
 // Haiku 又快又便宜又夠準，換上去只是白花錢。貴的模型要花在真正需要理解力的地方。
 //
-// ⚠️ thinking 明確關掉：Sonnet 5 省略這個參數會預設開啟 adaptive thinking，那會讓
+// ⚠️ 延伸思考維持關掉：省略 thinking 參數會預設開啟 adaptive thinking，那會讓
 // 每則回覆多等好幾秒——LINE 的 reply token 只有 60 秒，記者在等的是聊天速度的回應。
-// 讀新聞稿找名單是閱讀題不是推理題，Sonnet 5 不開 thinking 就綽綽有餘。之後若發現
-// 答案深度不足，這裡是第一個該調的旋鈕（改成 { type: 'adaptive' }）。
-const ANSWER_MODEL = 'claude-sonnet-5';
+// 讀新聞稿找名單是閱讀題不是推理題，不開延伸思考就綽綽有餘。之後若發現答案深度不足，
+// 這裡是第一個該調的旋鈕（拿掉 thinking 參數＝adaptive，或降 effort 而不是關掉）。
+// 批次 98：Sonnet 5 → Sonnet 5.5（朱朱 9/30）。5.5 拒收 `thinking: {type:'disabled'}`（400），
+// 「不做延伸思考」的寫法改成 `{type:'between_tools'}`，只能搭配 effort high 以下（預設 high）、
+// 不能再帶 display／budget_tokens 等其他欄位；模型 ID 與價格不變（$2／$10 per MTok）。
+// 路由與網頁版問答仍用 Haiku 4.5，刻意不動。
+const ANSWER_MODEL = 'claude-sonnet-5-5';
 
 // extraSystem（批次 36）：選填的第二個 system 區塊，放跨場次的相關資料。
 // ⚠️ 刻意不併進第一個區塊：那一塊逐 byte 穩定才吃得到 ephemeral cache，而這一塊
@@ -943,7 +947,7 @@ async function askAnthropic(systemPrompt, userText, history = [], { extraSystem 
       signal: AbortSignal.timeout(Math.max(2_000, budgetFor(timeoutMs, REPLY_RESERVE_MS))),
       body: JSON.stringify({
         model: ANSWER_MODEL,
-        thinking: { type: 'disabled' }, // 見 ANSWER_MODEL 的 ⚠️
+        thinking: { type: 'between_tools' }, // 見 ANSWER_MODEL 的 ⚠️（5.5 不收 disabled）
         max_tokens: 4096,
         system: [
           { type: 'text', text: [systemPrompt, ZH_TW_RULE, LAYOUT_RULE, styleRules].filter(Boolean).join('\n'), cache_control: { type: 'ephemeral' } },
