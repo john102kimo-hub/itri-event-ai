@@ -865,7 +865,7 @@ check('沒綁定活動時問邀訪需求 → 直接給全域技術主題選單�
 {
   const labels = (out[0]?.quickReply || []).map(i => (typeof i === 'object' ? i.label : i));
   check('全域選單含活動名稱／技術主題／其他，且不超過 13 顆',
-    labels.includes('📅 某一場的窗口') /* 批次 84：原本叫「活動名稱」 */ && labels.includes('生醫') && labels.includes('其他') && labels.length <= 13,
+    labels.includes('📅 某一場的窗口') /* 批次 84：原本叫「活動名稱」 */ && labels.includes('生醫所') /* 批次 94：以所來分 */ && labels.includes('其他') && labels.length <= 13,
     JSON.stringify(labels));
   const texts = (out[0]?.quickReply || []).map(i => (typeof i === 'object' ? i.text : i));
   check('主題按鈕送出的文字帶「邀訪：」前綴，不會跟記者自己打字問問題撞在一起',
@@ -902,14 +902,14 @@ check('「其他」後自由輸入，句子裡含「機械」→ 寬鬆比對命
 
 out = await send('隨便問一句跟任何主題都不相關的話');
 check('「其他」旗標只消費一次——上一則已經用掉了，這則不該再被當成主題自由輸入',
-  !/請直接輸入想了解的技術主題|目前沒有抓到明確對應的窗口/.test(out[0]?.text || ''), out[0]?.text);
+  !/請直接輸入想了解的技術主題|目前對不到明確的窗口/.test(out[0]?.text || ''), out[0]?.text);
 
 // 「其他」→ 打的內容完全比對不到任何主題或單位 → 退回綜合聯絡人（朱則瑋）
 reset(); await freshModule();
 await send('邀訪：其他');
 out = await send('這是一個完全查不到對應窗口的奇怪問題內容');
 check('「其他」自由輸入比對不到任何主題 → 退回綜合聯絡人（朱則瑋）',
-  /目前沒有抓到明確對應的窗口/.test(out[0]?.text || '') && /朱則瑋/.test(out[0]?.text || ''), out[0]?.text);
+  /目前對不到明確的窗口/.test(out[0]?.text || '') && /朱則瑋/.test(out[0]?.text || ''), out[0]?.text);
 
 // 群組裡也要能查到全域技術窗口——跟 1 對 1 共用同一支 handleContactTopicMessage()，
 // 這裡只驗證兩邊的 dispatch 有接上，不重複測比對邏輯本身。
