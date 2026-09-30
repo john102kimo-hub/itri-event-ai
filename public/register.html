@@ -253,9 +253,9 @@ function renderForm(prefill) {
   form.append(el('div', { class: 'card' },
     el('h2', {}, el('span', { class: 'step', text: '1' }), '基本資料'),
     field('name', '姓名', 'text', { autocomplete: 'name', placeholder: '王小明', value: pre.name }),
-    field('outlet', '媒體／服務單位', 'text', { autocomplete: 'organization', placeholder: '例如：經濟日報', value: pre.outlet }),
+    field('outlet', '媒體／服務單位', 'text', { autocomplete: 'organization', placeholder: '請填寫貴媒體或服務單位全名', value: pre.outlet }),
     field('email', 'Email', 'email', { autocomplete: 'email', inputmode: 'email', autocapitalize: 'off', placeholder: 'name@company.com', value: pre.email }, '請用公司信箱，主辦單位聯繫時使用'),
-    field('phone', '手機號碼', 'tel', { autocomplete: 'tel', inputmode: 'tel', placeholder: '0912-345-678', value: pre.phone }, '活動前一天的提醒與現場聯繫會用到')));
+    field('phone', '手機號碼', 'tel', { autocomplete: 'tel', inputmode: 'tel', placeholder: '0912-345-678', value: pre.phone }, '活動當天現場聯繫會用到')));
 
   const sess = el('div', { class: 'card', id: 'sess-card' },
     el('h2', {}, el('span', { class: 'step', text: '2' }), '要採訪哪幾場？', el('span', { class: 'req', text: '*' })));
