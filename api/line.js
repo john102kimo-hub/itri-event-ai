@@ -76,7 +76,7 @@ import {
 } from '../lib/bot-memory.js';
 import {
   CONTACTS_DIR_RANGE, GLOBAL_CONTACT_TOPICS, ensureContactsDirectorySheet,
-  parseContactsDirectory, formatGlobalContact, matchGlobalContactByText
+  parseContactsDirectory, formatGlobalContact, matchGlobalContactByText, isInternalContact
 } from '../lib/contacts-directory.js';
 import {
   fetchIndustryTrendDigest, formatDigestForPrompt, extractSourceIndices, resolveSourceUrls
@@ -1373,15 +1373,29 @@ async function getIndustryTrendDigest() {
 // {label,text} 分開（見 lib/line.js buildQuickReply()），按鈕上看到的字很短
 // （例如「生醫」），但送出的文字帶固定前綴，才不會跟記者自己打的真正問題撞在一起
 // （萬一剛好在問某場跟「生醫」有關的活動內容，不會被誤判成在找邀訪窗口）。
-async function sendGlobalContactMenu(replyToken, userId) {
+async function sendGlobalContactMenu(replyToken, userId, { page = 1 } = {}) {
   // 批次 94：按鈕改「以所來分」（朱朱 9/30）——標籤顯示窗口名單裡的單位（生醫所、資通所…），
   // 送出的字仍是固定的「邀訪：主題」，比對與快取都不用動；名單裡找不到單位時退回主題名。
   let directory = [];
   try { directory = await getContactsDirectory(); } catch { directory = []; }
-  const unitOf = t => directory.find(c => c.topic === t)?.unit || t;
+  // 批次 96：按鈕從名單來，不再寫死 10 個領域——電光所、產業學院、中分院原本被 13 顆上限擠掉，
+  // 記者看不到。名單裡有的單位（扣掉「其他」與公關內部組別）都要找得到：朱朱排的順序在前，
+  // 其餘照名單順序；放不下時分兩頁（第一頁最後一顆「更多單位」）。
+  const usable = directory.filter(c => c.topic !== '其他' && !isInternalContact(c));
+  const ordered = [
+    ...GLOBAL_CONTACT_TOPICS.map(t => usable.find(c => c.topic === t)).filter(Boolean),
+    ...usable.filter(c => !GLOBAL_CONTACT_TOPICS.includes(c.topic))
+  ];
+  const unitBtn = c => ({ label: (c.unit || c.topic).slice(0, 20), text: `邀訪：${c.topic}` });
+  // 13 顆上限：單頁 = 某一場 + N 個單位 + 其他 + 找真人（N ≤ 10）；分頁時第一頁 9 個單位 + 更多單位
+  const paged = ordered.length > 10;
+  const shown = !paged ? ordered : page === 2 ? ordered.slice(9) : ordered.slice(0, 9);
   const items = [
-    { label: '📅 某一場的窗口', text: '最近有哪些活動' }, // 批次 84：原本標成「活動名稱」，看不出按了會怎樣
-    ...GLOBAL_CONTACT_TOPICS.map(t => ({ label: unitOf(t).slice(0, 20), text: `邀訪：${t}` })),
+    page === 2 && paged
+      ? { label: '↩ 回單位選單', text: CONTACT_MENU_LABEL }
+      : { label: '📅 某一場的窗口', text: '最近有哪些活動' }, // 批次 84：原本標成「活動名稱」，看不出按了會怎樣
+    ...shown.map(unitBtn),
+    ...(paged && page !== 2 ? [{ label: '➕ 更多單位', text: '邀訪：更多單位' }] : []),
     { label: '其他', text: '邀訪：其他' },
     BTN.human // 批次 84：主題選單裡也找得到真人；主題哪天變多，先被擠掉的是這顆，不是主題
   ].slice(0, 13);
@@ -1418,6 +1432,11 @@ async function handleContactTopicMessage(replyToken, targetId, text, { speakerId
   const m = String(text || '').match(CONTACT_TOPIC_RE);
   if (m) {
     const topic = m[1].trim();
+    if (topic === '更多單位') {
+      await setContactPending(targetId, '');
+      await sendGlobalContactMenu(replyToken, targetId, { page: 2 });
+      return true;
+    }
     if (topic === '其他') {
       await setContactPending(targetId, pendingNoteFor(CONTACT_PENDING_NOTE, targetId, speakerId));
       await replyOrPush(replyToken, targetId, '請直接輸入想了解的技術主題，或想邀訪的議題，我幫您媒合對應窗口。');
@@ -1427,7 +1446,7 @@ async function handleContactTopicMessage(replyToken, targetId, text, { speakerId
     // 的話，記者接下來打的第一句真正的問題會被誤當成在找邀訪窗口的自由輸入。
     await setContactPending(targetId, '');
     const directory = await getContactsDirectory();
-    const contact = directory.find(c => c.topic === topic);
+    const contact = directory.find(c => c.topic === topic && !isInternalContact(c));
     await replyOrPush(replyToken, targetId,
       contact ? formatGlobalContact(contact) : '這個主題目前還沒有設定聯絡窗口，請洽現場工作人員。');
     return true;
