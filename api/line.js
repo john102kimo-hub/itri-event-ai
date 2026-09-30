@@ -1380,7 +1380,7 @@ async function getIndustryTrendDigest() {
 async function sendGlobalContactMenu(replyToken, userId, { view = 'top' } = {}) {
   // 批次 97：兩層選單（朱朱 9/30：比較清晰）。
   //   第一層：某一場活動窗口／各技術單位窗口／其他／找真人
-  //   第二層（各技術單位窗口）：列出全部單位；放不下 13 顆時分兩頁
+  //   第二層（各技術單位窗口）：一頁列出全部單位（不分頁、不放找真人）
   // 標籤顯示名單裡的單位（生醫所、資通所…），送出的字仍是固定的「邀訪：主題」（批次 94）。
   if (view === 'top') {
     await replyOrPush(replyToken, userId,
@@ -1402,16 +1402,14 @@ async function sendGlobalContactMenu(replyToken, userId, { view = 'top' } = {}) 
     ...usable.filter(c => !GLOBAL_CONTACT_TOPICS.includes(c.topic))
   ];
   const unitBtn = c => ({ label: (c.unit || c.topic).slice(0, 20), text: `邀訪：${c.topic}` });
-  // 13 顆上限：回上一層 + 單位 + （更多）+ 找真人。單位 ≤ 11 一頁放完；否則第一頁 10 個 + 更多單位
-  const paged = ordered.length > 11;
-  const second = view === 'units2' && paged;
-  const shown = !paged ? ordered : second ? ordered.slice(10) : ordered.slice(0, 10);
+  // 批次 100：單位選單不分頁、不放「找真人」「更多單位」（朱朱 9/30）——13 顆上限 = 回上一層 + 12 個單位，
+  // 目前名單剛好 12 個（含電光所、產業學院、中分院）。找真人在第一層。單位超過 12 個時多出來的放不下：
+  // 記一筆 log 提醒，那些單位仍可用「其他」打字比對到（matchGlobalContactByText）。
+  if (ordered.length > 12) console.warn(`[line] 邀訪單位選單放不下：${ordered.length} 個單位，只顯示前 12 個`);
   const items = [
-    second ? { label: '↩ 上一頁', text: '邀訪：各單位' } : { label: '↩ 回上一層', text: CONTACT_MENU_LABEL },
-    ...shown.map(unitBtn),
-    ...(paged && !second ? [{ label: '➕ 更多單位', text: '邀訪：更多單位' }] : []),
-    BTN.human
-  ].slice(0, 13);
+    { label: '↩ 回上一層', text: CONTACT_MENU_LABEL },
+    ...ordered.slice(0, 12).map(unitBtn)
+  ];
   await replyOrPush(replyToken, userId,
     ordered.length ? '請問想找哪個技術單位的邀訪窗口？請點下面按鈕。' : '目前還沒有設定各技術單位的窗口，請點「回上一層」選其他方式，或找真人。',
     items);
@@ -1445,9 +1443,9 @@ async function handleContactTopicMessage(replyToken, targetId, text, { speakerId
   const m = String(text || '').match(CONTACT_TOPIC_RE);
   if (m) {
     const topic = m[1].trim();
-    if (topic === '各單位' || topic === '更多單位') {
+    if (topic === '各單位' || topic === '更多單位') { // 「更多單位」是分頁時期的舊按鈕，還留在舊訊息上的照樣接得住
       await setContactPending(targetId, '');
-      await sendGlobalContactMenu(replyToken, targetId, { view: topic === '各單位' ? 'units' : 'units2' });
+      await sendGlobalContactMenu(replyToken, targetId, { view: 'units' });
       return true;
     }
     if (topic === '其他') {
