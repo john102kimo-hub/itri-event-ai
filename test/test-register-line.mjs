@@ -240,6 +240,33 @@ seed({ campaigns: [campaignRow({ short_name: '眺望2027場次' }), campaignRow(
   const first = out[0].messages[0].contents.footer.contents[0];
   check('兩個活動同時開放 → 歡迎卡用通用的「媒體報名（1 分鐘）」（不偏袒其中一個）', first.action.label === '📝 媒體報名（1 分鐘）', JSON.stringify(first.action));
 }
+console.log('\n── 三之一之一、後台填了「活動地點」→ 卡片標題下方寫 📍 地點（批次 92，同仁反饋） ──');
+seed({ campaigns: [campaignRow({ venue: '○○會議中心' })] }); guardAi(); await fresh();
+{
+  const card = flexOf(await say('我要報名', UID));
+  const header = bubblesOf(card)[0].header.contents;
+  check('★ 卡片標題區有「📍 ○○會議中心」', header.some((c) => c.text === '📍 ○○會議中心'), JSON.stringify(header));
+  check('地點排在日期那一行後面（標題、日期、地點的順序）', header.map((c) => c.text).join('|').match(/共 \d+ 場.*📍/) !== null, JSON.stringify(header.map((c) => c.text)));
+  check('地點只是多一行：按鈕、網址、場次數都沒變', labelOf(bubblesOf(card)[0]) === '填寫報名表' && paramsOf(uriOf(bubblesOf(card)[0])).c === 'tw2027' && JSON.stringify(header).includes('共 3 場'));
+  check('地點是後台填的固定文字，卡片不呼叫 AI', aiCalls === 0, aiCalls);
+}
+seed({ campaigns: [campaignRow()] }); guardAi(); await fresh();
+{
+  const header = bubblesOf(flexOf(await say('我要報名', UID)))[0].header.contents;
+  check('沒填地點 → 卡片跟以前一模一樣（不顯示空的 📍，也不亂補）', !JSON.stringify(header).includes('📍') && header.length === 3, JSON.stringify(header.map((c) => c.text)));
+}
+seed({ campaigns: [campaignRow({ venue: '○○會議中心' })], regs: [regRow({ line_user_id: UID, bound_at: '2026-10-01T10:05:00+08:00' })] }); guardAi(); await fresh();
+{
+  const b = bubblesOf(flexOf(await say('我要報名', UID)))[0];
+  check('已報名的人看到的卡片也有地點（同一個標題區）', b.header.contents.some((c) => c.text === '📍 ○○會議中心') && labelOf(b) === '修改我的報名');
+}
+{
+  const camp = R.campaignFromRow(campaignRow({ venue: '○○會議中心' }));
+  const txt = R.buildRegistrationText([camp], [], { userId: '' });
+  check('純文字版（卡片送不出去時）也帶地點', txt.includes('📍 ○○會議中心') && txt.indexOf('📍') > txt.indexOf(camp.title), txt);
+  check('純文字版沒填地點 → 沒有 📍', !R.buildRegistrationText([R.campaignFromRow(campaignRow())], [], { userId: '' }).includes('📍'));
+  check('欄位上限 60 字（超過的截掉）', R.campaignFromRow(campaignRow({ venue: '一二三四五六七八九十'.repeat(8) })).venue.length === 60);
+}
 console.log('\n── 三之二、兩個活動同時開放 → 輪播卡片 ──');
 seed({ campaigns: [campaignRow(), campaignRow({ id: 'other', title: '另一場說明會' })] }); await fresh();
 {
