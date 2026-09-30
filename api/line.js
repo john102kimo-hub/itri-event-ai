@@ -1373,34 +1373,43 @@ async function getIndustryTrendDigest() {
 // {label,text} 分開（見 lib/line.js buildQuickReply()），按鈕上看到的字很短
 // （例如「生醫」），但送出的文字帶固定前綴，才不會跟記者自己打的真正問題撞在一起
 // （萬一剛好在問某場跟「生醫」有關的活動內容，不會被誤判成在找邀訪窗口）。
-async function sendGlobalContactMenu(replyToken, userId, { page = 1 } = {}) {
-  // 批次 94：按鈕改「以所來分」（朱朱 9/30）——標籤顯示窗口名單裡的單位（生醫所、資通所…），
-  // 送出的字仍是固定的「邀訪：主題」，比對與快取都不用動；名單裡找不到單位時退回主題名。
+async function sendGlobalContactMenu(replyToken, userId, { view = 'top' } = {}) {
+  // 批次 97：兩層選單（朱朱 9/30：比較清晰）。
+  //   第一層：某一場活動窗口／各技術單位窗口／其他／找真人
+  //   第二層（各技術單位窗口）：列出全部單位；放不下 13 顆時分兩頁
+  // 標籤顯示名單裡的單位（生醫所、資通所…），送出的字仍是固定的「邀訪：主題」（批次 94）。
+  if (view === 'top') {
+    await replyOrPush(replyToken, userId,
+      '請問想找哪一種邀訪窗口？\n・某一場活動的窗口\n・各技術單位的窗口\n・其他（輸入想了解的主題，我幫您媒合）\n・或直接找真人',
+      [
+        { label: '📅 某一場活動窗口', text: '最近有哪些活動' }, // 批次 84：原本標成「活動名稱」，看不出按了會怎樣
+        { label: '🏢 各技術單位窗口', text: '邀訪：各單位' },
+        { label: '其他', text: '邀訪：其他' },
+        BTN.human // 批次 84：主題選單裡也找得到真人
+      ]);
+    return;
+  }
   let directory = [];
   try { directory = await getContactsDirectory(); } catch { directory = []; }
-  // 批次 96：按鈕從名單來，不再寫死 10 個領域——電光所、產業學院、中分院原本被 13 顆上限擠掉，
-  // 記者看不到。名單裡有的單位（扣掉「其他」與公關內部組別）都要找得到：朱朱排的順序在前，
-  // 其餘照名單順序；放不下時分兩頁（第一頁最後一顆「更多單位」）。
+  // 名單裡有的單位（扣掉「其他」與公關內部組別）都要找得到：朱朱排的順序在前，其餘照名單順序
   const usable = directory.filter(c => c.topic !== '其他' && !isInternalContact(c));
   const ordered = [
     ...GLOBAL_CONTACT_TOPICS.map(t => usable.find(c => c.topic === t)).filter(Boolean),
     ...usable.filter(c => !GLOBAL_CONTACT_TOPICS.includes(c.topic))
   ];
   const unitBtn = c => ({ label: (c.unit || c.topic).slice(0, 20), text: `邀訪：${c.topic}` });
-  // 13 顆上限：單頁 = 某一場 + N 個單位 + 其他 + 找真人（N ≤ 10）；分頁時第一頁 9 個單位 + 更多單位
-  const paged = ordered.length > 10;
-  const shown = !paged ? ordered : page === 2 ? ordered.slice(9) : ordered.slice(0, 9);
+  // 13 顆上限：回上一層 + 單位 + （更多）+ 找真人。單位 ≤ 11 一頁放完；否則第一頁 10 個 + 更多單位
+  const paged = ordered.length > 11;
+  const second = view === 'units2' && paged;
+  const shown = !paged ? ordered : second ? ordered.slice(10) : ordered.slice(0, 10);
   const items = [
-    page === 2 && paged
-      ? { label: '↩ 回單位選單', text: CONTACT_MENU_LABEL }
-      : { label: '📅 某一場的窗口', text: '最近有哪些活動' }, // 批次 84：原本標成「活動名稱」，看不出按了會怎樣
+    second ? { label: '↩ 上一頁', text: '邀訪：各單位' } : { label: '↩ 回上一層', text: CONTACT_MENU_LABEL },
     ...shown.map(unitBtn),
-    ...(paged && page !== 2 ? [{ label: '➕ 更多單位', text: '邀訪：更多單位' }] : []),
-    { label: '其他', text: '邀訪：其他' },
-    BTN.human // 批次 84：主題選單裡也找得到真人；主題哪天變多，先被擠掉的是這顆，不是主題
+    ...(paged && !second ? [{ label: '➕ 更多單位', text: '邀訪：更多單位' }] : []),
+    BTN.human
   ].slice(0, 13);
   await replyOrPush(replyToken, userId,
-    '請問想了解哪個技術領域，或想找哪一場活動的邀訪窗口？可以直接點下面按鈕，或輸入活動名稱。',
+    ordered.length ? '請問想找哪個技術單位的邀訪窗口？請點下面按鈕。' : '目前還沒有設定各技術單位的窗口，請點「回上一層」選其他方式，或找真人。',
     items);
 }
 
@@ -1432,9 +1441,9 @@ async function handleContactTopicMessage(replyToken, targetId, text, { speakerId
   const m = String(text || '').match(CONTACT_TOPIC_RE);
   if (m) {
     const topic = m[1].trim();
-    if (topic === '更多單位') {
+    if (topic === '各單位' || topic === '更多單位') {
       await setContactPending(targetId, '');
-      await sendGlobalContactMenu(replyToken, targetId, { page: 2 });
+      await sendGlobalContactMenu(replyToken, targetId, { view: topic === '各單位' ? 'units' : 'units2' });
       return true;
     }
     if (topic === '其他') {
