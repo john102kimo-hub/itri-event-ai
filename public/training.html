@@ -481,7 +481,7 @@
     </div>
     <div id="last-session" style="display:none"></div>
     <div id="who-ask">開始前先告訴 AI 記者，今天受訪的是誰——<b>題目會跟著您的職務換一批</b>。
-      院長被問的跟計畫主持人被問的，本來就不是同一批問題。</div>
+      院長被問的跟所長被問的，本來就不是同一批問題。</div>
     <div id="role-picker"></div>
     <div id="qcount-picker"></div>
     <input id="trainee-input" type="text" maxlength="40"
@@ -625,19 +625,17 @@ const MAX_REC_SECONDS = 150;   // 硬上限 2 分半：再長音檔會逼近 Ver
 const SILENT_PEAK = 0.02;      // 低於這個音量＝這段大概沒收到人聲
 
 // ── 今天受訪的是誰 ───────────────────────────────────────────────────
-// 同一場記者會，院長被問的跟計畫主持人被問的不是同一批問題：院長要答資源配置
-// 與政策，計畫主持人要答技術做不到什麼。舊版不分身分，出來的題目對誰都只有七分準。
+// 同一場記者會，院長被問的跟所長被問的不是同一批問題：院長要答資源配置
+// 與政策，所長要答技術路線與落地時程。舊版不分身分，出來的題目對誰都只有七分準。
 //
 // ⚠️ 這份清單要跟 lib/training-persona.js 的 TRAINEE_ROLES 一模一樣（id 與 label）。
 // 這裡是畫面用的副本，真正決定題目的是後端那一份；兩邊對不起來的話，主管會選了
 // 一個身分、卻拿到通用題目，而且畫面上完全看不出哪裡不對。
 // test/training.test.mjs 有一條在比對兩份清單（同 TARGET_MIN_SEC 的做法）。
 const ROLES = [
-  { id: 'exec',      label: '院長／副院長',          hint: '全院策略、資源、對外代表' },
-  { id: 'director',  label: '所長／中心主任',        hint: '單一領域的技術路線與團隊' },
-  { id: 'pi',        label: '計畫主持人／技術負責人', hint: '單一技術或計畫的第一線負責人' },
-  { id: 'bd',        label: '產業服務／推廣單位主管', hint: '對接廠商、技轉與合作' },
-  { id: 'other',     label: '其他／不特別指定',      hint: '用通用的受訪主管題目' },
+  { id: 'exec',      label: '院長／院部主管',        hint: '全院策略、資源、對外代表' },
+  { id: 'director',  label: '所長／單位主管',        hint: '單一領域的技術路線、團隊與產業合作' },
+  { id: 'other',     label: '其他',                  hint: '用通用的受訪主管題目' },
 ];
 const ROLE_LS_KEY = 'itri_trainee_role';
 let traineeRole = 'other';

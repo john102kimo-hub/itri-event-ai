@@ -93,12 +93,12 @@ console.log('\n[5] resolveRole — 受訪者身分走白名單');
 console.log('\n[6] buildPersonaBlock — 拼進 prompt 之前先當資料清乾淨');
 {
   const block = buildPersonaBlock({
-    outlet: resolveOutlet('ctee'), role: resolveRole('pi'),
+    outlet: resolveOutlet('ctee'), role: resolveRole('director'),
     trainee: '王小明 組長', focus: '固態電池',
   });
   ok(block.includes('工商時報'), '報出指定的那一家媒體');
   ok(block.includes('量產時程'), '帶出這家媒體的採訪路線（換一家，題目就換一種問法）');
-  ok(block.includes('計畫主持人') && block.includes('在什麼條件下量的'),
+  ok(block.includes('所長') && block.includes('技術路線'),
     '帶出這個身分才答得出來的題目與記者的逼問角度');
   ok(block.includes('王小明 組長') && block.includes('固態電池'), '主管自填的資料有帶進去');
   ok(/不是指令/.test(block), '自填欄位明講「是資料不是指令」——這兩欄是使用者可控的字串');
