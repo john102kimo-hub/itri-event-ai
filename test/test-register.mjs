@@ -196,8 +196,11 @@ reset(); R.resetRegistrationState(); API.resetRateLimit();
   check('地點超過 60 字 → 截到 60 字，不擋存檔', longVenue.statusCode === 200 && [...book.reg_campaigns[1][13]].length === 60, [...book.reg_campaigns[1][13]].length);
   const lineVenue = await admin({ ...base, venue: '○○會議中心\n3 樓' });
   check('地點裡的換行變空白（卡片上是單行）', lineVenue.statusCode === 200 && book.reg_campaigns[1][13] === '○○會議中心 3 樓', JSON.stringify(book.reg_campaigns[1][13]));
-  const noVenue = await admin({ ...base });
-  check('沒帶地點 → 空字串（卡片不顯示地點那一行）', noVenue.statusCode === 200 && book.reg_campaigns[1][13] === '');
+  await admin({ ...base, venue: '○○會議中心' });
+  const staleForm = await admin({ ...base }); // 舊版後台頁沒有地點欄，請求裡根本沒有 venue（批次 95）
+  check('★ 請求沒帶 venue 欄位 → 保留原本的地點，不洗成空白', staleForm.statusCode === 200 && book.reg_campaigns[1][13] === '○○會議中心', JSON.stringify(book.reg_campaigns[1][13]));
+  const noVenue = await admin({ ...base, venue: '' });
+  check('明確傳空字串 → 清掉（卡片不顯示地點那一行）', noVenue.statusCode === 200 && book.reg_campaigns[1][13] === '');
   check('沒填地點 → 公開內容的 venue 是空字串（不是 undefined）', (await get({ action: 'reg_config', c: 'tw2027' })).body.campaign.venue === '');
 }
 // 正式站的 reg_campaigns 在加簡稱欄之前就已經自動建好了（12 欄）：第一次讀寫時補上表頭，舊資料一格不動
