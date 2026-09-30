@@ -432,6 +432,115 @@
   }
   .spinner { width: 40px; height: 40px; border: 3px solid var(--border); border-top-color: var(--primary); border-radius: 50%; animation: spin 0.8s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ══ 批次 91：排版整理（電腦置中成一欄、手機不擠、開始畫面分成三步）══════════
+     ⚠️ 這一段刻意放在最後面，靠「後面的蓋前面的」改樣式，不去動上面各批次留下的說明。
+     ⚠️ 輸入框的 font-size 不要寫進 @media——test/training-voice.test.mjs 用很陽春的規則切分
+     掃 16px，包在 @media 裡會被切歪（而且 16px 本來就不該因為螢幕大小而變）。 */
+
+  /* 電腦：內容收成置中的一欄（720px）。標題列與底部作答區仍然滿版，只有內容收窄。
+     以前 1200px 寬的螢幕上，身分／題數按鈕排成參差不齊的三行，對話泡泡也拉到快一整行寬。 */
+  #scroller > * { width: min(100% - 32px, 720px); margin-left: auto; margin-right: auto; }
+  #progress-bar { width: min(100% - 32px, 720px); margin: 0 auto; padding: 12px 0 6px; }
+  #messages { padding-left: 0; padding-right: 0; }
+  #input-area { padding-left: max(16px, calc((100% - 720px) / 2)); padding-right: max(16px, calc((100% - 720px) / 2)); }
+  #info-card { margin-top: 14px; }
+  #info-card strong { color: #9a3d03; }
+
+  /* 開始畫面：一張白卡，三個步驟，每一步有標題 */
+  #start-area {
+    align-items: stretch; gap: 14px; padding: 20px 20px 0;
+    margin-top: 14px; margin-bottom: 20px;
+    background: var(--card); border: 1px solid var(--border); border-radius: 16px;
+    box-shadow: 0 2px 14px rgba(120,53,15,0.06);
+  }
+  #start-area > * { max-width: none; }
+  .sec-label { display: flex; flex-direction: column; gap: 3px; margin-top: 4px; text-align: left; }
+  .sec-label b { display: flex; align-items: center; gap: 8px; font-size: 0.95rem; color: var(--text); }
+  .sec-label small { font-size: 0.78rem; color: var(--muted); line-height: 1.55; padding-left: 28px; }
+  .sec-label em { font-style: normal; font-size: 0.72rem; font-weight: 600; color: var(--muted);
+    background: #f3f4f6; border-radius: 10px; padding: 1px 8px; }
+  .sec-label .step {
+    width: 20px; height: 20px; border-radius: 50%; flex-shrink: 0;
+    background: var(--primary); color: #fff; font-size: 0.74rem; font-weight: 700;
+    display: inline-flex; align-items: center; justify-content: center;
+  }
+  #who-ask { font-size: inherit; max-width: none; text-align: left; line-height: 1.5; color: inherit; }
+
+  /* 身分：三欄等寬（手機一欄一列）；題數：兩欄等寬。選到的那顆右上角有勾。 */
+  #role-picker { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; max-width: none; justify-content: stretch; }
+  #qcount-picker { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; max-width: none; justify-content: stretch; }
+  .role-chip, .q-chip { position: relative; border-radius: 12px; min-height: 60px; transition: border-color .15s, background .15s, box-shadow .15s; }
+  .role-chip { padding: 12px 14px; }
+  .q-chip { padding: 12px 14px; text-align: left; }
+  .role-chip:hover, .q-chip:hover { border-color: var(--primary); }
+  .role-chip.on, .q-chip.on { box-shadow: 0 0 0 1px var(--primary) inset; }
+  .role-chip.on::after, .q-chip.on::after {
+    content: '✓'; position: absolute; top: 8px; right: 10px;
+    font-size: 0.8rem; font-weight: 800; color: var(--primary);
+  }
+  .role-chip span, .q-chip span { display: block; margin-top: 2px; }
+
+  /* 姓名／領域：靠左、撐滿（置中的字在整欄寬時反而難讀）。字級留在上面那兩條 16px 的規則。 */
+  #trainee-input, #focus-input { max-width: none; text-align: left; border-radius: 12px; padding: 12px 14px; }
+
+  #last-session, #resume-box { max-width: none; }
+
+  /* 開始鈕：黏在卡片底部，底下墊一層漸層，捲動時不會壓在輸入框的字上 */
+  .start-cta {
+    position: sticky; bottom: 0; z-index: 2;
+    margin: 4px -20px 0; padding: 14px 20px 18px;
+    background: linear-gradient(to top, #fff 68%, rgba(255,255,255,0));
+    border-radius: 0 0 16px 16px;
+  }
+  #start-btn { position: static; width: 100%; justify-content: center; padding: 15px 24px; border-radius: 12px; font-size: 1.05rem; }
+
+  /* 麥克風測試 */
+  #mic-check {
+    display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 8px 12px;
+    padding: 12px 14px; border: 1px dashed #e7c9b3; border-radius: 12px; background: #fffaf6;
+  }
+  #mic-check-btn {
+    display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
+    border: 1.5px solid var(--primary); background: #fff; color: var(--primary);
+    border-radius: 10px; padding: 9px 14px; min-height: 40px;
+    font-family: var(--font); font-size: 0.88rem; font-weight: 700; cursor: pointer;
+  }
+  #mic-check-btn:hover { background: var(--primary-light); }
+  #mic-check-btn.running { background: var(--primary); color: #fff; }
+  #mic-check-meter { height: 8px; background: var(--border); border-radius: 4px; overflow: hidden; }
+  #mic-check-fill { height: 100%; width: 0%; background: #0F9E7A; border-radius: 4px; transition: width 0.08s linear; }
+  #mic-check-msg { grid-column: 1 / -1; font-size: 0.8rem; line-height: 1.55; color: var(--muted); }
+  #mic-check-msg.ok { color: #0a7a60; font-weight: 600; }
+  #mic-check-msg.warn { color: #b45309; font-weight: 600; }
+
+  /* 對話：電腦上泡泡不要拉到快一整行；記者題目字級稍大 */
+  .bubble { max-width: 86%; }
+  .msg.reporter .bubble { font-size: 0.95rem; }
+  #outlet-banner { width: min(100% - 32px, 720px); margin-left: auto; margin-right: auto; }
+
+  /* 作答區 */
+  #mic-btn { min-height: 52px; border-radius: 14px; box-shadow: 0 3px 10px rgba(15,158,122,0.25); }
+  #mic-btn.recording { box-shadow: 0 3px 10px rgba(220,38,38,0.28); }
+  .confirm-actions button { min-height: 46px; }
+  #end-screen { width: min(100% - 32px, 720px); }
+
+  /* ── 手機（窄螢幕）─────────────────────────────────────────── */
+  @media (max-width: 600px) {
+    #header { padding: 10px 14px; gap: 10px; }
+    #header h1 { font-size: 1rem; }
+    #back-link { padding: 6px 10px; font-size: 0.78rem; }
+    #scroller > *, #progress-bar, #outlet-banner, #end-screen { width: calc(100% - 24px); }
+    #input-area { padding-left: 12px; padding-right: 12px; }
+    #info-card { padding: 12px 14px; font-size: 0.86rem; }
+    #start-area { padding: 16px 14px 0; gap: 12px; }
+    .start-cta { margin-left: -14px; margin-right: -14px; padding-left: 14px; padding-right: 14px; }
+    #role-picker { grid-template-columns: 1fr; }
+    .role-chip { min-height: 56px; }
+    .bubble { max-width: 90%; }
+    #mic-check { grid-template-columns: 1fr; }
+    #mic-check-btn { justify-content: center; }
+  }
 </style>
 </head>
 <body>
@@ -480,17 +589,34 @@
       </div>
     </div>
     <div id="last-session" style="display:none"></div>
-    <div id="who-ask">開始前先告訴 AI 記者，今天受訪的是誰——<b>題目會跟著您的職務換一批</b>。
-      院長被問的跟所長被問的，本來就不是同一批問題。</div>
+    <div id="who-ask" class="sec-label">
+      <b><span class="step">1</span> 今天受訪的是誰</b>
+      <small>題目會跟著您的職務換一批——院長被問的跟所長被問的，本來就不是同一批問題。</small>
+    </div>
     <div id="role-picker"></div>
+    <div class="sec-label"><b><span class="step">2</span> 想練幾題</b></div>
     <div id="qcount-picker"></div>
+    <div class="sec-label">
+      <b><span class="step">3</span> 基本資料 <em>選填</em></b>
+      <small>方便主管追蹤訓練紀錄；填了負責的領域，記者會問得更準。</small>
+    </div>
     <input id="trainee-input" type="text" maxlength="40"
-           placeholder="您的姓名／職稱（選填，方便主管追蹤訓練紀錄）">
+           placeholder="您的姓名／職稱" aria-label="您的姓名／職稱（選填）">
     <input id="focus-input" type="text" maxlength="60"
-           placeholder="您負責的題目／領域（選填，例如：固態電池）">
-    <button id="start-btn">
-      <i class="ti ti-player-play"></i> 開始媒體訓練
-    </button>
+           placeholder="負責的題目／領域，例如：固態電池" aria-label="您負責的題目或領域（選填）">
+
+    <!-- 開講之前先確認麥克風收得到聲音：「按了錄音卻沒收到聲音」是這種介面最常見、也最晚才發現的失敗 -->
+    <div id="mic-check" style="display:none">
+      <button id="mic-check-btn" type="button"><i class="ti ti-microphone"></i> <span id="mic-check-label">先測試麥克風</span></button>
+      <div id="mic-check-meter"><div id="mic-check-fill"></div></div>
+      <div id="mic-check-msg">講幾句話，看看收音正不正常。</div>
+    </div>
+
+    <div class="start-cta">
+      <button id="start-btn">
+        <i class="ti ti-player-play"></i> 開始媒體訓練
+      </button>
+    </div>
   </div>
 
   <!-- 結算畫面。舊版只有一個平均分和一句「請參考各題的評分建議」，主管離開頁面就什麼都不剩。 -->
@@ -974,6 +1100,7 @@ async function init() {
     setVoiceNote('這個瀏覽器（或非 HTTPS 連線）不支援錄音，已改用打字。', true);
   } else {
     setAnswerMode(saved, false);
+    document.getElementById('mic-check').style.display = '';
   }
 
   const prevTrainee = rememberedTrainee();
@@ -1175,6 +1302,7 @@ document.getElementById('restart-btn').addEventListener('click', () => {
 });
 
 async function startTraining() {
+  if (micCheckStop) micCheckStop('cancel');   // 測試中的麥克風先放掉，免得跟正式錄音搶
   clearSavedSession();    // 按了「開始」就是不要接上次那場了
   document.getElementById('resume-box').style.display = 'none';
   resetSessionState();
@@ -1631,6 +1759,10 @@ function monitorLevel(stream) {
   try {
     const Ctx = window.AudioContext || window.webkitAudioContext;
     audioCtx = new Ctx();
+    // ⚠️ iOS Safari 的 AudioContext 常常是 suspended（getUserMedia 的 await 之後，
+    // 「使用者剛點了一下」的資格已經過期），不 resume 的話音量條整段是 0，
+    // 5 秒後會誤報「幾乎沒收到聲音」——麥克風明明是好的。
+    if (audioCtx.state === 'suspended') { try { audioCtx.resume(); } catch (e) {} }
     const src = audioCtx.createMediaStreamSource(stream);
     analyser = audioCtx.createAnalyser();
     analyser.fftSize = 512;
@@ -1651,8 +1783,93 @@ function monitorLevel(stream) {
   } catch (e) { /* 量不到就算了，不影響錄音本身 */ }
 }
 
+// ── 開講之前先測麥克風（批次 91）────────────────────────────────────
+// 「按了錄音卻沒收到聲音」的徵兆只有錄音中的那條音量條，等主管講完一分鐘才發現整段是空的，
+// 已經來不及。開始畫面先給一個 5 秒的測試：順便把瀏覽器的麥克風權限問完（iPhone 第一次會跳），
+// 不要讓權限視窗卡在第一題作答的當下。
+// 判準跟錄音時同一套：整段峰值低於 SILENT_PEAK 就是沒收到；SOFT_PEAK 以下算偏小。
+const SOFT_PEAK = 0.06;
+const MIC_CHECK_SECONDS = 5;
+let micCheckStop = null;   // 測試進行中時是「收尾函式」，否則 null
+
+function setMicCheckMsg(text, kind) {
+  const el = document.getElementById('mic-check-msg');
+  el.textContent = text;
+  el.className = kind || '';
+}
+
+async function runMicCheck() {
+  if (micCheckStop) { micCheckStop('cancel'); return; }
+  if (recording) return;
+  if (!canRecord()) { setMicCheckMsg('這個瀏覽器不支援錄音，請直接用打字作答。', 'warn'); return; }
+
+  const btn = document.getElementById('mic-check-btn');
+  const fill = document.getElementById('mic-check-fill');
+  setMicCheckMsg('請允許使用麥克風…', '');
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+    });
+  } catch (err) {
+    const denied = err && (err.name === 'NotAllowedError' || err.name === 'SecurityError');
+    setMicCheckMsg(denied
+      ? '瀏覽器擋住了麥克風。請點網址列左邊的圖示，允許麥克風後再測一次；先用打字作答也可以。'
+      : '找不到可以用的麥克風。請確認耳機或麥克風有接好，或直接用打字作答。', 'warn');
+    return;
+  }
+
+  let ctx = null, raf = null, peak = 0, timer = null;
+  const startedAt = Date.now();
+  try {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    ctx = new Ctx();
+    if (ctx.state === 'suspended') { try { ctx.resume(); } catch (e) {} }
+    const an = ctx.createAnalyser();
+    an.fftSize = 512;
+    ctx.createMediaStreamSource(stream).connect(an);
+    const buf = new Uint8Array(an.fftSize);
+    const tick = () => {
+      an.getByteTimeDomainData(buf);
+      let sum = 0;
+      for (let i = 0; i < buf.length; i++) { const v = (buf[i] - 128) / 128; sum += v * v; }
+      const rms = Math.sqrt(sum / buf.length);
+      if (rms > peak) peak = rms;
+      fill.style.width = Math.min(100, rms * 320) + '%';
+      raf = requestAnimationFrame(tick);
+    };
+    tick();
+  } catch (e) { /* 量不到音量就只確認麥克風開得起來 */
+    if (ctx) { try { ctx.close(); } catch (e2) {} }
+    ctx = null;
+  }
+
+  btn.classList.add('running');
+  document.getElementById('mic-check-label').textContent = '停止測試';
+  setMicCheckMsg(`請對著麥克風講幾句話（${MIC_CHECK_SECONDS} 秒）…`, '');
+
+  micCheckStop = (why) => {
+    clearTimeout(timer);
+    if (raf) cancelAnimationFrame(raf);
+    stream.getTracks().forEach((t) => { try { t.stop(); } catch (e) {} });
+    if (ctx) { try { ctx.close(); } catch (e) {} }
+    micCheckStop = null;
+    fill.style.width = '0%';
+    btn.classList.remove('running');
+    document.getElementById('mic-check-label').textContent = '再測一次';
+    if (why === 'cancel') { setMicCheckMsg('講幾句話，看看收音正不正常。', ''); return; }
+    if (!ctx) setMicCheckMsg('麥克風可以開啟。實際收音狀況，開講時看音量條有沒有在動。', 'ok');
+    else if (peak < SILENT_PEAK) setMicCheckMsg('幾乎沒收到聲音。請確認麥克風沒有被靜音、選對裝置，或把嘴巴靠近一點；不方便講話的話，可以改用打字作答。', 'warn');
+    else if (peak < SOFT_PEAK) setMicCheckMsg('有收到，但聲音偏小。請靠近麥克風或提高音量，錄出來的逐字稿才會準。', 'warn');
+    else setMicCheckMsg('收音正常 ✓ 可以開始了。', 'ok');
+  };
+  timer = setTimeout(() => micCheckStop && micCheckStop('done'), MIC_CHECK_SECONDS * 1000);
+}
+document.getElementById('mic-check-btn').addEventListener('click', runMicCheck);
+
 async function startRecording() {
   if (recording || isWaiting || !awaitingAnswer) return;
+  if (micCheckStop) micCheckStop('cancel');
 
   if (!canRecord()) {
     setAnswerMode('type');
