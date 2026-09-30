@@ -87,12 +87,25 @@
     flex-shrink: 0;
   }
   #welcome strong { color: var(--primary); }
+  /* 手機：整顆做成 44px 以上的按鈕（以前是一行 12.8px 的綠字，手指很難點準） */
   .line-link {
-    display: inline-flex; align-items: center; gap: 5px; margin-top: 8px;
-    font-size: 0.8rem; font-weight: 600; color: #06C755; text-decoration: none;
+    display: flex; align-items: center; gap: 10px; margin-top: 12px;
+    min-height: 48px; padding: 8px 14px; border-radius: 12px;
+    background: #06C755; color: #fff; text-decoration: none;
   }
-  .line-link i { font-size: 18px; }
-  #welcome .line-link { display: flex; }
+  .line-link i { font-size: 26px; flex-shrink: 0; }
+  .line-link b { display: block; font-size: 0.95rem; }
+  .line-link small { display: block; font-size: 0.75rem; opacity: 0.92; line-height: 1.4; }
+  /* 電腦：line.me/R/oaMessage 在沒有 LINE 的瀏覽器會被導到 LINE 官網首頁，
+     所以不給連結，改給 QR 讓記者用手機掃 */
+  .line-qr {
+    display: flex; align-items: center; gap: 14px; margin-top: 12px; padding: 12px;
+    border: 1px solid #b7ebcf; background: #f2fcf6; border-radius: 12px; color: var(--text);
+  }
+  .line-qr canvas { width: 116px; height: 116px; flex-shrink: 0; background: #fff; border-radius: 6px; }
+  .line-qr b { display: block; font-size: 0.92rem; color: #059a48; margin-bottom: 2px; }
+  .line-qr span { display: block; font-size: 0.8rem; line-height: 1.55; color: var(--muted); }
+  .line-qr code { font-family: inherit; font-weight: 700; color: var(--text); user-select: all; }
   #geo-article .geo-contact { margin-top: 24px; font-size: 0.9rem; }
   #geo-article #image-gallery { margin-top: 28px; }
 
@@ -331,6 +344,24 @@
   }
   #error-screen i { font-size: 48px; color: #ef4444; }
   #error-screen p { color: var(--muted); font-size: 0.95rem; line-height: 1.6; }
+
+  /* ── 手機（窄螢幕）：標題與輸入列少佔空間，字放大一點、點擊區加大 ── */
+  @media (max-width: 520px) {
+    #header { padding: 10px 14px; gap: 10px; }
+    #header-icon { font-size: 24px; }
+    #header-text h1 { font-size: 1rem; line-height: 1.35; }
+    #media-banner { padding: 8px 14px; gap: 8px; }
+    #media-banner label { font-size: 0; }              /* 只留圖示，placeholder 已寫明要填什麼 */
+    #media-banner label i { font-size: 18px; color: var(--muted); }
+    #messages { padding: 8px 12px 12px; }
+    #welcome { font-size: 0.92rem; padding: 12px 14px; }
+    .chip { padding: 9px 14px; font-size: 0.88rem; }
+    .msg.ai .bubble, .msg.user .bubble { font-size: 0.95rem; }
+    .bubble, .bubble-wrap { max-width: 88%; }
+    .copy-btn { padding: 6px 12px; font-size: 0.78rem; }
+    #input-area { padding: 10px 12px; gap: 8px; }
+    #media-modal-box { padding: 32px 22px 24px; }
+  }
 </style>
 </head>
 <body>
@@ -507,7 +538,7 @@ async function init() {
     document.getElementById('event-subtitle').textContent = 'AI 新聞助理 · 無需登入';
     document.getElementById('welcome-name').textContent = event.name;
     document.title = event.name + ' — AI 新聞助理';
-    addLineLink(document.getElementById('welcome'), null, event.line_url, '也可以用 LINE 問（會自動帶入這一場，會後也能隨時問）');
+    addLineLink(document.getElementById('welcome'), null, event.line_url, '也可以用 LINE 問米亞', '會自動帶入這一場，會後也能隨時問');
 
     // 快速問題：優先使用活動自訂 chips，否則用預設
     const chipsEl = document.getElementById('chips');
@@ -582,16 +613,73 @@ function renderGallery(raw) {
 // 「用 LINE 問」的入口（批次 82）。line_url 由後端組好（見 api/events.js get_public），
 // 內容是 line.me/R/oaMessage 連結：手機點了直接打開 LINE、輸入框已經帶好「#這一場的代碼」，
 // 按送出就接上這一場。後台沒設定 LINE_BASIC_ID 時後端不給，這裡就什麼都不畫。
-function addLineLink(parent, before, url, label) {
+//
+// ⚠️ 這種連結只有「裝了 LINE 的手機」點得開。電腦瀏覽器點下去，line.me 會直接把人導到
+// LINE 官網首頁（朱朱實測遇到的狀況，看起來就像連結壞了）。所以：
+//   手機 → 一顆綠色按鈕，點了直接開 LINE；
+//   電腦 → 不給連結，畫一個 QR（同一條網址）叫記者用手機掃，並附上官方帳號 ID 可手動搜尋。
+// QR 在瀏覽器裡畫（/vendor/qrcode.js），網址不送任何第三方服務；載入失敗就只剩文字說明。
+const IS_TOUCH_DEVICE = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
+  || (window.matchMedia && matchMedia('(hover: none) and (pointer: coarse)').matches);
+
+function addLineLink(parent, before, url, label, sub) {
   if (!parent || !/^https:\/\/line\.me\//.test(url || '')) return;
-  const a = document.createElement('a');
-  a.className = 'line-link';
-  a.href = url;
-  a.target = '_blank';
-  a.rel = 'noopener';
-  a.innerHTML = '<i class="ti ti-brand-line"></i> ';
-  a.appendChild(document.createTextNode(label));
-  parent.insertBefore(a, before);
+  if (IS_TOUCH_DEVICE) {
+    const a = document.createElement('a');
+    a.className = 'line-link';
+    a.href = url;
+    a.rel = 'noopener';
+    a.innerHTML = '<i class="ti ti-brand-line"></i><div><b></b><small></small></div>';
+    a.querySelector('b').textContent = label;
+    a.querySelector('small').textContent = sub || '';
+    parent.insertBefore(a, before);
+    return;
+  }
+  // 電腦版
+  let lineId = '';
+  try { lineId = decodeURIComponent((url.match(/oaMessage\/([^/?]+)/) || [])[1] || ''); } catch (e) {}
+  const box = document.createElement('div');
+  box.className = 'line-qr';
+  const canvas = document.createElement('canvas');
+  const text = document.createElement('div');
+  const b = document.createElement('b');
+  b.textContent = label + '：用手機掃這個 QR';
+  const s = document.createElement('span');
+  s.textContent = (sub || '') + '。';
+  text.appendChild(b);
+  text.appendChild(s);
+  if (lineId) {
+    const idLine = document.createElement('span');
+    idLine.appendChild(document.createTextNode('或在 LINE 搜尋官方帳號 '));
+    const code = document.createElement('code');
+    code.textContent = lineId;
+    idLine.appendChild(code);
+    text.appendChild(idLine);
+  }
+  box.appendChild(canvas);
+  box.appendChild(text);
+  const draw = () => {
+    try {
+      const qr = qrcode(0, 'M');
+      qr.addData(url);
+      qr.make();
+      const n = qr.getModuleCount(), cell = 6, quiet = 2 * cell, size = n * cell + quiet * 2;
+      canvas.width = canvas.height = size;
+      const g = canvas.getContext('2d');
+      g.fillStyle = '#fff'; g.fillRect(0, 0, size, size);
+      g.fillStyle = '#000';
+      for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) if (qr.isDark(r, c)) g.fillRect(quiet + c * cell, quiet + r * cell, cell, cell);
+      parent.insertBefore(box, before);
+    } catch (e) { console.error('LINE QR 畫不出來:', e); }
+  };
+  if (window.qrcode) draw();
+  else {
+    const sc = document.createElement('script');
+    sc.src = '/vendor/qrcode.js';
+    sc.onload = draw;
+    sc.onerror = () => console.error('QR 產生器載入失敗');
+    document.head.appendChild(sc);
+  }
 }
 
 function showError(msg) {
