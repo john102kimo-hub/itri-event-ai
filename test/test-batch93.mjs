@@ -64,7 +64,7 @@ console.log('\n── 一、contacts-directory ──');
   const dir = C.parseContactsDirectory([
     '電光｜電光所｜郭建志｜｜｜電子、光電相關技術｜矽光子、光通訊、雷射、光',
     '材料｜材化所｜李琦瑋｜｜｜材料、化工相關技術｜瀝青',
-    '機器人｜技術傳播組｜譚宇哲｜｜｜機器人相關技術議題',
+    '機器人｜機械所｜譚宇哲｜｜｜機器人相關技術議題',
     '其他｜｜朱則瑋｜｜｜綜合'
   ].join('\n'));
   check('第 7 欄關鍵字解析（用「、」分隔，單字的不收）', JSON.stringify(dir[0].keywords) === JSON.stringify(['矽光子', '光通訊', '雷射']), JSON.stringify(dir[0].keywords));
