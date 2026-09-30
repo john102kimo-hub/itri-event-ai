@@ -190,12 +190,15 @@ reset(); R.resetRegistrationState(); API.resetRateLimit();
   check('存地點沒有弄壞其他欄位（名稱、場次、狀態）', book.reg_campaigns[1][1] === 'T' && book.reg_campaigns[1][2] === 'open' && book.reg_campaigns[1][4].startsWith('A1｜2026-10-28'));
   const ovVenue = (await adminGet({ action: 'reg_admin_list' })).body;
   check('後台列表帶得回地點（編輯表單要預填）', ovVenue.campaigns.find((c) => c.id === 'tw2027')?.venue === '○○會議中心');
+  // 報名網頁也顯示地點（批次 93）：公開的活動內容要帶 venue，沒填是空字串（頁面上就不出現那一行）
+  check('★ 公開的報名頁內容帶活動地點', (await get({ action: 'reg_config', c: 'tw2027' })).body.campaign.venue === '○○會議中心');
   const longVenue = await admin({ ...base, venue: '一二三四五六七八九十'.repeat(8) });
   check('地點超過 60 字 → 截到 60 字，不擋存檔', longVenue.statusCode === 200 && [...book.reg_campaigns[1][13]].length === 60, [...book.reg_campaigns[1][13]].length);
   const lineVenue = await admin({ ...base, venue: '○○會議中心\n3 樓' });
   check('地點裡的換行變空白（卡片上是單行）', lineVenue.statusCode === 200 && book.reg_campaigns[1][13] === '○○會議中心 3 樓', JSON.stringify(book.reg_campaigns[1][13]));
   const noVenue = await admin({ ...base });
   check('沒帶地點 → 空字串（卡片不顯示地點那一行）', noVenue.statusCode === 200 && book.reg_campaigns[1][13] === '');
+  check('沒填地點 → 公開內容的 venue 是空字串（不是 undefined）', (await get({ action: 'reg_config', c: 'tw2027' })).body.campaign.venue === '');
 }
 // 正式站的 reg_campaigns 在加簡稱欄之前就已經自動建好了（12 欄）：第一次讀寫時補上表頭，舊資料一格不動
 reset(); R.resetRegistrationState(); API.resetRateLimit();

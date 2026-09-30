@@ -1420,7 +1420,7 @@ async function handleContactTopicMessage(replyToken, targetId, text, { speakerId
     if (hit) {
       await replyOrPush(replyToken, targetId, formatGlobalContact(hit));
     } else if (fallback) {
-      await replyOrPush(replyToken, targetId, `目前沒有抓到明確對應的窗口，${formatGlobalContact(fallback)}`);
+      await replyOrPush(replyToken, targetId, `目前沒有抓到明確對應的窗口，您可以先聯繫綜合窗口：\n${formatGlobalContact(fallback)}`);
     } else {
       await replyOrPush(replyToken, targetId, '目前還沒有設定綜合聯絡窗口，請洽現場工作人員。');
     }
@@ -1560,6 +1560,20 @@ async function answerIndustryTrend(replyToken, targetId, text) {
 // 檢索，整句拿去查更可靠」，實測是錯的，見下方 fetchItriNews() 呼叫）。查無資料時
 // 去語助詞再試一次的保底邏輯統一放在 lib/itri-news.js fetchItriNews() 裡面，這支
 // 不用自己重試——不管 keywordText 乾不乾淨，這支都不用假設它已經是乾淨關鍵字。
+// 查不到、或查到的不相關的時候，一定要留一個「人」給記者（批次 93）。
+// 回報（同仁，附截圖）：問「瀝青」「拉麵機器人」，米亞說官網沒有相關報導，然後只有一句「請洽媒體邀訪
+// 窗口」——沒有名字、沒有電話。而「機器人」明明有專屬窗口，那句話卻沒有帶出來。這是批次 81（世新事件）
+// 講過的形狀：AI 答不出來、又沒有人可以找。
+// 優先給比對得到的技術領域窗口（見 matchGlobalContactByText()），比對不到就給綜合窗口（主題「其他」），
+// 兩個都沒有才退回那句不含人名的話——後台一個人都沒設定的時候，不能編一個出來。
+async function contactTailFor(keyword, lead) {
+  const directory = await getContactsDirectory();
+  const contact = matchGlobalContactByText(keyword, directory) || directory.find(c => c.topic === '其他');
+  return contact
+    ? `\n\n${lead}\n${formatGlobalContact(contact)}`
+    : '\n\n想安排採訪或進一步了解，請洽媒體邀訪窗口。';
+}
+
 async function answerTechQuery(replyToken, targetId, keywordText) {
   const keyword = sanitize(keywordText, 60);
   // ⚠️ 沒有關鍵字、或關鍵字只是「新聞」「新聞稿」這種泛稱時，改走「最新新聞清單」
@@ -1593,7 +1607,8 @@ async function answerTechQuery(replyToken, targetId, keywordText) {
     // 冷門）——不是網站掛了，見 fetchItriNews() 的說明。老實說查不到，直接給邀訪
     // 窗口讓記者換個管道問，不要硬答或東拼西湊。
     await replyOrPush(replyToken, targetId,
-      `工研院官網新聞中心目前沒有找到跟「${keyword}」直接相關的報導。想從產業面切入的話我這邊還有 IEK 的產業趨勢摘要可以查；要找人談，直接洽媒體邀訪窗口會有專人協助確認。`,
+      `工研院官網新聞中心目前沒有找到跟「${keyword}」直接相關的報導。想從產業面切入的話，我這邊還有 IEK 的產業趨勢摘要可以查。` +
+      await contactTailFor(keyword, '要找人談的話，可以直接聯繫：'),
       [...crossItem, BTN.events, BTN.trend, BTN.contact, BTN.human]);
     return;
   }
@@ -1619,11 +1634,7 @@ async function answerTechQuery(replyToken, targetId, keywordText) {
   // 按鈕裡「其他」自由輸入同一支比對邏輯，見 lib/contacts-directory.js
   // matchGlobalContactByText() 的說明），比對不到才退回一般性的邀訪窗口指引——
   // 給得出精準窗口就不要只給一句「請洽邀訪窗口」，記者還要再點一次按鈕才找得到人。
-  const directory = await getContactsDirectory();
-  const contact = matchGlobalContactByText(keyword, directory);
-  const contactLine = contact
-    ? `\n\n想安排採訪或進一步了解，可直接聯繫：\n${formatGlobalContact(contact)}`
-    : '\n\n想安排採訪或進一步了解，請洽媒體邀訪窗口。';
+  const contactLine = await contactTailFor(keyword, '想安排採訪或進一步了解，可直接聯繫：');
 
   const reply = `${aiReply}${linksBlock}${contactLine}`;
   console.log(`[line] tech_query kw="${keyword}" reply="${reply.slice(0, 200)}"`);

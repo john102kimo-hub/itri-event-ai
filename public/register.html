@@ -124,6 +124,7 @@
   <div class="tag">工研院 · 媒體報名</div>
   <h1 id="h-title">媒體報名</h1>
   <div class="when" id="h-when"></div>
+  <div class="when" id="h-where"></div>
 </div></header>
 
 <main class="wrap" id="app"><div class="spinner">載入中…</div></main>
@@ -206,6 +207,8 @@ async function init() {
     const a = live[0], z = live[live.length - 1];
     $('#h-when').textContent = `${a.date === z.date ? a.dateLabel : `${a.dateLabel} – ${z.dateLabel}`}　共 ${live.length} 場`;
   }
+  // 活動地點（後台選填，跟 LINE 報名卡片同一個欄位）；textContent，同仁填什麼都不會被當成 HTML
+  $('#h-where').textContent = campaign.venue ? `📍 ${campaign.venue}` : '';
   // 先看這台裝置有沒有報過（編輯碼存在瀏覽器裡）；沒帶編輯碼的連結也能直接進修改模式
   if (!EDIT_TOKEN) EDIT_TOKEN = store.get(storeKey()) || '';
   if (EDIT_TOKEN) {
