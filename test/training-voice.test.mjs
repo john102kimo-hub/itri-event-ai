@@ -566,5 +566,17 @@ console.log('\n[12] 打字送出鍵、對話歷程不重複、結算報告');
   ok(sandbox.reportText(true).includes('【我的回答】A2'), '「下載完整紀錄」含每題回答與評語');
 }
 
+console.log('\n[11] training.html — 批次 91：排版與開講前的麥克風測試');
+{
+  const html = fs.readFileSync(new URL('../public/training.html', import.meta.url), 'utf8');
+  const js = html.split('<script>')[1].split('</script>')[0];
+  ok(/#scroller > \* \{[^}]*720px/.test(html), '電腦上內容收成置中的一欄（不再拉滿 1200px）');
+  ok(/@media \(max-width: 600px\)/.test(html) && /#role-picker \{ grid-template-columns: 1fr; \}/.test(html), '手機上身分按鈕改成一欄一列');
+  ok(html.includes('id="mic-check-btn"') && js.includes('runMicCheck'), '開始畫面有「先測試麥克風」');
+  ok(/SILENT_PEAK[\s\S]{0,1200}收音正常/.test(js) && js.includes('SOFT_PEAK'), '測試用跟錄音同一個「沒收到聲音」門檻，並多一層「聲音偏小」');
+  ok(/audioCtx\.state === 'suspended'[\s\S]{0,80}resume\(\)/.test(js), 'iOS 的 AudioContext 要 resume，否則音量條整段為 0、麥克風好好的卻被誤報沒收到聲音');
+  ok(/micCheckStop\('cancel'\)/.test(js.split('async function startTraining')[1].slice(0, 300)), '按開始前要先放掉測試中的麥克風，免得跟正式錄音搶');
+}
+
 console.log(fails === 0 ? '\n全部通過 ✅' : `\n失敗 ${fails} 項 ❌`);
 process.exit(fails === 0 ? 0 : 1);
