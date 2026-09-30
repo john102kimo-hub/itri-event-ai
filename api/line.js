@@ -43,7 +43,7 @@ import {
 } from '../lib/line.js';
 import { buildCalendarCards, buildAllCalendarCards, routeIntent, formatCalendarReply, calendarQuickReplyItems } from '../lib/router.js';
 import {
-  detectMetaIntent, detectCourtesy, isOrgWideNewsAsk, isHumanRequest, matchEventByName, MENU_WORDS, HELP_TEXT, ORG_INTRO_TEXT, buildWelcomeFlex,
+  detectMetaIntent, detectCourtesy, isOrgWideNewsAsk, isHumanRequest, isEventTopicAsk, isExactMetaAsk, matchEventByName, MENU_WORDS, HELP_TEXT, ORG_INTRO_TEXT, buildWelcomeFlex,
   buildRichMenuDefinition, ALL_MENUS, REPORTER_MENU, REPORTER_MENU_REG, REG_MENU_TILE, STAFF_MENU, findEventMentioned
 } from '../lib/menu.js';
 import {
@@ -1420,7 +1420,7 @@ async function handleContactTopicMessage(replyToken, targetId, text, { speakerId
     if (hit) {
       await replyOrPush(replyToken, targetId, formatGlobalContact(hit));
     } else if (fallback) {
-      await replyOrPush(replyToken, targetId, `目前沒有抓到明確對應的窗口，${formatGlobalContact(fallback)}`);
+      await replyOrPush(replyToken, targetId, `目前沒有抓到明確對應的窗口，您可以先聯繫綜合窗口：\n${formatGlobalContact(fallback)}`);
     } else {
       await replyOrPush(replyToken, targetId, '目前還沒有設定綜合聯絡窗口，請洽現場工作人員。');
     }
@@ -1560,6 +1560,20 @@ async function answerIndustryTrend(replyToken, targetId, text) {
 // 檢索，整句拿去查更可靠」，實測是錯的，見下方 fetchItriNews() 呼叫）。查無資料時
 // 去語助詞再試一次的保底邏輯統一放在 lib/itri-news.js fetchItriNews() 裡面，這支
 // 不用自己重試——不管 keywordText 乾不乾淨，這支都不用假設它已經是乾淨關鍵字。
+// 查不到、或查到的不相關的時候，一定要留一個「人」給記者（批次 93）。
+// 回報（同仁，附截圖）：問「瀝青」「拉麵機器人」，米亞說官網沒有相關報導，然後只有一句「請洽媒體邀訪
+// 窗口」——沒有名字、沒有電話。而「機器人」明明有專屬窗口，那句話卻沒有帶出來。這是批次 81（世新事件）
+// 講過的形狀：AI 答不出來、又沒有人可以找。
+// 優先給比對得到的技術領域窗口（見 matchGlobalContactByText()），比對不到就給綜合窗口（主題「其他」），
+// 兩個都沒有才退回那句不含人名的話——後台一個人都沒設定的時候，不能編一個出來。
+async function contactTailFor(keyword, lead) {
+  const directory = await getContactsDirectory();
+  const contact = matchGlobalContactByText(keyword, directory) || directory.find(c => c.topic === '其他');
+  return contact
+    ? `\n\n${lead}\n${formatGlobalContact(contact)}`
+    : '\n\n想安排採訪或進一步了解，請洽媒體邀訪窗口。';
+}
+
 async function answerTechQuery(replyToken, targetId, keywordText) {
   const keyword = sanitize(keywordText, 60);
   // ⚠️ 沒有關鍵字、或關鍵字只是「新聞」「新聞稿」這種泛稱時，改走「最新新聞清單」
@@ -1593,7 +1607,8 @@ async function answerTechQuery(replyToken, targetId, keywordText) {
     // 冷門）——不是網站掛了，見 fetchItriNews() 的說明。老實說查不到，直接給邀訪
     // 窗口讓記者換個管道問，不要硬答或東拼西湊。
     await replyOrPush(replyToken, targetId,
-      `工研院官網新聞中心目前沒有找到跟「${keyword}」直接相關的報導。想從產業面切入的話我這邊還有 IEK 的產業趨勢摘要可以查；要找人談，直接洽媒體邀訪窗口會有專人協助確認。`,
+      `工研院官網新聞中心目前沒有找到跟「${keyword}」直接相關的報導。想從產業面切入的話，我這邊還有 IEK 的產業趨勢摘要可以查。` +
+      await contactTailFor(keyword, '要找人談的話，可以直接聯繫：'),
       [...crossItem, BTN.events, BTN.trend, BTN.contact, BTN.human]);
     return;
   }
@@ -1619,11 +1634,7 @@ async function answerTechQuery(replyToken, targetId, keywordText) {
   // 按鈕裡「其他」自由輸入同一支比對邏輯，見 lib/contacts-directory.js
   // matchGlobalContactByText() 的說明），比對不到才退回一般性的邀訪窗口指引——
   // 給得出精準窗口就不要只給一句「請洽邀訪窗口」，記者還要再點一次按鈕才找得到人。
-  const directory = await getContactsDirectory();
-  const contact = matchGlobalContactByText(keyword, directory);
-  const contactLine = contact
-    ? `\n\n想安排採訪或進一步了解，可直接聯繫：\n${formatGlobalContact(contact)}`
-    : '\n\n想安排採訪或進一步了解，請洽媒體邀訪窗口。';
+  const contactLine = await contactTailFor(keyword, '想安排採訪或進一步了解，可直接聯繫：');
 
   const reply = `${aiReply}${linksBlock}${contactLine}`;
   console.log(`[line] tech_query kw="${keyword}" reply="${reply.slice(0, 200)}"`);
@@ -4066,6 +4077,12 @@ async function looksAddressedToBot(groupId, text, speakerId) {
   // ② 一句提問（中文或英文，見 GROUP_QUESTION_EN_RE 的說明）
   if (GROUP_QUESTION_RE.test(s) || GROUP_QUESTION_EN_RE.test(s)) return true;
 
+  // ②（續）整句只是一串活動名詞（批次 92）：「聯訪時間」「講者名單」「新聞照片」。主管在群組
+  // 打「聯訪時間」沒反應——沒有問號、沒有疑問詞，② 接不住。判準見 lib/menu.js isEventTopicAsk()；
+  // 米亞有專屬處理的整句固定講法（「採訪窗口」「產業趨勢」）同一個洞，一併放行。
+  // 兩支都是「整句扣完一個字不剩」或「整句錨定」，有動作、有人稱的句子不會中。
+  if (isEventTopicAsk(s) || isExactMetaAsk(s)) return true;
+
   // ③ 剛回答完趨勢／技術題時的裸名詞追問（「太空」）——那是我們自己在上一則答案
   // 結尾邀請他打的。沒有話題記憶時**不**放行：一個沒頭沒尾的名詞在群組裡多半是
   // 別人在聊自己的事（「半導體」），不是在問我們。
@@ -4368,9 +4385,16 @@ async function handleGroupMessage(replyToken, groupId, text, { mentioned, speake
   // 這裡新增的。currentEventId 帶目前這場給 routeIntent()，讓它分得出「延續這場
   // 的討論」跟「真的無關」（見 lib/router.js 的說明），下面的安靜門檻才靠得住。
   // currentTopic 的理由跟 1 對 1 那段完全一樣（見 handleEvent() 同一行的說明）。
+  // 整句就是一串活動名詞（批次 92）：守門已經因為「這句在問活動資料」放行了，這裡不能再讓路由
+  // 用「群組成員彼此也在聊天」的提示把它翻案。GROUP_CHATTER_HINT 明講「拿不準判 other，即使
+  // 它剛好提到時間、地點或資料」，而裸名詞「聯訪時間」正是最拿不準的那種——守門放行、路由
+  // 判 other、下面那道門又安靜，等於回報的「沒觸發」只是往後挪了一段（跟批次 41 的按鈕同一個
+  // 形狀：守門放行跟真的答得出來，是兩道各自獨立的門，兩道都要開）。
+  // 綁定中才開：沒綁定時 handleUnbound() 的 silentOnOther 不動，不會為了一個名詞去反問「哪一場」。
+  const topicAsk = !mentioned && !ownButton && (isEventTopicAsk(text) || isExactMetaAsk(text));
   const routed = pinGenericTechQueryToEvent(
     await routeIntent(text, buildCalendarCards(await getAllEventRows()),
-      { currentEventId: event.id, ...(await recentTopicContext(groupId)), groupChatter: !mentioned && !ownButton }),
+      { currentEventId: event.id, ...(await recentTopicContext(groupId)), groupChatter: !mentioned && !ownButton && !topicAsk }),
     text, event.id);
 
   // 回報的意見：批次 14 只擋得住「明確 @ 別人」這種訊號很強的情況，續問視窗內
@@ -4384,7 +4408,7 @@ async function handleGroupMessage(replyToken, groupId, text, { mentioned, speake
   // 同一個原則，明確叫了機器人就不能不理人。
   // 同上：按鈕不受這道安靜門檻約束。綁定中點到「這場沒有的內容」時 routeIntent()
   // 有可能判成 other，那也該老實回一句，不能讓按鈕變成按了沒反應。
-  if (!mentioned && !ownButton && routed.intent === 'other') return;
+  if (!mentioned && !ownButton && !topicAsk && routed.intent === 'other') return;
 
   // 綁定中，但這題其實是在問「有哪些場次」——理由與 1 對 1 那段完全相同（見
   // handleEvent() 同一個分支的完整說明）。

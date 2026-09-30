@@ -156,6 +156,7 @@
     <div class="fld"><label>活動名稱</label><input type="text" id="e-title"></div>
     <div class="fld"><label>LINE 簡稱（選填）</label><input type="text" id="e-short" maxlength="16" placeholder="眺望2027場次"><div class="help">出現在米亞歡迎卡的按鈕與報名卡片上，例如「📝 眺望2027場次報名」。留空＝只寫「媒體報名」——記者會不知道報的是哪一場，建議填。</div></div>
   </div>
+  <div class="fld"><label>活動地點（選填）</label><input type="text" id="e-venue" maxlength="60" placeholder="場館名稱，例：○○會議中心"><div class="help">出現在米亞報名卡片標題下方（📍）。寫場館名稱就好，各場次的廳別填在下面的場次清單。留空＝卡片不顯示地點。</div></div>
   <div class="fld"><label>報名截止時間（選填）</label><input type="text" id="e-closes" placeholder="2026-10-27 12:00　（只寫日期＝當天 23:59 截止）"><div class="help">到了就自動關閉，不用記得手動改狀態。台灣時間。</div></div>
   <div class="fld"><label>報名頁上方說明</label><textarea id="e-intro"></textarea></div>
   <div class="fld"><label>場次清單</label><textarea class="mono" id="e-sessions" spellcheck="false"></textarea>
@@ -212,7 +213,8 @@ const SAMPLE = {
   ].map(([code, date, time, title, room, note, sid]) => [code, date, time, title, room, note, '', IEK + sid].join('｜')).join('\n'),
   options: ['interview｜想參加 09:15 媒體聯訪（名額有限，由主辦單位另行確認）｜A1', 'meal｜需要餐盒（活動結束後領取）｜A1', 'party｜同行人數（含攝影，不含本人）｜｜number'].join('\n'),
   contact: '工研院行銷傳播處 朱則瑋\nitriA70541@itri.org.tw\n0934-267-766',
-  short_name: '眺望2027場次'
+  short_name: '眺望2027場次',
+  venue: '' // 場館名稱要同仁自己填：場次清單只有廳別（201 廳、402 廳），沒有場館，程式不猜
 };
 
 function toast(msg) { const t = $('toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove('show'), 2200); }
@@ -412,6 +414,7 @@ function openEdit(isNew) {
   $('e-status').value = isNew ? 'draft' : c.status;
   $('e-title').value = isNew ? SAMPLE.title : c.title;
   $('e-short').value = isNew ? SAMPLE.short_name : (c.short_name || '');
+  $('e-venue').value = isNew ? SAMPLE.venue : (c.venue || '');
   $('e-closes').value = isNew ? '' : c.closes_at;
   $('e-intro').value = isNew ? SAMPLE.intro : c.intro;
   $('e-sessions').value = isNew ? SAMPLE.sessions : c.sessions_text;
@@ -428,7 +431,7 @@ async function saveEdit() {
     const body = {
       id: $('e-id').value, title: $('e-title').value, status: $('e-status').value, closes_at: $('e-closes').value,
       intro: $('e-intro').value, sessions_text: $('e-sessions').value, options_text: $('e-options').value,
-      contact: $('e-contact').value, privacy: $('e-privacy').value, line_pitch: $('e-pitch').value, short_name: $('e-short').value
+      contact: $('e-contact').value, privacy: $('e-privacy').value, line_pitch: $('e-pitch').value, short_name: $('e-short').value, venue: $('e-venue').value
     };
     const r = await callJson('POST', 'reg_admin_save_campaign', body);
     CUR = r.id; closeModal('m-edit'); toast(r.created ? '已建立' : '已儲存'); await load();

@@ -169,7 +169,7 @@ reset(); R.resetRegistrationState(); API.resetRateLimit();
   check('同代碼再存＝更新，不會長出第二列，建立時間不變',
     again.statusCode === 200 && again.body.created === false && book.reg_campaigns.length === 2 && book.reg_campaigns[1][1] === '改過的名稱');
   // 「LINE 簡稱」（第 13 欄 M）：歡迎卡按鈕與報名卡片上寫明是報哪個活動（朱朱 9/29 提醒：只寫「媒體報名」記者不知道報什麼）
-  check('欄位定義：第 13 欄是 short_name', R.CAMPAIGN_HEADERS.length === 13 && R.CAMPAIGN_HEADERS[12] === 'short_name' && book.reg_campaigns[0].length === 13);
+  check('欄位定義：第 13 欄是 short_name、第 14 欄是 venue', R.CAMPAIGN_HEADERS.length === 14 && R.CAMPAIGN_HEADERS[12] === 'short_name' && R.CAMPAIGN_HEADERS[13] === 'venue' && book.reg_campaigns[0].length === 14);
   const withShort = await admin({ ...base, short_name: '眺望2027場次' });
   check('LINE 簡稱存進第 13 欄', withShort.statusCode === 200 && book.reg_campaigns[1][12] === '眺望2027場次', JSON.stringify(book.reg_campaigns[1]));
   check('存簡稱沒有弄壞其他欄位（名稱、場次、狀態）', book.reg_campaigns[1][1] === 'T' && book.reg_campaigns[1][2] === 'open' && book.reg_campaigns[1][4].startsWith('A1｜2026-10-28'));
@@ -182,6 +182,23 @@ reset(); R.resetRegistrationState(); API.resetRateLimit();
   check('簡稱裡的換行變空白（單行）', multiline.statusCode === 200 && book.reg_campaigns[1][12] === '眺望 2027', JSON.stringify(book.reg_campaigns[1][12]));
   const noShort = await admin({ ...base });
   check('沒帶簡稱 → 空字串（LINE 上會寫「媒體報名」）', noShort.statusCode === 200 && book.reg_campaigns[1][12] === '');
+
+  // 「活動地點」（第 14 欄 N，批次 92）：同仁反饋報名卡片上要有地點。場次清單只有廳別（201 廳），沒有場館名稱，
+  // 所以是活動層級、同仁自己填的欄位，不從廳別推。
+  const withVenue = await admin({ ...base, short_name: '眺望2027場次', venue: '○○會議中心' });
+  check('活動地點存進第 14 欄，簡稱（第 13 欄）沒被擠掉', withVenue.statusCode === 200 && book.reg_campaigns[1][13] === '○○會議中心' && book.reg_campaigns[1][12] === '眺望2027場次', JSON.stringify(book.reg_campaigns[1]));
+  check('存地點沒有弄壞其他欄位（名稱、場次、狀態）', book.reg_campaigns[1][1] === 'T' && book.reg_campaigns[1][2] === 'open' && book.reg_campaigns[1][4].startsWith('A1｜2026-10-28'));
+  const ovVenue = (await adminGet({ action: 'reg_admin_list' })).body;
+  check('後台列表帶得回地點（編輯表單要預填）', ovVenue.campaigns.find((c) => c.id === 'tw2027')?.venue === '○○會議中心');
+  // 報名網頁也顯示地點（批次 93）：公開的活動內容要帶 venue，沒填是空字串（頁面上就不出現那一行）
+  check('★ 公開的報名頁內容帶活動地點', (await get({ action: 'reg_config', c: 'tw2027' })).body.campaign.venue === '○○會議中心');
+  const longVenue = await admin({ ...base, venue: '一二三四五六七八九十'.repeat(8) });
+  check('地點超過 60 字 → 截到 60 字，不擋存檔', longVenue.statusCode === 200 && [...book.reg_campaigns[1][13]].length === 60, [...book.reg_campaigns[1][13]].length);
+  const lineVenue = await admin({ ...base, venue: '○○會議中心\n3 樓' });
+  check('地點裡的換行變空白（卡片上是單行）', lineVenue.statusCode === 200 && book.reg_campaigns[1][13] === '○○會議中心 3 樓', JSON.stringify(book.reg_campaigns[1][13]));
+  const noVenue = await admin({ ...base });
+  check('沒帶地點 → 空字串（卡片不顯示地點那一行）', noVenue.statusCode === 200 && book.reg_campaigns[1][13] === '');
+  check('沒填地點 → 公開內容的 venue 是空字串（不是 undefined）', (await get({ action: 'reg_config', c: 'tw2027' })).body.campaign.venue === '');
 }
 // 正式站的 reg_campaigns 在加簡稱欄之前就已經自動建好了（12 欄）：第一次讀寫時補上表頭，舊資料一格不動
 reset(); R.resetRegistrationState(); API.resetRateLimit();
@@ -192,11 +209,11 @@ reset(); R.resetRegistrationState(); API.resetRateLimit();
   book.registrations = [R.REG_HEADERS];
   const r = await get({ action: 'reg_config', c: 'tw2027' });
   check('舊版 12 欄的活動讀得出來（簡稱＝空）', r.statusCode === 200 && r.body.campaign.title === '舊活動');
-  check('★ 舊分頁的表頭自動補成 13 欄', eq(book.reg_campaigns[0], R.CAMPAIGN_HEADERS), JSON.stringify(book.reg_campaigns[0]));
+  check('★ 舊分頁的表頭自動補成 14 欄', eq(book.reg_campaigns[0], R.CAMPAIGN_HEADERS), JSON.stringify(book.reg_campaigns[0]));
   check('舊資料列一格都沒動', eq(book.reg_campaigns[1].slice(0, 12), row12) && book.reg_campaigns.length === 2);
   const ov = (await adminGet({ action: 'reg_admin_list' })).body;
   check('舊活動的簡稱是空字串（LINE 上照舊寫「媒體報名」）', ov.campaigns[0].short_name === '');
-  // 之後在後台編輯這個舊活動 → 寫的是 A:M，簡稱進得去
+  // 之後在後台編輯這個舊活動 → 寫的是 A:N，簡稱進得去
   const upd = await admin({ action: 'reg_admin_save_campaign', id: 'tw2027', title: '舊活動', status: 'open', sessions_text: 'A1｜2026-10-28｜09:30-12:00｜開幕論壇暨專刊發表', closes_at: '2099-12-31 12:00', short_name: '眺望2027場次' });
   check('編輯舊活動 → 簡稱寫進第 13 欄，其他欄位還在', upd.statusCode === 200 && book.reg_campaigns[1][12] === '眺望2027場次' && book.reg_campaigns.length === 2);
 }
