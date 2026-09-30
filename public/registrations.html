@@ -214,7 +214,7 @@ const SAMPLE = {
   options: ['interview｜想參加 09:15 媒體聯訪（名額有限，由主辦單位另行確認）｜A1', 'meal｜需要餐盒（活動結束後領取）｜A1', 'party｜同行人數（含攝影，不含本人）｜｜number'].join('\n'),
   contact: '工研院行銷傳播處 朱則瑋\nitriA70541@itri.org.tw\n0934-267-766',
   short_name: '眺望2027場次',
-  venue: '' // 場館名稱要同仁自己填：場次清單只有廳別（201 廳、402 廳），沒有場館，程式不猜
+  venue: '臺大醫院國際會議中心' // 朱朱 9/30 確認；場次清單只有廳別（201 廳、402 廳），場館是活動層級的欄位
 };
 
 function toast(msg) { const t = $('toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove('show'), 2200); }

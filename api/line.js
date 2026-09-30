@@ -1374,9 +1374,14 @@ async function getIndustryTrendDigest() {
 // （例如「生醫」），但送出的文字帶固定前綴，才不會跟記者自己打的真正問題撞在一起
 // （萬一剛好在問某場跟「生醫」有關的活動內容，不會被誤判成在找邀訪窗口）。
 async function sendGlobalContactMenu(replyToken, userId) {
+  // 批次 94：按鈕改「以所來分」（朱朱 9/30）——標籤顯示窗口名單裡的單位（生醫所、資通所…），
+  // 送出的字仍是固定的「邀訪：主題」，比對與快取都不用動；名單裡找不到單位時退回主題名。
+  let directory = [];
+  try { directory = await getContactsDirectory(); } catch { directory = []; }
+  const unitOf = t => directory.find(c => c.topic === t)?.unit || t;
   const items = [
     { label: '📅 某一場的窗口', text: '最近有哪些活動' }, // 批次 84：原本標成「活動名稱」，看不出按了會怎樣
-    ...GLOBAL_CONTACT_TOPICS.map(t => ({ label: t, text: `邀訪：${t}` })),
+    ...GLOBAL_CONTACT_TOPICS.map(t => ({ label: unitOf(t).slice(0, 20), text: `邀訪：${t}` })),
     { label: '其他', text: '邀訪：其他' },
     BTN.human // 批次 84：主題選單裡也找得到真人；主題哪天變多，先被擠掉的是這顆，不是主題
   ].slice(0, 13);
@@ -1392,6 +1397,23 @@ async function sendGlobalContactMenu(replyToken, userId) {
 //
 // speakerId（批次 28）：群組裡是「誰」在講這句話。等待中的旗標會記下按按鈕的人，
 // 只有同一個人的下一則才用得掉——見 pendingNoteFor() 的完整說明。
+// 「其他」輸入的主題對不到任何窗口時，通知公關同仁（批次 94）。跟找真人同一個管道
+// （LINE_ADMIN_USER_ID push）、同一個「30 分鐘只通知一次」的防洗版。回傳有沒有真的通知到。
+async function notifyStaffNoContactMatch(targetId, text, speakerId = '') {
+  const ownerId = process.env.LINE_ADMIN_USER_ID;
+  if (!ownerId || ownerId === (speakerId || targetId)) return false;
+  const key = `nomatch:${targetId}`;
+  if (Date.now() - (humanNotified.get(key) || 0) <= HUMAN_NOTIFY_GAP_MS) return true;
+  try {
+    const res = await pushMessage(ownerId,
+      `📨 邀訪窗口對不到主題\n${isGroupTarget(targetId) ? '（在群組裡）' : ''}記者輸入：「${sanitize(text, 100)}」\n\n` +
+      '請找相關技術同仁回復；到 LINE 官方帳號管理後台的「聊天」可以直接回他。');
+    const ok = !res || res.ok !== false;
+    if (ok) humanNotified.set(key, Date.now());
+    return ok;
+  } catch (e) { console.error('邀訪對不到主題通知失敗:', e.message); return false; }
+}
+
 async function handleContactTopicMessage(replyToken, targetId, text, { speakerId = '' } = {}) {
   const m = String(text || '').match(CONTACT_TOPIC_RE);
   if (m) {
@@ -1420,7 +1442,14 @@ async function handleContactTopicMessage(replyToken, targetId, text, { speakerId
     if (hit) {
       await replyOrPush(replyToken, targetId, formatGlobalContact(hit));
     } else if (fallback) {
-      await replyOrPush(replyToken, targetId, `目前沒有抓到明確對應的窗口，您可以先聯繫綜合窗口：\n${formatGlobalContact(fallback)}`);
+      // 批次 94：對不到窗口不再把記者丟回「問趨勢／問技術」（鬼打牆）——給綜合窗口、通知公關同仁請
+      // 相關技術同仁回復，並請記者直接留下資訊。不承諾回覆時間（LINE-PLAN.md 第 9 節）。
+      const notified = await notifyStaffNoContactMatch(targetId, text, speakerId);
+      await replyOrPush(replyToken, targetId,
+        `目前對不到明確的窗口，您可以先聯繫綜合窗口：\n${formatGlobalContact(fallback)}\n\n` +
+        (notified ? '我已經把您問的主題轉告公關同仁，會請相關技術同仁回復您。' : '想請相關技術同仁回復的話，可以打「找真人」。') +
+        '\n也請直接在這裡留下貴媒體名稱、姓名與聯絡方式，同仁看得到。',
+        [BTN.human, BTN.contact, BTN.events]);
     } else {
       await replyOrPush(replyToken, targetId, '目前還沒有設定綜合聯絡窗口，請洽現場工作人員。');
     }
@@ -1607,9 +1636,10 @@ async function answerTechQuery(replyToken, targetId, keywordText) {
     // 冷門）——不是網站掛了，見 fetchItriNews() 的說明。老實說查不到，直接給邀訪
     // 窗口讓記者換個管道問，不要硬答或東拼西湊。
     await replyOrPush(replyToken, targetId,
-      `工研院官網新聞中心目前沒有找到跟「${keyword}」直接相關的報導。想從產業面切入的話，我這邊還有 IEK 的產業趨勢摘要可以查。` +
-      await contactTailFor(keyword, '要找人談的話，可以直接聯繫：'),
-      [...crossItem, BTN.events, BTN.trend, BTN.contact, BTN.human]);
+      `工研院官網新聞中心目前沒有找到跟「${keyword}」直接相關的報導。` +
+      await contactTailFor(keyword, '要找人談的話，可以直接聯繫：') +
+      '\n\n想請相關技術同仁回復，也可以打「找真人」。',
+      [BTN.human, BTN.contact, BTN.events]); // 批次 94：不再導去「產業趨勢」——記者問的是技術，被丟回去問趨勢就是鬼打牆
     return;
   }
 
