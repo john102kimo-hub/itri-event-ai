@@ -802,10 +802,10 @@ export default async function handler(req, res) {
         },
         signal: AbortSignal.timeout(MODEL_TIMEOUT_MS),
         body: JSON.stringify({
-          // Sonnet 5 預設開啟 adaptive thinking（4.6 預設是關的），
+          // Sonnet 5.5 預設開啟 adaptive thinking（批次 98 由 Sonnet 5 升級，行為相同），
           // 而 max_tokens 是「思考＋回答」的總上限 —— evaluate 模式要輸出完整結構，
           // 思考吃掉大半預算時容易被截斷，所以給到 8000（上限 128K，毫無壓力）。
-          model: 'claude-sonnet-5',
+          model: 'claude-sonnet-5-5',
           max_tokens: 8000,
           system: [{ type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }],
           // 見 normalizeMessages()：前端的歷程從記者第一題（assistant）開始，要補回開頭那則 user
