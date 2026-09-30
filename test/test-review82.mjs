@@ -332,7 +332,10 @@ console.log('\n── 六、前端 ──');
   check('粗體照舊', renderMarkdown('**重點** https://x.tw').startsWith('<strong>重點</strong>'));
   check('★ 快速提問與照片在對話捲動區裡面（不再釘在上方吃掉手機畫面）', /<div id="messages">[\s\S]*id="chips"[\s\S]*id="image-gallery"[\s\S]*<\/div>\s*<div id="chip-dock"/.test(html));
   check('複製鈕在拿不到剪貼簿時有備援（LINE 內建瀏覽器）', /execCommand\('copy'\)/.test(html));
-  check('存檔模式不再把照片區藏起來', !/archive-mode #image-gallery/.test(read('api/event-page.js')));
+  check('★ 電腦版「用 LINE 問」不給 line.me 連結、改畫 QR（電腦點 oaMessage 會被導到 LINE 官網首頁）', /IS_TOUCH_DEVICE/.test(html) && /className = 'line-qr'/.test(html) && /qrcode\(0, 'M'\)/.test(html));
+  check('手機版「用 LINE 問」是 44px 以上的按鈕', /\.line-link \{[^}]*min-height: 48px/.test(html));
+  check('記者頁有手機窄螢幕的排版（@media max-width）', /@media \(max-width: 520px\)/.test(html));
+  check('存檔模式不再把照片區藏起來',!/archive-mode #image-gallery/.test(read('api/event-page.js')));
 }
 {
   const html = read('public/index.html');
