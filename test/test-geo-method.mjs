@@ -406,8 +406,8 @@ console.log('\n── 八、畫面：報告的「方法與依據」與總覽的�
   sandbox.window = sandbox; sandbox.globalThis = sandbox;
   runInNewContext(code, sandbox);
 
-  const out = sandbox.repMethodHtml(rep, '六、');
-  check('報告「方法與依據」：有章節標題與編號', /六、方法與依據/.test(out));
+  const out = sandbox.repMethodHtml(rep, '');
+  check('報告「方法與依據」：折在細節裡，本身不再有章節標題', !/方法與依據<\/div>/.test(out) && /測量等級/.test(out));
   check('★ 寫出測量等級「探索性」與「不是決策等級」', /探索性/.test(out) && /不是決策等級/.test(out));
   check('寫出宣稱等級', /宣稱等級：相關（Associated）/.test(out) || /宣稱等級：觀察（Observed）/.test(out));
   check('五個分項指標都在，且標明 IAB 的名稱', ['IAB Mention Rate', 'IAB Share of Voice', 'IAB Position', 'IAB Citation Rate', 'MRR'].every((s) => out.includes(s)));
@@ -443,7 +443,7 @@ console.log('\n── 八、畫面：報告的「方法與依據」與總覽的�
     /能見度指數走勢（自訂指數，近/.test(html) && /提及 45＋位置 20＋自家網域被引用 20＋有具體內容 15），<b>不是國際標準<\/b>/.test(html));
   check('簡報最後一張「方法與限制」揭露測量等級與宣稱等級（來自 API，不自己生）', /測量等級：\$\{esc\(d\.method\.tier\.label\)\}/.test(html) && /宣稱等級：\$\{esc\(d\.claim\.label\)\}/.test(html));
   check('議題排行的表頭也標「（自訂）」', /<th>能見度指數（自訂）<\/th>/.test(html));
-  check('報告頁真的有呼叫「方法與依據」', /repMethodHtml\(d, sec\(\)\)/.test(html));
+  check('報告頁真的有呼叫「方法與依據」', /repMethodHtml\(d, ''\)/.test(html) && /想看細節（點開）/.test(html));
   check('KPI 卡片的 hint 不再只寫「滿分 100」', !/<div class="hint">滿分 100<\/div>/.test(html));
 }
 

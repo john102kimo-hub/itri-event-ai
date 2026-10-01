@@ -113,6 +113,9 @@
     border-top:1px solid var(--border);padding-top:10px}
   .rep-headline{font-size:1.12rem;font-weight:700;line-height:1.65;background:var(--primary-light);
     border-left:4px solid var(--primary);border-radius:0 10px 10px 0;padding:14px 16px;margin-bottom:18px}
+  .rep-badges{font-size:.78rem;color:var(--muted);margin:10px 0 4px}
+  .rep-fold{border:1px solid var(--border);border-radius:10px;padding:10px 14px;margin-bottom:8px}
+  .rep-fold>summary{font-size:.86rem}
   .rep-h3{font-size:.82rem;font-weight:700;color:var(--primary-dark);letter-spacing:.03em;
     margin:20px 0 8px;padding-bottom:5px;border-bottom:1px solid var(--border)}
   .rep-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px}
@@ -1061,7 +1064,6 @@ function repMethodHtml(d, no){
 
   const small = 'font-size:.82rem;line-height:1.85;margin-top:12px';
   return `
-    <div class="rep-h3">${no}方法與依據</div>
     <div class="verdict warn"><b>測量等級：${esc(t.label)}</b>——這份數據是方向參考，<b>不是決策等級</b>。
       <details style="margin-top:6px"><summary style="font-size:.78rem;font-weight:600">為什麼還不是決策等級（對照 IAB／AMEC 準則）</summary>
         <ul style="margin:8px 0 0 18px;padding:0;font-size:.8rem;line-height:1.75">${t.gaps.map(g=>`<li>${esc(g)}</li>`).join('')}</ul>
@@ -1157,34 +1159,21 @@ async function loadReport(keyword){
   let _s = 0;
   const sec = () => `${CN[_s++]}、`;   // 不要叫 S，全域狀態物件已經叫 S 了
 
+  const fold = (t, inner) => `<details class="rep-fold"><summary>${t}</summary><div style="margin-top:10px">${inner}</div></details>`;
+  const stageT = d.performance && d.performance.ready ? (STAGE[d.performance.stage]||STAGE.INSUFFICIENT_N).t : '';
+  const quotesHtml = `    <div style="font-size:.78rem;color:var(--muted);margin-bottom:10px">以下為 AI 回答原文節錄，未經改寫</div>
+    ${q(d.quote,false)}${q(d.missed,true)}
+${!d.quote&&!d.missed?'<div class="empty">尚無可引用的原文</div>':''}`;
   out.innerHTML = `
     <div class="doc-title">${title}</div>
     <div class="doc-meta">
       <span>議題：<b>${esc(d.keyword||'全部議題')}</b></span>
-      <span>調查期間：${esc(d.dateRange[0])} ～ ${esc(d.dateRange[1])}</span>
-      <span>樣本：${d.samples} 次問答</span>
-      <span>對象：${d.engines.map(esc).join('、')}</span>
+      <span>${esc(d.dateRange[0])} ～ ${esc(d.dateRange[1])}</span>
+      <span>${d.samples} 次問答</span>
       <span>製表：${today}　<span id="rep-by-line">${esc(by)}</span></span>
     </div>
 
-    <div class="rep-h3">${sec()}為什麼要看這件事</div>
-    <div class="rep-lead">記者找題目、廠商找合作對象、人才找去處，現在多半先問 AI 再決定要不要接觸。
-      而他們問的時候<b>不會先講「工研院」</b>——只會問「這個領域誰做得比較前面」。
-      這份調查量的就是：在那種不指名的問法下，AI 會不會把工研院講出來、排在第幾個、
-      以及同一批問題裡它把誰當成答案。</div>
-
-    <div class="rep-h3">${sec()}結論</div>
     <div class="rep-headline">${esc(d.headline)}</div>
-
-    ${d.performance ? perfHtml(d.performance, sec()) : ''}
-
-    <div class="rep-h3">${sec()}這個議題上，AI 認為誰是答案</div>
-    <div style="font-size:.78rem;color:var(--muted);margin-bottom:10px">
-      同一批問題、不指名任何單位，AI 分別提到各單位幾次</div>
-    ${bars}
-    ${mergeNote}
-
-    <div class="rep-h3">${sec()}關鍵數字</div>
     <div class="rep-stats">${d.stats.map(s=>`
       <div class="rep-stat">
         <div class="l">${esc(s.label)}</div>
@@ -1194,27 +1183,31 @@ async function loadReport(keyword){
         <div class="l" style="margin:6px 0 0;font-size:.72rem">${esc(s.hint)}</div>
       </div>`).join('')}</div>
 
-    <div class="rep-h3">${sec()}AI 實際上是怎麼講的</div>
-    <div style="font-size:.78rem;color:var(--muted);margin-bottom:10px">以下為 AI 回答原文節錄，未經改寫</div>
-    ${q(d.quote,false)}${q(d.missed,true)}
-    ${!d.quote&&!d.missed?'<div class="empty">尚無可引用的原文</div>':''}
 
-    <div class="rep-h3">${sec()}建議下一步</div>
+    ${d.method && d.claim ? `<div class="rep-badges">測量等級：<b>${esc(d.method.tier.label)}</b>・方向參考，非決策等級　｜　宣稱等級：<b>${esc(d.claim.label)}</b></div>` : ''}
+
+    <div class="rep-h3">AI 認為誰是答案</div>
+    <div style="font-size:.78rem;color:var(--muted);margin-bottom:10px">
+      同一批問題、不指名任何單位，AI 分別提到各單位幾次</div>
+    ${bars}
+    ${mergeNote}
+
+    ${mergeNote}
+
+    <div class="rep-h3">建議下一步</div>
     ${d.actions.length ? d.actions.map(a=>`
       <div class="act"><div class="t">${esc(a.title)}</div>
         <div class="d">${esc(a.todo).replace(/\*\*(.+?)\*\*/g,'<b>$1</b>')}</div></div>`).join('')
       : '<div class="empty">目前沒有需要處理的問題</div>'}
 
-    ${d.standard && d.method ? repMethodHtml(d, sec()) : ''}
 
-    <details style="margin-top:18px">
-      <summary style="font-size:.8rem;color:var(--muted)">附錄：AI 引用了誰的網頁</summary>
-      <div style="margin-top:10px;font-size:.8rem">
-        <div style="margin-bottom:8px">${d.samples} 次裡有 ${Math.round(d.citedRate*d.samples/100)} 次引到工研院自己的網頁（${d.citedRate}%）</div>
-        ${d.ownedDomains.map(x=>`<span class="dom own">${esc(x.d)} ×${x.n}</span>`).join('')}
-        ${d.otherDomains.map(x=>`<span class="dom">${esc(x.d)} ×${x.n}</span>`).join('')}
-      </div>
-    </details>
+    <div class="rep-h3">想看細節（點開）</div>
+    ${d.performance ? fold('活動前後的變化' + (stageT ? '：' + esc(stageT) : ''), perfHtml(d.performance, '')) : ''}
+    ${fold('AI 實際上是怎麼講的（原文）', quotesHtml)}
+    ${d.standard && d.method ? fold('方法與依據（指標定義、樣本、區間）', repMethodHtml(d, '')) : ''}
+    ${fold('AI 引用了誰的網頁', `<div style="font-size:.8rem"><div style="margin-bottom:8px">${d.samples} 次裡有 ${Math.round(d.citedRate*d.samples/100)} 次引到工研院自己的網頁（${d.citedRate}%）</div>
+      ${d.ownedDomains.map(x=>`<span class="dom own">${esc(x.d)} ×${x.n}</span>`).join('')}
+      ${d.otherDomains.map(x=>`<span class="dom">${esc(x.d)} ×${x.n}</span>`).join('')}</div>`)}
 
     <div class="doc-note">
       <b>量測方法</b>：以不指名工研院的問句詢問具備網路搜尋能力的 AI 答案引擎，
@@ -1230,6 +1223,7 @@ function printReport(){
   showTab('deck');
   const det = document.getElementById('rep-details');
   if(det) det.open = true;
+  document.querySelectorAll('#rep-out .rep-fold').forEach(x=>x.open=true);
   document.body.classList.remove('print-deck');
   window.print();
 }
