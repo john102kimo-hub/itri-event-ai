@@ -66,7 +66,7 @@ check(page.url().endsWith('#deck'), '議題排行按「簡報」→ 切到簡報
 const n = await page.locator('#deck-slides .slide').count();
 check(n >= 6, `產生 ${n} 張投影片`);
 check((await page.textContent('#deck-slides .slide.cover')).includes('固態電池'), '封面是剛點的議題');
-check(!(await page.textContent('#deck-slides')).includes('成果績效報告'), '沒通過 D+31 檢定時，簡報不會掛「成果績效」的名');
+check(!(await page.textContent('#deck-slides')).includes('變化確認報告'), '沒通過 D+31 檢定時，簡報不會掛「變化確認」的名');
 if (OUT) await page.screenshot({ path: OUT + '/g-deck.png' });
 // 播放
 await page.click('#deck-slides .slide >> nth=1');

@@ -955,7 +955,7 @@ function liftChart(p){
 /* ── 績效區塊：發稿前 vs 發稿後 ── */
 function perfHtml(p, no){
   if(!p) return '';
-  const head = `<div class="rep-h3">${no}這一場帶來的變化：${esc(p.event.title)}（${esc(p.event.date)}）</div>`;
+  const head = `<div class="rep-h3">${no}這一場前後的變化：${esc(p.event.title)}（${esc(p.event.date)}）</div>`;
 
   if(!p.ready){
     return head + `<div class="perf-wait">
@@ -1142,11 +1142,11 @@ async function loadReport(keyword){
     </div>`;
 
   /* 標題必須跟判定一致。
-   * 只有通過 D+31 之後檢定才配叫「成果績效報告」——
+   * 只有通過 D+31 之後檢定才配叫「變化確認報告」——
    * 資料還不到位就掛績效的名，是這份報告最容易被拆穿的地方。 */
   const stage = d.performance?.stage;
   const isPerf = stage === 'BASELINE_RAISED';
-  const title = isPerf ? 'AI 搜尋能見度　成果績效報告'
+  const title = isPerf ? 'AI 搜尋能見度　變化確認報告'
     : d.performance?.ready ? 'AI 搜尋能見度　活動後追蹤報告（期中）'
     : 'AI 搜尋能見度　基準調查';
   const by = localStorage.getItem('geo_by') || '';
@@ -1242,7 +1242,7 @@ function printReport(){
  * ⚠️ 投影片上的每一句話、每一個數字都來自報告 API 已經算好的欄位（headline、stats、
  * voiceBoard、performance、actions、quote），這裡只負責排版，不生成任何新的說法——
  * 跟一頁報告同一個原則：簡報會被拿去給長官看，講不得的東西不能因為換了版面就講出來。
- * 「成果績效」的字眼一樣只在通過 D+31 之後檢定（BASELINE_RAISED）時才出現。 */
+ * 「變化確認」的字眼一樣只在通過 D+31 之後檢定（BASELINE_RAISED）時才出現。 */
 let DECK = [];
 let DECK_AT = 0;
 
@@ -1257,7 +1257,7 @@ function renderDeckKeywords(keywords){
 
 function deckTitle(d){
   const stage = d.performance?.stage;
-  return stage === 'BASELINE_RAISED' ? '成果績效報告'
+  return stage === 'BASELINE_RAISED' ? '變化確認報告'
     : d.performance?.ready ? '活動後追蹤報告（期中）' : '基準調查';
 }
 
@@ -1323,7 +1323,7 @@ function buildDeckSlides(d, keyword){
   const p = d.performance;
   if(p && p.ready){
     const st = STAGE[p.stage] || STAGE.INSUFFICIENT_N;
-    add('', `<h3>這一場帶來的變化：${esc(p.event.title)}</h3>
+    add('', `<h3>這一場前後的變化：${esc(p.event.title)}</h3>
       ${liftChart(p)}
       <div class="verdict ${st.cls}"><b>${esc(st.t)}。</b>AI 提到工研院的比例：發稿前 ${p.before.mentionRate}% → 活動期 ${p.during.mentionRate}% → 第 15–30 天 ${p.after.mentionRate}%。
         ${st.can ? '這個結論可以拿去報告。' : '<b>先不要拿去宣稱成果。</b>'}</div>`);
