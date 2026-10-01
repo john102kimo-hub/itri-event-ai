@@ -372,13 +372,13 @@ console.log('── 畫面：簡報的標題跟一頁報告用同一套判定 �
     voiceBoard: [{ name: '工研院', n: 96, self: true }, { name: '清大', n: 69 }], actions: [{ title: '提及率偏低', todo: '把 **主詞** 寫清楚' }], quote: null, missed: null };
   Object.assign(sandbox.__S(), { data: null });
   const plain = sandbox.buildDeckSlides({ ...base, performance: null }, '固態電池');
-  check('沒有活動績效 → 封面是「基準調查」', /基準調查/.test(plain[0].html) && !/成果績效/.test(plain.map((x) => x.html).join('')), plain[0].html);
+  check('沒有活動績效 → 封面是「基準調查」', /基準調查/.test(plain[0].html) && !/變化確認/.test(plain.map((x) => x.html).join('')), plain[0].html);
   check('建議下一步把 ** 標記拿掉，不會把星號印在投影片上', !/\*\*/.test(plain.map((x) => x.html).join('')), '');
   check('最後一張一定是方法與限制（對外引用要附的那段）', /方法與限制/.test(plain.at(-1).html) && /代理指標/.test(plain.at(-1).html), plain.at(-1).html);
   const notYet = sandbox.buildDeckSlides({ ...base, performance: { ready: false, stage: 'ECHO_HIGH_NOT_BASELINE' } }, '固態電池');
-  check('還沒通過 D+31 檢定 → 簡報不會掛「成果績效」的名', !/成果績效/.test(notYet.map((x) => x.html).join('')), notYet[0].html);
+  check('還沒通過 D+31 檢定 → 簡報不會掛「變化確認」的名', !/變化確認/.test(notYet.map((x) => x.html).join('')), notYet[0].html);
   const raised = sandbox.buildDeckSlides({ ...base, performance: { ready: false, stage: 'BASELINE_RAISED' } }, '固態電池');
-  check('通過 D+31 檢定（BASELINE_RAISED）才叫「成果績效報告」', /成果績效報告/.test(raised[0].html), raised[0].html);
+  check('通過 D+31 檢定（BASELINE_RAISED）才叫「變化確認報告」', /變化確認報告/.test(raised[0].html), raised[0].html);
   const xss = sandbox.buildDeckSlides({ ...base, performance: null, headline: '<script>x</script>', keyword: '<b>k</b>' }, '');
   check('投影片上的文字都有跳脫', !/<script>|<b>k<\/b>/.test(xss.map((x) => x.html).join('')), '');
 }

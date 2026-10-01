@@ -21,8 +21,12 @@ import { readRange, appendRows, updateRange, ensureSheets } from '../lib/sheets.
 import { fetchNewsjackCandidates } from '../lib/newsjacking.js';
 import { checkStructuredContent } from '../lib/structured-check.js';
 import { checkGeoDraft } from '../lib/geo-draft-check.js';
-import { BRAND_DEFAULT, BRAND_KEY, BRAND_ALIAS_RE, canonList, resolveOrg, tallyOrgs } from '../lib/geo-orgs.js';
+import { BRAND_DEFAULT, BRAND_KEY, BRAND_ALIAS_RE, BRAND_JUDGE_HINT, canonList, resolveOrg, tallyOrgs } from '../lib/geo-orgs.js';
 import { buildPeerSeries, selfTrend } from '../lib/geo-benchmark.js';
+import {
+  COMPOSITE, compositeScore, compositeSensitivity, rateWithCI, shareOfVoice, reciprocalRank,
+  denominators, measurementTier, judgeVsRule, claimFor,
+} from '../lib/geo-metrics.js';
 import { reportAiFailure } from '../lib/ai-alert.js';
 
 const SHEETS = {
@@ -351,8 +355,9 @@ const JUDGE_SCHEMA = {
 // 判官判成沒提到工研院，排行那邊（lib/geo-orgs.js）卻把它們算成工研院，兩邊對不起來。
 function brandSynonyms(brand) {
   if (resolveOrg(brand).key !== BRAND_KEY) return '';
-  return '（同義寫法：工研院、工業技術研究院、ITRI、Industrial Technology Research Institute 都算同一個；'
-    + '工研院底下的研究所／中心——例如產科國際所、IEK、ISTI、材化所、電光所——被點名時，也算提到工研院）';
+  // 批次 102：改由 lib/geo-orgs.js 的詞表產生（官網組織架構的單位全名＋單位簡稱的歧義說明），
+  // 不再手寫幾個例子——詞表一擴，這裡與規則比對、題目防呆會一起跟上。
+  return BRAND_JUDGE_HINT;
 }
 
 function judgePrompt({ brand, competitors, question, answer }) {
@@ -592,11 +597,42 @@ async function generatePrompts(keyword) {
   return { prompts: clean, competitors: competitors.length ? competitors : COMPETITORS.split('、') };
 }
 
-/** 能見度指數 0–100：提及 45 ＋ 位置 20 ＋ 自家網域被引 20 ＋ 有具體內容 15 */
-function scoreOf({ mentioned, rank, cited, specifics }) {
-  if (!mentioned) return 0;
-  const rankPts = rank === 1 ? 20 : rank === 2 ? 14 : rank === 3 ? 9 : 5;
-  return 45 + rankPts + (cited ? 20 : 0) + (specifics ? 15 : 0);
+/**
+ * 能見度指數 0–100：提及 45 ＋ 位置 20 ＋ 自家網域被引 20 ＋ 有具體內容 15。
+ * ⚠️ 這是我們**自訂**的綜合指數，不是任何標準——沒有國際標準規定這四項該配多少分
+ * （IAB 2026-08 的指引把綜合分數定位成「呈現層」，要求揭露權重、正規化與限制；
+ * AMEC GEO Principles 明講不要倚賴任何單一分數）。所以對外要講的數字用 lib/geo-metrics.js
+ * 的分項指標（提及率、話語權占比、倒數名次、引用率，帶區間與分母），這個指數只拿來看
+ * 自己的趨勢。權重放在 lib/geo-metrics.js 的 COMPOSITE，這裡只負責呼叫——
+ * 改權重＝換算法，歷史曲線就不能接著看，見 GEO-METHOD.md「怎麼改權重」。
+ */
+const scoreOf = (obs) => compositeScore(obs);
+
+// 各引擎目前設定的模型版本。AMEC／IAB 都要求揭露「產品與版本」；掃描當下沒有逐筆記錄版本
+// （geo_runs 沒有這一欄），所以這裡講的是「目前設定」，換過模型的話趨勢要當成不同基準看。
+const modelOf = (id) => ({
+  claude: PROBE_MODEL, gemini: GEMINI_MODEL, openai: OPENAI_MODEL,
+  perplexity: process.env.PERPLEXITY_MODEL || 'sonar',
+})[id] || '';
+
+/**
+ * 方法揭露：IAB「Provider Disclosure Framework」與 AMEC 揭露清單要求報告讓讀的人看得出
+ * 「測了什麼、怎麼測、樣本多大、限制在哪」。這裡把我們實際的做法照實列出來，
+ * 一頁報告與總覽的「怎麼算」共用同一份，不各寫各的。
+ */
+function methodDisclosure({ engineIds, prompts, totalPrompts, topics }) {
+  return {
+    architecture: '主動發問（active query simulation）：程式用官方 API 對各 AI 引擎發問，保存回答節錄（前 500 字）、來源網域與判官的觀察。',
+    retrieval: '各引擎皆開啟網路搜尋。回答若沒有任何搜尋來源（接地未生效），該筆不計分、但會記錄並在樣本數裡揭露。',
+    cadence: '每天上午 9:00（台北時間）掃描一輪，09:30 補掃還沒成功的；每題每天每引擎通常 1 次，每月 1 日加跑 2 輪校準（13:00、20:00），用來看單次取樣的雜訊有多大。',
+    queries: '題目由關鍵字生成（找單位／找合作／找解方／找新聞四種問法）。題目不得點名工研院（程式會擋）；生成時也要求不點名其他機構，但那一條只靠提示詞、沒有程式擋。',
+    engines: engineIds.map((id) => ({ id, label: ENGINES.find((e) => e.id === id)?.label || id, model: modelOf(id) })),
+    judge: judgeEngine() ? `${judgeEngine()} / ${judgeModel()}` : '（未設定）',
+    judgeNote: '判官只做觀察（有沒有提到、第幾個提到、有沒有具體內容、點名了哪些機構），分數一律由程式依固定規則計算。',
+    notMeasured: ['情感（Sentiment）', '框架（Framing）', '幻覺率（Hallucination Rate）', '事實錯誤率（Factual Inaccuracy Rate）',
+      '推薦強度（Recommendation Strength）', '點擊轉換（Post-Citation CTR）'],
+    tier: measurementTier({ prompts, engines: engineIds.length, totalPrompts, topics }),
+  };
 }
 
 const matchesOwned = (host) =>
@@ -1482,7 +1518,35 @@ export default async function handler(req, res) {
           };
         }
 
+        /* ── 標準指標與方法揭露（批次 102）──
+         * 對外要講的數字用 IAB／AMEC 準則裡有定義的分項指標，每個都帶 95% 區間（以「天」為群集
+         * 的 bootstrap，不到 7 天不給）與分母；綜合指數不在這份報告裡出現（見文件開頭的說明）。
+         * 規則比對（判官之外的獨立判定）讀的是 excerpt，所以舊資料也算得出來，不用動 geo_runs。 */
+        const engIds = [...new Set(scored.map((r) => r.engine))];
+        const topicPrompts = new Map();
+        scored.forEach((r) => {
+          const k = r.keyword || '未分類';
+          (topicPrompts.get(k) || topicPrompts.set(k, new Set()).get(k)).add(r.prompt_id);
+        });
+        const promptsMax = Math.max(0, ...[...topicPrompts.values()].map((x) => x.size));
+        const totalPrompts = new Set(scored.map((r) => r.prompt_id)).size;
+        const standard = {
+          mention: { label: '提及率（Mention Rate）', ...rateWithCI(scored, (r) => r.mentioned) },
+          first: { label: '被提到時排第一的比例（Position：first entity）', ...rateWithCI(hit, (r) => r.rank === 1) },
+          sov: { label: '話語權占比（Share of Voice）', ...shareOfVoice(scored) },
+          position: { label: '位置（倒數名次均值，MRR）', ...reciprocalRank(scored) },
+          citation: { label: '自家網域引用率（Citation Rate）', ...rateWithCI(scored, (r) => r.cited) },
+        };
+        const method = {
+          window: { from, to: todayTW(), days },
+          denominators: denominators(all),
+          agreement: judgeVsRule(scored),
+          ...methodDisclosure({ engineIds: engIds, prompts: promptsMax, totalPrompts, topics: topicPrompts.size }),
+        };
+
         return ok(res, {
+          standard, method,
+          claim: claimFor({ hasComparison: !!performance?.ready }),
           performance,
           ready: true, keyword: kw, days, samples: scored.length,
           dateRange: [scored[0].date, scored[scored.length - 1].date],
@@ -1492,11 +1556,11 @@ export default async function handler(req, res) {
           myRank,
           stats: [
             { label: '問到這個議題時，AI 提到工研院的比例',
-              value: `${scored.length} 次裡 ${hit.length} 次`, pct: mentionRate,
+              value: `${scored.length} 次裡 ${hit.length} 次`, pct: mentionRate, range: standard.mention.ci,
               hint: '這是話語權的基本盤：不提到，後面都不用談' },
             { label: '被提到時，工研院是第一個被講到的比例',
               value: hit.length ? `${hit.filter((r) => r.rank === 1).length} / ${hit.length} 次` : '沒被提到過',
-              pct: hit.length ? firstRate : null,
+              pct: hit.length ? firstRate : null, range: standard.first.ci,
               hint: '排第一代表 AI 把我們當成這題的代表答案' },
             { label: '和最強對手的差距',
               value: rival ? `${gap > 0 ? '領先' : gap < 0 ? '落後' : '打平'} ${Math.abs(gap)} 次（${rival.name}）` : '沒有對手被穩定提到',
@@ -1577,6 +1641,42 @@ export default async function handler(req, res) {
             // 本週 vs 近 30 天。樣本不夠時這裡面的數字一律是 null，前端想畫也沒得畫。
             trend: selfTrend(runs, todayTW()),
           },
+        });
+      }
+
+      /**
+       * 綜合指數怎麼算、能不能對外講（批次 102）：總覽「怎麼算」那張卡片用。
+       * 把權重、敏感度、測量等級、樣本分母、方法揭露一次交出去。
+       * IAB（2026-08）：提供綜合指數的人必須揭露「完整權重、正規化方式、各分項數值與限制」，
+       * 而且「分項指標才是權威的測量詞彙，綜合分數只是呈現層」。所以這裡不只給權重，
+       * 還給「換幾套權重結論會不會變」——被問「45 哪來的」時，比一句「我們自己定的」站得住。
+       */
+      if (action === 'method') {
+        const n = Math.min(Math.max(parseInt(days, 10) || 60, 14), 365);
+        const from = addDays(todayTW(), -n + 1);
+        const [runRows, promptRows] = await Promise.all([
+          safeRead('geo_runs!A2:O'), safeRead('geo_prompts!A2:H'),
+        ]);
+        const runs = runRows.filter((r) => r[0]).map(parseRun).filter((r) => r.date >= from);
+        const scored = runs.filter((r) => r.score !== null);
+        const prompts = promptRows.filter((r) => r[0]).map(parsePrompt).filter((p) => p.active);
+        const perTopic = new Map();
+        prompts.forEach((p) => perTopic.set(p.keyword, (perTopic.get(p.keyword) || 0) + 1));
+        const engIds = scored.length
+          ? [...new Set(scored.map((r) => r.engine))] : activeEngines().map((e) => e.id);
+        return ok(res, {
+          days: n,
+          composite: {
+            max: 100,
+            weights: { mention: COMPOSITE.mention, position: COMPOSITE.rankPoints[0], owned: COMPOSITE.owned, specifics: COMPOSITE.specifics },
+            rankPoints: [...COMPOSITE.rankPoints],
+          },
+          sensitivity: compositeSensitivity(scored),
+          denominators: denominators(runs),
+          ...methodDisclosure({
+            engineIds: engIds, prompts: Math.max(0, ...perTopic.values()),
+            totalPrompts: prompts.length, topics: perTopic.size,
+          }),
         });
       }
 
