@@ -411,6 +411,7 @@
       <div class="desc">實線為七日均線、淡點為單日原始值、橘色虛線為活動日。點色塊切換要看的議題。
         <details class="more-info"><summary>怎麼看這張圖</summary>
           0–100。提及 45＋位置 20＋自家網域被引用 20＋有具體內容 15。
+          <b>這是我們自訂的綜合指數，不是國際標準</b>：對外請引用提及率等分項指標，怎麼算與換權重會不會變，見下方「這些數字量的是什麼？」。
           <b>這張圖需要時間累積</b>——沒有人保存「上個月 AI 怎麼回答」的歷史，只能從開始追蹤那天起一天一筆。</details></div>
       <div class="chips" id="chips"></div>
       <div class="chart-box">
@@ -443,7 +444,7 @@
       <div id="snap-out"></div>
     </div>
 
-    <details class="card method-card">
+    <details class="card method-card" id="calc-card" ontoggle="if(this.open) loadCalc()">
       <summary><i class="ti ti-info-circle"></i> 這些數字量的是什麼？（對外引用前請先看）</summary>
       <div style="margin-top:12px">
   <div class="caveat">
@@ -454,10 +455,22 @@
   <div class="caveat" style="background:#eef2ff;border-color:#c7d2fe;color:#3730a3">
     <b>方法論依據：</b>AMEC（國際傳播評測學會，公關成效評測的國際權威組織，Barcelona Principles 的發布者）於 2026-05-20 在都柏林 Global Summit 發布《AMEC GEO Principles》，訂出七大原則與三個證據領域——
     <b>上游聲譽訊號</b>（露出報告涵蓋）、<b>搜尋與內容可讀性</b>（發稿檢查清單涵蓋）、<b>下游 AI 輸出追蹤</b>（本頁涵蓋）。
-    官方原文明講：「AI outputs should be treated as directional evidence rather than absolute truth, and caution against relying on any single score, platform or tool.」——本頁用<b>七日均線</b>而非單次分數、明白標註<b>代理指標</b>、每月做多輪取樣校準誤差，做的正是這件事。
+    官方原文明講：「AI outputs should be treated as directional evidence rather than absolute truth, and caution against relying on any single score, platform or tool.」——本頁用<b>七日均線</b>而非單次分數、明白標註<b>代理指標</b>、每月做多輪取樣校準誤差，是照著做的；但「能見度指數」本身是一個綜合單一分數，這一點見下一段。
     三層合起來看，才是完整的 GEO 量測；目前市面上多數 GEO 工具只做第三層，且未公開取樣方法。
     <span style="font-size:.72rem;opacity:.75">原文：amecorg.com/2026/05/amec-launches-geo-principles-to-bring-rigour-to-ai-led-communications-measurement</span>
   </div>
+
+  <div class="caveat" style="background:#fff7ed;border-color:#fed7aa;color:#9a3412">
+    <b>先講結論：「能見度指數」是我們自訂的綜合指數，不是國際標準。</b>
+    目前查不到 ISO／IEC 等級、專門針對 AI 能見度（GEO）的國際標準。2026 年有三份國際業界準則：
+    AMEC《GEO Principles》（5 月 20 日）、PRCA《How to Measure GEO》（6 月）、IAB《Measuring Visibility in the AI Era》（8 月）。
+    三份都沒有定義一個通用的「能見度分數」——AMEC 提醒不要倚賴任何單一分數；
+    IAB 把綜合分數定位成「呈現層」，<b>分項指標</b>（Mention Rate、Citation Rate、Share of Voice、Position）才是權威的測量詞彙，
+    用綜合指數的人要揭露權重、正規化方式、各分項數值與限制。<br>
+    <b>所以我們這樣用：</b>對外引用請用分項指標（詳細版一頁報告用的就是這些，帶 95% 區間與分母）；能見度指數只用來看自己的趨勢。
+    下面攤開它怎麼算、換權重結論會不會變。
+  </div>
+  <div id="calc-out"><div class="empty">展開這一區時載入…</div></div>
 
       </div>
     </details>
@@ -1005,6 +1018,90 @@ function perfHtml(p, no){
     </div>`;
 }
 
+/* ── 方法與依據（批次 102）──────────────────────────────────────────────
+ * 報告裡對外講的每個數字，都要答得出「分母是什麼、樣本多大、誤差多少、依據哪份文件」。
+ * 與其等主管問了才翻文件，不如直接印在報告上。指標的定義取自 IAB《Measuring Visibility in
+ * the AI Era》（2026-08），揭露項目與宣稱等級取自 AMEC《GEO Principles》（2026-05）；
+ * 綜合指數（能見度指數）刻意不出現在這份報告裡，原因見 GEO-METHOD.md。
+ * 全部來自 /api/geo?action=report 已經算好的 standard／method／claim，這裡只負責排版，
+ * 不自己生數字——跟簡報同一個原則。 */
+const fmtPct = (v) => (v==null ? '—' : `${Math.round(v)}%`);
+function fmtCI(ci, kind){
+  if(!ci) return '<span style="color:var(--muted)">不足 7 天，暫不提供</span>';
+  return kind==='rr' ? `${ci[0].toFixed(2)}～${ci[1].toFixed(2)}` : `${Math.round(ci[0])}～${Math.round(ci[1])}%`;
+}
+const TERM_TIER = { name:'名稱', unit:'單位全名', short:'單位簡稱' };
+function repMethodHtml(d, no){
+  const st = d.standard, m = d.method, t = m.tier, dn = m.denominators, ag = m.agreement;
+  const row = (name, val, base, ci, def) => `<tr><td><b>${esc(name)}</b></td>
+      <td class="num-cell">${val}</td><td class="num-cell" style="color:var(--muted)">${base}</td>
+      <td class="num-cell" style="white-space:nowrap">${ci}</td><td style="font-size:.74rem;color:var(--muted);line-height:1.6">${def}</td></tr>`;
+  const rows = [
+    row('提及率', fmtPct(st.mention.pct), `${st.mention.k}／${st.mention.n} 次回答`, fmtCI(st.mention.ci),
+      'IAB Mention Rate：有提到工研院的回答數 ÷ 總回答數'),
+    row('話語權占比', fmtPct(st.sov.pct), `${st.sov.self}／${st.sov.total} 次點名`, fmtCI(st.sov.ci),
+      `IAB Share of Voice：工研院被點名次數 ÷ 所有機構被點名次數。競爭集合＝這批回答裡被點名的 ${st.sov.orgs} 家機構（不是事先指定的名單），每則回答每家只計一次`),
+    row('被提到時排第一', fmtPct(st.first.pct), `${st.first.k}／${st.first.n} 次`, fmtCI(st.first.ci),
+      'IAB Position：被提到的回答中，工研院是第一個被講到的機構的比例'),
+    row('位置（倒數名次均值）', st.position.mrr==null ? '—' : st.position.mrr.toFixed(2), `${st.position.n} 次回答`, fmtCI(st.position.ci,'rr'),
+      '第 1 個被提到＝1、第 2＝0.5、第 3＝0.33…，沒被提到＝0，再取平均（MRR，Voorhees 1999）'
+      + (st.position.unranked ? `；另有 ${st.position.unranked} 次判官沒給名次，未計入` : '')),
+    row('自家網域引用率', fmtPct(st.citation.pct), `${st.citation.k}／${st.citation.n} 次回答`, fmtCI(st.citation.ci),
+      'IAB Citation Rate：來源裡有自家網域（itri.org.tw 等）的回答數 ÷ 總回答數；只計有連結的來源'),
+  ].join('');
+
+  const chips = ag.terms.length
+    ? ag.terms.map(x=>`<span class="dom ${x.tier==='short'?'':'own'}">${esc(x.term)} ×${x.n}<small style="opacity:.8">（${TERM_TIER[x.tier]||''}）</small></span>`).join('')
+    : '<span style="color:var(--muted)">這批回答裡沒有出現任何工研院相關用語</span>';
+  const exs = ag.examples.length ? `<details style="margin-top:6px">
+      <summary style="font-size:.78rem;color:var(--muted)">不一致的回答（供人工複核，${ag.examples.length} 筆）</summary>
+      ${ag.examples.map(x=>`<div class="quote" style="margin-top:8px"><div class="meta">${esc(x.engine)}｜${esc(x.date)}｜${x.kind==='rule_only'
+        ? '規則認定有提到、判官認定沒有' : '判官認定有提到、規則認定沒有（多半只寫單位簡稱）'}</div>
+        <div class="t">${esc(x.text)}</div></div>`).join('')}</details>` : '';
+
+  const small = 'font-size:.82rem;line-height:1.85;margin-top:12px';
+  return `
+    <div class="rep-h3">${no}方法與依據</div>
+    <div class="verdict warn"><b>測量等級：${esc(t.label)}</b>——這份數據是方向參考，<b>不是決策等級</b>。
+      <details style="margin-top:6px"><summary style="font-size:.78rem;font-weight:600">為什麼還不是決策等級（對照 IAB／AMEC 準則）</summary>
+        <ul style="margin:8px 0 0 18px;padding:0;font-size:.8rem;line-height:1.75">${t.gaps.map(g=>`<li>${esc(g)}</li>`).join('')}</ul>
+      </details></div>
+    <div class="verdict"><b>宣稱等級：${esc(d.claim.label)}</b>。${esc(d.claim.text)}</div>
+
+    <table style="margin:10px 0 6px;font-size:.8rem"><thead><tr>
+      <th>指標</th><th>數值</th><th>樣本</th><th>95% 區間</th><th>定義與依據</th></tr></thead><tbody>${rows}</tbody></table>
+    <div style="font-size:.74rem;color:var(--muted);line-height:1.8">
+      區間以「天」為單位重抽 1,000 次（同一天問的是同一批題目，彼此相關，不能當獨立樣本），固定種子，同一份資料每次算出一樣的區間。
+      它估的是<b>這組題目重測的變異</b>，不代表所有可能的問法；題庫沒有已知母體（AMEC），所以不推到全市場。不足 7 天不給區間。</div>
+
+    <div style="${small}"><b>樣本與分母</b>：嘗試 ${dn.attempted} 次，有效 ${dn.scored} 次（${dn.pct==null?'—':dn.pct}%）。${dn.failed
+      ? `不計分的 ${dn.failed} 次裡，${dn.noGround} 次是引擎沒有真的去搜尋（回答是模型憑記憶講的，不算能見度）、${dn.otherFailed} 次是逾時等錯誤——這些不是被悄悄丟掉，照實列在這裡。`
+      : '沒有不計分的回答。'}調查期間 ${esc(m.window.from)} ～ ${esc(m.window.to)}，其中 ${st.mention.days} 天有資料。</div>
+
+    <div style="${small}"><b>兩套獨立判定的一致率：${ag.agreePct==null?'—':ag.agreePct+'%'}</b>（${ag.both+ag.neither}／${ag.n}）。
+      「有沒有提到工研院」由判官（AI 讀回答）與詞表規則（程式比對工研院名稱與單位全名）各判一次：
+      ${ag.judgeOnly} 次只有判官認定、${ag.ruleOnly} 次只有規則認定。分數仍以判官為準（歷史曲線不能斷）；
+      規則只讀回答前 500 字（回答上限約 400 字）。${exs}</div>
+
+    <div style="${small}"><b>AI 怎麼稱呼工研院</b>（相關用語追蹤）：<div style="margin-top:6px">${chips}</div>
+      ${ag.shortOnly ? `<div style="margin-top:4px">其中 <b>${ag.shortOnly} 次只出現單位簡稱、沒有提到工研院</b>——AI 認得那個單位，卻沒把它連到工研院。發稿時單位簡稱前面要掛「工研院」。</div>` : ''}</div>
+
+    <details style="margin-top:12px"><summary style="font-size:.8rem;color:var(--muted)">方法揭露（測了什麼、怎麼測、沒測什麼）</summary>
+      <ul style="margin:8px 0 0 18px;padding:0;font-size:.78rem;line-height:1.8">
+        <li><b>怎麼測</b>：${esc(m.architecture)}</li>
+        <li><b>搜尋</b>：${esc(m.retrieval)}</li>
+        <li><b>頻率</b>：${esc(m.cadence)}</li>
+        <li><b>題目</b>：${esc(m.queries)}</li>
+        <li><b>引擎與版本</b>：${m.engines.map(e=>`${esc(e.label)}（${esc(e.model||'—')}）`).join('、')}　<span style="color:var(--muted)">目前設定；歷史資料未逐筆記錄版本</span></li>
+        <li><b>判官</b>：${esc(m.judge)}。${esc(m.judgeNote)}</li>
+        <li><b>沒有量測</b>：${m.notMeasured.map(esc).join('、')}</li>
+      </ul></details>
+
+    <div class="doc-note"><b>依據</b>：指標定義與測量等級取自 IAB《Measuring Visibility in the AI Era》（2026 年 8 月）；
+      揭露項目與宣稱等級取自 AMEC《GEO Principles》（2026 年 5 月 20 日）與其實務指南；倒數名次（MRR）出自 Voorhees（1999）TREC-8 問答評測。
+      這些是國際業界公會的準則，<b>不是 ISO 等級的標準</b>。完整對照、引用連結與限制見專案文件 GEO-METHOD.md。</div>`;
+}
+
 /* ── 一頁報告（給同仁與主管） ──
  * 批次 72 起它是「簡報」分頁裡的詳細版：同一份資料，簡報是精簡版、這份是完整版。
  * 回傳報告資料給 openDeck() 排投影片；資料還不夠時回 { msg }。 */
@@ -1093,6 +1190,7 @@ async function loadReport(keyword){
         <div class="l">${esc(s.label)}</div>
         <div class="v">${esc(s.value)}</div>
         ${s.pct===null?'':`<div class="p" style="color:${s.pct>=60?'var(--up)':s.pct>=30?'var(--event)':'var(--down)'}">${s.pct}%</div>`}
+        ${s.range?`<div class="l" style="margin:2px 0 0;font-size:.72rem">95% 區間 ${Math.round(s.range[0])}～${Math.round(s.range[1])}%</div>`:''}
         <div class="l" style="margin:6px 0 0;font-size:.72rem">${esc(s.hint)}</div>
       </div>`).join('')}</div>
 
@@ -1107,6 +1205,8 @@ async function loadReport(keyword){
         <div class="d">${esc(a.todo).replace(/\*\*(.+?)\*\*/g,'<b>$1</b>')}</div></div>`).join('')
       : '<div class="empty">目前沒有需要處理的問題</div>'}
 
+    ${d.standard && d.method ? repMethodHtml(d, sec()) : ''}
+
     <details style="margin-top:18px">
       <summary style="font-size:.8rem;color:var(--muted)">附錄：AI 引用了誰的網頁</summary>
       <div style="margin-top:10px;font-size:.8rem">
@@ -1120,7 +1220,8 @@ async function loadReport(keyword){
       <b>量測方法</b>：以不指名工研院的問句詢問具備網路搜尋能力的 AI 答案引擎，
       逐次記錄回答內容、提及單位與引用來源，分數由程式依固定規則計算，非人工評分。<br>
       <b>限制</b>：本數據為代理指標，不等同 ChatGPT 或 Google AI Overviews 消費端畫面；
-      單次查詢具隨機性，趨勢判讀以七日均線為準。對外引用請一併載明本限制。
+      單次查詢具隨機性，趨勢判讀以七日均線為準。對外引用請一併載明本限制。<br>
+      <b>能見度不等於成效</b>：本報告量的是 AI 回答裡的輸出面，不是對記者、民眾認知或行為的影響（AMEC：「Visibility is not an outcome」）。
     </div>`;
   return d;
 }
@@ -1203,8 +1304,11 @@ function buildDeckSlides(d, keyword){
 
   const trend = deckTrendSvg(keyword);
   if(trend){
-    add('', `<h3>能見度指數走勢（近 ${esc(document.getElementById('days').value)} 天）</h3>${trend}
-      <div class="small">0–100，粗線為七日均線、淡點為單日值、橘色虛線為活動日。趨勢請看均線，單日會跳動。</div>`);
+    // 批次 102：這張是整份簡報裡唯一用到自訂綜合指數的投影片。IAB 要求用綜合指數的人公開權重、
+    // 說明限制，所以直接寫在投影片上，不要等被問；對外的數字用上一張的分項指標。
+    add('', `<h3>能見度指數走勢（自訂指數，近 ${esc(document.getElementById('days').value)} 天）</h3>${trend}
+      <div class="small">0–100。這是我們自訂的綜合指數（提及 45＋位置 20＋自家網域被引用 20＋有具體內容 15），<b>不是國際標準</b>，只用來看趨勢；對外請引用提及率等分項指標。
+        粗線為七日均線、淡點為單日值、橘色虛線為活動日，趨勢請看均線，單日會跳動。</div>`);
   }
 
   const vb = (d.voiceBoard||[]).slice(0,7);
@@ -1242,7 +1346,8 @@ function buildDeckSlides(d, keyword){
   add('', `<h3>方法與限制</h3>
     <div class="small" style="font-size:2cqw">以不指名工研院的問句詢問具網路搜尋能力的 AI 答案引擎，逐次記錄回答內容、提及單位與引用來源，分數由程式依固定規則計算，非人工評分。<br><br>
     本數據為<b>代理指標</b>，不等同 ChatGPT 或 Google AI Overviews 消費端畫面；單次查詢具隨機性，趨勢判讀以七日均線為準。對外引用請一併載明本限制。<br><br>
-    方法論依據：AMEC《GEO Principles》（2026-05）——AI 輸出應視為方向性證據，不依賴任何單一分數、平台或工具。</div>`);
+    方法論依據：AMEC《GEO Principles》（2026-05）——AI 輸出應視為方向性證據，不依賴任何單一分數、平台或工具；指標定義依 IAB《Measuring Visibility in the AI Era》（2026-08）。
+    ${d.method && d.method.tier && d.claim ? `<br><br><b>測量等級：${esc(d.method.tier.label)}</b>（方向參考，不是決策等級）；<b>宣稱等級：${esc(d.claim.label)}</b>。` : ''}</div>`);
 
   return slides;
 }
@@ -1395,7 +1500,10 @@ const briefIcon = (k) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentCo
 // 工研院的所有寫法——鏡射 lib/geo-orgs.js 的 BRAND_ALIAS_RE（靜態頁不能 import），
 // test/test-review82.mjs 會比對兩邊逐字相同。以前這頁只認「工研院|ITRI」，
 // 問句寫「工業技術研究院」照樣放行；而且沒有字詞邊界，「nitride」會被當成 ITRI。
-const BRAND_ALIAS_RE = /工研院|工業技術研究院|工业技术研究院|\b(?:ITRI|IEK|ISTI)\b|Industrial\s+Technology\s+Research\s+Institute/i;
+// 批次 102：加了官網組織架構上的單位全名（電子與光電系統研究所…）。單位簡稱（電光所…）
+// 不在這條裡——「成大電光所」也叫這個名字，要擋只能用 lookbehind，而 iOS 16.4 以前的 Safari
+// 看到 lookbehind 會整支 script 語法錯誤。簡稱的歧義由後端 findBrandTerms() 處理。
+const BRAND_ALIAS_RE = /工研院|工業技術研究院|工业技术研究院|電子與光電系統研究所|資訊與通訊研究所|機械與機電系統研究所|材料與化工研究所|綠能與環境研究所|生醫與醫材研究所|產業科技國際策略發展所|無人化創新科技研究所|量測技術發展中心|服務系統科技中心|智慧感測與系統科技中心|產科國際所|產業經濟與趨勢研究中心|\b(?:ITRI|IEK|ISTI)\b|Industrial\s+Technology\s+Research\s+Institute/i;
 
 const BRIEF_TILE = {
   lead_brand:  ['building', '開頭就是工研院'],
@@ -1690,7 +1798,7 @@ function renderSummary(d){
     ? `，本週比近 ${t.baseDays} 天${t.dir==='flat' ? '持平' : `${t.label} ${Math.abs(t.delta)} 分`}`
     : '';
   items.push({ cls: t && t.dir==='down' ? 'warn' : '', html:
-    `近 14 天能見度指數 <b>${s.score14 ?? '—'}</b> 分${esc(trendTxt)}；不指名工研院時，AI 有 <b>${s.mentionRate14 ?? '—'}%</b> 的回答會提到工研院，<b>${s.citedRate14 ?? '—'}%</b> 引用到自家網頁。` });
+    `近 14 天能見度指數 <b>${s.score14 ?? '—'}</b> 分（自訂指數）${esc(trendTxt)}；不指名工研院時，AI 有 <b>${s.mentionRate14 ?? '—'}%</b> 的回答會提到工研院，<b>${s.citedRate14 ?? '—'}%</b> 引用到自家網頁。` });
   const board = (d.board || []).filter(b => b.score !== null);
   if(board.length >= 2){
     const sorted = [...board].sort((a,b) => b.score - a.score);
@@ -1799,10 +1907,70 @@ function trendBadge(t){
     <span class="base">vs 近 ${t.baseDays} 天 ${t.baseline} 分</span></div>`;
 }
 
+/* ── 綜合指數怎麼算（批次 102）──
+ * IAB 的要求：提供綜合指數的人必須揭露完整權重、正規化方式、各分項數值與限制，
+ * 「分項指標才是權威的測量詞彙，綜合分數只是呈現層」。這裡把我們的指數照這個標準攤開，
+ * 再加上 OECD／JRC 手冊建議的敏感度分析：權重是價值判斷，所以換幾套合理的權重重算，
+ * 看結論會不會跟著變。數字全部來自 /api/geo?action=method，這裡只排版。 */
+function compositeExplainHtml(m){
+  if(!m || !m.composite) return '';
+  const w = m.composite.weights, rp = m.composite.rankPoints, sn = m.sensitivity || {}, t = m.tier;
+  const cv = (v, why) => (v==null ? `<span style="color:var(--muted)">${why}</span>` : v.toFixed(2));
+  const srows = (sn.schemes||[]).map(x=>`<tr><td>${esc(x.label)}</td>
+      <td class="num-cell">${x.mean==null ? '—' : x.mean}</td>
+      <td class="num-cell">${cv(x.dailyCorr, x.dailyWhy || '—')}</td>
+      <td class="num-cell">${cv(x.topicCorr, x.topicWhy || '—')}</td></tr>`).join('');
+  const muted = 'font-size:.76rem;color:var(--muted);line-height:1.8;margin-top:6px';
+  return `<div style="font-size:.84rem;line-height:1.8">
+    <div style="font-weight:800;margin:4px 0 6px">這個指數怎麼算</div>
+    <table style="font-size:.8rem"><thead><tr><th>分項</th><th>配分</th><th>說明</th></tr></thead><tbody>
+      <tr><td>提及</td><td class="num-cell">${w.mention}</td><td>回答正文有提到工研院；沒提到整筆 0 分，下面三項都不算</td></tr>
+      <tr><td>位置</td><td class="num-cell">${w.position}</td><td>第 1 個被提到 ${rp[0]}、第 2 個 ${rp[1]}、第 3 個 ${rp[2]}、第 4 個以後 ${rp[3]}</td></tr>
+      <tr><td>自家網域被引用</td><td class="num-cell">${w.owned}</td><td>來源裡有 itri.org.tw、itritech.itri.org.tw、iek.org.tw</td></tr>
+      <tr><td>具體內容</td><td class="num-cell">${w.specifics}</td><td>針對工研院給出可查證的技術名稱、數字、年份、案例或合作對象</td></tr>
+    </tbody></table>
+    <div style="${muted}">合計 0–100，配分本身就是 0–100，不另做正規化。每一筆回答各算一個分數，再取平均；分數由程式依固定規則計算，不是模型評分。
+      分項數值就是上方的提及率、自家網域引用率，與詳細版一頁報告裡帶區間的各項指標。</div>
+
+    <div style="font-weight:800;margin:14px 0 6px">這組配分是價值判斷，不是標準</div>
+    <div>OECD 與歐盟 JRC 的《Handbook on Constructing Composite Indicators》（2008）寫得很直白：
+      「Regardless of which method is used, weights are essentially value judgements.」
+      所以我們不宣稱 45／20／20／15「正確」，而是照該手冊 Step 7 的作法，換幾套合理的權重重算，看結論會不會跟著變：</div>
+    <table style="font-size:.8rem;margin-top:8px"><thead><tr><th>權重方案</th><th>平均分</th><th>走勢相關</th><th>議題名次相關</th></tr></thead><tbody>${srows || '<tr><td colspan="4">還沒有資料</td></tr>'}</tbody></table>
+    <div style="${muted}">範圍：近 ${m.days} 天、${sn.samples||0} 次有效回答、${sn.days||0} 天、${sn.topics||0} 個議題。
+      「走勢相關」＝每日平均分曲線跟現行算法的相關係數（1＝完全同向）；「議題名次相關」＝各議題排名跟現行算法的名次相關。
+      沒有「幾以上算穩」的標準可以援引，所以這裡不下判定，只給數字；若某一列明顯偏低，代表那一部分的結論有一部分是權重決定的，對外就不能只講綜合指數。</div>
+
+    <div style="font-weight:800;margin:14px 0 6px">測量等級：${esc(t.label)}</div>
+    <div>依 IAB 的分級，這份數據是方向參考、不是決策等級。
+      <details style="margin-top:4px"><summary style="font-size:.8rem;font-weight:600">為什麼（對照 IAB／AMEC 準則）</summary>
+        <ul style="margin:8px 0 0 18px;padding:0;font-size:.8rem;line-height:1.75">${t.gaps.map(g=>`<li>${esc(g)}</li>`).join('')}</ul></details></div>
+  </div>`;
+}
+let CALC_LOADED = false;
+async function loadCalc(){
+  const box = document.getElementById('calc-out');
+  if(CALC_LOADED || !box) return;
+  box.innerHTML = '<div class="empty">整理中…</div>';
+  try{
+    const d = await api('action=method&days=60');
+    if(d.error){ box.innerHTML = `<div class="empty down">${esc(d.error)}</div>`; return; }
+    CALC_LOADED = true;
+    box.innerHTML = compositeExplainHtml(d);
+  }catch(e){ box.innerHTML = '<div class="empty down">載入失敗，請稍後再開一次</div>'; }
+}
+function openCalc(e){
+  if(e) e.preventDefault();
+  const c = document.getElementById('calc-card');
+  if(!c) return;
+  c.open = true; loadCalc();
+  c.scrollIntoView({ behavior:'smooth', block:'start' });
+}
+
 function renderKpis(s){
   const v = (x,suf='') => x===null||x===undefined ? '—' : x+suf;
   document.getElementById('kpis').innerHTML = `
-    <div class="kpi"><div class="num">${v(s.score14)}</div><div class="lab">近 14 天能見度指數</div><div class="hint">滿分 100</div>${trendBadge(s.trend)}</div>
+    <div class="kpi"><div class="num">${v(s.score14)}</div><div class="lab">近 14 天能見度指數（自訂）</div><div class="hint">自訂綜合指數，非國際標準・<a href="#calc-card" onclick="openCalc(event)">怎麼算</a></div>${trendBadge(s.trend)}</div>
     <div class="kpi"><div class="num">${v(s.mentionRate14,'%')}</div><div class="lab">提及率</div><div class="hint">不指名問法下有被提到</div></div>
     <div class="kpi"><div class="num">${v(s.citedRate14,'%')}</div><div class="lab">自家網域引用率</div><div class="hint">itri.org.tw 被列為來源</div></div>
     <div class="kpi"><div class="num">${s.samples}</div><div class="lab">累計樣本</div><div class="hint">最後掃描 ${s.lastScan||'—'}${s.failed14?`｜近期失敗 ${s.failed14}`:''}</div></div>`;
@@ -2093,7 +2261,7 @@ function toggleFinds(tr){
 function renderBoard(board){
   const box = document.getElementById('board');
   if(!board || !board.length){ box.innerHTML = '<div class="empty">尚無資料</div>'; return; }
-  box.innerHTML = `<table><thead><tr><th>議題</th><th>能見度指數</th><th>變化</th><th>提及率</th><th>自家網域引用率</th><th>樣本</th></tr></thead><tbody>` +
+  box.innerHTML = `<table><thead><tr><th>議題</th><th>能見度指數（自訂）</th><th>變化</th><th>提及率</th><th>自家網域引用率</th><th>樣本</th></tr></thead><tbody>` +
     board.map(b=>`<tr class="clickable" onclick="toggleFinds(this)">
       <td><b>${esc(b.keyword)}</b>
         <br><button class="linkbtn" style="color:var(--primary-dark)"

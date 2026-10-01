@@ -91,6 +91,25 @@ if (OUT) fs.writeFileSync(OUT + '/deck.pdf', pdf);
 await page.evaluate(() => document.body.classList.remove('print-deck'));
 // 詳細版一頁報告還在
 check(await page.isVisible('#rep-card'), '詳細版一頁報告在簡報下面');
+// ── 批次 102：詳細版一頁報告的「方法與依據」──
+await page.evaluate(() => { document.getElementById('rep-details').open = true; });
+const rep = await page.textContent('#rep-out');
+check(/方法與依據/.test(rep) && /測量等級：探索性/.test(rep) && /不是決策等級/.test(rep), '一頁報告有「方法與依據」，並自稱探索性、不是決策等級');
+check((rep.match(/95% 區間 \d+～\d+%/g) || []).length >= 1 && (rep.match(/\d+～\d+%/g) || []).length >= 4, '關鍵數字與分項指標都帶 95% 區間');
+check(/IAB Mention Rate/.test(rep) && /IAB Share of Voice/.test(rep) && /MRR/.test(rep), '分項指標標明 IAB 的名稱');
+check(/嘗試 \d+ 次，有效 \d+ 次/.test(rep) && /兩套獨立判定的一致率/.test(rep) && /AI 怎麼稱呼工研院/.test(rep), '有樣本分母、判官與規則一致率、相關用語追蹤');
+check(!/能見度指數/.test(rep), '對外的一頁報告不出現自訂的「能見度指數」');
+if (OUT) await page.locator('#rep-card').screenshot({ path: OUT + '/g-report-method.png' });
+// ── 批次 102：總覽的「這些數字量的是什麼？」──
+await page.click('#tabs button[data-go="overview"]');
+check(/能見度指數（自訂）/.test(await page.textContent('#kpis')), 'KPI 標成「（自訂）」');
+await page.click('#calc-card > summary');
+await page.waitForFunction(() => /這個指數怎麼算/.test(document.getElementById('calc-out').textContent), null, { timeout: 15000 });
+const calc = await page.textContent('#calc-out');
+check(/價值判斷，不是標準/.test(calc) && /weights are essentially value judgements/.test(calc), '「怎麼算」開宗明義：價值判斷、不是標準');
+check(await page.locator('#calc-out table').nth(1).locator('tbody tr').count() === 6, '敏感度表列出 6 套權重方案');
+check(/測量等級：探索性/.test(calc), '「怎麼算」也標出測量等級');
+if (OUT) await page.locator('#calc-card').screenshot({ path: OUT + '/g-calc.png' });
 // 活動效應欄位
 await page.click('#tabs button[data-go="overview"]');
 check((await page.textContent('#events')).includes('第 15–30 天'), '活動效應欄位改名，不叫「基線抬升」');
