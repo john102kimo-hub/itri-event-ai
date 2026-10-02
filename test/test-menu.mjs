@@ -1,6 +1,6 @@
 import {
   detectMetaIntent, matchEventByName, buildWelcomeFlex, buildRichMenuDefinition,
-  ALL_MENUS, REPORTER_MENU, STAFF_MENU, detectCourtesy, isOrgWideNewsAsk, findEventMentioned
+  ALL_MENUS, REPORTER_MENU, STAFF_MENU, isStaffMoreCommand, detectCourtesy, isOrgWideNewsAsk, findEventMentioned
 } from '../lib/menu.js';
 import { isExitStaffCommand } from '../lib/staff.js';
 
@@ -312,10 +312,16 @@ for (const t of [
 console.log('── 職員按鈕不可以被記者端意圖攔走 ──');
 for (const b of STAFF_MENU.buttons) {
   const got = detectMetaIntent(b.text);
-  // 批次 77：「更多功能」送出的就是「使用說明」，在職員模式裡 help 會給職員功能表，是預期的
-  eq(got === null || got === 'calendar' || (b.text === '使用說明' && got === 'help'), true,
+  // 批次 114：「更多功能」不再送出「使用說明」，六格都不該被記者端意圖攔走
+  eq(got === null || got === 'calendar', true,
     `職員按鈕「${b.text}」不該被記者端意圖攔走（實得 ${got}）`);
 }
+eq(STAFF_MENU.buttons.some(b => b.text === '使用說明'), false,
+  '職員選單沒有一格送出「使用說明」（回報：按「更多功能」對話裡卻出現「使用說明」）');
+eq(STAFF_MENU.buttons.find(b => b.label === '更多功能')?.text, '更多功能',
+  '「更多功能」這一格送出的字就是「更多功能」');
+for (const t of ['更多功能', '更多功能？', ' 更多功能 ', '更多功能。']) eq(isStaffMoreCommand(t), true, `「${t}」認得是職員的更多功能`);
+for (const t of ['更多功能有哪些', '我要更多功能', '功能', '使用說明', '']) eq(isStaffMoreCommand(t), false, `「${t}」不是職員的更多功能`);
 eq(detectMetaIntent('設定圖文選單'), null, '「設定圖文選單」不該被記者端意圖攔走');
 eq(detectMetaIntent('所有場次的後台數據'), 'calendar',
   '「所有場次的後台數據」會命中 CALENDAR_RE——所以 api/line.js 不能在字面比對那層短路 calendar');

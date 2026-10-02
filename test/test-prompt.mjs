@@ -12,11 +12,10 @@ function ok(cond, label) {
 }
 
 // 動態算相對今天的日期，不寫死日期字串——測試才不會過幾個月就失效。
+// ⚠️ 要用台灣時間算：lib/prompt.js 的 isBeforeEventDate() 看的是 Asia/Taipei，用機器本地時區的話，
+// 在 UTC 16:00–24:00（台灣凌晨 0–8 點）「明天」會算成台灣的今天，活動前的測試就在沒人改程式時全紅。
 function isoOffset(days) {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  d.setDate(d.getDate() + days);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  return new Date(Date.now() + days * 86400000).toLocaleDateString('sv-SE', { timeZone: 'Asia/Taipei' });
 }
 const TOMORROW = isoOffset(1);
 const TODAY = isoOffset(0);

@@ -43,7 +43,7 @@ import {
 import { buildCalendarCards, buildAllCalendarCards, routeIntent, formatCalendarReply, calendarQuickReplyItems, matchShownEvents } from '../lib/router.js';
 import {
   detectMetaIntent, detectCourtesy, isOrgWideNewsAsk, isHumanRequest, isEventTopicAsk, isExactMetaAsk, matchEventByName, MENU_WORDS, HELP_TEXT, ORG_INTRO_TEXT, buildWelcomeFlex,
-  REPORTER_MENU, STAFF_MENU, findEventMentioned
+  REPORTER_MENU, STAFF_MENU, isStaffMoreCommand, findEventMentioned
 } from '../lib/menu.js';
 import {
   listOpenCampaigns, listRegistrationTopics, loadCampaigns, findRegistrationsForLineUser, bindRegistrationToLine, parseRegBindText,
@@ -2874,6 +2874,12 @@ async function handleStaffMessage(replyToken, userId, text) {
     return;
   }
 
+  // 選單最右下那一格（批次 114）。字面比對、不進模型：每次回的都是同一則固定文字。
+  if (isStaffMoreCommand(text)) {
+    await sendStaffMore(replyToken, userId);
+    return;
+  }
+
   // ── 用對話教米亞（批次 46）────────────────────────────────────────────
   // ⚠️ 一定要排在 routeStaffIntent() 之前，而且用字面比對——跟 isExitStaffCommand()
   // 同一個理由：「這句話會不會被寫進知識庫、讓每個記者都讀到」，不該取決於模型當下
@@ -3185,12 +3191,34 @@ async function handleStaffMessage(replyToken, userId, text) {
 // 照樣答得出來（批次 52 修的是 handleStaffMessage() 的路由，不是這段文字）——
 // 那條路被拿掉的話，回報過的「問新聞稿拿到一面功能清單的牆」就會整個回來。
 // 測試釘住了這一條。
+// 【教米亞】那一段：功能表與「更多功能」兩處都要寫，抄兩份遲早有一份跟不上。
+const STAFF_TEACH_TEXT =
+  '【教米亞】\n' +
+  '・「記住：這場的技術還在實驗階段，不要說已經量產」——只記這一場\n' +
+  '・「語氣：回答再短一點」——全站通用\n' +
+  '・打「記憶清單」看目前記得什麼';
+
+// 選單「更多功能」那一格（批次 114）。只回格子底下寫的那三件事——訓練、教米亞、退出——
+// 不是整份功能表；要看完整的打「使用說明」。按鈕列照規矩帶整套入口（staffChips），
+// 只是把這一則最相關的三顆排在前面。
+async function sendStaffMore(replyToken, userId) {
+  await replyOrPush(replyToken, userId,
+    '更多功能 🧰\n\n' +
+    '【媒體訓練】\n' +
+    '・「要媒體訓練連結」——發言練習（每張活動卡上也有）\n\n' +
+    STAFF_TEACH_TEXT + '\n\n' +
+    '【其他】\n' +
+    '・「設定圖文選單」——重設下方選單\n' +
+    '・「退出職員模式」——回到記者身分\n\n' +
+    '完整的功能說明打「使用說明」。',
+    staffChips('要媒體訓練連結', '記憶清單', '退出職員模式', '使用說明'));
+}
+
 async function sendStaffMenu(replyToken, userId) {
   await replyOrPush(replyToken, userId,
     '職員模式 🔧 下面按鈕直接點，或用講的都可以。\n\n' +
     '【管理】\n' +
-    // 「更多功能」這一格送出的就是「使用說明」＝這一則本身，不列自己
-    STAFF_MENU.buttons.filter(b => b.text !== '退出職員模式' && b.text !== '使用說明').map(b => `・${b.label}——${b.sub}`).join('\n') +
+    STAFF_MENU.buttons.map(b => `・${b.label}——${b.sub}`).join('\n') +
     '\n・要媒體訓練連結——發言練習（每張活動卡上也有）' +
     '\n・設定圖文選單——重設下方選單\n' +
     '・點活動名稱——看那一場的活動卡：填寫進度、編輯頁、催填訊息、媒體訓練\n' +
@@ -3200,10 +3228,7 @@ async function sendStaffMenu(replyToken, userId) {
     '・「發布 某某那場」——必填都齊了才能發布\n' +
     '・打「復原上一個修改」改回去\n' +
     '・直接傳照片——選一場，照片就加進那一場的活動照片\n\n' +
-    '【教米亞】\n' +
-    '・「記住：這場的技術還在實驗階段，不要說已經量產」——只記這一場\n' +
-    '・「語氣：回答再短一點」——全站通用\n' +
-    '・打「記憶清單」看目前記得什麼\n\n' +
+    STAFF_TEACH_TEXT + '\n\n' +
     '【離開】打「退出職員模式」回到記者身分。',
     STAFF_QUICK_REPLIES);
 }

@@ -364,6 +364,33 @@ reset(); await freshModule();
 state.staff.push(['U_staff', '', '2026-08-27', '', '']);
 out = await send('使用說明', 'U_staff');
 
+// 批次 114：選單「更多功能」送出的是「更多功能」，回的是格子底下寫的三件事（訓練、教米亞、退出），
+// 不是整份功能表。回報：按「更多功能」，對話裡跳出「使用說明」、回來一整面【管理】清單。
+{
+  reset(); await freshModule();
+  state.staff.push(['U_staff', '', '2026-08-27', '', '']);
+  out = await send('更多功能', 'U_staff');
+  const more = out.find(o => o.kind === 'text')?.text || '';
+  check('職員打「更多功能」→ 寫著媒體訓練、教米亞、退出職員模式三件事',
+    /媒體訓練/.test(more) && /【教米亞】/.test(more) && /退出職員模式/.test(more), JSON.stringify(out));
+  check('　 不是整份功能表（沒有【管理】【直接改資料】）',
+    !/【管理】/.test(more) && !/【直接改資料】/.test(more), more);
+  check('　 結尾告訴同仁完整說明怎麼叫出來', /使用說明/.test(more), more);
+  check('　 不是記者那份說明影片', !out.some(o => o.kind === 'video'), JSON.stringify(out.map(o => o.kind)));
+  const chips = (sent[sent.length - 1]?.quickReply || []).map(c => (typeof c === 'string' ? c : (c.text || c.label)));
+  check('　 按鈕列最前面是這一則最相關的三顆，後面照樣是整套入口',
+    JSON.stringify(chips.slice(0, 3)) === JSON.stringify(['要媒體訓練連結', '記憶清單', '退出職員模式'])
+      && STAFF_MENU.buttons.every(b => chips.includes(b.text)) && chips.length <= 13, JSON.stringify(chips));
+  // 「使用說明」仍然是完整功能表，而且現在會列出「更多功能」這一格
+  out = await send('使用說明', 'U_staff');
+  check('「使用說明」還是完整功能表，並提到「更多功能」',
+    out.some(o => o.kind === 'text' && /【管理】/.test(o.text) && /更多功能/.test(o.text)), JSON.stringify(out));
+  // 記者打「更多功能」不是職員指令，不能叫出職員內部說明
+  reset(); await freshModule();
+  out = await send('更多功能', 'U_reporter_more');
+  check('記者打「更多功能」不會看到職員功能', !out.some(o => o.kind === 'text' && /【教米亞】|退出職員模式/.test(o.text || '')), JSON.stringify(out));
+}
+
 // 聽不懂的時候不要丟清單——針對同仁這一句講一段貼題的話，按鈕仍然是職員那組。
 reset(); await freshModule();
 state.staff.push(['U_staff', '', '2026-08-27', '', '']);

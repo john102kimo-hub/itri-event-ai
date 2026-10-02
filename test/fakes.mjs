@@ -53,7 +53,7 @@ export const state = {
     // 完全不同的「邀請函」問句——這樣才測得出來活動前記者看到的按鈕真的換了一組，
     // 不是剛好兩組長一樣。
     ['soon', '奈米材料前瞻應用發表會', '#0F9E7A', '【正式新聞稿】完整技術規格與時程…', 'active',
-      (() => { const d = new Date(); d.setDate(d.getDate() + 1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; })(),
+      isoOffset(1),
       '這場的技術突破是什麼？', 'https://example.com/photo.jpg', '', '工研院', 'code4', '', '', '', '',
       '', '【邀請函】誠摯邀請貴媒體蒞臨採訪本次記者會…', '邀請函內容是什麼？\n採訪申請方式？']
   ],
