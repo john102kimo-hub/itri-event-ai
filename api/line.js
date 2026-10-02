@@ -2228,11 +2228,29 @@ const GROUP_ANSWER_RULE = '這一題是在多人 LINE 群組裡問的，群組�
 // 只認「要整份稿子」的講法。刻意不收「完整版」「逐字稿」：「有完整版影片嗎？」「有沒有
 // 逐字稿？」問的不是新聞稿，後面接一段「完整新聞稿比較長…」就是答非所問。
 const GROUP_FULL_TEXT_RE = /(完整|整篇|整份)的?(新聞)?稿|新聞稿的?(全文|全部|完整)|全文|完整的?內容|整篇(貼|給|傳|發)/;
+// 「整句就只是在要完整新聞稿、沒帶任何主題」：圖文選單「新聞稿全文」那一格送出的固定句型（「給我完整新聞稿」）
+// 與記者手打的常見講法。批次 115：這種句子**不能交給模型判**。回報（截圖）：按那一格，回來的是「工研院官網
+// 新聞中心目前沒有找到跟『給我完整新聞稿』直接相關的報導」——正式環境的模型把它判成 tech_query、又抽不出關鍵字，
+// 整句被丟去官網搜尋。上面反問「要哪一場」的規則（批次 85）排在路由「之後」，路由判成別的就永遠輪不到。
+// 刻意收得緊：有主題的（「半導體的完整新聞稿」）、點名活動的（《ＸＸ》的完整新聞稿）都不吃，那些照舊交給路由。
+const FULL_TEXT_ASK_EXACT_RE = /^(請|麻煩)?(給我|我要|我想要|想要|可以給我|能給我)?((完整|整篇|整份)的?新聞稿|新聞稿(全文|全部|完整版?))(嗎|呢)?[?？!！。]*$/;
+const isFullTextAsk = (text) => FULL_TEXT_ASK_EXACT_RE.test(String(text || '').trim());
 // 「要哪一場的完整新聞稿」那排按鈕送出的字（批次 85）。固定格式，才能不靠模型、直接認出是哪一場，
 // 群組裡別人按也認得（見 isOwnButtonText()）。有人照這個格式自己打字，意思也一樣。
 const FULL_TEXT_PICK_RE = /^給我《(.+)》的完整新聞稿$/;
 function fullTextPickButton(name) {
   return { label: name, text: `給我《${name}》的完整新聞稿` };
+}
+// 「要哪一場的完整新聞稿」那一則。eventIds：路由已經認出的場次（有知識庫的才算）；沒有就列全部。
+// 回 false＝一場都列不出來（呼叫端照原流程往下走）。
+async function sendFullTextPicker(replyToken, userId, cards, eventIds = []) {
+  const named = eventIds.map(id => cards.find(c => c.id === id)).filter(c => c?.has_kb);
+  const picks = named.length ? named.map(c => c.name) : calendarQuickReplyItems(cards);
+  if (!picks.length) return false;
+  await replyOrPush(replyToken, userId,
+    `想要哪一場的完整新聞稿呢？點下面的活動就給您：\n${picks.map(n => '・' + n).join('\n')}`,
+    [...picks.map(fullTextPickButton), BTN.events, BTN.human].slice(0, 13));
+  return true;
 }
 async function fullTextPickEvent(text) {
   const m = String(text || '').trim().match(FULL_TEXT_PICK_RE);
@@ -3568,6 +3586,10 @@ async function handleUnbound(replyToken, userId, text, { silentOnOther = false, 
       return;
     }
   }
+  // 整句只是在要完整新聞稿（選單「新聞稿全文」）：規則先接，不等模型（批次 115，見 FULL_TEXT_ASK_EXACT_RE）。
+  // silentOnOther（群組裡沒被叫到）照舊不開口。
+  if (!silentOnOther && isFullTextAsk(text) && await sendFullTextPicker(replyToken, userId, cards)) return;
+
   // groupChatter（批次 83）：群組裡沒被叫到的訊息，提醒路由「群組成員彼此也在聊天」——
   // silentOnOther 為 true 的情況正好就是這種（見 lib/router.js 的說明）。
   const { intent, event_ids, confidence, tech_keyword } = await routeIntent(text, cards, { ...topicCtx, groupChatter: silentOnOther });
@@ -3616,16 +3638,7 @@ async function handleUnbound(replyToken, userId, text, { silentOnOther = false, 
   // 要的是「某一場的完整新聞稿」，但沒講哪一場、目前也沒在問哪一場（批次 85）。以前掉到兜底
   // 「這句我不太確定該從哪邊幫您找答案」——其實我們很清楚他要什麼，只是不知道哪一場。
   // 反問一次，每一場一顆按鈕，按下去直接給那一場（見 FULL_TEXT_PICK_RE）。
-  if (!silentOnOther && GROUP_FULL_TEXT_RE.test(text)) {
-    const named = event_ids.map(id => cards.find(c => c.id === id)).filter(c => c?.has_kb);
-    const picks = named.length ? named.map(c => c.name) : calendarQuickReplyItems(cards);
-    if (picks.length) {
-      await replyOrPush(replyToken, userId,
-        `想要哪一場的完整新聞稿呢？點下面的活動就給您：\n${picks.map(n => '・' + n).join('\n')}`,
-        [...picks.map(fullTextPickButton), BTN.events, BTN.human].slice(0, 13));
-      return;
-    }
-  }
+  if (!silentOnOther && GROUP_FULL_TEXT_RE.test(text) && await sendFullTextPicker(replyToken, userId, cards, event_ids)) return;
 
   if (intent === 'qa' && event_ids.length > 0) {
     const names = event_ids.map(id => cards.find(c => c.id === id)?.name).filter(Boolean).slice(0, 3);
@@ -4498,10 +4511,13 @@ async function handleGroupMessage(replyToken, groupId, text, { mentioned, speake
   // 形狀：守門放行跟真的答得出來，是兩道各自獨立的門，兩道都要開）。
   // 綁定中才開：沒綁定時 handleUnbound() 的 silentOnOther 不動，不會為了一個名詞去反問「哪一場」。
   const topicAsk = !mentioned && !ownButton && (isEventTopicAsk(text) || isExactMetaAsk(text));
-  const routed = pinGenericTechQueryToEvent(
-    await routeIntent(text, buildCalendarCards(await getAllEventRows()),
-      { currentEventId: event.id, ...(await recentTopicContext(groupId)), groupChatter: !mentioned && !ownButton && !topicAsk }),
-    text, event.id);
+  // 綁定中、被叫到、整句只是在要完整新聞稿：就是在要這一場的，不等模型（批次 115）。
+  const routed = (mentioned || ownButton) && isFullTextAsk(text)
+    ? { intent: 'qa', event_ids: [event.id], confidence: 'high' }
+    : pinGenericTechQueryToEvent(
+      await routeIntent(text, buildCalendarCards(await getAllEventRows()),
+        { currentEventId: event.id, ...(await recentTopicContext(groupId)), groupChatter: !mentioned && !ownButton && !topicAsk }),
+      text, event.id);
 
   // 回報的意見：批次 14 只擋得住「明確 @ 別人」這種訊號很強的情況，續問視窗內
   // 純聊天、答非所問的訊息（例如「友信你覺得呢」）當時沒有安全的判斷依據——
@@ -4854,10 +4870,13 @@ async function handleEvent(ev) {
   // ⚠️ 批次 58：只帶話題標籤不夠——記者的追問常常是一句完整問句（回報的截圖：
   // 「有談機器人發展的嗎」），標籤給不出任何依據，那句話照樣被 currentEventId 拉回
   // 這一場。recentTopicContext() 會連「上一則實際答了什麼」一起帶上去。
-  const routed = pinGenericTechQueryToEvent(
-    await routeIntent(text, buildCalendarCards(await getAllEventRows()),
-      { currentEventId: event.id, ...(await recentTopicContext(userId)) }),
-    text, event.id);
+  // 整句只是在要完整新聞稿（選單「新聞稿全文」）：綁定中就是這一場的，不等模型（批次 115）。
+  const routed = isFullTextAsk(text)
+    ? { intent: 'qa', event_ids: [event.id], confidence: 'high' }
+    : pinGenericTechQueryToEvent(
+      await routeIntent(text, buildCalendarCards(await getAllEventRows()),
+        { currentEventId: event.id, ...(await recentTopicContext(userId)) }),
+      text, event.id);
 
   // 綁定中，但這題其實是在問「有哪些場次」——不動原本的活動綁定，只列清單（跟
   // handleMetaIntent() 的 calendar 分支同一支，見 sendCalendarReply()）。

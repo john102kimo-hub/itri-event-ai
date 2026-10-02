@@ -12,6 +12,8 @@ export const isoOffset = (days) => {
   const t = new Date(Date.now() + days * 86400000);
   return t.toLocaleDateString('sv-SE', { timeZone: 'Asia/Taipei' });
 };
+let staffModelCalls = 0;
+export const getStaffModelCalls = () => staffModelCalls; // 批次 115：職員路由模型被呼叫了幾次
 export const weekdayOf = (iso) => {
   const [y, m, d] = iso.split('-').map(Number);
   return '日一二三四五六'[new Date(Date.UTC(y, m - 1, d)).getUTCDay()];
@@ -113,6 +115,9 @@ export function reset() {
   state.itriFetchFail = false;
   state.itriKeywordMustInclude = '';
   state.fallbackReply = null; // null＝用上面的預設假回覆，見 installFetchStub() 的兜底分支
+  state.staffRouteForce = null; // 批次 115：同上，職員那一支
+  staffModelCalls = 0;
+  state.routeForce = null; // 批次 115：(text) => 路由結果，覆蓋假模型的判斷，用來重現「正式環境的模型判成別的意圖」
   state.anthropicFail = null; // 批次 85：'auth'＝金鑰失效（401）、'overload'＝過載（529），見 installFetchStub()
   state.noDataKeyword = ''; // 非空＝模擬「這場答不出來」，見 installFetchStub() 的問答分支
   state.newsDigestText = ''; // 非空＝模擬「官網補查那支模型」吐出這段話（批次 44）
@@ -466,7 +471,8 @@ export function installFetchStub() {
 
       // 路由呼叫跟問答呼叫都打同一個端點，用 system prompt 的特徵分辨
       const json = o => ({ ok: true, json: async () => ({ content: [{ type: 'text', text: JSON.stringify(o) }] }) });
-      if (sys.includes('內部職員助理')) return json(fakeStaffRoute(userText));
+      if (sys.includes('內部職員助理')) { staffModelCalls++; return json(state.staffRouteForce ? state.staffRouteForce(userText) : fakeStaffRoute(userText)); }
+      if (sys.includes('意圖判斷器') && state.routeForce) { const forced = state.routeForce(userText); if (forced) return json(forced); }
       if (sys.includes('意圖判斷器')) return json(fakeReporterRoute(userText, currentEventHint, topicHint, topicAnswer, /群組成員彼此之間也在聊天/.test(allSys)));
 
       // 智慧兜底（api/line.js composeFallbackReply()）——四條路都對不上時，用米亞的
