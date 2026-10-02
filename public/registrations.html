@@ -88,7 +88,20 @@
   .chk label { font-weight: 400; display: flex; gap: 6px; align-items: flex-start; font-size: .84rem; }
   #toast { position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%); background: #111827; color: #fff; padding: 10px 18px; border-radius: 10px; font-size: .88rem; opacity: 0; transition: opacity .2s; pointer-events: none; z-index: 60; }
   #toast.show { opacity: 1; }
-  @media (max-width: 720px) { .bar-row { grid-template-columns: 1fr 50px; } .bar-row .track { grid-column: 1 / -1; order: 3; } .row2 { grid-template-columns: 1fr; } .scroll-x { overflow-x: auto; } table { min-width: 760px; } }
+  @media (max-width: 720px) { .bar-row { grid-template-columns: 1fr 50px; } .bar-row .track { grid-column: 1 / -1; order: 3; } .row2 { grid-template-columns: 1fr; } 
+    /* 批次 108：手機上名單一筆一張卡片。以前是橫向捲動的七欄表，「場次／備註／取消／刪除」在畫面外，
+       手機上要改一筆報名得先往右滑才找得到按鈕。 */
+    table { min-width: 0; } thead { display: none; }
+    table, tbody, tr, td { display: block; width: 100%; }
+    tr { border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; margin-bottom: 10px; background: #fff; }
+    tr.cancelled { opacity: .6; }
+    td { border: 0 !important; padding: 3px 0 !important; }
+    td[data-l]::before { content: attr(data-l) '：'; color: var(--muted); font-size: .74rem; }
+    td:empty { display: none; }
+    td.act { padding-top: 8px !important; white-space: normal !important; }
+    td.act .btn { margin: 0 4px 4px 0; }
+    td .sess-tags { display: inline-flex; vertical-align: middle; }
+  }
 </style>
 </head>
 <body>
@@ -337,10 +350,10 @@ function renderList() {
       <td><code>${esc(g.reg_id)}</code>${g.test ? '<br><span class="flag no">測試</span>' : ''}${g.dup ? `<br><span class="flag no" title="同一個 Email 有 ${g.dup + 1} 列，已合併計算">重複×${g.dup + 1}</span>` : ''}</td>
       <td><b>${esc(g.name)}</b><br><span class="muted">${esc(g.outlet)}</span>${g.note ? `<br><span class="small" style="color:var(--warn)">📝 ${esc(g.note)}</span>` : ''}</td>
       <td>${esc(g.email)}<br><span class="muted">${esc(g.phone_label)}</span></td>
-      <td><div class="sess-tags">${g.sessions.map((c) => `<span class="tag">${esc(c)}</span>`).join('')}</div></td>
-      <td class="small">${optText(g)}</td>
-      <td>${{ yes: '<span class="flag yes">名單內</span>', no: '<span class="flag no">名單外</span>', maybe: '<span class="flag maybe" title="名字在記者名單裡，但媒體不同">同名不同媒體</span>', unknown: '<span class="flag unknown">–</span>' }[g.roster]}${g.line_bound ? '<br><span class="flag line" style="margin-top:3px;display:inline-block">LINE</span>' : ''}</td>
-      <td class="small muted">${esc((g.created_at || '').replace('T', ' ').replace('+08:00', '').slice(5, 16))}</td>
+      <td data-l="場次"><div class="sess-tags">${g.sessions.map((c) => `<span class="tag">${esc(c)}</span>`).join('')}</div></td>
+      <td class="small" data-l="選填">${optText(g)}</td>
+      <td data-l="名單">${{ yes: '<span class="flag yes">名單內</span>', no: '<span class="flag no">名單外</span>', maybe: '<span class="flag maybe" title="名字在記者名單裡，但媒體不同">同名不同媒體</span>', unknown: '<span class="flag unknown">–</span>' }[g.roster]}${g.line_bound ? '<br><span class="flag line" style="margin-top:3px;display:inline-block">LINE</span>' : ''}</td>
+      <td class="small muted" data-l="報名">${esc((g.created_at || '').replace('T', ' ').replace('+08:00', '').slice(5, 16))}</td>
       <td class="act" style="white-space:nowrap">
         <button class="btn outline small" onclick="editSess('${esc(g.reg_id)}')">場次</button>
         <button class="btn outline small" onclick="editNote('${esc(g.reg_id)}')">備註</button>
