@@ -372,39 +372,46 @@ installFetchStub();
 
 // ═══ 八、圖文選單依有沒有開放報名挑版本 ═══════════════════════════════
 console.log('\n── 八、「設定圖文選單」：報名期間用報名版，結束後換回 ──');
-async function setupMenu() {
-  const created = [];
-  const uploaded = [];
+let SYNC = null;   // 這一輪 api/line.js 用的那份 lib/richmenu-sync.js（同一個版本號才是同一個實例）
+const loadSync = async () => { SYNC = await import(new URL(`../lib/richmenu-sync.js?v=${seq}`, import.meta.url).href); return SYNC; };
+let rendered = [];
+const stubRenderer = () => SYNC.__setRenderer(async (args) => { rendered.push(args); return Buffer.from('PNG-' + args.label); });
+async function setupMenu({ render = true } = {}) {
+  const created = [], defs = [];
+  const uploaded = [];       // 去網站抓的底圖檔名
+  const uploadedBytes = [];  // 實際上傳給 LINE 的內容
   let defaultId = null;
+  rendered = [];
+  if (render) stubRenderer(); else SYNC.__setRenderer(async () => { throw new Error('模擬畫圖失敗'); });
   const base = globalThis.fetch;
   globalThis.fetch = async (url, o) => {
     if (String(url).includes('/richmenu-')) { uploaded.push(String(url).split('/').pop()); return { ok: true, status: 200, arrayBuffer: async () => new ArrayBuffer(8) }; }
     return base(url, o);
   };
-  line.createRichMenu = async (def) => { created.push(def.name); return 'rm_' + created.length; };
-  line.uploadRichMenuImage = async () => true;
+  line.createRichMenu = async (def) => { created.push(def.name); defs.push(def); return 'rm_' + created.length; };
+  line.uploadRichMenuImage = async (id, buf) => { uploadedBytes.push(String(buf)); return true; };
   line.setDefaultRichMenu = async (id) => { defaultId = id; return true; };
   const out = await say('設定圖文選單', 'Ustaff000001');
   globalThis.fetch = base;
-  return { created, uploaded, defaultId, text: out[0]?.text || '' };
+  return { created, defs, uploaded, uploadedBytes, defaultId, text: out[0]?.text || '' };
 }
-seed({ campaigns: [campaignRow()] }); await fresh(); installFetchStub();
+seed({ campaigns: [campaignRow()] }); await fresh(); await loadSync(); installFetchStub();
 {
   await say('openseasame', 'Ustaff000001');
+  F.state.richMenus.length = 0;
   const r = await setupMenu();
-  check('有開放中的報名 → 建的是「報名版」＋職員版', r.created.join('|') === `${REPORTER_MENU_REG.name}|${STAFF_MENU.name}`, r.created.join('|'));
-  check('抓的底圖是 richmenu-reporter-reg.png 與 richmenu-staff.png', r.uploaded.join('|') === 'richmenu-reporter-reg.png|richmenu-staff.png', r.uploaded.join('|'));
+  check('有開放中的報名 → 建的是「報名版」（名稱帶活動代碼）＋職員版', r.created.join('|') === `${REPORTER_MENU_REG.name}｜tw2027|${STAFF_MENU.name}`, r.created.join('|'));
+  check('★ 報名格的字是同步當下畫上去的：記者版底圖是畫出來的那張，職員版才是去網站抓的固定圖', r.uploadedBytes[0] === 'PNG-活動報名' && r.uploaded.join('|') === 'richmenu-staff.png', JSON.stringify([r.uploadedBytes, r.uploaded]));
   check('報名版設為預設選單（所有記者）', r.defaultId === 'rm_1');
-  check('完成訊息寫明這次裝的是報名版，並列出報名那一格的名稱', /（報名版）/.test(r.text) && r.text.includes(`・${REG_MENU_TILE.label}`), r.text);
+  check('完成訊息寫明這次裝的是報名版，並列出報名那一格的名稱', /（報名版）/.test(r.text) && r.text.includes('・活動報名') && !/⚠️/.test(r.text), r.text);
 }
-seed({ campaigns: [campaignRow({ status: 'closed' })] }); await fresh(); installFetchStub();
+seed({ campaigns: [campaignRow({ status: 'closed' })] }); await fresh(); await loadSync(); installFetchStub();
 {
   await say('openseasame', 'Ustaff000001');
   const r = await setupMenu();
   check('報名結束後再設定一次 → 換回原本那套', r.created.join('|') === `${REPORTER_MENU.name}|${STAFF_MENU.name}` && r.uploaded[0] === 'richmenu-reporter.png', r.created.join('|'));
   check('完成訊息沒有「報名版」字樣', !/（報名版）/.test(r.text));
 }
-
 
 // ═══ 九、報名結束後，圖文選單自動換回（Vercel Cron）════════════════════
 console.log('\n── 九、報名結束後圖文選單自動換回 ──');
@@ -536,6 +543,99 @@ check('isCampaignRegisterPhrase：簡稱或活動名稱後面接「報名」才�
   R.isCampaignRegisterPhrase('新品說明會報名', { short_name: '新品說明會' }) && R.isCampaignRegisterPhrase('新品 發表會 報名表', { title: '新品發表會' })
   && !R.isCampaignRegisterPhrase('報名', { short_name: '新品說明會' }) && !R.isCampaignRegisterPhrase('新品說明會', { short_name: '新品說明會' })
   && !R.isCampaignRegisterPhrase('新品說明會報名費', { short_name: '新品說明會' }) && !R.isCampaignRegisterPhrase('新品說明會報名', {}) && !R.isCampaignRegisterPhrase('新品說明會報名', null));
+
+// ═══ 批次 113：後台挑哪一場、報名格寫那一場的名稱 ══════════════════════
+console.log('\n── 批次 113：圖文選單的報名格綁哪一場 ──');
+const bound = (id) => { F.state.richMenus.length = 0; F.state.richMenus.push({ richMenuId: 'rm_r', name: SYNC.regMenuName(id ? { id } : null) }, { richMenuId: 'rm_s', name: STAFF_MENU.name }); };
+const ymd2 = (days) => new Date(Date.now() + days * 864e5 + 8 * 3600e3).toISOString().slice(0, 10);
+const futureSessions = `A1｜${ymd2(30)}｜09:30-12:00｜開幕論壇`;
+seed({ campaigns: [campaignRow({ short_name: '眺望場次', sessions_text: futureSessions })] }); await fresh(); await loadSync(); installFetchStub();
+{
+  await say('openseasame', 'Ustaff000001');
+  F.state.richMenus.length = 0;
+  const r = await setupMenu();
+  const t = r.defs[0].areas.find((a) => a.action.text === '我要報名');
+  check('★ 只有一場開放 → 格子寫「簡稱＋報名」，副標是開始日期；送出的字仍是「我要報名」', rendered[0]?.label === '眺望場次報名' && /^\d+\/\d+ 起・選場次$/.test(rendered[0]?.sub) && t.action.label === '眺望場次報名', JSON.stringify([rendered, t]));
+  check('畫圖用的格子範圍來自選單的可點區域（x=833、第一排）——圖與按鈕不會錯位', rendered[0]?.tile.x === 833 && rendered[0].tile.y === 0 && rendered[0].tile.width === 833 && rendered[0].tile.height === 843, JSON.stringify(rendered[0]?.tile));
+}
+seed({ campaigns: [campaignRow({ short_name: '眺望場次' }), campaignRow({ id: 'other', title: '另一場', short_name: '新品說明會' })] }); await fresh(); await loadSync(); installFetchStub();
+{
+  await say('openseasame', 'Ustaff000001');
+  F.state.richMenus.length = 0;
+  let r = await setupMenu();
+  check('★ 兩場以上開放、沒指定綁哪一場 → 通用的「活動報名」，名稱沒帶活動代碼', rendered[0]?.label === '活動報名' && rendered[0]?.sub === '選場次・1 分鐘' && r.created[0] === REPORTER_MENU_REG.name, JSON.stringify([rendered[0], r.created]));
+  bound('other');
+  r = await setupMenu();
+  check('★ 後台已經綁了其中一場、而且還開著 → 職員在 LINE 重設選單時沿用，不會被洗成通用格', rendered[0]?.label === '新品說明會報名' && r.created[0] === `${REPORTER_MENU_REG.name}｜other`, JSON.stringify([rendered[0], r.created]));
+}
+seed({ campaigns: [campaignRow()] }); await fresh(); await loadSync(); installFetchStub();
+{
+  await say('openseasame', 'Ustaff000001');
+  F.state.richMenus.length = 0;
+  const r = await setupMenu({ render: false });
+  check('★ 畫圖壞了、職員在 LINE 打指令 → 退回固定的舊圖並寫明（不是整個失敗，選單照樣裝得起來）', r.created[0] === REPORTER_MENU_REG.name && r.uploaded.includes('richmenu-reporter-reg.png') && /⚠️/.test(r.text) && /固定的舊圖/.test(r.text), JSON.stringify([r.created, r.uploaded, r.text]));
+}
+// 排程：綁的那一場結束、別場還開著 → 改寫；綁的還開著 → 不動
+seed({ campaigns: [campaignRow({ id: 'gone', status: 'closed', title: '結束的', sessions_text: sessionsAround(-3) }), campaignRow({ id: 'other', title: '另一場', short_name: '新品說明會' })] }); await fresh(); await loadSync(); installFetchStub();
+{
+  stubRenderer(); rendered = [];
+  bound('gone');
+  const r = await runCron();
+  check('★ 報名格綁的那一場結束了、但還有別場開放 → 自動改寫成現在開著的那一場（不是留著一個已結束的活動名稱）', r.res.body?.action === 'resynced' && r.res.body.campaign_id === 'other' && r.created[0] === `${REPORTER_MENU_REG.name}｜other` && rendered[0]?.label === '新品說明會報名', JSON.stringify([r.res.body, r.created, rendered]));
+  check('改寫的那天推一則給管理員', r.pushes.length === 1 && /已經結束/.test(r.pushes[0].text) && /新品說明會報名/.test(r.pushes[0].text), JSON.stringify(r.pushes));
+  bound('other');
+  const again = await runCron();
+  check('綁的那一場還開著 → 什麼都不動（每天跑一次不會每天重建）', again.res.body?.action === 'skip' && again.created.length === 0 && again.pushes.length === 0, JSON.stringify(again.res.body));
+}
+
+// 後台 API（api/events.js 的 reg_admin_menu_*）
+console.log('\n── 批次 113：後台的選單 API ──');
+const eventsApi = (await import(new URL(`../api/events.js?v=${seq}`, import.meta.url).href)).default;
+const adminCall = async (method, body, pw = 'pw') => {
+  const r = { statusCode: 200, body: undefined, headers: {} };
+  const res = { status(c) { r.statusCode = c; return res; }, json(o) { r.body = o; return res; }, end() { return res; }, send() { return res; }, setHeader() { return res; } };
+  const headers = pw ? { 'x-admin-password': pw, 'x-forwarded-for': '10.9.9.9' } : { 'x-forwarded-for': '10.9.9.9' };
+  await eventsApi(method === 'GET' ? { method, headers, query: body } : { method, headers, query: {}, body }, res);
+  return r;
+};
+process.env.ADMIN_PASSWORD = 'pw';
+seed({ campaigns: [campaignRow({ short_name: '眺望場次' }), campaignRow({ id: 'other', title: '另一場', short_name: '新品說明會' }), campaignRow({ id: 'drafty', title: '草稿', status: 'draft' }), campaignRow({ id: 'shut', title: '已截止', status: 'closed' })] }); guardAi();
+{
+  const SYNC2 = await import(new URL(`../lib/richmenu-sync.js?v=${seq}`, import.meta.url).href); // events.js 用的是同一個版本號
+  SYNC2.__setRenderer(async (a) => { rendered.push(a); return Buffer.from('PNG-' + a.label); });
+  const created = [];
+  line.createRichMenu = async (def) => { created.push(def.name); return 'rm_a' + created.length; };
+  line.uploadRichMenuImage = async () => true; line.setDefaultRichMenu = async () => true;
+  const base = globalThis.fetch;
+  globalThis.fetch = async (url, o) => (String(url).includes('/richmenu-') ? { ok: true, status: 200, arrayBuffer: async () => new ArrayBuffer(8) } : base(url, o));
+  rendered = [];
+  const noPw = await adminCall('POST', { action: 'reg_admin_menu_sync', c: 'other' }, '');
+  check('★ 沒有管理員密碼 → 401，選單完全沒動', noPw.statusCode === 401 && created.length === 0 && (await adminCall('GET', { action: 'reg_admin_menu_status' }, '')).statusCode === 401);
+  const bad = await adminCall('POST', { action: 'reg_admin_menu_sync', c: 'drafty' });
+  const bad2 = await adminCall('POST', { action: 'reg_admin_menu_sync', c: 'shut' });
+  const bad3 = await adminCall('POST', { action: 'reg_admin_menu_sync', c: 'nope' });
+  check('★ 草稿與已截止的活動不能放到記者看得到的選單上（400）；不存在 → 404；都沒有建任何選單', bad.statusCode === 400 && bad2.statusCode === 400 && bad3.statusCode === 404 && created.length === 0, JSON.stringify([bad.body, bad2.body, bad3.body]));
+  const ok = await adminCall('POST', { action: 'reg_admin_menu_sync', c: 'other' });
+  check('★ 挑「新品說明會」按同步 → 畫圖、建報名版（名稱帶代碼）與職員版、成功', ok.statusCode === 200 && ok.body.success && ok.body.campaign_id === 'other' && ok.body.label === '新品說明會報名' && created.join('|') === `${REPORTER_MENU_REG.name}｜other|${STAFF_MENU.name}`, JSON.stringify([ok.body, created]));
+  F.state.richMenus.length = 0; F.state.richMenus.push({ richMenuId: 'rm_a1', name: created[0] });
+  const st = await adminCall('GET', { action: 'reg_admin_menu_status' });
+  check('狀態：讀得出 LINE 上現在綁的是哪一場，並列出可選的開放中活動（不含草稿與已截止）', st.body.installed === true && st.body.campaign_id === 'other' && st.body.open.map((c) => c.id).join() === 'tw2027,other', JSON.stringify(st.body));
+  const gen = await adminCall('POST', { action: 'reg_admin_menu_sync', c: '*' });
+  check('c=* ＝ 通用的「活動報名」', gen.body.label === '活動報名' && gen.body.campaign_id === '', JSON.stringify(gen.body));
+  created.length = 0;
+  const rs = await adminCall('POST', { action: 'reg_admin_menu_reset' });
+  check('換回一般選單 → 建的是原本那套（沒有報名格）', rs.body.success && created.join('|') === `${REPORTER_MENU.name}|${STAFF_MENU.name}`, JSON.stringify([rs.body, created]));
+  created.length = 0;
+  SYNC2.__setRenderer(async () => { throw new Error('模擬畫圖失敗'); });
+  const fail = await adminCall('POST', { action: 'reg_admin_menu_sync', c: 'other' });
+  check('★ 後台按同步時畫圖失敗 → 500 講明原因、選單完全沒動（不會用寫著別場的舊圖頂替）', fail.statusCode === 500 && /畫選單圖失敗，選單沒有動/.test(fail.body.error) && created.length === 0, JSON.stringify([fail.statusCode, fail.body, created]));
+  const savedTok = process.env.LINE_CHANNEL_ACCESS_TOKEN; delete process.env.LINE_CHANNEL_ACCESS_TOKEN;
+  const noTok = await adminCall('POST', { action: 'reg_admin_menu_sync', c: 'other' });
+  const stNo = await adminCall('GET', { action: 'reg_admin_menu_status' });
+  process.env.LINE_CHANNEL_ACCESS_TOKEN = savedTok;
+  check('沒設 LINE_CHANNEL_ACCESS_TOKEN → 同步回明確的錯誤；狀態回 configured:false，不炸', noTok.statusCode === 500 && /LINE_CHANNEL_ACCESS_TOKEN/.test(noTok.body.error) && stNo.body.configured === false, JSON.stringify([noTok.body, stNo.body]));
+  globalThis.fetch = base;
+}
 
 console.log(`\n批次 88（LINE × 報名）測試：${pass} 通過，${fail} 失敗`);
 if (fail) process.exit(1);

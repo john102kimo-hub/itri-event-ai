@@ -205,6 +205,14 @@
       <div class="entry"><b>總入口</b><code id="entry-url"></code><button class="btn outline small" onclick="copyText($('entry-url').textContent)">複製</button></div>
       <div class="help muted small" style="margin-top:6px">同時開放多場時，記者從這個連結挑要報的那一場；只開放一場時會直接進那一場的報名頁。各場自己的連結在每一場的「分享連結」。</div>
     </div>
+    <div class="card" id="menu-card" hidden>
+      <h2>LINE 圖文選單的報名格 <small id="menu-state"></small></h2>
+      <div class="entry"><select id="menu-pick" style="min-width:220px"></select>
+        <button class="btn small" id="menu-go" onclick="menuSync($('menu-pick').value)">放到 LINE 圖文選單並同步</button>
+        <button class="btn outline small" id="menu-reset" onclick="menuReset()">換回一般選單</button></div>
+      <div class="muted small" style="margin-top:6px;line-height:1.7">選一場開放中的活動，格子上就會寫那一場的名稱與開始日期，按下去同步（約 10～20 秒）；記者按那一格看到的仍是所有開放中活動的報名卡片。
+        已經加好友的人可能要把聊天室關掉重開才看得到。<b>那一場結束時，系統每天會自動改成還開著的另一場；全部結束就自動換回一般選單</b>，不用記得來改。</div>
+    </div>
     <div id="lists"></div>
     <div id="list-empty" class="card empty" hidden>
       還沒有報名活動。<br><br><a class="btn" href="#/new">＋ 建立第一個報名活動</a>
@@ -332,7 +340,7 @@
 <script>
 'use strict';
 let PWD = '', LIST = [], LINK_ALL = '', DATA = null, CUR = '', TAB = 'over', FSESS = '', editSessId = '', INCLUDE_TEST = false;
-let formMode = 'edit', sessMode = 'rows', routeSeq = 0, sessLineMap = [], optLineMap = [], LOADED_ID = '';
+let MENU = null, formMode = 'edit', sessMode = 'rows', routeSeq = 0, sessLineMap = [], optLineMap = [], LOADED_ID = '';
 const TABS = ['over', 'list', 'share', 'set'];
 const TAB_NAMES = { over: '總覽', list: '報名名單', share: '分享連結', set: '設定' };
 const STATUS_LABEL = { open: '開放報名', draft: '草稿（測試中）', closed: '已截止' };
@@ -437,12 +445,49 @@ function renderList() {
   const has = LIST.length > 0;
   $('list-empty').hidden = has; $('entry').hidden = !has || !LINK_ALL;
   $('entry-url').textContent = LINK_ALL;
+  renderMenu(); loadMenu();
   const starts = (a, b) => (a.date_from || '9999').localeCompare(b.date_from || '9999');
   const live = LIST.filter((c) => c.status === 'draft' || (c.status === 'open' && c.accepting)).sort(starts);
   const done = LIST.filter((c) => !live.includes(c)).sort((a, b) => starts(b, a));
   $('lists').innerHTML =
     (live.length ? `<div class="ccards">${live.map(campCard).join('')}</div>` : (has ? '<div class="card empty">目前沒有進行中的活動。</div>' : '')) +
     (done.length ? `<details class="more"${live.length ? '' : ' open'}><summary>已截止／已結束的活動（${done.length}）</summary><div class="ccards" style="margin-top:10px">${done.map(campCard).join('')}</div></details>` : '');
+}
+/* LINE 圖文選單：綁哪一場（資料在 LINE 上那份選單的名稱裡，這裡只是讀出來、再送指令） */
+async function loadMenu() {
+  try { MENU = await callJson('GET', 'reg_admin_menu_status'); } catch (e) { MENU = { error: e.message }; }
+  renderMenu();
+}
+function renderMenu() {
+  const card = $('menu-card'); if (!MENU) return;
+  card.hidden = !LIST.length;
+  if (MENU.error) { $('menu-state').textContent = `讀不到狀態：${MENU.error}`; $('menu-pick').hidden = $('menu-go').hidden = $('menu-reset').hidden = true; return; }
+  const open = MENU.open || [];
+  const bound = open.find((c) => c.id === MENU.campaign_id);
+  $('menu-state').textContent = !MENU.configured ? '尚未設定 LINE（LINE_CHANNEL_ACCESS_TOKEN）'
+    : !MENU.installed ? '目前是一般選單（沒有報名格）'
+    : bound ? `目前寫的是「${bound.label}」` : MENU.campaign_id ? '目前綁的活動已結束（排程會自動改）' : '目前寫的是通用的「活動報名」';
+  $('menu-pick').hidden = $('menu-go').hidden = !MENU.configured || !open.length;
+  $('menu-reset').hidden = !MENU.configured || !MENU.installed;
+  $('menu-pick').innerHTML = open.map((c) => `<option value="${esc(c.id)}"${c.id === MENU.campaign_id ? ' selected' : ''}>${esc(c.title)}</option>`).join('') + '<option value="*">通用（只寫「活動報名」）</option>';
+}
+async function menuSync(id) {
+  if (!id) return;
+  if (!confirm('要把圖文選單同步到 LINE 嗎？會重建記者與同仁的選單，約 10～20 秒。')) return;
+  const btns = document.querySelectorAll('#menu-go, .menu-go'); btns.forEach((b) => { b.disabled = true; });
+  toast('同步中，請稍候…');
+  try {
+    const r = await callJson('POST', 'reg_admin_menu_sync', { c: id });
+    toast(`已同步：格子寫「${r.label}」${r.warning ? '（有警告）' : ''}`);
+    if (r.warning) alert(r.warning);
+    await loadMenu();
+  } catch (e) { alert(e.message); }
+  finally { btns.forEach((b) => { b.disabled = false; }); }
+}
+async function menuReset() {
+  if (!confirm('要換回一般選單（沒有報名格）嗎？')) return;
+  toast('同步中，請稍候…');
+  try { await callJson('POST', 'reg_admin_menu_reset', {}); toast('已換回一般選單'); await loadMenu(); } catch (e) { alert(e.message); }
 }
 function copyLink(id) { copyText(`${LINK_ALL}?c=${encodeURIComponent(id)}`); }
 
@@ -562,6 +607,11 @@ function renderShare(camp) {
       <details class="more"><summary>邀請函怎麼放才不會搞混</summary>
         <div class="tip">報名是<b>唯一必做的事</b>（大按鈕＋QR，放上面）；米亞 LINE 放<b>下面小小的「選用」</b>，文字寫清楚好處。手機讀者給<b>連結按鈕</b>（QR 用手機掃自己螢幕掃不了），列印或桌機讀者才靠 QR。兩個 QR 底下各自寫一句話，顏色不要一樣。</div></details>
     </div>
+    ${camp.status === 'open' && camp.accepting ? `<div class="card">
+      <h2>LINE 圖文選單</h2>
+      <div class="muted small" style="line-height:1.7;margin-bottom:8px">把這一場放到米亞圖文選單的報名格（格子寫這一場的名稱與開始日期）。要換成別場或換回一般選單，到「所有活動」首頁。</div>
+      <button class="btn small menu-go" onclick="menuSync('${esc(camp.id)}')">放到 LINE 圖文選單並同步</button>
+    </div>` : ''}
     <div class="card">
       <h2>同時有多場活動時</h2>
       <div class="muted small" style="line-height:1.7">各場的連結互不影響。<b>總入口</b>是 <code>${esc(LINK_ALL)}</code>：開放中的活動有兩場以上，記者會看到一份清單自己挑；只有一場就直接進那一場。米亞的「我要報名」卡片也會把每一場分開列出來。</div>

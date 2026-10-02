@@ -101,6 +101,9 @@ check((await page.textContent('#entry-url')).endsWith('/register'), '有「總�
 check(!/媒體報名/.test(await page.textContent('body')), '畫面上沒有「媒體報名」');
 const workshop = page.locator('.ccard', { hasText: '新手工作坊' });
 check((await workshop.textContent()).includes('草稿'), '草稿標得出來');
+check(await page.isVisible('#menu-card'), 'LINE 圖文選單的卡片在清單首頁');
+check((await page.textContent('#menu-state')).includes('尚未設定 LINE'), '沒設 LINE 金鑰 → 卡片明說尚未設定，同步與換回按鈕藏起來');
+check(await page.isHidden('#menu-go') && await page.isHidden('#menu-reset'), '沒有可按的同步鈕（不會按了才出錯）');
 await shot('1-list');
 
 console.log('── 二、單場：總覽／名單／分享 ──');
@@ -119,6 +122,7 @@ await page.fill('#q', ''); await page.selectOption('#f-sess', '');
 await shot('3-list');
 await page.click('.tabs a:text("分享連結")'); await page.waitForSelector('#form-url');
 check((await page.textContent('#form-url')).includes('?c=tw2099'), '分享頁有這一場的連結');
+check(await page.locator('#p-share .menu-go').count() === 1, '開放中的活動，分享頁有「放到 LINE 圖文選單」按鈕');
 check(await page.locator('#qr-form').count() === 1, '有報名 QR');
 await shot('4-share');
 

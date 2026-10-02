@@ -83,7 +83,7 @@
       "maxDuration": 60
     },
     "api/events.js": {
-      "maxDuration": 30
+      "maxDuration": 60
     },
     "api/event-page.js": {
       "includeFiles": "public/event.html"

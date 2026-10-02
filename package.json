@@ -3,11 +3,15 @@
   "version": "2.0.0",
   "description": "工研院活動溝通 AI 平台 — 多活動統一管理、問答記錄、媒體訓練",
   "type": "module",
-  "engines": { "node": ">=18" },
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
     "test": "node test/run-all.mjs"
   },
   "dependencies": {
-    "@vercel/blob": "2.6.1"
+    "@vercel/blob": "2.6.1",
+    "opentype.js": "2.0.0",
+    "pngjs": "7.0.0"
   }
 }

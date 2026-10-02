@@ -37,19 +37,19 @@ import { toTraditionalTW, ZH_TW_RULE } from '../lib/zh-tw.js';
 import { buildSystemPrompt, resolveEventContent, formatEventBasics } from '../lib/prompt.js';
 import {
   readRawBody, verifySignature, replyOrPush as replyOrPushRaw, replyOrPushMessages, startLoading, replyTextWithImages,
-  createRichMenu, uploadRichMenuImage, setDefaultRichMenu, listRichMenus, deleteRichMenu,
-  linkRichMenuToUser, unlinkRichMenuFromUser,
+  listRichMenus, linkRichMenuToUser, unlinkRichMenuFromUser,
   isBotMentioned, stripMentionText, pushMessage
 } from '../lib/line.js';
 import { buildCalendarCards, buildAllCalendarCards, routeIntent, formatCalendarReply, calendarQuickReplyItems, matchShownEvents } from '../lib/router.js';
 import {
   detectMetaIntent, detectCourtesy, isOrgWideNewsAsk, isHumanRequest, isEventTopicAsk, isExactMetaAsk, matchEventByName, MENU_WORDS, HELP_TEXT, ORG_INTRO_TEXT, buildWelcomeFlex,
-  buildRichMenuDefinition, ALL_MENUS, REPORTER_MENU, REPORTER_MENU_REG, REG_MENU_TILE, STAFF_MENU, findEventMentioned
+  REPORTER_MENU, STAFF_MENU, findEventMentioned
 } from '../lib/menu.js';
 import {
-  listOpenCampaigns, listOpenCampaignsStrict, listRegistrationTopics, loadCampaigns, findRegistrationsForLineUser, bindRegistrationToLine, parseRegBindText,
+  listOpenCampaigns, listRegistrationTopics, loadCampaigns, findRegistrationsForLineUser, bindRegistrationToLine, parseRegBindText,
   buildRegistrationFlex, buildRegistrationText, describeSessions, welcomeButtonLabel, isCampaignRegisterPhrase
 } from '../lib/registration.js';
+import { applyRichMenus, syncRegistrationMenu, autoSyncRegistrationMenu, registrationMenuStatus, pickMenuCampaign, buildRegMenu } from '../lib/richmenu-sync.js';
 import {
   isPasscodeMatch, isStaffAuthenticated, authenticateStaff, routeStaffIntent,
   createDraftEvent, editLink, trainingLink, ensureEventEditCode, getEventRawById,
@@ -2418,44 +2418,6 @@ async function handleRegBind(replyToken, userId, code) {
     HOME_MENU);
 }
 
-// 建立並套用整組圖文選單（記者版＋職員版）。handleSetupRichMenu()（職員打「設定圖文選單」）與
-// autoRevertRegistrationMenu()（報名結束後的排程）共用；失敗會丟例外，由呼叫端決定怎麼回報。
-async function applyRichMenus(reporterMenu) {
-  // 先記下現有的，等新選單全部確定上線後才刪——順序反過來的話，中間只要有一步
-  // 失敗，記者就會看到一個完全沒有選單的帳號。
-  const before = await listRichMenus();
-  const menusToSetup = [reporterMenu, STAFF_MENU];
-
-  const created = {};
-  for (const menu of menusToSetup) {
-    const imgRes = await fetch(`${SITE}/richmenu-${menu.key}.png`, { signal: AbortSignal.timeout(15_000) });
-    if (!imgRes.ok) throw new Error(`抓取 ${menu.name} 底圖失敗 ${imgRes.status}`);
-    const id = await createRichMenu(buildRichMenuDefinition(menu));
-    await uploadRichMenuImage(id, Buffer.from(await imgRes.arrayBuffer()), 'image/png');
-    created[menu.key] = id;
-  }
-
-  // 記者選單設為預設（所有人），職員再逐一覆蓋成職員選單。
-  // per-user 連結的優先度高於預設，所以記者永遠看不到「新增活動」「後台數據」
-  // 這些內部功能的入口。
-  await setDefaultRichMenu(created[reporterMenu.key]);
-
-  const staffIds = await listActiveStaffIds();
-  let linked = 0;
-  for (const sid of staffIds) {
-    try { await linkRichMenuToUser(sid, created[STAFF_MENU.key]); linked++; }
-    catch (e) { console.error(`綁定職員選單失敗 user=${sid}:`, e.message); }
-  }
-
-  const keep = new Set(Object.values(created));
-  for (const old of before) {
-    if (old.richMenuId && !keep.has(old.richMenuId)) await deleteRichMenu(old.richMenuId);
-  }
-
-  console.log(`[line] 圖文選單已設定 ${JSON.stringify(created)} 職員綁定 ${linked}/${staffIds.length} 清掉舊的 ${before.length} 個`);
-  return { created, linked, staffCount: staffIds.length };
-}
-
 async function handleSetupRichMenu(replyToken, userId) {
   if (!process.env.LINE_CHANNEL_ACCESS_TOKEN) {
     await replyOrPush(replyToken, userId, '尚未設定 LINE_CHANNEL_ACCESS_TOKEN，無法建立圖文選單。', staffChips());
@@ -2465,15 +2427,27 @@ async function handleSetupRichMenu(replyToken, userId) {
 
   try {
     // 批次 88：有開放中的活動報名 → 記者選單用「報名版」（多一格報名入口）；報名結束後會自動換回
-    // 原本那套（見 autoRevertRegistrationMenu()），也可以再打一次「設定圖文選單」馬上換。
-    // 兩套底圖各自一張（public/richmenu-{key}.png）。
-    const reporterMenu = (await listOpenCampaigns()).length ? REPORTER_MENU_REG : REPORTER_MENU;
-    const { linked } = await applyRichMenus(reporterMenu);
+    // 原本那套（見 autoSyncRegistrationMenu()），也可以再打一次「設定圖文選單」馬上換。
+    // 批次 113：報名格的字是同步當下畫上去的（見 lib/richmenu-sync.js）：已經綁著的那一場還開著就沿用，
+    // 否則只有一場開放就是那一場、兩場以上就寫通用的「活動報名」。要指定綁哪一場，到後台「活動報名」按「放到 LINE 圖文選單」。
+    const open = await listOpenCampaigns();
+    let reporterMenu = REPORTER_MENU, linked, warning = '';
+    if (open.length) {
+      const bound = (await registrationMenuStatus()).campaign_id;
+      const r = await syncRegistrationMenu(pickMenuCampaign(open, bound), { allowStaticFallback: true });
+      reporterMenu = buildRegMenu(pickMenuCampaign(open, bound));
+      linked = r.linked; warning = r.warning;
+    } else {
+      ({ linked } = await applyRichMenus(REPORTER_MENU));
+    }
+    const isReg = reporterMenu !== REPORTER_MENU;
     await replyOrPush(replyToken, userId,
       '圖文選單已設定完成 ✅\n\n' +
-      `【記者看到的${reporterMenu === REPORTER_MENU_REG ? '（報名版）' : ''}】\n${reporterMenu.buttons.map(b => `・${b.label}`).join('\n')}\n\n` +
+      `【記者看到的${isReg ? '（報名版）' : ''}】\n${reporterMenu.buttons.map(b => `・${b.label}`).join('\n')}\n\n` +
       `【職員看到的】（已套用到 ${linked} 位職員）\n${STAFF_MENU.buttons.map(b => `・${b.label}`).join('\n')}\n\n` +
-      '記者不會看到職員那一套。已經加過好友的人可能要把對話關掉重開才會看到。',
+      (warning ? `⚠️ ${warning}\n\n` : '') +
+      '記者不會看到職員那一套。已經加過好友的人可能要把對話關掉重開才會看到。' +
+      (isReg ? '\n\n報名格要綁哪一場，也可以到後台「活動報名」挑。' : ''),
       staffChips());
   } catch (e) {
     console.error('設定圖文選單失敗:', e.message);
@@ -2481,26 +2455,7 @@ async function handleSetupRichMenu(replyToken, userId) {
   }
 }
 
-// 報名結束後，圖文選單自動換回原本那套（批次 88，朱朱要的「活動結束後，LINE 報名自動消除」）。
-// Vercel Cron 每天叫一次（vercel.json，只在正式站跑），帶 CRON_SECRET。只做「報名版 → 原版」這一個
-// 方向：報名開始時要不要裝上去，仍然是職員自己打「設定圖文選單」決定——剛建活動、還在測的時候，
-// 不該有東西自己冒出來。
-// ⚠️ 用 listOpenCampaignsStrict()：試算表暫時讀不到就丟例外、什麼都不動，不能把「讀不到」當成
-// 「沒有開放中的報名」而把選單換掉（報名正在收的時候換掉，記者就少了入口）。
-async function autoRevertRegistrationMenu() {
-  if (!process.env.LINE_CHANNEL_ACCESS_TOKEN) return { action: 'skip', why: '沒設定 LINE_CHANNEL_ACCESS_TOKEN' };
-  if ((await listOpenCampaignsStrict()).length) return { action: 'skip', why: '還有開放中的報名' };
-  const menus = await listRichMenus();
-  if (!menus.some(m => m.name === REPORTER_MENU_REG.name)) return { action: 'skip', why: '目前不是報名版選單' };
-  const r = await applyRichMenus(REPORTER_MENU);
-  const ownerId = process.env.LINE_ADMIN_USER_ID;
-  if (ownerId) {
-    // 只有真的換的那天才推一則（一次 1 則，不是行銷推播）
-    try { await pushMessage(ownerId, `報名已結束，圖文選單已自動換回原本那套（沒有「${REG_MENU_TILE.label}」那一格了）。`); }
-    catch (e) { console.error('通知管理員失敗:', e.message); }
-  }
-  return { action: 'reverted', linked: r.linked };
-}
+// 報名結束後圖文選單自動換回、綁的那一場結束時自動改寫：見 lib/richmenu-sync.js autoSyncRegistrationMenu()（批次 88、113）。
 
 // 職員模式指令分派（批次 4）。跟 handleUnbound 的差異：
 //   - qa 意圖不套用 isUsable()——同仁本來就該問得到 draft／archived 場次的內容
@@ -4976,7 +4931,7 @@ export default async function handler(req, res) {
     const a = Buffer.from(bearer), b = Buffer.from(secret || '');
     if (!secret || a.length !== b.length || !timingSafeEqual(a, b)) return res.status(401).json({ error: 'unauthorized' });
     try {
-      return res.status(200).json(await autoRevertRegistrationMenu());
+      return res.status(200).json(await autoSyncRegistrationMenu());
     } catch (e) {
       console.error('自動換回圖文選單失敗:', e.message);
       return res.status(500).json({ error: e.message });
