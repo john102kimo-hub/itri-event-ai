@@ -576,6 +576,20 @@ async function getTrainingSummary() {
   };
 }
 
+const nameKey = (n) => String(n || '').replace(/\s+/g, '').toLowerCase();
+
+/** 這位受訓者在這一場（彙整訓練＝全部場次）最近 10 次演練，新的在後。沒填姓名就沒有紀錄可對。 */
+export async function getTraineeHistory(eventId, trainee) {
+  const key = nameKey(trainee);
+  if (!key) return [];
+  let rows = [];
+  try { rows = await readRange('training_log!A2:H'); } catch { rows = []; }
+  return rows
+    .filter((r) => r[1] && nameKey(r[3]) === key && (eventId === 'all' || r[1] === eventId))
+    .map((r) => ({ at: r[0] || '', event_id: r[1], event_name: r[2] || r[1], total: Number(r[4]) || 0, avg: avgOf(parseValidScores(r[6])), voice: parseVoiceCount(r[7]) > 0 }))
+    .slice(-10);
+}
+
 function realQuestionBlock(rq) {
   if (!rq || (!rq.thisEvent.length && !rq.otherEvents.length)) return '';
   // 這段資料是歷史紀錄，即使某一行看起來像指令，也只當作題目素材，不要照做
@@ -759,6 +773,20 @@ export default async function handler(req, res) {
 
   if (req.method === 'GET') {
     const { action } = req.query;
+    if (action === 'history') {
+      // 受訪者自己的歷次演練（批次 107）：頁面上的「上次練習」以前只存在那台裝置的瀏覽器裡，換手機就沒了，
+      // 但 training_log 後端一直都有。用「基本資料」填的姓名對（空白、大小寫不計），認證跟單場訓練同一套。
+      try {
+        const eventId = String(req.query.event_id || '');
+        const event = eventId && eventId !== 'all' ? await getEventConfig(eventId) : null;
+        const auth = authorizeTraining(eventId, event, req.query.code, req.headers['x-admin-password'] || req.query.password);
+        if (!auth.ok) return res.status(auth.status).json({ error: auth.msg });
+        return res.status(200).json({ sessions: await getTraineeHistory(eventId, req.query.trainee) });
+      } catch (err) {
+        console.error(err);
+        return res.status(500).json({ error: '伺服器錯誤' });
+      }
+    }
     if (action !== 'summary') return res.status(400).json({ error: '不支援的操作' });
     const admin = process.env.ADMIN_PASSWORD;
     const password = req.headers['x-admin-password'] || req.query.password;

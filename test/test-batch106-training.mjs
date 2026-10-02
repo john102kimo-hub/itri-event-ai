@@ -68,9 +68,9 @@ const buttons = (root) => flat(root).filter((e) => e.tag === 'button');
   const state = { eventName: '工研院活動', eventId: null, hist: [], offered: 0, last: 0, url: '' };
   const src = [constLine(TRAIN, /const WEEKDAYS = \[[^\]]*\];/), ...MIRROR.map((n) => fnSource(TRAIN, n)), fnSource(TRAIN, 'eventMeta'), 'const PAST_SHOWN = 3;',
     fnSource(TRAIN, 'showEventSelector'), fnSource(TRAIN, 'createSelectorBtn'), fnSource(TRAIN, 'selectEvent')].join('\n');
-  const api = new Function('document', 'history', 'renderLastSession', 'offerResume',
-    `let eventName = '工研院活動'; let eventId = null;\n${src}\nreturn { showEventSelector, selectEvent, eventMeta, get eventName() { return eventName; }, get eventId() { return eventId; } };`)(
-    document, { replaceState(a, b, u) { state.url = u; } }, () => { state.last++; }, () => { state.offered++; });
+  const api = new Function('document', 'history', 'renderLastSession', 'offerResume', 'loadServerHistory',
+    `let eventName = '工研院活動'; let eventId = null; let serverHistFor = '';\n${src}\nreturn { showEventSelector, selectEvent, eventMeta, get eventName() { return eventName; }, get eventId() { return eventId; } };`)(
+    document, { replaceState(a, b, u) { state.url = u; } }, () => { state.last++; }, () => { state.offered++; }, () => {});
 
   const TODAY = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Taipei' });
   const iso = (n) => new Date(Date.now() + n * 86400000).toLocaleDateString('sv-SE', { timeZone: 'Asia/Taipei' });
@@ -113,7 +113,7 @@ const buttons = (root) => flat(root).filter((e) => e.tag === 'button');
   check('彙整訓練：頁首寫「彙整媒體訓練 — 全部活動」', /彙整媒體訓練/.test(document.getElementById('event-title').textContent) && document.title === '彙整媒體訓練');
 
   const none = (() => { const e2 = new Map(); const d2 = { getElementById: (id) => { if (!e2.has(id)) e2.set(id, mkEl()); return e2.get(id); }, createElement: mkEl };
-    const a2 = new Function('document', `let eventName = ''; let eventId = null; ${src} return { showEventSelector };`)(d2, {}, () => {}, () => {}); a2.showEventSelector([]); return e2.get('info-card').inserted[1]; })();
+    const a2 = new Function('document', `let eventName = ''; let eventId = null; let serverHistFor = ''; ${src} return { showEventSelector };`)(d2, {}, () => {}, () => {}, () => {}); a2.showEventSelector([]); return e2.get('info-card').inserted[1]; })();
   check('一場活動都沒有 → 說明可以先用彙整訓練，不是一片空白', flat(none).some((e) => /沒有可以練習的單場活動/.test(e.textContent)));
 }
 

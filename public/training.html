@@ -907,16 +907,39 @@ function rememberHistory(item) {
   h.push(item);
   try { localStorage.setItem(HISTORY_LS_KEY, JSON.stringify(h.slice(-10))); } catch (e) {}
 }
+// 後端 training_log 裡這位受訓者（用「基本資料」填的姓名對）的歷次演練（批次 107）。
+// 換手機、清掉瀏覽器資料，「上次練習」以前就整個消失；後端一直有紀錄，只是頁面沒去拿。
+let serverHist = [];
+let serverHistFor = '';
+async function loadServerHistory() {
+  const name = document.getElementById('trainee-input').value.trim();
+  const tag = name + '|' + eventId;
+  if (!name || !eventId || tag === serverHistFor) return;
+  try {
+    const q = `action=history&event_id=${encodeURIComponent(eventId)}&trainee=${encodeURIComponent(name)}`
+      + (TRAINING_CODE ? `&code=${encodeURIComponent(TRAINING_CODE)}` : '');
+    const r = await fetch('/api/training?' + q, { headers: TRAINING_PWD ? { 'X-Admin-Password': TRAINING_PWD } : {} });
+    if (!r.ok) return;
+    const d = await r.json();
+    serverHist = (d.sessions || []).filter((x) => x && x.avg != null);
+    serverHistFor = tag; // 同一個姓名＋活動只問一次
+  } catch (e) { /* 拿不到就用這台裝置記的，不影響練習 */ }
+  renderLastSession();
+}
 function renderLastSession() {
-  const h = loadHistory().filter((x) => x && x.eventId === eventId && x.avg != null);
+  const local = loadHistory().filter((x) => x && x.eventId === eventId && x.avg != null);
+  const h = serverHist.length ? serverHist : local;
   const el = document.getElementById('last-session');
   if (!h.length) { el.style.display = 'none'; return; }
   const last = h[h.length - 1];
+  const m = String(last.at || '').match(/(\d{1,2})[\/-](\d{1,2})/);   // 後端的時間是「2026/10/2 下午3:05」
   const d = new Date(last.at || 0);
-  const when = isNaN(d.getTime()) ? '' : `${d.getMonth() + 1}/${d.getDate()}`;
+  const when = serverHist.length ? (m ? `${m[1]}/${m[2]}` : '') : (isNaN(d.getTime()) ? '' : `${d.getMonth() + 1}/${d.getDate()}`);
   const trend = h.length >= 2 ? `<br>最近 ${Math.min(h.length, 3)} 次平均：${h.slice(-3).map((x) => escHtml(String(x.avg))).join(' → ')}` : '';
-  el.innerHTML = `<b>上次練習</b>（${escHtml(when)}${last.outlet ? `・${escHtml(last.outlet)}` : ''}・${escHtml(String(last.total))} 題）平均 <b>${escHtml(String(last.avg))}</b> 分`
-    + (last.fix ? `<br>上次最該改的：${escHtml(last.fix)}` : '') + trend;
+  const fix = (local.length && local[local.length - 1].fix) || '';
+  const outlet = (local.length && local[local.length - 1].outlet) || '';
+  el.innerHTML = `<b>上次練習</b>（${escHtml(when)}${outlet ? `・${escHtml(outlet)}` : ''}・${escHtml(String(last.total))} 題）平均 <b>${escHtml(String(last.avg))}</b> 分`
+    + (fix ? `<br>上次最該改的：${escHtml(fix)}` : '') + trend;
   el.style.display = 'block';
 }
 
@@ -1161,6 +1184,7 @@ async function init() {
   document.getElementById('loading').style.display = 'none';
   renderLastSession();
   offerResume();
+  loadServerHistory();
 }
 
 // 活動清單（批次 82）。以前一律打公開列表 /api/events——那支刻意不含「未發布」的場次，
@@ -1318,6 +1342,7 @@ function createSelectorBtn(label, id, desc, name) {
 
 function selectEvent(id) {
   eventId = id;
+  serverHistFor = '';
   // 更新 URL（不重新整理）
   history.replaceState(null, '', '/training?id=' + encodeURIComponent(id));
   // 移除選擇器，顯示進度條＋開始。
@@ -1341,9 +1366,11 @@ function selectEvent(id) {
   }
   renderLastSession();
   offerResume();
+  loadServerHistory();
 }
 
 document.getElementById('start-btn').addEventListener('click', startTraining);
+document.getElementById('trainee-input').addEventListener('change', loadServerHistory);
 
 /** 把一場演練的所有狀態歸零（開始新的一場、再練一場、單題重練都先過這裡）。 */
 function resetSessionState() {
