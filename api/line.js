@@ -48,7 +48,7 @@ import {
 } from '../lib/menu.js';
 import {
   listOpenCampaigns, listOpenCampaignsStrict, listRegistrationTopics, loadCampaigns, findRegistrationsForLineUser, bindRegistrationToLine, parseRegBindText,
-  buildRegistrationFlex, buildRegistrationText, describeSessions, welcomeButtonLabel
+  buildRegistrationFlex, buildRegistrationText, describeSessions, welcomeButtonLabel, isCampaignRegisterPhrase
 } from '../lib/registration.js';
 import {
   isPasscodeMatch, isStaffAuthenticated, authenticateStaff, routeStaffIntent,
@@ -2313,7 +2313,7 @@ async function applyStaffMenu(userId) {
   }
 }
 
-// ── 媒體報名（批次 88）────────────────────────────────────────────────
+// ── 活動報名（批次 88；批次 112 由「媒體報名」改名）─────────────────────────
 // 資料層與規則在 lib/registration.js；這裡只負責「米亞這一端」：
 //   ① 「我要報名」→ 一張卡片，點開是 LINE 內建瀏覽器裡的報名表（不是在聊天室一題一題問）
 //   ② 報名完成頁的「用 LINE 連結我的報名」→ 「#報名 R7K3M」→ 把這個 LINE 帳號連到那筆報名
@@ -2323,21 +2323,27 @@ async function applyStaffMenu(userId) {
 // 米亞對「報名」「怎麼報名」的反應跟以前完全一樣，不會憑空多出一句「目前沒有開放報名」蓋掉問答。
 async function resolveMetaIntent(text) {
   const intent = detectMetaIntent(text);
-  if (intent !== 'register') return intent;
+  if (intent && intent !== 'register') return intent;
+  // 沒有「報名」兩個字的訊息不必為了這件事多讀一次試算表（每則訊息都會走到這裡）
+  if (!intent && !/報名/.test(String(text || ''))) return intent;
   const { open, closed } = await listRegistrationTopics();
-  return open.length || closed.length ? intent : null;
+  if (intent === 'register') return open.length || closed.length ? intent : null;
+  // 批次 112：「眺望2027場次報名」這類——簡稱或活動名稱＋報名，認得目前每一個活動，不只眺望
+  return [...open, ...closed].some((c) => isCampaignRegisterPhrase(text, c)) ? 'register' : null;
 }
 
 async function handleRegisterIntent(replyToken, targetId, { group = false, staff = false } = {}) {
   let campaigns = await listOpenCampaigns();
   if (!staff && !campaigns.length) {
     // 剛截止的活動：老實說已截止，並附上媒體聯絡人（後台「媒體聯絡人」欄），比沉默或亂答有用
+    // 批次 112：剛截止的活動可能不只一個，全部列出（以前只講第一個，另一個的記者會以為沒有這場）
     const { closed } = await listRegistrationTopics();
     if (closed.length) {
-      const c = closed[0];
+      const blocks = closed.slice(0, 3).map((c) =>
+        `《${c.title}》的報名已經截止了。` + (c.contact ? `\n如果還想參加，請直接聯絡活動聯絡人：\n${c.contact}` : ''));
+      const noContact = closed.slice(0, 3).some((c) => !c.contact);
       await replyOrPush(replyToken, targetId,
-        `《${c.title}》的媒體報名已經截止了。\n\n` +
-        (c.contact ? `如果還想採訪，請直接聯絡媒體聯絡人：\n${c.contact}` : '如果還想採訪，請打「找真人」，同仁會協助您。'),
+        blocks.join('\n\n') + (noContact ? '\n\n如果還想參加，請打「找真人」，同仁會協助您。' : ''),
         HOME_MENU);
       return;
     }
@@ -2351,7 +2357,7 @@ async function handleRegisterIntent(replyToken, targetId, { group = false, staff
   }
   if (!campaigns.length) {
     await replyOrPush(replyToken, targetId,
-      '目前沒有開放報名的活動。\n\n有新的媒體報名開放時，這裡會第一時間放出來。想看看有哪些活動可以打「最近有哪些活動」，要找窗口打「媒體邀訪需求」。',
+      '目前沒有開放報名的活動。\n\n有新的活動報名開放時，這裡會第一時間放出來。想看看有哪些活動可以打「最近有哪些活動」，要找窗口打「媒體邀訪需求」。',
       HOME_MENU);
     return;
   }
@@ -2458,7 +2464,7 @@ async function handleSetupRichMenu(replyToken, userId) {
   await startLoading(userId, 45);
 
   try {
-    // 批次 88：有開放中的媒體報名 → 記者選單用「報名版」（多一格報名入口）；報名結束後會自動換回
+    // 批次 88：有開放中的活動報名 → 記者選單用「報名版」（多一格報名入口）；報名結束後會自動換回
     // 原本那套（見 autoRevertRegistrationMenu()），也可以再打一次「設定圖文選單」馬上換。
     // 兩套底圖各自一張（public/richmenu-{key}.png）。
     const reporterMenu = (await listOpenCampaigns()).length ? REPORTER_MENU_REG : REPORTER_MENU;
@@ -4600,7 +4606,7 @@ async function handleEvent(ev) {
     // 所以退回原本那則純文字歡迎詞——文案本身仍然是完整可用的引導。
     // 批次 84：圖卡本身也掛上起點按鈕——盤點抓到加好友這則一顆按鈕都沒有；手機的圖文
     // 選單要先點開才看得到，LINE 電腦版則完全不顯示圖文選單（官方文件）。
-    // 批次 88：有開放中的媒體報名時，歡迎卡最上面多一顆「媒體報名」。查詢失敗當作沒有，
+    // 批次 88：有開放中的活動報名時，歡迎卡最上面多一顆「活動報名」。查詢失敗當作沒有，
     // 不能讓新記者因為報名資料表讀不到就收不到歡迎卡（listOpenCampaigns() 自己吞例外）。
     // 按鈕上的字用後台「LINE 簡稱」（例：眺望2027場次報名），只有一個活動開放時才具體，兩個以上就用通用的。
     const openNow = await listOpenCampaigns();

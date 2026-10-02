@@ -125,13 +125,13 @@ check('歡迎卡沒開報名時完全不變（2 顆按鈕）', buildWelcomeFlex(
   const texts = w.contents.footer.contents.map((b) => b.action.text);
   check('歡迎卡開報名時多一顆，而且排第一、是主按鈕', JSON.stringify(texts) === JSON.stringify(['我要報名', '最近有哪些活動', '使用說明']) && w.contents.footer.contents[0].style === 'primary' && w.contents.footer.contents[1].style === 'secondary');
   for (const t of texts) check(`歡迎卡按鈕「${t}」認得`, detectMetaIntent(t) !== null);
-  check('歡迎卡沒有簡稱時，按鈕寫「媒體報名（1 分鐘）」', w.contents.footer.contents[0].action.label === '📝 媒體報名（1 分鐘）', w.contents.footer.contents[0].action.label);
+  check('歡迎卡沒有簡稱時，按鈕寫「活動報名（1 分鐘）」', w.contents.footer.contents[0].action.label === '📝 活動報名（1 分鐘）', w.contents.footer.contents[0].action.label);
   const w2 = buildWelcomeFlex('', { registration: R.welcomeButtonLabel({ short_name: '眺望2027場次' }) });
   check('★ 歡迎卡有簡稱時，按鈕寫明活動（送出的字還是「我要報名」）',
     w2.contents.footer.contents[0].action.label === '📝 眺望2027場次報名（1 分鐘）' && w2.contents.footer.contents[0].action.text === '我要報名', JSON.stringify(w2.contents.footer.contents[0].action));
 }
-check('registrationLabel：有簡稱＝簡稱＋報名、沒有＝媒體報名、只有空白也算沒有',
-  R.registrationLabel({ short_name: '眺望2027場次' }) === '眺望2027場次報名' && R.registrationLabel({}) === '媒體報名' && R.registrationLabel({ short_name: '   ' }) === '媒體報名' && R.registrationLabel(null) === '媒體報名');
+check('registrationLabel：有簡稱＝簡稱＋報名、沒有＝活動報名、只有空白也算沒有',
+  R.registrationLabel({ short_name: '眺望2027場次' }) === '眺望2027場次報名' && R.registrationLabel({}) === '活動報名' && R.registrationLabel({ short_name: '   ' }) === '活動報名' && R.registrationLabel(null) === '活動報名');
 {
   // LINE 按鈕文字上限 20 字：簡稱最長 16 字，加上「📝 」「報名」「（1 分鐘）」會超過——超過就拿掉「（1 分鐘）」，不能送出去被 LINE 退件
   const long = R.welcomeButtonLabel({ short_name: '一二三四五六七八九十一二三四五六' });
@@ -170,7 +170,7 @@ seed({ campaigns: [campaignRow({ id: 'long-ago', title: '早就辦完的活動',
 seed({ campaigns: [campaignRow({ id: 'just-shut', title: '剛截止的活動', status: 'closed', sessions_text: sessionsAround(+3), contact: '工研院行銷傳播處 朱則瑋\nitriA70541@itri.org.tw\n0934-267-766' })] }); guardAi(); await fresh();
 {
   const out = await say('我要報名');
-  check('剛截止（場次還沒辦）→ 老實說已截止，附上媒體聯絡人', out[0]?.kind === 'text' && /《剛截止的活動》的媒體報名已經截止了/.test(out[0].text) && /朱則瑋/.test(out[0].text) && /0934-267-766/.test(out[0].text), JSON.stringify(out));
+  check('剛截止（場次還沒辦）→ 老實說已截止，附上活動聯絡人', out[0]?.kind === 'text' && /《剛截止的活動》的報名已經截止了/.test(out[0].text) && /朱則瑋/.test(out[0].text) && /0934-267-766/.test(out[0].text), JSON.stringify(out));
   check('這則是固定程式回覆：不呼叫 AI、帶整排按鈕', aiCalls === 0 && out[0].quickReply.length >= 5);
 }
 seed({ campaigns: [campaignRow({ id: 'late', title: '過了截止時間的活動', status: 'open', closes_at: '2020-01-01', sessions_text: sessionsAround(+3), contact: '' })] }); guardAi(); await fresh();
@@ -207,8 +207,8 @@ const UID = 'Ureporter0001';
   check('★ 網址帶著簽章過的 LINE 身分，而且驗得回同一個人', R.verifyLineToken(paramsOf(uri).u) === UID, uri);
   check('網址不含原始 userId 明文以外的個資、沒有編輯碼', !('t' in paramsOf(uri)) && uri.length < 1000, String(uri.length));
   check('卡片上有活動名稱、日期範圍與場數', JSON.stringify(b.header).includes('眺望2027') && JSON.stringify(b.header).includes('10/28（三） – 10/29（四）') && JSON.stringify(b.header).includes('共 3 場'), JSON.stringify(b.header));
-  check('altText 是一句有用的話（鎖定畫面只看得到這行）', /媒體報名/.test(flex.altText) && flex.altText.length < 400);
-  check('卡片小標沒有簡稱時是「📝 媒體報名」', JSON.stringify(b.header).includes('📝 媒體報名'), JSON.stringify(b.header));
+  check('altText 是一句有用的話（鎖定畫面只看得到這行）', /活動報名/.test(flex.altText) && flex.altText.length < 400);
+  check('卡片小標沒有簡稱時是「📝 活動報名」', JSON.stringify(b.header).includes('📝 活動報名'), JSON.stringify(b.header));
   check('卡片底下掛著整排導覽按鈕', (flex.quickReply?.items || []).length >= 5);
   check('繁體字：卡片文字沒有簡體字', !/[们这们个报么对话]/.test(JSON.stringify(flex)));
   check('不呼叫 AI', aiCalls === 0);
@@ -238,7 +238,7 @@ seed({ campaigns: [campaignRow({ short_name: '眺望2027場次' }), campaignRow(
 {
   const out = await follow();
   const first = out[0].messages[0].contents.footer.contents[0];
-  check('兩個活動同時開放 → 歡迎卡用通用的「媒體報名（1 分鐘）」（不偏袒其中一個）', first.action.label === '📝 媒體報名（1 分鐘）', JSON.stringify(first.action));
+  check('兩個活動同時開放 → 歡迎卡用通用的「活動報名（1 分鐘）」（不偏袒其中一個）', first.action.label === '📝 活動報名（1 分鐘）', JSON.stringify(first.action));
 }
 console.log('\n── 三之一之一、後台填了「活動地點」→ 卡片標題下方寫 📍 地點（批次 92，同仁反饋） ──');
 seed({ campaigns: [campaignRow({ venue: '○○會議中心' })] }); guardAi(); await fresh();
@@ -494,6 +494,48 @@ const installedMenus = (regVariant) => {
   await handler({ method: 'GET', query: {}, headers: {} }, res);
   check('沒帶 action 的 GET 照舊 405', res.statusCode === 405);
 }
+
+// ═══ 批次 112：同時有多個活動 ════════════════════════════════════════
+console.log('\n── 批次 112：同時兩個以上的活動，米亞要接得住 ──');
+seed({ campaigns: [
+  campaignRow({ id: 'a-one', title: '甲活動', short_name: '甲場次', status: 'closed', sessions_text: sessionsAround(+3), contact: '甲聯絡人 0911-111-111' }),
+  campaignRow({ id: 'b-two', title: '乙活動', status: 'closed', sessions_text: sessionsAround(+4), contact: '' })
+] }); guardAi(); await fresh();
+{
+  const out = await say('我要報名');
+  const t = out[0]?.text || '';
+  check('★ 兩個剛截止的活動 → 兩個都講（以前只講第一個，另一個的記者會以為沒有這場）', /《甲活動》的報名已經截止了/.test(t) && /《乙活動》的報名已經截止了/.test(t), t);
+  check('有聯絡人的附聯絡人、沒有的統一請他打「找真人」', /甲聯絡人 0911-111-111/.test(t) && /找真人/.test(t), t);
+  check('這則是固定程式回覆：不呼叫 AI', aiCalls === 0);
+}
+seed({ campaigns: [
+  campaignRow({ short_name: '眺望2027場次' }),
+  campaignRow({ id: 'other', title: '另一場說明會', short_name: '新品說明會' })
+] }); guardAi(); await fresh();
+{
+  const out = await say('我要報名', UID);
+  const bs = bubblesOf(flexOf(out));
+  check('★ 兩個活動同時開放 → 一張卡片各一個活動（輪播），網址各帶各的代碼', bs.length === 2 && paramsOf(uriOf(bs[0])).c === 'tw2027' && paramsOf(uriOf(bs[1])).c === 'other', JSON.stringify(bs.map(uriOf)));
+  check('每張卡片小標用各自的簡稱', JSON.stringify(bs[0].header).includes('📝 眺望2027場次報名') && JSON.stringify(bs[1].header).includes('📝 新品說明會報名'));
+  for (const t of ['新品說明會報名', '眺望2027場次報名', '📝 新品說明會報名', '另一場說明會報名', '新品說明會報名連結', '新品說明會 報名']) {
+    const o = await say(t, UID);
+    check(`★ 打卡片上看到的「${t}」→ 報名卡片（不只眺望一個活動認得）`, !!flexOf(o) && aiCalls === 0, JSON.stringify(o).slice(0, 200) + ' ai=' + aiCalls);
+  }
+  aiCalls = 0;
+  const q = await say('新品說明會報名費多少？', UID);
+  check('★ 「簡稱＋報名費」是真正的提問 → 不被當成報名入口（照原本的路徑走）', !flexOf(q) && aiCalls >= 1, JSON.stringify(q).slice(0, 200) + ' ai=' + aiCalls);
+}
+{
+  // 沒有「報名」兩個字的訊息，不必為了辨識報名多讀一次報名活動表（每則訊息都會經過這裡）
+  seed({ campaigns: [campaignRow({ short_name: '眺望2027場次' })] }); guardAi(); await fresh();
+  S.calls.length = 0;
+  await say('哈囉', UID);
+  check('★ 一般訊息不會去讀報名活動表（省 Sheets 讀取額度）', !S.calls.some((c) => /reg_campaigns/.test(c[1])), JSON.stringify(S.calls.filter((c) => /reg_campaigns/.test(c[1]))));
+}
+check('isCampaignRegisterPhrase：簡稱或活動名稱後面接「報名」才算；只有「報名」兩個字由 menu.js 處理',
+  R.isCampaignRegisterPhrase('新品說明會報名', { short_name: '新品說明會' }) && R.isCampaignRegisterPhrase('新品 發表會 報名表', { title: '新品發表會' })
+  && !R.isCampaignRegisterPhrase('報名', { short_name: '新品說明會' }) && !R.isCampaignRegisterPhrase('新品說明會', { short_name: '新品說明會' })
+  && !R.isCampaignRegisterPhrase('新品說明會報名費', { short_name: '新品說明會' }) && !R.isCampaignRegisterPhrase('新品說明會報名', {}) && !R.isCampaignRegisterPhrase('新品說明會報名', null));
 
 console.log(`\n批次 88（LINE × 報名）測試：${pass} 通過，${fail} 失敗`);
 if (fail) process.exit(1);

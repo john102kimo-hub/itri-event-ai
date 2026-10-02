@@ -6,9 +6,9 @@
 <!-- 網址上帶著 LINE 身分簽章與編輯碼，不要外流給任何第三方網站 -->
 <meta name="referrer" content="no-referrer">
 <meta name="robots" content="noindex,nofollow">
-<title>媒體報名</title>
+<title>活動報名</title>
 <!--
-  媒體報名頁（批次 88）。給記者從邀請函、米亞聊天室點進來填的。
+  活動報名頁（批次 88；批次 112 由「媒體報名」改名，網址不變）。給記者與來賓從邀請函、米亞聊天室點進來填的。
   設計原則：一頁做完、手機優先、不需要 LINE、不需要登入、不載入任何外部資源（icon 用內嵌 SVG／emoji，
   公司網路擋 CDN 也不影響）。LINE 只在「報名完成」之後才問，而且明講不加也完成了。
   資料進 Google 試算表的 registrations 分頁，後台看 /registrations。API 在 api/events.js 的 reg_ 系列 action。
@@ -114,6 +114,7 @@
   footer.contact { margin-top: 22px; font-size: .85rem; color: var(--muted); white-space: pre-line; text-align: center; }
   .center { text-align: center; }
   .spinner { text-align: center; color: var(--muted); padding: 60px 0; }
+  .choices small.choice-sub { display: block; font-weight: 400; font-size: .82rem; color: var(--muted); margin-top: 2px; }
   .choices a { display: block; padding: 14px; border: 1.5px solid var(--border); border-radius: 12px; margin-bottom: 10px; text-decoration: none; color: var(--text); font-weight: 600; background: #fff; }
   [hidden] { display: none !important; }
 </style>
@@ -121,8 +122,8 @@
 <body>
 
 <header class="hero"><div class="in">
-  <div class="tag">工研院 · 媒體報名</div>
-  <h1 id="h-title">媒體報名</h1>
+  <div class="tag">工研院 · 活動報名</div>
+  <h1 id="h-title">活動報名</h1>
   <div class="when" id="h-when"></div>
   <div class="when" id="h-where"></div>
 </div></header>
@@ -200,7 +201,7 @@ async function init() {
   if (r.data.choices) return renderChoices(r.data.choices);
   if (!r.ok || !r.data.campaign) return fail(r.data.error || '找不到這個報名活動，請確認連結是否完整。');
   campaign = r.data.campaign;
-  document.title = `${campaign.title}｜媒體報名`;
+  document.title = `${campaign.title}｜活動報名`;
   $('#h-title').textContent = campaign.title;
   const live = campaign.sessions.filter((s) => !s.ended); // 辦完的場次自動不算
   if (live.length) {
@@ -219,12 +220,16 @@ async function init() {
   renderForm();
 }
 function fail(msg) {
-  $('#app').replaceChildren(el('div', { class: 'card center' }, el('p', { text: msg }), el('p', { class: 'hint', style: 'margin-top:8px', text: '如需協助，請洽活動的媒體聯絡人。' })));
+  $('#app').replaceChildren(el('div', { class: 'card center' }, el('p', { text: msg }), el('p', { class: 'hint', style: 'margin-top:8px', text: '如需協助，請洽活動聯絡人。' })));
 }
 function renderChoices(list) {
-  $('#h-title').textContent = '媒體報名';
+  $('#h-title').textContent = '活動報名';
   const box = el('div', { class: 'card choices' }, el('h2', { text: '請選擇要報名的活動' }));
-  list.forEach((c) => box.append(el('a', { href: `/register?c=${encodeURIComponent(c.id)}`, text: c.title })));
+  // 多場同時開放：每一場一行，標題下面小字寫日期與地點，記者不用點進去才知道是哪一場
+  list.forEach((c) => box.append(el('a', { href: `/register?c=${encodeURIComponent(c.id)}` },
+    el('span', { text: c.title }),
+    c.when ? el('small', { class: 'choice-sub', text: c.when }) : null,
+    c.venue ? el('small', { class: 'choice-sub', text: `📍 ${c.venue}` }) : null)));
   $('#app').replaceChildren(box);
 }
 
@@ -238,7 +243,7 @@ function renderForm(prefill) {
   if (c.intro) nodes.push(el('div', { class: 'card' }, el('div', { class: 'intro', text: c.intro })));
   if (c.closed) {
     nodes.push(el('div', { class: 'card center' }, el('h2', { style: 'justify-content:center', text: '報名已截止' }),
-      el('p', { class: 'hint', text: '如果還想採訪，請直接聯絡媒體聯絡人，我們盡量協助。' })));
+      el('p', { class: 'hint', text: '如果還想參加，請直接聯絡活動聯絡人，我們盡量協助。' })));
     nodes.push(contactFooter());
     return app.replaceChildren(...nodes);
   }
@@ -253,12 +258,12 @@ function renderForm(prefill) {
   form.append(el('div', { class: 'card' },
     el('h2', {}, el('span', { class: 'step', text: '1' }), '基本資料'),
     field('name', '姓名', 'text', { autocomplete: 'name', placeholder: '王小明', value: pre.name }),
-    field('outlet', '媒體／服務單位', 'text', { autocomplete: 'organization', placeholder: '請填寫貴媒體或服務單位全名', value: pre.outlet }),
+    field('outlet', '服務單位／媒體', 'text', { autocomplete: 'organization', placeholder: '請填寫貴單位或媒體全名', value: pre.outlet }),
     field('email', 'Email', 'email', { autocomplete: 'email', inputmode: 'email', autocapitalize: 'off', placeholder: 'name@company.com', value: pre.email }, '請用公司信箱，主辦單位聯繫時使用'),
     field('phone', '手機號碼', 'tel', { autocomplete: 'tel', inputmode: 'tel', placeholder: '0912-345-678', value: pre.phone }, '活動當天現場聯繫會用到')));
 
   const sess = el('div', { class: 'card', id: 'sess-card' },
-    el('h2', {}, el('span', { class: 'step', text: '2' }), '要採訪哪幾場？', el('span', { class: 'req', text: '*' })));
+    el('h2', {}, el('span', { class: 'step', text: '2' }), '要參加哪幾場？', el('span', { class: 'req', text: '*' })));
   // 已經辦完的場次自動從表單消失；只有這個人原本報了的才留著（鎖住、標「已結束」），
   // 紀錄不會因為他改別的欄位或別的場次被拿掉（伺服器端也會保留）。
   const shown = c.sessions.filter((s) => !s.ended || (pre.sessions || []).includes(s.code));
@@ -334,7 +339,7 @@ function syncUi() {
   const codes = selectedCodes();
   document.querySelectorAll('.sess').forEach((n) => n.classList.toggle('on', !!$('input', n).checked));
   const sum = $('#sum');
-  if (sum) sum.replaceChildren(codes.length ? el('span', {}, '已選 ', el('b', { text: String(codes.length) }), ' 場') : el('span', { text: '請勾選要採訪的場次' }));
+  if (sum) sum.replaceChildren(codes.length ? el('span', {}, '已選 ', el('b', { text: String(codes.length) }), ' 場') : el('span', { text: '請勾選要參加的場次' }));
   document.querySelectorAll('#extras .opt').forEach((row) => {
     const need = (row.dataset.sessions || '').split(',').filter(Boolean);
     row.hidden = need.length ? !need.some((c) => codes.includes(c)) : !codes.length;
@@ -365,7 +370,7 @@ function collect() {
 function validate(d) {
   const errs = {};
   if (!d.name) errs.name = '請填寫姓名'; else if (d.name.length < 2) errs.name = '姓名至少 2 個字';
-  if (!d.outlet) errs.outlet = '請填寫媒體或服務單位';
+  if (!d.outlet) errs.outlet = '請填寫服務單位或媒體名稱';
   if (!d.email) errs.email = '請填寫 Email'; else if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(d.email)) errs.email = 'Email 格式好像不對，請再確認';
   const p = digitsOnly(d.phone);
   if (!d.phone) errs.phone = '請填寫手機號碼'; else if (!/^(\+?886)?0?9\d{8}$|^0\d{8,10}$|^\+[1-9]\d{7,14}$/.test(p)) errs.phone = '手機號碼格式好像不對（例如 0912-345-678）';
@@ -424,7 +429,7 @@ async function onCancelReg() {
   if (!r || !r.ok) return showBanner('err', (r && r.data.error) || '取消失敗，請稍後再試。');
   store.del(storeKey()); EDIT_TOKEN = ''; editing = null;
   $('#app').replaceChildren(el('div', { class: 'card center done' }, el('h2', { text: '已取消您的報名' }),
-    el('p', { class: 'hint', text: '如果之後想再採訪，隨時可以重新報名。' }),
+    el('p', { class: 'hint', text: '如果之後想再參加，隨時可以重新報名。' }),
     el('button', { class: 'btn ghost', style: 'margin-top:14px', type: 'button', text: '重新報名', onclick: () => renderForm({}) })), contactFooter());
   scrollTo(0, 0);
 }
@@ -440,7 +445,7 @@ function renderDone(data, sent) {
     el('div', { class: 'ok', text: '✓', 'aria-hidden': 'true' }),
     el('h2', { text: title }),
     el('div', { class: 'who', text: `${reg.name || sent.name}｜${reg.outlet || sent.outlet}` }));
-  if (data.mode === 'merged') card.append(el('p', { class: 'hint', style: 'margin-top:6px', text: '這次勾選的場次已加進您先前的報名。姓名、手機等資料沒有更動；要改請用當初報名後的「修改這筆報名」連結，或洽媒體聯絡人。' }));
+  if (data.mode === 'merged') card.append(el('p', { class: 'hint', style: 'margin-top:6px', text: '這次勾選的場次已加進您先前的報名。姓名、手機等資料沒有更動；要改請用當初報名後的「修改這筆報名」連結，或洽活動聯絡人。' }));
   const ul = el('ul', { class: 'sum-list' });
   (reg.session_labels || []).forEach((t) => {
     const m = t.match(/^(\S+)\s+(.*)$/);
@@ -453,7 +458,7 @@ function renderDone(data, sent) {
     const g = await api('reg_get', null, { c: campaign.id, t: EDIT_TOKEN }).catch(() => null);
     editing = g && g.ok ? g.data.reg : null; renderForm(); scrollTo(0, 0);
   } }));
-  else acts.append(el('p', { class: 'hint', text: '如需刪減場次，請洽媒體聯絡人。' }));
+  else acts.append(el('p', { class: 'hint', text: '如需刪減場次，請洽活動聯絡人。' }));
   card.append(acts);
   nodes.push(card);
   const lc = lineCard(data.line || {});
@@ -476,7 +481,7 @@ function lineCard(line) {
 
 function contactFooter() {
   const f = el('footer', { class: 'contact' });
-  if (campaign && campaign.contact) { f.append('媒體聯絡人\n'); f.append(linkify(campaign.contact)); }
+  if (campaign && campaign.contact) { f.append('活動聯絡人\n'); f.append(linkify(campaign.contact)); }
   return f;
 }
 

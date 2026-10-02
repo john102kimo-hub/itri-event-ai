@@ -1,7 +1,7 @@
 # 工研院活動溝通 AI 平台（itri-event-ai）
 
 多活動共用的記者會 AI 問答平台。記者在**網頁**或 **LINE（米亞）** 問活動的新聞稿內容，承辦人在**後台**管活動與看數據；
-另外還有 **AI 能見度追蹤（GEO）**、**媒體訓練**、**媒體報名**。純 Node serverless（Vercel）＋靜態 HTML＋Google Sheets 當資料庫，沒有前端框架。
+另外還有 **AI 能見度追蹤（GEO）**、**媒體訓練**、**活動報名**（原名「媒體報名」，批次 112 改名）。純 Node serverless（Vercel）＋靜態 HTML＋Google Sheets 當資料庫，沒有前端框架。
 
 ## 有哪些入口
 
@@ -14,7 +14,7 @@
 | 主管（成效報告） | `/report` | `public/report.html`、`api/exposure.js` |
 | AI 能見度追蹤 | `/geo` | `public/geo.html`、`api/geo.js`、`lib/geo-*.js` |
 | 主管（媒體訓練） | `/training` | `public/training.html`、`api/training.js` |
-| 記者（媒體報名）／後台名單 | `/register`／`/registrations` | `public/register.html`、`public/registrations.html`、`lib/registration*.js` |
+| 記者（活動報名）／後台：所有活動與名單 | `/register`／`/registrations` | `public/register.html`、`public/registrations.html`、`lib/registration*.js` |
 
 ## 先讀這幾份
 
@@ -39,7 +39,7 @@ GitHub Actions（`.github/workflows/test.yml`）每個 PR 與 main 推送都會�
 
 | 工具 | 做什麼 |
 |---|---|
-| `tools/geo-ui-check`、`tools/training-flow-check.mjs`、`tools/training-voice-check.mjs` | 在真的瀏覽器裡把 /geo、媒體訓練的流程與語音跑一遍 |
+| `tools/geo-ui-check`、`tools/reg-ui-check`、`tools/training-flow-check.mjs`、`tools/training-voice-check.mjs` | 在真的瀏覽器裡把 /geo、/registrations（活動報名後台）、媒體訓練的流程與語音跑一遍 |
 | `tools/sri-check` | 驗證 CDN 資源的 SRI 雜湊（原檔通過、竄改過的被瀏覽器拒絕） |
 | `tools/line-button-audit`、`tools/line-group-sim`、`tools/line-persona-sim` | 把 LINE 的每一步、群組對話、四種角色丟進真的 `api/line.js`，看按鈕與回應（AI 是假的，看的是規則層） |
 | `tools/model-ab` | 同一批問題比兩個模型的答案（**會花真的錢**） |
