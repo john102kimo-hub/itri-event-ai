@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>更新我的記者會內容 — 工研院活動溝通 AI 平台</title>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.3.0/dist/tabler-icons.min.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.3.0/dist/tabler-icons.min.css" integrity="sha384-ir0fR0HzKEQ1x1XwqY5+0wIbrIgY45nvWPjIQy7+rjcwW7L0cHDytvEHKS3tIxBZ" crossorigin="anonymous">
 <style>
 :root {
   --primary: #0F9E7A;
@@ -777,11 +777,16 @@ function toast(msg, ms) {
 // 已經有內容時先問「覆蓋還是接在後面」——跟「帶入範本」「複製其他場」同一條規則：
 // 程式不可以默默蓋掉同仁打過的字（批次 53）。
 const MAMMOTH_SRC = 'https://cdn.jsdelivr.net/npm/mammoth@1.8.0/mammoth.browser.min.js';
+// 批次 110：版本鎖死之外再加 SRI——CDN 或套件被動過手腳，瀏覽器會直接拒絕執行（這支腳本跑在有編輯碼的頁面上）。
+// 雜湊值與 npm 官方套件 mammoth@1.8.0 的 mammoth.browser.min.js 逐位元比對過；升版時兩個一起改。
+const MAMMOTH_SRI = 'sha384-/cXAMbzovUIKbBERjPmR3SnPTh8siWr5lsvFYj1Uq4XP0yaJUZJmsh0YXyGv5P0y';
 function loadMammoth() {
   if (window.mammoth) return Promise.resolve(window.mammoth);
   return new Promise((resolve, reject) => {
     const sc = document.createElement('script');
     sc.src = MAMMOTH_SRC;
+    sc.integrity = MAMMOTH_SRI;
+    sc.crossOrigin = 'anonymous';
     sc.onload = () => window.mammoth ? resolve(window.mammoth) : reject(new Error('Word 轉換元件載入失敗'));
     sc.onerror = () => reject(new Error('Word 轉換元件載入失敗，請檢查網路'));
     document.head.appendChild(sc);

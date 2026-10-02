@@ -41,6 +41,34 @@
       "destination": "/api/event-page?_r=sitemap"
     }
   ],
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        },
+        {
+          "key": "Referrer-Policy",
+          "value": "strict-origin-when-cross-origin"
+        }
+      ]
+    },
+    {
+      "source": "/(admin|geo|report|registrations|edit|training|index\\.html|geo\\.html|report\\.html|registrations\\.html|edit\\.html|training\\.html|media\\.html)",
+      "headers": [
+        {
+          "key": "X-Frame-Options",
+          "value": "SAMEORIGIN"
+        },
+        {
+          "key": "Content-Security-Policy",
+          "value": "frame-ancestors 'self'"
+        }
+      ]
+    }
+  ],
   "functions": {
     "api/geo.js": {
       "maxDuration": 60

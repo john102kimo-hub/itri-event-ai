@@ -1,0 +1,13 @@
+# 相依套件與本機環境（批次 110 補上：以前沒有這個檔，node_modules、.env 都可能被誤 commit）
+node_modules/
+.env
+.env.*
+!.env.example
+.vercel/
+
+# 工具與瀏覽器驗證產生的東西
+*.log
+.DS_Store
+test-results/
+playwright-report/
+coverage/

@@ -11,12 +11,13 @@
 // ── 管理員（需 ADMIN_PASSWORD）───────────────────────────────────────
 // POST {action:'seed',password,csv}    → 貼上 CSV 一次性匯入／更新（用 id 對應，重覆貼不會炸掉）
 // POST {action:'settings_save',password,revoke?,regenerate?} → 產生／收回同仁連結的 code
-// GET  ?action=export&password=xxx     → 匯出全部名單 CSV
+// GET  ?action=export                  → 匯出全部名單 CSV（管理員，header X-Admin-Password）
 //
 // 誠實邊界：這裡不猜記者現在跑什麼路線，只把「太久沒受邀」「從沒填過路線」的人
 // 排到前面讓人判斷，是否還在職、路線是什麼，一律由人工按一下確認。
 
 import { readRange, appendRows, updateRange, ensureSheets } from '../lib/sheets.js';
+import { isAdminPassword, requireAdmin, passwordFrom, codeMatches, authBlocked, authFailed } from '../lib/auth.js';
 
 const SHEETS = {
   media_roster: [
@@ -85,12 +86,13 @@ function priority(rec) {
   return score;
 }
 
-async function authorize({ code, password }) {
-  const admin = process.env.ADMIN_PASSWORD;
-  if (password && admin && password === admin) return { ok: true, who: 'admin' };
+async function authorize({ code, password }, req) {
+  if (isAdminPassword(password)) return { ok: true, who: 'admin' };
+  if (authBlocked(req)) return { ok: false, status: 429, msg: '嘗試的次數太多了，請 10 分鐘後再試。' };
   await loadSettings();
   if (!CFG.staffCode) return { ok: false, status: 401, msg: '這個功能還沒開放共用連結，請向承辦人索取' };
-  if (!code || String(code) !== CFG.staffCode) {
+  if (!codeMatches(code, CFG.staffCode)) {
+    authFailed(req);
     return { ok: false, status: 401, msg: '這條連結已失效，請向承辦人索取新的' };
   }
   return { ok: true, who: 'staff' };
@@ -130,12 +132,12 @@ export default async function handler(req, res) {
 
     if (req.method === 'GET') {
       const { action, code, q } = req.query;
-      // 管理員密碼優先讀 header，避免留在網址列／瀏覽器歷史／伺服器存取紀錄裡（code 是同仁的
-      // 共用連結碼，設計上本來就要能放在網址裡分享，維持走 query）
-      const password = req.headers['x-admin-password'] || req.query.password;
+      // 管理員密碼只收 header（批次 110 起不再讀網址）。code 是同仁的共用連結碼，
+      // 設計上本來就要能放在網址裡分享，維持走 query。
+      const password = passwordFrom(req);
 
       if (action === 'list') {
-        const auth = await authorize({ code, password });
+        const auth = await authorize({ code, password }, req);
         if (!auth.ok) return res.status(auth.status).json({ error: auth.msg });
 
         const rows = (await safeRead('media_roster!A2:N')).map(parseRow);
@@ -157,7 +159,7 @@ export default async function handler(req, res) {
       }
 
       if (action === 'search') {
-        const auth = await authorize({ code, password });
+        const auth = await authorize({ code, password }, req);
         if (!auth.ok) return res.status(auth.status).json({ error: auth.msg });
         const kw = String(q || '').trim();
         if (kw.length < 1) return res.status(200).json({ results: [] });
@@ -171,7 +173,7 @@ export default async function handler(req, res) {
       }
 
       if (action === 'export') {
-        if (password !== process.env.ADMIN_PASSWORD) return res.status(401).json({ error: '密碼錯誤' });
+        if (!requireAdmin(req, res, password)) return;
         const rows = await safeRead('media_roster!A2:N');
         const header = SHEETS.media_roster;
         const csv = [header, ...rows].map((row) =>
@@ -186,10 +188,11 @@ export default async function handler(req, res) {
 
     if (req.method === 'POST') {
       const body = req.body || {};
-      const { action, code, password } = body;
+      const { action, code } = body;
+      const password = passwordFrom(req);
 
       if (action === 'settings_save') {
-        if (password !== process.env.ADMIN_PASSWORD) return res.status(401).json({ error: '密碼錯誤' });
+        if (!requireAdmin(req, res, password)) return;
         await ensureSheets(SHEETS);
         if (body.revoke) {
           await saveSetting('staff_code', '');
@@ -206,7 +209,7 @@ export default async function handler(req, res) {
       }
 
       if (action === 'seed') {
-        if (password !== process.env.ADMIN_PASSWORD) return res.status(401).json({ error: '密碼錯誤' });
+        if (!requireAdmin(req, res, password)) return;
         const { csv } = body;
         if (!csv || !csv.trim()) return res.status(400).json({ error: '沒有收到 CSV 內容' });
         await ensureSheets(SHEETS);
@@ -274,7 +277,7 @@ export default async function handler(req, res) {
       }
 
       // ── 以下需要同仁 code 或管理員密碼 ──
-      const auth = await authorize({ code, password });
+      const auth = await authorize({ code, password }, req);
       if (!auth.ok) return res.status(auth.status).json({ error: auth.msg });
 
       if (action === 'update') {

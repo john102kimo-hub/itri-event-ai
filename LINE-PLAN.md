@@ -6652,3 +6652,48 @@ SoV／MRR／分母／測量等級、判官與規則一致率、敏感度（手�
 **驗證**：`test/test-batch109.mjs`（40 項：快取本身 12 項、活動頁、網頁問答、媒體訓練、SSR、接線；數的是假試算表被讀了幾次，不是比對字串）。
 反向驗證兩層：① 五個檔案各還原成舊版，測試各紅 8／2／5／2／2 項；② 快取模組拿掉「合併讀取」「epoch」「沿用舊資料」「失敗後不重試」「invalidate」五種變異，各自變紅。
 另外用真的 HTTP 伺服器（假 Sheets）併發實測修改前後的讀取次數（上表）。**沒辦法驗證的**：真的 Google 配額行為、Vercel 邊緣實際怎麼快取（只驗證了回應標頭）。
+
+## 批次 110：資安衛生、供應鏈、CI（2026-10-02）
+
+接批次 109，是 B。**這一批的重點是通盤檢討時我沒看出來、動手遷移時才實測抓到的一個洞：管理員驗證在 `ADMIN_PASSWORD` 沒設定時是「開著」的。**
+
+**1. 【fail-open】`ADMIN_PASSWORD` 沒設定，不帶任何密碼就通過管理員驗證**
+- 原因：各檔案各寫一份 `if (password !== adminPassword) return 401`。環境變數沒設時 `adminPassword` 是 `undefined`，請求也沒帶密碼時 `password` 也是 `undefined`，
+  `undefined !== undefined` 是 false → **放行**。實測（`ADMIN_PASSWORD` 未設定、請求完全沒帶密碼）：`list_admin`（含每場編輯碼的後台列表）、`get`（知識庫＋編輯碼）、`archive`（封存活動）、
+  `analytics`（全部問答紀錄）、`export`，全部回 200。`create`／`update`／`contacts_directory_save`／`seed`／`settings_save` 同一個形狀。
+- 現況沒有被打穿：正式站有設密碼。但環境變數被刪、新環境或預覽部署忘了設，整個後台就是開放的——CLAUDE.md 第 2 條點名的「絕對不能發生」，要擋在程式出口。
+- 修法：新增 `lib/auth.js` 集中所有比對。`isAdminPassword()` 沒設定一律 false（fail-closed，只在 log 提醒一次，不對外洩漏設定狀態）；`safeEqual()` 兩邊先各做 SHA-256 再 `timingSafeEqual`，
+  空字串、非字串（`?password=a&password=b` 變成陣列）一律不通過；`codeMatches()` 給編輯碼與共用連結碼（活動沒有編輯碼 → 不通過）。
+  `analytics`、`events`、`export`、`exposure`、`media`、`geo`、`training`、`upload`、`registration-api` 全部改走這一份（接線測試掃原始碼確認沒有舊寫法殘留）。
+
+**2. 密碼不再放網址**：`?password=` 會進伺服器存取紀錄與瀏覽器歷史。現在只收 header（`X-Admin-Password`）或 POST 內文（`passwordFrom()`）。
+`lib/staff.js` 兩處內部呼叫 `/api/geo`（LINE 職員模式的 GEO 狀態與趨勢）原本把管理員密碼拼在網址裡，改放 header。所有前端頁面本來就都用 header（沒有任何頁面或文件用 `?password=`），所以沒有使用者會感覺到。
+GEO 排程沒設 `CRON_SECRET` 時，手動 calibrate 原本認網址的 `?password=`，現在認 header；`?secret=`（既有文件的用法）維持相容。
+
+**3. 失敗限流**（`requireAdmin()`／`authBlocked()`／`authFailed()`）：同一個來源 10 分鐘內失敗 30 次，先擋 10 分鐘（429，連正確的密碼也先擋，猜中了也進不來；擋下的請求連比對都不做、也不讀 Sheets）。
+門檻放 30 是因為辦公室共用一個對外 IP，打錯幾次不能被鎖（測試涵蓋：失敗 29 次後輸入正確密碼照常進得去）。猜編輯碼（`get_edit`／`update_edit`／上傳／露出／訓練）與共用連結碼（媒體名單）、
+GEO 的同仁連結也共用同一份失敗計數。**這是 best-effort**：計數在單一 instance 的記憶體裡（見 `lib/rate-limit.js`），擋得住單一來源無腦猜，擋不住分散式。
+
+**4. 安全標頭**（`vercel.json` 的 `headers`，用 Vercel 官方 schema 驗證過）：全站 `X-Content-Type-Options: nosniff`、`Referrer-Policy: strict-origin-when-cross-origin`；
+後台與同仁頁面（`/admin /geo /report /registrations /edit /training` 與對應的 `.html`、`/media.html`）另加 `X-Frame-Options: SAMEORIGIN` 與 `Content-Security-Policy: frame-ancestors 'self'`，不能被別的網站嵌進 iframe。
+**刻意沒做完整 CSP**：每個頁面都是大量內嵌 script／style，要上完整 CSP 得先把它們全部外移或加 nonce，那是另一個工程，硬上 `unsafe-inline` 的 CSP 只是擺著好看。
+記者公開頁（`/event`、`/register`、`guide.html`）維持可被嵌入（測試把這個當成已記錄的決定）。**新增後台頁面時，要把它加進 `vercel.json` 的那條規則**，`test-batch110.mjs` 會逐頁檢查，漏了會紅燈。
+
+**5. SRI**：六個頁面的圖示 CSS 與 `edit.html` 動態載入的 mammoth（Word 匯入，跑在有編輯碼的頁面上）加了 `integrity`（sha384）＋`crossorigin`。版本本來就鎖死，SRI 補的是 CDN 或套件被動過手腳的情況。
+雜湊值與 **npm 官方套件**（`npm pack` 下來的 `tabler-icons-webfont@3.3.0`、`mammoth@1.8.0`）的檔案逐位元比對過，不是只信 jsDelivr 的一次下載。
+`tools/sri-check/check.mjs`（需要 playwright，不進 `npm test`）用真的 Chromium 驗：原檔 → 圖示樣式表真的套用、mammoth 載得進來；原檔多一個字 → 瀏覽器拒絕。六個頁面加 mammoth 共 14 項全過。
+**升級圖示字型或 mammoth 時要同步改雜湊**，算法寫在那支工具的檔頭。
+
+**6. `.gitignore`**（以前沒有）與 **CI**（`.github/workflows/test.yml`）：PR 與 main 推送都跑 `npm test`，再跑一次 `SHIFT_DAYS=90 npm test`（抓寫死日期的測試）。測試用假的 Sheets／LINE／模型，不需要 `npm install`、也不需要金鑰。
+用 GitHub Actions 官方 schema 驗過語法。**沒做 lockfile**：`@vercel/blob` 已鎖死 `2.6.1`，只剩它的間接相依會浮動；加 lockfile 會改變 Vercel 的安裝行為，要用預覽部署確認，留給你決定。
+
+**7. 新的安全網：`test/test-pages-syntax.mjs`**：public/*.html 的每一段內嵌 script（含 module）與 api/、lib/ 的每一支 .js 都要能被解析。既有測試都是「把某個函式抽出來跑」，抽不到的地方語法壞了沒人知道。
+
+**坑**
+- `passwordFrom()` 回傳 `''` 而不是 `undefined`，所以「反向驗證」不能只把比對改成 `given === admin`（`'' === undefined` 還是 false），要改成「沒設密碼又沒帶密碼就放行」（`!given`）才是舊 bug 的真正形狀——這樣改，20 個管理員入口的測試會紅 19 個。
+- 失敗限流用 `x-forwarded-for` 第一段當 key；測試沒帶這個標頭時所有請求都是 `unknown`，同一支測試裡失敗太多次會互相影響——`test-batch110.mjs` 每個情境都帶自己的 IP，並在情境之間 `resetAuthLimiter()`。
+- 把網址密碼拿掉之後只有一支既有測試壞（`test-register.mjs` 的 `adminGet` 把密碼放在網址裡），改成 header。
+
+**驗證**：`test/test-batch110.mjs`（75 項）：驗證小工具、20 個管理員入口在 `ADMIN_PASSWORD` 未設定時全部 401 且沒有任何東西被改、密碼來源、失敗限流（含「不讀 Sheets」）、GEO 排程驗證、內部呼叫、安全標頭、SRI、`.gitignore`／CI、接線。
+反向驗證兩層：① 13 個檔案各還原成舊版，測試各紅 17／6／3／5／4／2／3／2／1／3／3／2／1 項（events、analytics、export、media、exposure、training、geo、upload、registration-api、staff、vercel.json、edit.html、index.html 的順序）；② `lib/auth.js` 五種變異（含「沒設密碼就放行」→ 19 項紅）。
+真瀏覽器：SRI 14 項。另外用官方 schema 驗過 `vercel.json` 與 workflow（兩個都做了「故意寫錯」的對照）。**沒辦法驗證的**：CI 在 GitHub 上真的跑起來（推送後看 PR 的 check）、Vercel 實際送出的標頭（預覽部署後用瀏覽器開發者工具確認）。

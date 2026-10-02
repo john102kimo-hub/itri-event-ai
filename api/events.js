@@ -6,14 +6,15 @@
 // GET  ?action=get_edit&id=xxx&code=yyy → 讀取單一活動可編輯內容（同仁用）
 // POST {action:'update_edit',id,code,...} → 同仁更新自己那場的內容
 // ── 管理員（需 ADMIN_PASSWORD）────────────────────────────────────────
-// GET  ?action=get&id=xxx&password=..  → 單一活動含知識庫與編輯碼
-// GET  ?action=list_admin&password=..  → 後台列表用（含 draft／archived，附 has_kb，不含知識庫全文）
+// （管理員密碼一律放 header X-Admin-Password，POST 也可放內文；批次 110 起不再讀網址的 ?password=）
+// GET  ?action=get&id=xxx              → 單一活動含知識庫與編輯碼
+// GET  ?action=list_admin              → 後台列表用（含 draft／archived，附 has_kb，不含知識庫全文）
 // POST {action:'create',...}           → 新增活動（自動產生 edit_code，預設 status=draft）
 // POST {action:'update',...}           → 更新活動（後台的「發布／收回」按鈕也是打這個，帶 status）
 // POST {action:'archive',...}          → 封存活動
 // POST {action:'ensure_edit_code',id}  → 確保該活動有 edit_code（沒有就補上），回傳
-// GET  ?action=contacts_directory&password=..     → 全域技術窗口分工原始文字（後台編輯用）
-// POST {action:'contacts_directory_save',password,content} → 整份覆蓋儲存
+// GET  ?action=contacts_directory                 → 全域技術窗口分工原始文字（後台編輯用）
+// POST {action:'contacts_directory_save',content} → 整份覆蓋儲存
 // ── 媒體報名（批次 88）：action 一律以 reg_ 開頭，整段交給 lib/registration-api.js ──
 //   （Vercel Hobby 的 Function 上限 12 支已用 11 支，所以搭在這支上，不另開新檔）
 
@@ -27,6 +28,7 @@ import { handleRegistrationRequest } from '../lib/registration-api.js';
 import { publishBlockers, isPublishing, taipeiToday } from '../lib/event-status.js';
 import { effectiveChips } from '../lib/default-chips.js';
 import { readEventRows, invalidateEventsTable, EVENTS_RANGE } from '../lib/events-table.js';
+import { requireAdmin, passwordFrom, codeMatches, authBlocked, authFailed, tooManyAttempts } from '../lib/auth.js';
 
 // 跟 events 的 knowledge_base 同一個上限理由：Google Sheets 單一儲存格上限約 5 萬字元，
 // 這份清單目前十幾行遠遠用不到，留餘裕只是避免同仁哪天貼了整份含備註的原始文件進來。
@@ -120,8 +122,8 @@ export default async function handler(req, res) {
   // ── GET ──────────────────────────────────────────────────────────────
   if (req.method === 'GET') {
     const { action, id, code } = req.query;
-    // 管理員密碼優先讀 header，避免留在網址列／瀏覽器歷史／伺服器存取紀錄裡
-    const password = req.headers['x-admin-password'] || req.query.password;
+    // 管理員密碼只收 header（批次 110 起不再讀網址，避免留在網址列／瀏覽器歷史／伺服器存取紀錄裡）
+    const password = passwordFrom(req);
 
     // 媒體報名（批次 88）：在讀活動表之前就交出去，報名頁的尖峰流量不要多打一次 events 讀取。
     if (typeof action === 'string' && action.startsWith('reg_')) {
@@ -130,7 +132,7 @@ export default async function handler(req, res) {
 
     // 全域技術窗口分工：跟活動表無關，不需要先讀 events，獨立處理完就回傳。
     if (action === 'contacts_directory') {
-      if (password !== adminPassword) return res.status(401).json({ error: '密碼錯誤' });
+      if (!requireAdmin(req, res, password)) return;
       try {
         await ensureContactsDirectorySheet(ensureSheets, updateRange);
         const dirRows = await readRange(CONTACTS_DIR_RANGE);
@@ -139,6 +141,9 @@ export default async function handler(req, res) {
         return res.status(500).json({ error: err.message });
       }
     }
+
+    // 批次 110：猜編輯碼的人（錯得太多次的來源）在讀 Sheets 之前就擋下來，也順便擋掉亂填 id 的讀取
+    if (action === 'get_edit' && authBlocked(req)) return tooManyAttempts(res);
 
     try {
       // 批次 109：公開端點（get_public、公開列表）走 lib/events-table.js 的 30 秒快取——
@@ -193,8 +198,9 @@ export default async function handler(req, res) {
       // 同仁自助編輯：用 edit_code 讀取自己那一場（只回單一活動，不含編輯碼、不含分析）
       if (action === 'get_edit' && id) {
         const row = rows.find(r => r[0] === id);
-        if (!row) return res.status(404).json({ error: '找不到這場活動，請確認連結是否正確' });
-        if (!row[10] || String(code) !== String(row[10])) {
+        if (!row) { authFailed(req); return res.status(404).json({ error: '找不到這場活動，請確認連結是否正確' }); }
+        if (!codeMatches(code, row[10])) {
+          authFailed(req);
           return res.status(401).json({ error: '編輯碼錯誤，請向承辦人索取正確的編輯連結' });
         }
         if (row[4] === 'archived') return res.status(403).json({ error: '這場活動已封存，如需修改請聯絡承辦人' });
@@ -222,7 +228,7 @@ export default async function handler(req, res) {
 
       // 管理員：單一活動含知識庫與編輯碼
       if (action === 'get' && id) {
-        if (password !== adminPassword) return res.status(401).json({ error: '密碼錯誤' });
+        if (!requireAdmin(req, res, password)) return;
         const row = rows.find(r => r[0] === id);
         if (!row) return res.status(404).json({ error: '活動不存在' });
         return res.status(200).json({
@@ -239,7 +245,7 @@ export default async function handler(req, res) {
       // （只回布林值，不吐知識庫全文——列表一次抓幾十場，塞全文既浪費頻寬又沒必要）。
       // 跟 action=get 共用同一把密碼驗證。
       if (action === 'list_admin') {
-        if (password !== adminPassword) return res.status(401).json({ error: '密碼錯誤' });
+        if (!requireAdmin(req, res, password)) return;
         const today = taipeiToday();
         const events = rows
           .filter(r => r[0])
@@ -306,8 +312,8 @@ export default async function handler(req, res) {
       // 「textarea 整段貼上存檔」邏輯，不做逐行 CRUD——同仁常常是整批調整（換人、
       // 加新單位），一次貼過去比一格一格改方便，也不用另外做欄位對應的表單 UI。
       if (action === 'contacts_directory_save') {
-        const { password, content } = body;
-        if (password !== adminPassword) return res.status(401).json({ error: '密碼錯誤' });
+        const { content } = body;
+        if (!requireAdmin(req, res)) return;
         if (String(content || '').length > CONTACTS_DIR_MAX_LEN) {
           return res.status(400).json({ error: `內容過長（上限 ${CONTACTS_DIR_MAX_LEN} 字），請刪減後再存` });
         }
@@ -321,11 +327,13 @@ export default async function handler(req, res) {
         const { id, code } = body;
         if (!id) return res.status(400).json({ error: '缺少活動 ID' });
         if (!code) return res.status(400).json({ error: '缺少編輯碼' });
+        if (authBlocked(req)) return tooManyAttempts(res);
         const rows = await readRange(RANGE);
         const rowIndex = rows.findIndex(r => r[0] === id);
-        if (rowIndex === -1) return res.status(404).json({ error: '找不到這場活動' });
+        if (rowIndex === -1) { authFailed(req); return res.status(404).json({ error: '找不到這場活動' }); }
         const existing = rows[rowIndex];
-        if (!existing[10] || String(code) !== String(existing[10])) {
+        if (!codeMatches(code, existing[10])) {
+          authFailed(req);
           return res.status(401).json({ error: '編輯碼錯誤，無法儲存' });
         }
         if (existing[4] === 'archived') {
@@ -349,10 +357,10 @@ export default async function handler(req, res) {
 
       // ── 以下皆需管理員密碼 ────────────────────────────────────────────
       const {
-        password, id, name, color, knowledge_base, chips, status, images, event_date, greeting, organizer,
+        id, name, color, knowledge_base, chips, status, images, event_date, greeting, organizer,
         event_time, venue, event_type, press_contact, contacts, invite_letter, invite_letter_chips
       } = body;
-      if (password !== adminPassword) return res.status(401).json({ error: '密碼錯誤' });
+      if (!requireAdmin(req, res)) return;
       if (knowledge_base !== undefined && String(knowledge_base).length > KB_MAX_LEN) {
         return res.status(400).json({ error: `內容過長（上限 ${KB_MAX_LEN} 字），請刪減後再存` });
       }
