@@ -4,10 +4,11 @@
 //   1. 前端帶 stream: true → SSE 逐字串流（現行前台走這條）
 //   2. 沒帶 → 維持原本一次回傳 { reply } 的 JSON（舊前端／外部呼叫者不會被打斷）
 
-import { readRange, appendRows, warmAuth } from '../lib/sheets.js';
+import { appendRows, warmAuth } from '../lib/sheets.js';
 import { buildSystemPrompt, resolveEventContent, formatEventBasics } from '../lib/prompt.js';
 import { toTraditionalTW, createTraditionalStream, ZH_TW_RULE } from '../lib/zh-tw.js';
 import { reportAiFailure } from '../lib/ai-alert.js';
+import { readEventRows } from '../lib/events-table.js';
 
 // 這支是記者看得到的出口，跟 api/line.js 一樣要過繁體轉換（CLAUDE.md 第 1、2 條）。
 // 批次 82 之前這裡完全沒有接：LINE 在批次 45 補了兩層防線，網頁版一層都沒有——
@@ -35,8 +36,11 @@ const CACHE_TTL_MS = 60 * 1000;
 // 只給邀請函」（見 lib/prompt.js resolveEventContent()），這裡也要跟著讀，不然網頁版
 // 問答永遠拿不到邀請函內容，活動前一樣把還沒定案的新聞稿端出去，等於 LINE 端擋了、
 // 網頁端沒擋。
+// 批次 109：讀整張活動表走 lib/events-table.js 的共用快取。以前這裡每次讀 Sheets，而且「找不到」的
+// 結果不快取——亂填 event_id 的請求每個都多打一次讀取，單 IP 每分鐘 120 題的上限比 Sheets 的
+// 每分鐘 60 次讀取額度還高。現在不存在的 id 是在快取過的整張表裡查不到，一次 Sheets 讀取都不用。
 async function fetchEventConfig(eventId) {
-  const rows = await readRange('events!A2:Q');
+  const rows = await readEventRows();
   const row = rows.find(r => r[0] === eventId);
   if (!row) return null;
   return {

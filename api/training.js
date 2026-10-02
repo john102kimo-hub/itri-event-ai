@@ -25,6 +25,7 @@ import { reportAiFailure } from '../lib/ai-alert.js';
 import { kbHasContent } from '../lib/kb-template.js';
 import { eventDateOf } from '../lib/event-status.js';
 import { isTestMedia } from '../lib/media-name.js';
+import { readEventRows } from '../lib/events-table.js';
 
 const CACHE_TTL_MS = 60 * 1000; // 60 秒；同仁改完知識庫應該很快能在訓練模式看到新版
 
@@ -64,7 +65,7 @@ async function getEventConfig(eventId) {
     const cached = eventCache.get(cacheKey);
     if (cached && Date.now() < cached.expiry) return cached.data;
 
-    const rows = await readRange('events!A2:K');
+    const rows = await readEventRows(); // 批次 109：整張活動表共用快取，不存在的 id 不會多打 Sheets
     const { knowledge_base, names, skipped } = buildAllEventsKnowledge(rows);
     const shown = names.slice(0, 6).join('、') + (names.length > 6 ? `等 ${names.length} 場` : '');
     const data = {
@@ -79,7 +80,7 @@ async function getEventConfig(eventId) {
   const cached = eventCache.get(eventId);
   if (cached && Date.now() < cached.expiry) return cached.data;
 
-  const rows = await readRange('events!A2:K');
+  const rows = await readEventRows(); // 批次 109：整張活動表共用快取，不存在的 id 不會多打 Sheets
   const row = rows.find(r => r[0] === eventId);
   if (!row) return null;
 
@@ -819,15 +820,20 @@ export default async function handler(req, res) {
   if (isConversation && !apiKey) return res.status(500).json({ error: 'ANTHROPIC_API_KEY 未設定' });
 
   try {
+    // ── 認證：這支只給內部人用，記者不能碰 ──────────────────────────
+    // 批次 109：**先驗身分，再讀 qa_log**。以前是活動表與整張 qa_log 都讀完才驗，沒帶任何密碼的請求
+    // 照樣各吃一次 Sheets 讀取（實測 20 次未登入請求＝20 次 qa_log＋20 次 events 讀取），
+    // 而這支沒有限流——任何人都能用它把全站共用的讀取額度用光。現在未登入的請求在這裡就結束，
+    // 活動表走共用快取，最多只碰到快取，不碰 qa_log。「彙整」模式只認管理員，連活動表都不用組。
+    const eventForAuth = event_id && event_id !== 'all' ? await getEventConfig(event_id) : null;
+    const auth = authorizeTraining(event_id, eventForAuth, code, password);
+    if (!auth.ok) return res.status(auth.status).json({ error: auth.msg });
+
     const [event, realQuestions] = await Promise.all([
-      event_id ? getEventConfig(event_id) : null,
+      event_id === 'all' ? getEventConfig('all') : eventForAuth,
       // log_session／transcribe 用不到「記者真的問過的題目」，省一次 qa_log 讀取
       isConversation ? getRealQuestions(event_id) : null,
     ]);
-
-    // ── 認證：這支只給內部人用，記者不能碰 ──────────────────────────
-    const auth = authorizeTraining(event_id, event, code, password);
-    if (!auth.ok) return res.status(auth.status).json({ error: auth.msg });
 
     if (mode === 'log_session') {
       return await logTrainingSession(res, event_id, event, trainee, scores, voiceAnswers);

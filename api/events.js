@@ -26,6 +26,7 @@ import { lineBindUrl, lineAddFriendUrl, lineBasicId } from '../lib/line-link.js'
 import { handleRegistrationRequest } from '../lib/registration-api.js';
 import { publishBlockers, isPublishing, taipeiToday } from '../lib/event-status.js';
 import { effectiveChips } from '../lib/default-chips.js';
+import { readEventRows, invalidateEventsTable, EVENTS_RANGE } from '../lib/events-table.js';
 
 // 跟 events 的 knowledge_base 同一個上限理由：Google Sheets 單一儲存格上限約 5 萬字元，
 // 這份清單目前十幾行遠遠用不到，留餘裕只是避免同仁哪天貼了整份含備註的原始文件進來。
@@ -41,7 +42,7 @@ const CONTACTS_DIR_MAX_LEN = 20000;
 //               Q invite_letter（媒體邀請函；活動日期還沒到時，問答只用這份內容回答，
 //                 不給正式新聞稿與照片——解析邏輯在 lib/prompt.js 的 resolveEventContent()）
 //               R invite_letter_chips（活動前快速提問；沒填就退回 G 欄原本的 chips）
-const RANGE = 'events!A2:R';
+const RANGE = EVENTS_RANGE; // 跟 lib/events-table.js 同一份，公開讀取走它的快取（批次 109）
 
 // Google Sheets 單一儲存格上限約 5 萬字元；留一點餘裕避免踩線寫入失敗。
 // ⚠️ public/index.html 與 public/edit.html 各鏡射一份（KB_HARD_LIMIT）——靜態頁沒辦法
@@ -102,6 +103,12 @@ const EVENT_SHEET_HEADERS = ['id', 'name', 'color', 'knowledge_base', 'status', 
   'greeting', 'organizer', 'edit_code', 'event_time', 'venue', 'event_type', 'press_contact', 'contacts',
   'invite_letter', 'invite_letter_chips'];
 
+// 公開讀取的 CDN 快取（批次 109）：記者會現場同一分鐘幾十個人開同一頁，由 Vercel 邊緣直接回，
+// 不必每個都叫醒 function。15 秒新鮮＋30 秒容許舊的，加上 lib/events-table.js 的 30 秒，
+// 後台改了內容、封存活動，記者端大約一分鐘內看到（跟網頁問答原本的 60 秒是同一個尺度）。
+// 只用在成功（200）的回應；404（含未發布）一律 no-store。
+const PUBLIC_CACHE = 'public, max-age=0, s-maxage=15, stale-while-revalidate=30';
+
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
@@ -134,13 +141,20 @@ export default async function handler(req, res) {
     }
 
     try {
-      const rows = await readRange(RANGE);
+      // 批次 109：公開端點（get_public、公開列表）走 lib/events-table.js 的 30 秒快取——
+      // 以前活動頁每開一次、或亂填 id，都是一次 Sheets 讀取，記者會現場很容易把全站共用的
+      // 每分鐘 60 次讀取額度用光。後台與同仁編輯要看到最新內容，而且有密碼或編輯碼才進得來，維持直接讀。
+      const direct = action === 'get_edit' || action === 'get' || action === 'list_admin';
+      const rows = direct ? await readRange(RANGE) : await readEventRows();
 
       // 公開端點：只回傳單一活動前台所需欄位（不含知識庫、不需密碼）
       if (action === 'get_public' && id) {
         const row = rows.find(r => r[0] === id);
         // draft 尚未對外公開，跟 archived 一樣視為不存在——不能讓記者用網址直接看到還沒發布的場次
-        if (!row || row[4] === 'archived' || row[4] === 'draft') return res.status(404).json({ error: '活動不存在' });
+        if (!row || row[4] === 'archived' || row[4] === 'draft') {
+          res.setHeader('Cache-Control', 'no-store');   // 還沒發布的場次不能被 CDN 記住：發布後要馬上看得到
+          return res.status(404).json({ error: '活動不存在' });
+        }
         // 活動前只給邀請函對應的 chips／images（見 lib/prompt.js resolveEventContent()
         // 的說明）——public/event.html 直接顯示 event.chips／event.images，AI 問答那邊
         // 擋了但這個公開頁面沒擋的話，官方照片一樣會在活動前被看到，等於防了一半。
@@ -155,6 +169,7 @@ export default async function handler(req, res) {
         // 這是公開、免登入的端點，前台根本沒用到這一欄；以前照樣回傳，等於任何人打一次
         // 網址就拿得到每場技術窗口同仁的姓名、分機與私人 LINE ID。記者要找人走 LINE 的
         // 邀訪流程（一次只給對應的那一位），不是整份名單。
+        res.setHeader('Cache-Control', PUBLIC_CACHE);
         return res.status(200).json({
           event: {
             id: row[0], name: row[1], color: row[2] || '#0F9E7A',
@@ -268,6 +283,7 @@ export default async function handler(req, res) {
             event_time: r[11] || '', venue: r[12] || '', event_type: r[13] || '', press_contact: r[14] || ''
           };
         });
+      res.setHeader('Cache-Control', PUBLIC_CACHE);
       return res.status(200).json({ events });
     } catch (err) {
       return res.status(500).json({ error: err.message });
@@ -327,6 +343,7 @@ export default async function handler(req, res) {
           if (missing.length) return publishBlocked(res, missing);
         }
         await updateRange(`events!A${rowIndex + 2}:R${rowIndex + 2}`, [updated]);
+        invalidateEventsTable();
         return res.status(200).json({ success: true });
       }
 
@@ -363,6 +380,7 @@ export default async function handler(req, res) {
           if (missing.length) return publishBlocked(res, missing);
         }
         await appendRows('events!A:R', [newRow]);
+        invalidateEventsTable();
         return res.status(200).json({ success: true, id: newId, edit_code: editCode, status: initialStatus });
       }
 
@@ -397,6 +415,7 @@ export default async function handler(req, res) {
           if (missing.length) return publishBlocked(res, missing);
         }
         await updateRange(`events!A${rowIndex + 2}:R${rowIndex + 2}`, [updated]);
+        invalidateEventsTable();
         return res.status(200).json({ success: true, edit_code: updated[10] });
       }
 
@@ -422,6 +441,7 @@ export default async function handler(req, res) {
           e[11] || '', e[12] || '', e[13] || '', e[14] || '', e[15] || '', e[16] || '', e[17] || ''
         ];
         await updateRange(`events!A${rowIndex + 2}:R${rowIndex + 2}`, [updated]);
+        invalidateEventsTable();
         return res.status(200).json({ success: true });
       }
 
@@ -465,6 +485,7 @@ export default async function handler(req, res) {
         await batchUpdate([{
           deleteDimension: { range: { sheetId: sheet.sheetId, dimension: 'ROWS', startIndex: sheetRow - 1, endIndex: sheetRow } }
         }]);
+        invalidateEventsTable();
 
         // 跟封存一樣，順手清掉自家 Blob 上的照片（備份裡留著網址，但檔案不留）。
         const blobUrls = String(e[7] || '').split('\n').map(x => x.trim()).filter(Boolean)
@@ -487,12 +508,14 @@ export default async function handler(req, res) {
         if (!editCode) {
           editCode = generateEditCode();
           await updateRange(`events!K${rowIndex + 2}`, [[editCode]]);
+          invalidateEventsTable();
         }
         return res.status(200).json({ success: true, edit_code: editCode });
       }
 
       return res.status(400).json({ error: `不支援的操作: ${action}` });
     } catch (err) {
+      invalidateEventsTable();   // 寫到一半出錯，不確定表有沒有被改到——下一次讀取重新來
       return res.status(500).json({ error: err.message });
     }
   }

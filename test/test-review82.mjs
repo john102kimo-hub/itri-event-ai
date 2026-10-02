@@ -4,6 +4,9 @@
 // 抽出來執行——測到的是記者與同仁真的會拿到的東西。
 import { register } from 'node:module';
 register('./loader-82.mjs', import.meta.url);
+// 批次 109：活動表有 30 秒共用快取（lib/events-table.js）。這支測試一路直接改假試算表的內容再打 API，
+// 要每次都讀到最新，所以關掉快取（TTL=0）。快取本身的行為在 test-batch109.mjs 測。
+process.env.EVENTS_TABLE_TTL_MS = '0';
 
 import fs from 'node:fs';
 import path from 'node:path';

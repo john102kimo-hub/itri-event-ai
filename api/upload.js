@@ -5,7 +5,7 @@
 // 授權方式跟本平台其他同仁功能一致：同仁用該場的 edit_code，管理員用 ADMIN_PASSWORD。
 
 import { handleUpload } from '@vercel/blob/client';
-import { readRange } from '../lib/sheets.js';
+import { readEventRows } from '../lib/events-table.js';
 
 const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
 const MAX_SIZE = 10 * 1024 * 1024; // 10MB
@@ -27,7 +27,7 @@ export default async function handler(req, res) {
 
         if (!isAdmin) {
           if (!event_id || !code) throw new Error('缺少授權資訊');
-          const rows = await readRange('events!A2:K');
+          const rows = await readEventRows(); // 批次 109：共用快取，亂填 event_id 不多打 Sheets
           const row = rows.find(r => r[0] === event_id);
           if (!row) throw new Error('活動不存在');
           if (row[4] === 'archived') throw new Error('活動已封存，無法上傳');
