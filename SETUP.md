@@ -7,7 +7,7 @@
 | 變數名 | 說明 |
 |---|---|
 | `ANTHROPIC_API_KEY` | Anthropic API Key（sk-ant-...） |
-| `ADMIN_PASSWORD` | 自訂後台密碼 |
+| `ADMIN_PASSWORD` | 自訂後台密碼。**沒設定時，後台、匯出、訓練等管理員功能一律拒絕**（批次 110 之前沒設定反而是不用密碼就放行）。密碼只放在 header（`X-Admin-Password`）或 POST 內文，不放網址。同一個來源 10 分鐘內失敗 30 次會被暫時擋下。 |
 | `GOOGLE_SERVICE_ACCOUNT_EMAIL` | Google 服務帳號 Email |
 | `GOOGLE_PRIVATE_KEY` | Google 服務帳號私鑰（含換行） |
 | `GOOGLE_SPREADSHEET_ID` | Google 試算表 ID |
@@ -19,6 +19,7 @@
 | `CRON_SECRET` | **強烈建議設定**（隨機長字串即可）。沒設的話排程端點只能靠容易被偽造的 User-Agent 驗證，等於任何人都能觸發全量重掃、燒光 API 額度。詳見 [GEO_SETUP.md](GEO_SETUP.md)。 |
 | `GEMINI_API_KEY` / `OPENAI_API_KEY` / `PERPLEXITY_API_KEY` | 想多掃哪家 AI 引擎就填哪把，缺的引擎會自動跳過，不影響其他功能 |
 | `GEO_MODEL` / `GEMINI_MODEL` / `OPENAI_MODEL` / `PERPLEXITY_MODEL` | 想指定特定模型版本才需要填，留空用系統預設 |
+| `OPENAI_STT_MODEL` | 媒體訓練「語音作答」伺服器端轉逐字稿用的模型，預設 `gpt-4o-transcribe`（需要 `OPENAI_API_KEY`；沒設就退回瀏覽器自己的語音辨識，品質看裝置） |
 
 ### 選填 —— 給「LINE 官方帳號問答」（/api/line）用，不設定則該功能停用
 
@@ -49,7 +50,7 @@
 
 記者從邀請函點連結到 `/register` 報名，資料進試算表的 `reg_campaigns`、`registrations` 兩個分頁（第一次用到時
 **自動建立**，不用手動）；後台側邊欄「媒體報名」（`/registrations`）管理活動、看名單、匯出 CSV。
-詳細設計與上線步驟見 [LINE-PLAN.md](LINE-PLAN.md) 批次 88。
+詳細設計與上線步驟見 [docs/batches/08-batch-083.md](docs/batches/08-batch-083.md) 批次 88。
 
 | 變數名 | 說明 |
 |---|---|
@@ -93,8 +94,12 @@
    - G 欄留給系統標記刪除用（後台按「刪除」時會在這欄寫 `1`，不用手動填、也不用管它）
    - H 欄 `source`（`web` 網頁問的、`line` LINE 問的）、I 欄 `reporter_name`（記者姓名，批次 105 起）是系統自動寫的，標題可以補上方便自己看，不補也不影響功能（程式照欄位位置讀寫）。
    - **D 欄 `media_name` 只放「媒體」**，姓名另外放 I 欄——後台的「服務媒體家數」只數 D 欄、同一家媒體的不同記者併成一家。舊資料常是「經濟日報 王小明」一整串放在 D 欄，統計時會自動拆開（不改動試算表裡的原始內容）；要整理成兩欄，後台「問答分析」每一列的「✎ 媒體」可以分別改。
-7. 其餘分頁（`exposure`、`geo_prompts`、`geo_runs`、`geo_events`、`geo_settings`、`media_roster`、`media_settings`）
-   不用手動建立——第一次用到「露出上傳」「AI 能見度」「記者名單健檢」等功能時，系統會自動建好並補上表頭。
+7. 其餘分頁不用手動建立——第一次用到相關功能時，系統會自動建好並補上表頭：
+   `exposure`（露出上傳）、`geo_prompts`／`geo_runs`／`geo_events`／`geo_settings`（AI 能見度）、`media_roster`／`media_settings`（記者名單健檢）、
+   `line_users`（LINE 綁定與對話狀態）、`line_staff`（職員模式）、`line_photo_inbox`（LINE 傳來的照片暫存）、`bot_memory`（教米亞的記憶）、
+   `contacts_directory`（全域技術窗口分工）、`event_changes`（LINE 職員改資料的紀錄，可復原）、`events_trash`（刪除活動前的備份）、
+   `training_log`（媒體訓練演練分數）、`reg_campaigns`／`registrations`（媒體報名）。
+   **只有 `events` 與 `qa_log` 要手動建**（上面第 3～6 步）。
 
 ---
 
@@ -175,17 +180,17 @@ Vercel Hobby（免費）方案規定：**一次部署最多 12 個 Serverless Fu
 
 以前 `api/lib/sheets.js`、`api/lib/exposure-parse.js` 這兩個「共用工具檔」放在 `api/` 底下，
 它們根本不是 API、沒有人會去呼叫，卻照樣各佔一格，等於白白吃掉 2 格額度。
-現在已經搬到根目錄的 `lib/`，額度回來了：
+現在已經搬到根目錄的 `lib/`，額度回來了（2026-10 核對：`api/` 底下 11 支，只剩 1 格；批次 109、110 的新檔案都放 `lib/`，沒有動到額度）：
 
 | | 位置 | 佔用格數 |
 |---|---|---|
-| 10 支真正的 API | `api/*.js` | 10 |
-| 2 個共用工具檔 | `lib/*.js`（根目錄，**不佔額度**） | 0 |
-| **合計** | | **10 / 12（剩 2 格）** |
+| 11 支真正的 API | `api/*.js` | 11 |
+| 共用工具檔（目前 37 支） | `lib/*.js`（根目錄，**不佔額度**） | 0 |
+| **合計** | | **11 / 12（剩 1 格）** |
 
 **所以之後：**
 
-- 要加新的 API → 直接在 `api/` 新增 `.js`，還有 2 格可以用。
+- 要加新的 API → 直接在 `api/` 新增 `.js`，**只剩 1 格**；多半不必新開——見下面「又滿了怎麼辦」，已經有好幾個功能是搭在既有檔案上（例如媒體報名搭在 `api/events.js`）。
 - 要加「共用工具檔」（不是 API、只是給別的檔 import 的） → **一定要放根目錄 `lib/`，不要放 `api/`**。
 - 又滿了怎麼辦 → 不必升級付費方案。把功能相近的幾支合併成一支，
   再用 `vercel.json` 的 `rewrites` 帶一個參數進去分流即可。
