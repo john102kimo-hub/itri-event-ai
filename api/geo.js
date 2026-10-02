@@ -3,12 +3,13 @@
 // 定位：量測「不指名工研院的問法下，AI 答案引擎會不會、以什麼位置、引哪個網域提到工研院」，
 // 並把每天的分數接成時間序列，疊上記者會／發稿事件標記，算出半衰期與基線抬升。
 //
-// GET  ?action=prompts&password=            題庫
-// GET  ?action=events&password=             事件標記（記者會／發稿）
-// GET  ?action=status&password=             今日掃描進度＋可用引擎
-// GET  ?action=series&password=&days=90     時間序列 + 事件 + 衍生指標
-// GET  ?action=detail&password=&date=&prompt_id=  單題原始回答（人工複核用）
-// GET  ?action=newsjack&password=           今日可借勢話題（掃 Google News RSS，見下方說明）
+// （管理員密碼放 header X-Admin-Password，或帶同仁連結的 code；批次 110 起不再讀網址的 ?password=）
+// GET  ?action=prompts            題庫
+// GET  ?action=events             事件標記（記者會／發稿）
+// GET  ?action=status             今日掃描進度＋可用引擎
+// GET  ?action=series&days=90     時間序列 + 事件 + 衍生指標
+// GET  ?action=detail&date=&prompt_id=  單題原始回答（人工複核用）
+// GET  ?action=newsjack           今日可借勢話題（掃 Google News RSS，見下方說明）
 // GET  ?action=cron&secret=                 排程掃描（Vercel Cron，帶 CRON_SECRET）
 // POST {action, password, ...}              seed / scan / prompt_save / prompt_delete
 //                                           / event_save / event_delete
@@ -28,6 +29,7 @@ import {
   denominators, measurementTier, judgeVsRule, claimFor,
 } from '../lib/geo-metrics.js';
 import { reportAiFailure } from '../lib/ai-alert.js';
+import { safeEqual, isAdminPassword, codeMatches, passwordFrom, authBlocked, authFailed, tooManyAttempts } from '../lib/auth.js';
 
 const SHEETS = {
   geo_prompts: ['id', 'topic', 'prompt', 'keyword', 'brand', 'competitors', 'active', 'created_at'],
@@ -1108,8 +1110,6 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-Admin-Password');
   if (req.method === 'OPTIONS') return res.status(200).end();
 
-  const admin = process.env.ADMIN_PASSWORD;
-
   try {
     await loadSettings();
 
@@ -1120,16 +1120,17 @@ export default async function handler(req, res) {
     const secret = process.env.CRON_SECRET;
     const bearer = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
     const fromVercelCron = /vercel-cron/i.test(req.headers['user-agent'] || '');
-    const cronCall = req.query.action === 'cron' || (!!secret && bearer === secret);
+    const cronCall = req.query.action === 'cron' || safeEqual(bearer, secret);   // 批次 110：固定時間比對；沒設 secret 時 safeEqual 一律 false
 
     if (cronCall) {
       // calibrate=1：每月固定日子多跑幾輪，force 略過「今天已成功」的略過邏輯，
       // 跟當天正常那一輪一起被 buildSeries 平均起來，當天的分數等於多次取樣的平均，
       // 用來對照單次取樣的雜訊有多大（不改變其餘日子的每日一次取樣，成本不變）。
       const calibrate = req.query.calibrate === '1';
+      // 批次 110：沒設 CRON_SECRET 時改認管理員的 header（以前認網址的 ?password=，會留在存取紀錄裡）
       const strongAuth = secret
-        ? (bearer === secret || req.query.secret === secret)
-        : (!!admin && req.query.password === admin);
+        ? (safeEqual(bearer, secret) || safeEqual(req.query.secret, secret))
+        : isAdminPassword(passwordFrom(req));
       // User-Agent 是任何人都能偽造的標頭，只用它放行「一般批次」；
       // calibrate（force 全量重掃、會跳過當天去重）一律要求 CRON_SECRET 或管理員密碼，
       // 否則一行偽造 UA 的 curl 就能無限重跑、燒光探測用的 API 額度。
@@ -1146,13 +1147,18 @@ export default async function handler(req, res) {
     const q = req.method === 'GET' ? req.query : (req.body || {});
     // 管理員密碼優先讀 header（GET 用這個，避免留在網址列／瀏覽器歷史裡）；
     // code 是同仁的專屬連結碼，設計上本來就要能放在網址裡分享，維持走 query/body。
-    const password = req.method === 'GET' ? (req.headers['x-admin-password'] || q.password) : q.password;
+    // 批次 110：管理員密碼只收 header 或 POST 內文，不再讀網址（見 lib/auth.js）
+    const password = passwordFrom(req);
     const code = String(q.code || '').trim();
 
+    if (authBlocked(req)) return tooManyAttempts(res);
     let role = null;
-    if (admin && password === admin) role = 'admin';
-    else if (code && CFG.staffCode && code === CFG.staffCode) role = 'staff';
-    if (!role) return res.status(401).json({ error: code ? '這條連結已失效，請向承辦人索取新的' : '密碼錯誤' });
+    if (isAdminPassword(password)) role = 'admin';
+    else if (code && CFG.staffCode && codeMatches(code, CFG.staffCode)) role = 'staff';
+    if (!role) {
+      authFailed(req);
+      return res.status(401).json({ error: code ? '這條連結已失效，請向承辦人索取新的' : '密碼錯誤' });
+    }
 
     const ADMIN_ONLY = new Set([
       'settings_save', 'staff_link', 'prompt_delete', 'event_delete', 'seed', 'detail', 'keycheck',

@@ -6,7 +6,7 @@
 // POST {action:'clear',id,code}            → 清掉該場露出資料（重傳前用）
 //
 // ── 管理員（需 ADMIN_PASSWORD；上面三個動作也可改用 password 驗證）──────
-// GET  ?action=analysis&id=xxx&password=.. → 露出 × AI 提問 交叉分析
+// GET  ?action=analysis&id=xxx（header X-Admin-Password）→ 露出 × AI 提問 交叉分析
 //
 // 設計重點：同仁只有 edit_code，沒有後台密碼。上傳與檢視必須能用 edit_code
 // 通過，否則這個功能對同仁等於不存在。
@@ -14,6 +14,8 @@
 import { readRange, appendRows, ensureSheets, listSheets, batchUpdate } from '../lib/sheets.js';
 import { parseExposureFile, normalizeOutlet } from '../lib/exposure-parse.js';
 import { groupOutlets } from '../lib/media-name.js';
+import { readEventRows } from '../lib/events-table.js';
+import { isAdminPassword, requireAdmin, passwordFrom, codeMatches, authBlocked, authFailed } from '../lib/auth.js';
 
 const SHEETS = {
   exposure: ['event_id', '則數', '日期', '類型', '媒體名稱', '版位', '標題', '上傳時間', '來源檔'],
@@ -26,16 +28,17 @@ async function safeRead(range) {
 }
 
 /** edit_code 或管理員密碼皆可通過 */
-async function authorize({ id, code, password }) {
-  const admin = process.env.ADMIN_PASSWORD;
-  if (password && admin && password === admin) return { ok: true, who: 'admin' };
+async function authorize({ id, code, password }, req) {
+  if (isAdminPassword(password)) return { ok: true, who: 'admin' };
   if (!id) return { ok: false, status: 400, msg: '缺少活動 ID' };
   if (!code) return { ok: false, status: 401, msg: '缺少編輯碼，請使用承辦人給你的專屬編輯連結' };
+  if (authBlocked(req)) return { ok: false, status: 429, msg: '嘗試的次數太多了，請 10 分鐘後再試。' };
 
-  const rows = await readRange('events!A2:K');
+  const rows = await readEventRows(); // 批次 109：共用快取，亂填 id 不多打 Sheets
   const row = rows.find((r) => r[0] === id);
-  if (!row) return { ok: false, status: 404, msg: '找不到這場活動，請確認連結是否正確' };
-  if (!row[10] || String(code) !== String(row[10])) {
+  if (!row) { authFailed(req); return { ok: false, status: 404, msg: '找不到這場活動，請確認連結是否正確' }; }
+  if (!codeMatches(code, row[10])) {
+    authFailed(req);
     return { ok: false, status: 401, msg: '編輯碼錯誤，請向承辦人索取正確的編輯連結' };
   }
   if (row[4] === 'archived') return { ok: false, status: 403, msg: '這場活動已封存，無法上傳' };
@@ -146,12 +149,12 @@ export default async function handler(req, res) {
     // ─────────────── GET
     if (req.method === 'GET') {
       const { action, id, code } = req.query;
-      // 管理員密碼優先讀 header，避免留在網址列／瀏覽器歷史／伺服器存取紀錄裡（code 是同仁的
-      // 專屬編輯連結，設計上本來就要能放在網址裡分享，維持走 query）
-      const password = req.headers['x-admin-password'] || req.query.password;
+      // 管理員密碼只收 header（批次 110 起不再讀網址，避免留在網址列／瀏覽器歷史／伺服器存取紀錄裡）。
+      // code 是同仁的專屬編輯連結，設計上本來就要能放在網址裡分享，維持走 query。
+      const password = passwordFrom(req);
 
       if (action === 'list') {
-        const auth = await authorize({ id, code, password });
+        const auth = await authorize({ id, code, password }, req);
         if (!auth.ok) return res.status(auth.status).json({ error: auth.msg });
         const rows = rowsForEvent(await safeRead('exposure!A2:I'), id);
         const records = rows.map((r) => ({
@@ -165,7 +168,7 @@ export default async function handler(req, res) {
       }
 
       if (action === 'analysis' || action === 'analysis_all') {
-        if (password !== process.env.ADMIN_PASSWORD) return res.status(401).json({ error: '密碼錯誤' });
+        if (!requireAdmin(req, res, password)) return;
         const [expRows, qaRowsRaw] = await Promise.all([
           safeRead('exposure!A2:I'), safeRead('qa_log!A2:G'),
         ]);
@@ -200,8 +203,9 @@ export default async function handler(req, res) {
     // ─────────────── POST
     if (req.method === 'POST') {
       const body = req.body || {};
-      const { action, id, code, password } = body;
-      const auth = await authorize({ id, code, password });
+      const { action, id, code } = body;
+      const password = passwordFrom(req);
+      const auth = await authorize({ id, code, password }, req);
       if (!auth.ok) return res.status(auth.status).json({ error: auth.msg });
 
       if (action === 'clear') {

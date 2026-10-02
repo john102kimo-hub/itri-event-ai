@@ -1,10 +1,11 @@
 // 問答紀錄匯出 API — 下載 CSV（Excel 可直接開啟）
 // GET ?event_id=xxx
-// 管理員密碼走 X-Admin-Password header（也相容舊的 ?password= query，供直接貼網址測試用）
+// 管理員密碼走 X-Admin-Password header（批次 110 起不再收網址的 ?password=：會留在伺服器存取紀錄與瀏覽器歷史）
 
 import { readRange } from '../lib/sheets.js';
 import { taipeiToday } from '../lib/event-status.js';
 import { isStaffMedia } from '../lib/media-name.js';
+import { requireAdmin } from '../lib/auth.js';
 
 // CSV 公式注入防護：記者輸入以 =／+／-／@ 開頭的內容，管理員用 Excel 開啟時
 // 會被當公式執行；在前面補一個單引號讓 Excel 只當純文字顯示。
@@ -19,8 +20,7 @@ const csvCell = (v) => {
 export default async function handler(req, res) {
   if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
 
-  const password = req.headers['x-admin-password'] || req.query.password;
-  if (password !== process.env.ADMIN_PASSWORD) return res.status(401).json({ error: '密碼錯誤' });
+  if (!requireAdmin(req, res)) return;   // 批次 110：header 才收（不讀網址）、沒設密碼一律拒絕、固定時間比對
 
   const { event_id } = req.query;
 

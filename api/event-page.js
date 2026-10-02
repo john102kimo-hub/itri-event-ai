@@ -24,11 +24,10 @@
 
 import fs from 'fs';
 import path from 'path';
-import { readRange } from '../lib/sheets.js';
+import { readEventRows } from '../lib/events-table.js';
 import { resolveOrg, BRAND_KEY } from '../lib/geo-orgs.js';
 
-// 讀到 M 欄（L 時間、M 地點）：結構化資料的 Event 要有 location 才完整（批次 82）
-const RANGE = 'events!A2:M';
+// 用到 L 欄時間、M 欄地點：結構化資料的 Event 要有 location 才完整（批次 82）。讀取走 lib/events-table.js 的共用快取（批次 109）。
 
 // 主辦單位是工研院時，結構化資料要把「同一個機構的所有名字」一次講清楚（批次 82）。
 // 生成式引擎靠 alternateName／sameAs 把「工研院」「工業技術研究院」「ITRI」認成同一個
@@ -205,7 +204,7 @@ function serveRobots(res) {
 async function serveSitemap(res) {
   let rows = [];
   try {
-    rows = await readRange(RANGE);
+    rows = await readEventRows();
   } catch (err) {
     console.error('sitemap 讀取活動失敗:', err.message);
   }
@@ -252,7 +251,7 @@ async function serveEventPage(req, res) {
 
   let row = null;
   try {
-    const rows = await readRange(RANGE);
+    const rows = await readEventRows();
     row = rows.find(r => r[0] === id) || null;
   } catch (err) {
     // 試算表讀取失敗時不要讓整頁掛掉，退回靜態頁由前端重試

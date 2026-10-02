@@ -3,7 +3,7 @@
 // POST mode: 'evaluate'     — AI 評估主管的回答並出下一題
 // POST mode: 'transcribe'   — 把主管錄下來的那段話轉成逐字稿（語音作答用）
 // POST mode: 'log_session'  — 記錄一場完整演練的分數（訓練本身不呼叫 Anthropic）
-// GET  ?action=summary&password=xxx — 給成效報告用：每場活動累積演練幾次、平均幾分
+// GET  ?action=summary（header X-Admin-Password）— 給成效報告用：每場活動累積演練幾次、平均幾分
 //
 // 語音作答（批次 58）：主管反映「真實記者會上沒有人在打字」，改成可以直接用講的。
 // 錄音在瀏覽器端，這裡只收音檔轉逐字稿；評分時把「講了幾秒、幾個字、語速多少」
@@ -25,6 +25,8 @@ import { reportAiFailure } from '../lib/ai-alert.js';
 import { kbHasContent } from '../lib/kb-template.js';
 import { eventDateOf } from '../lib/event-status.js';
 import { isTestMedia } from '../lib/media-name.js';
+import { readEventRows } from '../lib/events-table.js';
+import { isAdminPassword, codeMatches, passwordFrom, requireAdmin, authBlocked, authFailed, tooManyAttempts } from '../lib/auth.js';
 
 const CACHE_TTL_MS = 60 * 1000; // 60 秒；同仁改完知識庫應該很快能在訓練模式看到新版
 
@@ -64,7 +66,7 @@ async function getEventConfig(eventId) {
     const cached = eventCache.get(cacheKey);
     if (cached && Date.now() < cached.expiry) return cached.data;
 
-    const rows = await readRange('events!A2:K');
+    const rows = await readEventRows(); // 批次 109：整張活動表共用快取，不存在的 id 不會多打 Sheets
     const { knowledge_base, names, skipped } = buildAllEventsKnowledge(rows);
     const shown = names.slice(0, 6).join('、') + (names.length > 6 ? `等 ${names.length} 場` : '');
     const data = {
@@ -79,7 +81,7 @@ async function getEventConfig(eventId) {
   const cached = eventCache.get(eventId);
   if (cached && Date.now() < cached.expiry) return cached.data;
 
-  const rows = await readRange('events!A2:K');
+  const rows = await readEventRows(); // 批次 109：整張活動表共用快取，不存在的 id 不會多打 Sheets
   const row = rows.find(r => r[0] === eventId);
   if (!row) return null;
 
@@ -474,15 +476,14 @@ async function transcribeAnswer(res, event, body) {
  * event_id==='all' 只收 admin——彙整訓練沒有單一場次的 edit_code 可比對。
  */
 export function authorizeTraining(eventId, event, code, password) {
-  const admin = process.env.ADMIN_PASSWORD;
-  const isAdmin = !!admin && password === admin;
+  const isAdmin = isAdminPassword(password);   // 批次 110：沒設 ADMIN_PASSWORD 一律不是管理員；固定時間比對
   if (eventId === 'all') {
     return isAdmin ? { ok: true } : { ok: false, status: 401, msg: '彙整訓練僅限管理員使用，請由後台進入' };
   }
   if (eventId) {
     if (!event) return { ok: false, status: 404, msg: '找不到這場活動' };
     if (event.status === 'archived') return { ok: false, status: 403, msg: '這場活動已封存' };
-    const isStaff = !!event.edit_code && String(code || '') === String(event.edit_code);
+    const isStaff = codeMatches(code, event.edit_code);
     return (isAdmin || isStaff) ? { ok: true } : { ok: false, status: 401, msg: '請由後台或同仁編輯連結進入媒體訓練' };
   }
   return isAdmin ? { ok: true } : { ok: false, status: 401, msg: '請先選擇活動' };
@@ -777,10 +778,11 @@ export default async function handler(req, res) {
       // 受訪者自己的歷次演練（批次 107）：頁面上的「上次練習」以前只存在那台裝置的瀏覽器裡，換手機就沒了，
       // 但 training_log 後端一直都有。用「基本資料」填的姓名對（空白、大小寫不計），認證跟單場訓練同一套。
       try {
+        if (authBlocked(req)) return tooManyAttempts(res);
         const eventId = String(req.query.event_id || '');
         const event = eventId && eventId !== 'all' ? await getEventConfig(eventId) : null;
-        const auth = authorizeTraining(eventId, event, req.query.code, req.headers['x-admin-password'] || req.query.password);
-        if (!auth.ok) return res.status(auth.status).json({ error: auth.msg });
+        const auth = authorizeTraining(eventId, event, req.query.code, passwordFrom(req));
+        if (!auth.ok) { if (auth.status === 401) authFailed(req); return res.status(auth.status).json({ error: auth.msg }); }
         return res.status(200).json({ sessions: await getTraineeHistory(eventId, req.query.trainee) });
       } catch (err) {
         console.error(err);
@@ -788,9 +790,7 @@ export default async function handler(req, res) {
       }
     }
     if (action !== 'summary') return res.status(400).json({ error: '不支援的操作' });
-    const admin = process.env.ADMIN_PASSWORD;
-    const password = req.headers['x-admin-password'] || req.query.password;
-    if (!admin || password !== admin) return res.status(401).json({ error: '密碼錯誤' });
+    if (!requireAdmin(req, res)) return;
     try {
       return res.status(200).json(await getTrainingSummary());
     } catch (err) {
@@ -802,10 +802,12 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   const {
-    messages, event_id, mode = 'reporter', code, password, trainee, scores,
+    messages, event_id, mode = 'reporter', code, trainee, scores,
     spoken, duration, voice_answers: voiceAnswers,
     outlet: outletId, role: roleId, focus, total,
   } = req.body || {};
+
+  const password = passwordFrom(req);   // header 或 POST 內文（批次 110 起不讀網址）
 
   // 只有 reporter／evaluate 是「對話」，要帶 messages、也要呼叫 Anthropic。
   // log_session 是寫一列紀錄，transcribe 是丟音檔給 STT——兩個都不帶 messages，
@@ -819,15 +821,21 @@ export default async function handler(req, res) {
   if (isConversation && !apiKey) return res.status(500).json({ error: 'ANTHROPIC_API_KEY 未設定' });
 
   try {
+    // ── 認證：這支只給內部人用，記者不能碰 ──────────────────────────
+    // 批次 109：**先驗身分，再讀 qa_log**。以前是活動表與整張 qa_log 都讀完才驗，沒帶任何密碼的請求
+    // 照樣各吃一次 Sheets 讀取（實測 20 次未登入請求＝20 次 qa_log＋20 次 events 讀取），
+    // 而這支沒有限流——任何人都能用它把全站共用的讀取額度用光。現在未登入的請求在這裡就結束，
+    // 活動表走共用快取，最多只碰到快取，不碰 qa_log。「彙整」模式只認管理員，連活動表都不用組。
+    if (authBlocked(req)) return tooManyAttempts(res);
+    const eventForAuth = event_id && event_id !== 'all' ? await getEventConfig(event_id) : null;
+    const auth = authorizeTraining(event_id, eventForAuth, code, password);
+    if (!auth.ok) { if (auth.status === 401) authFailed(req); return res.status(auth.status).json({ error: auth.msg }); }
+
     const [event, realQuestions] = await Promise.all([
-      event_id ? getEventConfig(event_id) : null,
+      event_id === 'all' ? getEventConfig('all') : eventForAuth,
       // log_session／transcribe 用不到「記者真的問過的題目」，省一次 qa_log 讀取
       isConversation ? getRealQuestions(event_id) : null,
     ]);
-
-    // ── 認證：這支只給內部人用，記者不能碰 ──────────────────────────
-    const auth = authorizeTraining(event_id, event, code, password);
-    if (!auth.ok) return res.status(auth.status).json({ error: auth.msg });
 
     if (mode === 'log_session') {
       return await logTrainingSession(res, event_id, event, trainee, scores, voiceAnswers);

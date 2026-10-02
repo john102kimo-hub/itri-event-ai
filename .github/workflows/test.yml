@@ -1,0 +1,31 @@
+# 每次推送與每個 PR 都自動跑全部測試（批次 110）。
+# 以前 45 支測試只有人手動跑才會跑，PR 合併前沒有任何自動把關。
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # 測試用的是假的 Google Sheets／LINE／模型，不需要 npm install、也不需要任何金鑰。
+      - name: 全部測試
+        run: npm test
+      # 把「現在」往後撥 90 天再跑一次：專門抓寫死日期的測試（批次 103 的日期炸彈）。
+      - name: 時間往後撥 90 天再跑一次
+        run: SHIFT_DAYS=90 npm test

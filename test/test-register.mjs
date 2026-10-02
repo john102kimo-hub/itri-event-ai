@@ -48,7 +48,8 @@ async function get(query, { headers = {} } = {}) {
   return res;
 }
 const admin = (b) => post({ password: 'pw', ...b });
-const adminGet = (q) => get({ password: 'pw', ...q });
+// 批次 110：管理員密碼只收 header，不再讀網址的 ?password=（見 lib/auth.js）
+const adminGet = (q) => get(q, { headers: { 'x-admin-password': 'pw' } });
 
 // 今年眺望的 16 場（傳播規劃 v13 第 16 頁的草稿）
 const SESSIONS = [

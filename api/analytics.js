@@ -1,6 +1,7 @@
 // 問答分析 API
-// GET  ?password=xxx             → 全部活動統計（含 row_num 供刪除／改媒體名稱）
-// GET  ?password=xxx&event_id=xx → 單一活動統計
+// 管理員密碼一律放 header X-Admin-Password（POST 也可放內文）；批次 110 起不再讀網址的 ?password=
+// GET                            → 全部活動統計（含 row_num 供刪除／改媒體名稱）
+// GET  ?event_id=xx              → 單一活動統計
 // POST {action:'delete', row_num, password, timestamp, question} → 標記刪除單筆 Q&A
 // POST {action:'update_media', row_num, password, timestamp, question, media_name}
 //      → 手動改這筆的媒體名稱。LINE 問答沒辦法強制記者一定要打媒體名稱（見
@@ -20,6 +21,7 @@
 
 import { readRange, updateRange } from '../lib/sheets.js';
 import { groupOutlets, isTestMedia, isNotMedia, splitMedia } from '../lib/media-name.js';
+import { requireAdmin } from '../lib/auth.js';
 
 // 「AI 這題疑似沒答到」：提示詞規定答不出來時要說「這部分我沒有資料，建議洽現場新聞聯絡人」
 // （lib/prompt.js），所以這句話的出現是個可靠的線索。只是**線索**——模型偶爾會換個說法，
@@ -49,12 +51,10 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type,X-Admin-Password');
   if (req.method === 'OPTIONS') return res.status(200).end();
 
-  const adminPassword = process.env.ADMIN_PASSWORD;
-
   // ── POST：刪除單筆 ────────────────────────────────────────
   if (req.method === 'POST') {
-    const { action, password, row_num, timestamp, question } = req.body || {};
-    if (password !== adminPassword) return res.status(401).json({ error: '密碼錯誤' });
+    const { action, row_num, timestamp, question } = req.body || {};
+    if (!requireAdmin(req, res)) return;   // 批次 110：沒設 ADMIN_PASSWORD 一律拒絕、固定時間比對、失敗限流（lib/auth.js）
     if (action === 'delete' && row_num) {
       // 刪除前先比對這一列現在的內容，避免試算表被手動整理過、row_num 早就指向別筆資料，
       // 開著的舊後台頁面一按刪除就標記錯人的問答。
@@ -130,9 +130,8 @@ export default async function handler(req, res) {
   if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
 
   // ── GET：統計 ────────────────────────────────────────────
-  const password = req.headers['x-admin-password'] || req.query.password;
   const { event_id, exclude_test } = req.query;
-  if (password !== adminPassword) return res.status(401).json({ error: '密碼錯誤' });
+  if (!requireAdmin(req, res)) return;
 
   // 測試資料（依媒體名稱）：測試／test／demo／純數字／常見亂打，以及同仁在 LINE 職員模式自己問的
   // （「（內部職員）」，批次 104 起算測試資料）。判斷放在 lib/media-name.js，後台首頁、問答分析、
