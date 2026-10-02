@@ -7,7 +7,7 @@ import { EventEmitter } from 'node:events';
 // ── 用 loader 攔截 lib/sheets.js 與 lib/line.js ──────────────────────
 register('./loader.mjs', import.meta.url);
 
-const { sent, state, reset } = await import('./fakes.mjs');
+const { sent, state, reset, isoOffset, weekdayOf } = await import('./fakes.mjs');
 process.env.LINE_CHANNEL_SECRET = 'testsecret';
 process.env.LINE_CHANNEL_ACCESS_TOKEN = 'testtoken';
 process.env.ANTHROPIC_API_KEY = 'test';
@@ -727,8 +727,14 @@ check('綁定中的答案要附上這場自訂的 chips（quad 的 fixture 是�
 reset(); await freshModule();
 state.bindings.set('U_reporter', { event_id: 'semi', media_name: '', note: '', bound_at: Date.now() });
 out = await send('這場的重點是什麼');
-check('活動沒設定自訂 chips 時（semi 的 fixture 是空字串）退回預設問題，不是空按鈕列',
-  out[1]?.quickReply?.length > 0 && !JSON.stringify(out[1]?.quickReply).includes('重點'), JSON.stringify(out));
+// 批次 104：沒設定自訂 chips 時不再是寫死的五題，而是依知識庫與基本資料算出來的（lib/default-chips.js）。
+// semi 有新聞稿內容與日期、新聞聯絡人 → 重點／時間地點／聯絡人；不能出現 quad 那組自訂的「重點」「應用」。
+{
+  const labels = (out[1]?.quickReply || []).map(c => (typeof c === 'object' && c ? c.text : c));
+  check('活動沒設定自訂 chips 時（semi 的 fixture 是空字串）給依資料算出來的預設問題，不是空按鈕列',
+    labels.includes('這次活動的重點是什麼？') && labels.includes('新聞聯絡人是誰？') && !labels.includes('重點') && !labels.includes('應用'), JSON.stringify(labels));
+  check('　 不再出現跟這場無關的「合作廠商」「商業化」五題', !labels.some(l => /合作廠商|商業化|應用場域/.test(l)), JSON.stringify(labels));
+}
 
 // #代碼綁定：ask_name 解決的那一刻（「已記錄，謝謝」）就要看得到 chips，
 // 不用等問完第一題才第一次看到
@@ -3207,10 +3213,12 @@ check('　 同一視窗內真的在問活動 → 照樣回', out.length > 0, JSO
   check('按取消 → 沒有改', medRow()[11] === '' && /沒有改/.test(out[0]?.text || ''), JSON.stringify(medRow()));
 
   // 日期：格式由程式把關，並帶星期幾
-  out = await send('智慧醫療解決方案記者會改到 10/15', 'U_staff');
-  check('改日期 → 確認句帶星期幾', /改成「2026-10-15（四）」/.test(out[0]?.text || ''), out[0]?.text);
+  // 日期用「20 天後」現算，不寫死（批次 103：寫死 2026-10-15 的版本在 2027 年就紅）
+  const in20 = isoOffset(20);
+  out = await send(`智慧醫療解決方案記者會改到 ${in20}`, 'U_staff');
+  check('改日期 → 確認句帶星期幾', out[0]?.text?.includes(`改成「${in20}（${weekdayOf(in20)}）」`), out[0]?.text);
   await send('✅ 確認修改', 'U_staff');
-  check('　 確認後寫成 YYYY-MM-DD', medRow()[5] === '2026-10-15', medRow()[5]);
+  check('　 確認後寫成 YYYY-MM-DD', medRow()[5] === in20, medRow()[5]);
 
   // 沒說哪一場 → 問哪一場，點了再確認
   out = await send('新聞聯絡人換成王小明 0912-345-678', 'U_staff');
@@ -3365,10 +3373,10 @@ check('　 同一視窗內真的在問活動 → 照樣回', out.length > 0, JSO
   check('★ 點短名稱的活動 → 活動卡，不是被當成主題詞', out[0]?.kind === 'flex' && /眺望研討會/.test(JSON.stringify(out[0].messages)), JSON.stringify(out));
 
   // (4) 日期改到今天以前 → 確認句先警告
-  out = await send('智慧醫療解決方案記者會改到 1/5', 'U_staff');
+  out = await send(`智慧醫療解決方案記者會改到 ${isoOffset(-30)}`, 'U_staff');
   check('★ 日期改到過去 → 確認句寫出「這個日期已經過了」', /這個日期已經過了/.test(out[0]?.text || ''), out[0]?.text);
   await send('✖ 取消修改', 'U_staff');
-  out = await send('智慧醫療解決方案記者會改到 12/20', 'U_staff');
+  out = await send(`智慧醫療解決方案記者會改到 ${isoOffset(40)}`, 'U_staff');
   check('　 改到未來的日期 → 不警告', !/已經過了/.test(out[0]?.text || '') && /確認修改/.test(JSON.stringify(out)), out[0]?.text);
   await send('✖ 取消修改', 'U_staff');
 

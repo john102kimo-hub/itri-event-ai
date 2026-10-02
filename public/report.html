@@ -170,9 +170,11 @@ function render(){
   const byEvent = ANALYTICS.by_event || [];
   const total = ANALYTICS.total || 0;
 
-  // 全體服務媒體家數（跨活動去重）
+  // 全體服務媒體家數（跨活動去重）：以後端算好的為準——同一家媒體的不同記者、不同寫法併成一家，
+  // 「（未提供）」「（內部職員）」與整句問題不算（批次 105）。舊版後端沒有這個欄位時，才退回用各場名單去重。
   const mediaUnion = new Set();
   byEvent.forEach(e => (e.media_list||[]).forEach(m => mediaUnion.add(m)));
+  const mediaTotal = ANALYTICS.media_total != null ? ANALYTICS.media_total : mediaUnion.size;
 
   // 媒體訓練演練紀錄依 event_id 查——TRAINING.by_event 只有真的被練過的場次會出現
   const trainingByEvent = new Map((TRAINING && TRAINING.by_event || []).map(t => [t.event_id, t]));
@@ -185,7 +187,7 @@ function render(){
 
   const kpis = `
     <div class="kpi"><div class="num">${byEvent.length}</div><div class="lab">支援記者會場次</div></div>
-    <div class="kpi"><div class="num">${mediaUnion.size}</div><div class="lab">服務媒體家數</div><div class="hint">依記者填寫之媒體去重</div></div>
+    <div class="kpi"><div class="num">${mediaTotal}</div><div class="lab">服務媒體家數</div><div class="hint">同一家媒體只算一次</div></div>
     <div class="kpi"><div class="num">${total}</div><div class="lab">累積回答題數</div></div>
     <div class="kpi"><div class="num">${savedStr}<span style="font-size:1rem"> 小時</span></div><div class="lab">估算節省人力工時</div><div class="hint">${total} 題 × ${minPerQ} 分／題</div></div>
     <div class="kpi"><div class="num" style="font-size:1.5rem">近乎零</div><div class="lab">雲端營運成本</div><div class="hint">Vercel 免費方案 + 輕量模型</div></div>
@@ -199,7 +201,9 @@ function render(){
 
   const cards = byEvent.map(e=>{
     const topics = topTopics(e.questions, 6);
-    const filled = (e.questions||[]).filter(q=>q.media && q.media!=='（未填寫）').length;
+    // 後端算好的 media_filled 才準：「（未提供）」「（群組提問）」不是媒體，不能算進填寫率
+    const filled = e.media_filled != null ? e.media_filled
+      : (e.questions||[]).filter(q=>q.media && !/^（(未填寫|未提供|內部職員|群組提問)）$/.test(q.media)).length;
     const fillRate = e.count ? Math.round(filled/e.count*100) : 0;
     const training = trainingByEvent.get(e.event_id);
     return `
@@ -232,7 +236,7 @@ function render(){
     ${cards || '<div class="ev-card">尚無問答資料。</div>'}
     <div class="foot-note">
       · 本報告數據來自 AI 新聞助理實際問答紀錄，已排除測試資料。<br>
-      · 「服務媒體家數」以記者填寫之媒體名稱去重計算，實際觸及媒體數可能更高（部分記者未填寫）。<br>
+      · 「服務媒體家數」以記者填寫之媒體名稱計算，同一家媒體的不同記者只算一家，實際觸及媒體數可能更高（部分記者未填寫）。<br>
       · 「估算節省人力工時」為 AI 代答題數 × 每題估算人工回覆時間，供效益評估參考。<br>
       · 除記者即時問答外，本平台亦提供「媒體訓練模式」供發言人於會前進行 AI 記者實戰演練。
     </div>`;

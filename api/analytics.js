@@ -11,10 +11,21 @@
 // POST {action:'clean_dirty_media', password, row_nums:[...]}
 //      → 把指定的那幾列媒體名稱清回「（未填寫）」，只清人工看過勾選的列。
 //
+// GET  ?summary=1 …              → 儀表板用的輕量版：只回數字與各場彙總，不含逐筆問答（批次 104，見下面說明）
+// GET  ?answer_row=N …           → 單筆 AI 回答全文（後台展開一列時才載，列表本身只帶預覽）
+// POST update_media 可同時帶 reporter_name（批次 105：媒體欄拆成「媒體」＋「姓名」，姓名在 I 欄）
+//
 // 管理員密碼也可用 X-Admin-Password header 傳（GET 用這個，不要放在網址上——
 // 網址會留在瀏覽器歷史與伺服器存取紀錄裡）。
 
 import { readRange, updateRange } from '../lib/sheets.js';
+import { groupOutlets, isTestMedia, isNotMedia, splitMedia } from '../lib/media-name.js';
+
+// 「AI 這題疑似沒答到」：提示詞規定答不出來時要說「這部分我沒有資料，建議洽現場新聞聯絡人」
+// （lib/prompt.js），所以這句話的出現是個可靠的線索。只是**線索**——模型偶爾會換個說法，
+// 漏標沒關係，後台標的是「疑似」，目的是讓承辦人一眼找出知識庫補哪裡（批次 104）。
+const UNANSWERED_RE = /這部分我沒有資料|背景資料(?:中|裡)?(?:並)?沒有(?:提到|提供|記載)|沒有(?:相關|這方面的)資料|查無相關資料/;
+const previewOf = (a, n = 140) => String(a || '').replace(/\s+/g, ' ').trim().slice(0, n);
 
 // 判斷「已經存進媒體名稱欄的值」其實比較像一句問題，不是真的媒體/記者名稱——
 // LINE 的一次性擷取視窗誤判時會發生（見 lib/line.js looksLikeNameOrSkip 的說明：
@@ -72,8 +83,13 @@ export default async function handler(req, res) {
           return res.status(409).json({ error: '這筆資料已變動，請重新整理後再試' });
         }
       }
-      // D 欄是媒體名稱，只動這一欄。
+      // D 欄是媒體名稱。有帶 reporter_name 才一併改 I 欄（姓名）；沒帶就只動 D，不會把姓名清掉。
       await updateRange(`qa_log!D${row_num}:D${row_num}`, [[name]]);
+      if (typeof req.body.reporter_name === 'string') {
+        const person = req.body.reporter_name.replace(/\s+/g, ' ').trim().slice(0, 40);
+        await updateRange(`qa_log!I${row_num}:I${row_num}`, [[person]]);
+        return res.status(200).json({ success: true, media_name: name, reporter_name: person });
+      }
       return res.status(200).json({ success: true, media_name: name });
     }
     if (action === 'scan_dirty_media') {
@@ -118,23 +134,32 @@ export default async function handler(req, res) {
   const { event_id, exclude_test } = req.query;
   if (password !== adminPassword) return res.status(401).json({ error: '密碼錯誤' });
 
-  // 判斷是否為測試資料（依媒體名稱）：測試 / test / demo / 純數字 / 常見亂打
-  const isTestMedia = (m) => {
-    if (!m) return false;
-    const s = String(m).trim().toLowerCase();
-    if (/測試|test|demo|範例|sample|練習/.test(s)) return true;
-    if (/^[0-9]+$/.test(s)) return true;
-    if (/^(abc|xxx|aaa|ttt|qqq|asdf|qwer|zzz|123)$/.test(s)) return true;
-    return false;
-  };
+  // 測試資料（依媒體名稱）：測試／test／demo／純數字／常見亂打，以及同仁在 LINE 職員模式自己問的
+  // （「（內部職員）」，批次 104 起算測試資料）。判斷放在 lib/media-name.js，後台首頁、問答分析、
+  // 成效報告、LINE 職員的「後台數據」共用同一份。
   const dropTest = exclude_test === '1' || exclude_test === 'true';
+  const summaryOnly = req.query.summary === '1' || req.query.summary === 'true';
+
+  // 單筆 AI 回答全文：列表只帶預覽（每筆回答動輒上千字，一次全帶 200 筆是好幾百 KB），
+  // 承辦人點開某一列才來要那一筆。
+  if (req.query.answer_row !== undefined) {
+    const n = parseInt(req.query.answer_row, 10);
+    if (!Number.isInteger(n) || n < 2) return res.status(400).json({ error: 'answer_row 不正確' });
+    try {
+      const row = (await readRange(`qa_log!A${n}:I${n}`))[0];
+      if (!row || !row[1] || row[1] === '[deleted]' || row[6] === '1') return res.status(404).json({ error: '找不到這筆問答' });
+      return res.status(200).json({ row_num: n, time: row[0] || '', question: row[4] || '', answer: row[5] || '', unanswered: UNANSWERED_RE.test(row[5] || '') });
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  }
 
   // recent 預設回最近 50 筆，可用 ?limit= 調整（上限 500）——記者會當天問答量很容易破 50，
   // 「今日問答」與「最新問答」在最需要盯的那天反而會失準。
   const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 500);
 
   try {
-    const rawRows = await readRange('qa_log!A2:H');
+    const rawRows = await readRange('qa_log!A2:I');   // I 欄＝記者姓名（批次 105），舊資料是空的
     // 保留原始 row_num（sheet 第幾列，row 2 = index 0）
     const rowsWithNum = rawRows.map((r, i) => ({ r, rowNum: i + 2 }));
 
@@ -146,23 +171,29 @@ export default async function handler(req, res) {
       : valid;
 
     // 按活動分組（H 欄 source 是批次 2 才有的欄位，舊資料一律當 web）
+    //
+    // 媒體家數一律用 groupOutlets() 算（批次 105）：「經濟日報 王小明」與「經濟日報 林小美」是同一家，
+    // 「（未提供）」「（內部職員）」與整句問題不算任何一家。以前拿 D 欄整串文字去重，三種都會多算。
+    // 逐筆問答（questions）不再帶 AI 回答全文——成效報告只用 question 與 media，帶 answer 只是讓
+    // 每次載入多傳好幾百 KB（120 筆就 211KB，登入就打兩次）。
     const byEvent = {};
     filtered.forEach(({ r }) => {
       const eid = r[1] || 'unknown';
       if (!byEvent[eid]) {
-        byEvent[eid] = { event_id: eid, event_name: r[2] || eid, count: 0, media_list: new Set(), questions: [], line_count: 0 };
+        byEvent[eid] = { event_id: eid, event_name: r[2] || eid, count: 0, medias: [], questions: [], line_count: 0, media_filled: 0 };
       }
       byEvent[eid].count++;
+      // 媒體填寫率的分子：要真的有一家媒體才算（「（未填寫）」「（未提供）」「（群組提問）」、整句問題都不算）
+      if (!isNotMedia(r[3]) && splitMedia(r[3]).outlet) byEvent[eid].media_filled++;
       if ((r[7] || 'web') === 'line') byEvent[eid].line_count++;
-      if (r[3] && r[3] !== '（未填寫）') byEvent[eid].media_list.add(r[3]);
-      byEvent[eid].questions.push({ time: r[0], media: r[3], question: r[4], answer: r[5], source: r[7] || 'web' });
+      byEvent[eid].medias.push(r[3]);
+      if (!summaryOnly) byEvent[eid].questions.push({ time: r[0], media: r[3], reporter: r[8] || '', question: r[4], source: r[7] || 'web' });
     });
 
-    const byEventArr = Object.values(byEvent).map(e => ({
-      ...e,
-      media_list: [...e.media_list],
-      media_count: e.media_list.size
-    }));
+    const byEventArr = Object.values(byEvent).map(({ medias, questions, ...e }) => {
+      const outlets = groupOutlets(medias);
+      return { ...e, ...(summaryOnly ? {} : { questions }), media_list: outlets.map(o => o.name), media_count: outlets.length };
+    });
 
     // 關鍵字統計：改用字典比對（活動的 chips／知識庫小標題 + 通用產業詞表），
     // 不再用「連續中文 2–8 字」貪婪切詞——貪婪切詞切出的是斷句碎片，
@@ -201,15 +232,9 @@ export default async function handler(req, res) {
       if (h >= 0 && h < 24) hourly[h]++;
     });
 
-    // 媒體排行
-    const mediaCount = {};
-    filtered.forEach(({ r }) => {
-      const m = r[3];
-      if (m && m !== '（未填寫）') mediaCount[m] = (mediaCount[m] || 0) + 1;
-    });
-    const topMedia = Object.entries(mediaCount)
-      .sort((a, b) => b[1] - a[1]).slice(0, 10)
-      .map(([name, count]) => ({ name, count }));
+    // 媒體排行（同一家併在一起；不算「沒填／略過／員工自己問」）
+    const allOutlets = groupOutlets(filtered.map(({ r }) => r[3]));
+    const topMedia = allOutlets.slice(0, 10).map(({ name, count }) => ({ name, count }));
 
     // 今日筆數：對「全部」filtered 資料算，不是只看 recent 那截斷後的 50 筆
     // ——記者會當天問答量很容易破 50，只看 recent 會讓「今日問答」數字失真。
@@ -225,15 +250,29 @@ export default async function handler(req, res) {
     const dayOf = (ts) => String(ts || '').trim().split(/[\s ]/)[0];
     const todayCount = filtered.filter(({ r }) => dayOf(r[0]) === todayStr).length;
 
-    return res.status(200).json({
+    // 有媒體名稱的筆數／全部筆數：成效報告的「媒體填寫率」
+    const filledRows = filtered.filter(({ r }) => !isNotMedia(r[3]) && splitMedia(r[3]).outlet).length;
+
+    const base = {
       total: filtered.length,
       today_count: todayCount,
+      media_total: allOutlets.length,                       // 全部（或所選活動）服務了幾家媒體
+      media_filled_count: filledRows,
       by_event: byEventArr,
       top_keywords: topKeywords,
       top_media: topMedia,
-      hourly_distribution: hourly,
+      hourly_distribution: hourly
+    };
+    // 儀表板只要數字：不回逐筆（批次 104）。同樣 120 筆，完整版 200KB、摘要版 < 3KB。
+    if (summaryOnly) return res.status(200).json(base);
+
+    return res.status(200).json({
+      ...base,
+      unanswered_count: filtered.filter(({ r }) => UNANSWERED_RE.test(r[5] || '')).length,
       recent: filtered.slice(-limit).reverse().map(({ r, rowNum }) => ({
-        time: r[0], event_id: r[1], event: r[2], media: r[3], question: r[4], row_num: rowNum, source: r[7] || 'web'
+        time: r[0], event_id: r[1], event: r[2], media: r[3], reporter: r[8] || '', question: r[4],
+        answer_preview: previewOf(r[5]), unanswered: UNANSWERED_RE.test(r[5] || ''),
+        row_num: rowNum, source: r[7] || 'web'
       }))
     });
   } catch (err) {

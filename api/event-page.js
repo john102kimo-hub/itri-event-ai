@@ -395,16 +395,9 @@ async function serveEventPage(req, res) {
     margin-top: 40px; padding-top: 16px; border-top: 1px solid #e5e7eb;
     font-size: 0.8rem; color: #9ca3af;
   }
-  /* 存檔模式：藏掉聊天介面，只留文章。
-     照片區不藏（批次 82）：public/event.html 會把它搬進文章裡，會後回來補抓新聞照的
-     記者要找得到。它在搬進來之前住在 #messages 裡，跟著 #messages 一起藏著。 */
-  body.archive-mode #media-banner,
-  body.archive-mode #welcome,
-  body.archive-mode #chips,
-  body.archive-mode #chip-dock,
-  body.archive-mode #messages,
-  body.archive-mode #input-area,
-  body.archive-mode #status-dot { display: none !important; }
+  /* 批次 105：已結束的活動網頁版照樣可以提問，不再有「存檔模式」把聊天介面藏起來。
+     瀏覽器端（public/event.html 的 setupArchive）把這篇文章搬進標題列「新聞稿存檔」按鈕展開的面板；
+     爬蟲不執行 JS，照樣在 HTML 裡讀到整篇，GEO 的效果不變。 */
 </style>`;
 
     html = html

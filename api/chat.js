@@ -115,16 +115,19 @@ const sanitize = (s, max) => String(s || '').replace(/\s+/g, ' ').trim().slice(0
 // 把這輪問答寫進 qa_log。串流模式下是在「文字已經全部送到瀏覽器之後」才呼叫——
 // 記者已經讀得到完整答案，但 Function 還沒 res.end()，所以寫入照樣有完整執行時間，
 // 不會重蹈當年 fire-and-forget 被凍結、寫到一半消失的覆轍。
-async function logQA({ event_id, eventName, media_name, question, reply }) {
+async function logQA({ event_id, eventName, media_name, reporter_name, question, reply }) {
   if (!process.env.GOOGLE_SPREADSHEET_ID || !question) return;
   const timestamp = new Date().toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' });
   try {
     // H 欄（source）批次 2 新增，用來分辨這題是網頁問的還是 LINE 問的（見 api/line.js）。
     // G 欄是既有的刪除旗標欄，這裡一定要補空字串佔位，不然 source 會寫錯格、
     // 後台會把這筆資料當成已刪除。
-    await appendRows('qa_log!A:H', [[
+    // I 欄（批次 105）：記者姓名。網頁彈窗拆成「媒體」「姓名」兩欄後，D 欄只放媒體，這樣
+    // 後台的「服務媒體家數」才數得準（舊版一整串「媒體 人名」去重，同一家會被算成好幾家）。
+    await appendRows('qa_log!A:I', [[
       timestamp, event_id, eventName,
-      sanitize(media_name, 40) || '（未填寫）', sanitize(question, 2000), reply, '', 'web'
+      sanitize(media_name, 40) || '（未填寫）', sanitize(question, 2000), reply, '', 'web',
+      sanitize(reporter_name, 40)
     ]]);
   } catch (e) {
     console.error('Sheets 寫入失敗:', e.message);
@@ -142,7 +145,7 @@ export default async function handler(req, res) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return res.status(500).json({ error: 'ANTHROPIC_API_KEY 未設定' });
 
-  const { messages, event_id, media_name, stream, client_id } = req.body || {};
+  const { messages, event_id, media_name, reporter_name, stream, client_id } = req.body || {};
 
   const ip = String(req.headers['x-forwarded-for'] || req.socket?.remoteAddress || 'unknown').split(',')[0].trim();
   // client_id 只拿來當限流的 key，不寫進任何資料表、也不跟媒體名稱綁在一起
@@ -153,6 +156,14 @@ export default async function handler(req, res) {
   if (!messages || !Array.isArray(messages)) return res.status(400).json({ error: '請求格式錯誤' });
   if (!event_id) return res.status(400).json({ error: '缺少活動 ID' });
 
+  // 網頁問答一定要先留下媒體名稱（批次 105，朱朱的決定：先填名稱，後台才做得出統計）。
+  // 前台的彈窗與輸入框鎖定是第一道，這裡是**程式出口**那一道（CLAUDE.md 第 2 條）：舊版頁面
+  // 還開在記者手機上、或有人直接打這支 API，都不會多出一筆「（未填寫）」。
+  // 用 code 讓前台認得是這一種錯、重新打開彈窗，而不是把這句話當成 AI 的回答印出來。
+  if (!sanitize(media_name, 40)) {
+    return res.status(400).json({ error: '請先填寫貴媒體名稱，再開始提問。', code: 'media_required' });
+  }
+
   // 裁切輸入：只留最近 12 則、每則截 8000 字 —— 沒有這道限制，輸入成本完全由呼叫者決定
   const trimmed = messages
     .slice(-12)
@@ -161,6 +172,10 @@ export default async function handler(req, res) {
       role: m.role,
       content: typeof m.content === 'string' ? m.content.slice(0, 8000) : m.content
     }));
+  // 模型 API 要求第一則一定是使用者的話。「只留最近 12 則」會把一輪問答從中間切開：前端每一題都是
+  // 「問、答、問、答…最後一個是問」，總數是奇數，往回數 12 則剛好從 AI 的回答開始——
+  // 同一場對話問到第 7 題起，每一題都會被模型 API 退件（記者看到「暫時無法取得回應」）。
+  while (trimmed.length && trimmed[0].role !== 'user') trimmed.shift();
   if (!trimmed.length) return res.status(400).json({ error: '請求格式錯誤' });
 
   // 串流途中出錯時，catch 要拿得到「已經送出去的那一段」與活動資訊來寫 qa_log
@@ -191,7 +206,7 @@ export default async function handler(req, res) {
           ? lastUserMsg.content
           : (lastUserMsg.content?.[0]?.text || ''));
 
-    logCtx = { event_id, eventName, media_name, question };
+    logCtx = { event_id, eventName, media_name, reporter_name, question };
 
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',

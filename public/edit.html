@@ -100,6 +100,19 @@ textarea.form-control { min-height: 240px; resize: vertical; line-height: 1.65; 
 .state-screen p { font-size: 0.9rem; max-width: 420px; line-height: 1.6; }
 .state-screen.error i { color: #ef4444; }
 
+/* 批次 104：發布前必填的檢查列（跟後台新增／編輯活動視窗同一套）與「缺這一欄」的框線 */
+.readiness {
+  position: sticky; top: 0; z-index: 20; background: #fff; border: 1px solid var(--border); border-radius: 10px;
+  padding: 9px 12px; margin: 0 0 16px; display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: center;
+  font-size: 0.82rem; box-shadow: 0 4px 10px rgba(0,0,0,0.05);
+}
+.readiness .lead { color: var(--muted); font-weight: 600; }
+.readiness .ok { color: #047857; font-weight: 600; }
+.readiness .miss { color: #b45309; font-weight: 600; }
+.readiness.all-ok { background: #f0fdf4; border-color: #bbf7d0; }
+.req { display: inline-block; font-size: 0.7rem; font-weight: 700; color: #b45309; background: #fffbeb; border: 1px solid #fde68a; border-radius: 10px; padding: 0 7px; margin-left: 6px; vertical-align: 1px; }
+.form-control.field-missing { border-color: #f59e0b; box-shadow: 0 0 0 3px rgba(245,158,11,0.25); }
+
 #toast {
   position: fixed; bottom: 84px; left: 50%; transform: translateX(-50%);
   background: #1a1a2e; color: white; padding: 12px 22px; border-radius: 10px;
@@ -143,6 +156,8 @@ textarea.form-control { min-height: 240px; resize: vertical; line-height: 1.65; 
     </div>
   </div>
 
+  <div class="readiness" id="readiness"></div>
+
   <div class="card">
     <h2><i class="ti ti-file-text" style="color:var(--primary)"></i> 基本資訊</h2>
     <div class="sub">這場記者會的名稱、日期與狀態</div>
@@ -152,7 +167,7 @@ textarea.form-control { min-height: 240px; resize: vertical; line-height: 1.65; 
       <input class="form-control" id="input-name" placeholder="例：工研院 AI 智慧醫療大平台發表記者會">
     </div>
     <div class="form-group">
-      <label><i class="ti ti-calendar-event"></i> 活動日期</label>
+      <label><i class="ti ti-calendar-event"></i> 活動日期<span class="req">發布前必填</span></label>
       <input class="form-control" id="input-date" type="date">
       <div class="form-hint">這個日期會顯示在後台的活動行事曆上</div>
     </div>
@@ -161,8 +176,9 @@ textarea.form-control { min-height: 240px; resize: vertical; line-height: 1.65; 
       <input class="form-control" id="input-time" placeholder="例：10:00">
     </div>
     <div class="form-group">
-      <label><i class="ti ti-map-pin"></i> 活動地點（選填）</label>
+      <label><i class="ti ti-map-pin"></i> 活動地點<span class="req">發布前必填</span></label>
       <input class="form-control" id="input-venue" placeholder="例：工研院中興院區 中興文薈廳">
+      <div class="form-hint">記者問「在哪裡」時，AI 靠這一欄回答</div>
     </div>
     <div class="form-group">
       <label><i class="ti ti-category"></i> 活動類型（選填）</label>
@@ -175,9 +191,9 @@ textarea.form-control { min-height: 240px; resize: vertical; line-height: 1.65; 
       </datalist>
     </div>
     <div class="form-group">
-      <label><i class="ti ti-headset"></i> 新聞聯絡人（選填）</label>
+      <label><i class="ti ti-headset"></i> 新聞聯絡人<span class="req">發布前必填</span></label>
       <input class="form-control" id="input-contact" placeholder="例：王小明 03-1234567 分機 8888">
-      <div class="form-hint">AI 答不出來時，會請記者洽詢這裡填的人；也是未來 LINE 查詢「這場還沒有內容」時唯一能給的線索，建議填。</div>
+      <div class="form-hint">AI 答不出來時，會請記者洽詢這裡填的人；也是 LINE 查詢「這場還沒有內容」時唯一能給的線索。</div>
     </div>
     <div class="form-group">
       <label><i class="ti ti-address-book"></i> 邀訪聯絡窗口分工（選填，每行一組）</label>
@@ -222,7 +238,7 @@ textarea.form-control { min-height: 240px; resize: vertical; line-height: 1.65; 
   </div>
 
   <div class="card">
-    <h2><i class="ti ti-database" style="color:var(--primary)"></i> 活動知識庫（最重要）</h2>
+    <h2><i class="ti ti-database" style="color:var(--primary)"></i> 活動知識庫（最重要）<span class="req">新聞稿發布前必填</span></h2>
     <div class="sub">貼上本場新聞稿與重要資訊，AI 只會根據這裡的內容回答記者</div>
 
     <div class="form-group" id="copy-template-group" style="display:none;background:var(--primary-light);border:1px solid var(--border);border-radius:10px;padding:14px">
@@ -401,6 +417,7 @@ const KB_SOFT_LIMIT = 8000;
 const KB_HARD_LIMIT = 45000;
 
 function updateKbCount() {
+  updateReadiness();
   const out = document.getElementById('kb-count');
   const n = document.getElementById('input-kb').value.length;
   if (n > KB_HARD_LIMIT) {
@@ -415,12 +432,64 @@ function updateKbCount() {
   }
 }
 
+// ── 發布前必填檢查（批次 104）──────────────────────────────
+// 後端 api/events.js 的發布閘門（批次 103）才是「擋住」的那一道；這裡只是讓同仁在按儲存之前就看到
+// 還缺什麼，不用被退回來才知道。
+// ⚠️ kbHasContent 是 lib/kb-template.js 的鏡射（靜態頁沒辦法 import lib/）——
+//    test/test-batch104-admin.mjs 拿同一批樣本比對兩邊的結果。
+let KB_TEMPLATE_LINES = null;   // 第一次用到才建（KB_TEMPLATE 在檔案前面已經宣告）
+const KB_EMPTY_SHAPES = [/^[-・•*]+$/, /^【[^】]*】(（[^）]*）|\([^)]*\))?$/, /^[-・•*]?\s*[^：:]{0,30}[：:]$/];
+function kbHasContent(kb) {
+  if (!KB_TEMPLATE_LINES) KB_TEMPLATE_LINES = new Set(KB_TEMPLATE.split('\n').map(l => l.trim()).filter(Boolean));
+  return String(kb || '').split('\n').map(l => l.trim()).filter(Boolean)
+    .some(l => !KB_TEMPLATE_LINES.has(l) && !KB_EMPTY_SHAPES.some(re => re.test(l)));
+}
+function missingForPublish() {
+  const v = id => (document.getElementById(id)?.value || '').trim();
+  const miss = [];
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(v('input-date'))) miss.push({ label: '日期', field: 'input-date' });
+  if (!v('input-venue')) miss.push({ label: '地點', field: 'input-venue' });
+  if (!v('input-contact')) miss.push({ label: '新聞聯絡人', field: 'input-contact' });
+  if (!kbHasContent(v('input-kb'))) miss.push({ label: '新聞稿', field: 'input-kb' });
+  return miss;
+}
+function updateReadiness() {
+  const box = document.getElementById('readiness');
+  if (!box) return;
+  const miss = missingForPublish();
+  const missLabels = new Set(miss.map(m => m.label));
+  const chip = l => missLabels.has(l) ? `<span class="miss"><i class="ti ti-square"></i> ${l}</span>` : `<span class="ok"><i class="ti ti-circle-check"></i> ${l}</span>`;
+  box.className = 'readiness' + (miss.length ? '' : ' all-ok');
+  box.innerHTML = `<span class="lead">發布前必填</span>${['日期', '地點', '新聞聯絡人', '新聞稿'].map(chip).join('')}` +
+    (miss.length ? '' : '<span class="ok">　都齊了，可以把狀態改成「進行中」</span>');
+}
+// 儲存被擋下來時，把缺的欄位框起來並捲過去
+function highlightMissing(labels) {
+  const map = { '日期': 'input-date', '地點': 'input-venue', '新聞聯絡人': 'input-contact', '新聞稿': 'input-kb' };
+  let first = null;
+  (labels || []).forEach(l => {
+    const el = document.getElementById(map[l]);
+    if (!el) return;
+    el.classList.add('field-missing');
+    setTimeout(() => el.classList.remove('field-missing'), 8000);
+    first = first || el;
+  });
+  first?.scrollIntoView?.({ behavior: 'smooth', block: 'center' });
+}
+// 活動日期欄只收「純日期」：沒填日期的活動，日期欄裡是系統寫的建立時間戳（"2026/6/18 下午11:06:04"），
+// 以前把它的前半段當成活動日期預填進來——同仁按儲存，「建立那天」就變成正式的活動日期。
+// 跟後端 lib/event-status.js eventDateOf() 同一條規則。
+function eventDateIso(ev) {
+  const m = String((ev && ev.event_date) || '').trim().match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/);
+  return m ? `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}` : '';
+}
+
 // 記錄頁面載入當下的狀態，存檔時用來判斷「這次是不是第一次從未發布切成進行中」（= 發布）
 let loadedStatus = 'active';
 
 // 沒存就關分頁毫無警告的話，同仁手打的內容會整段蒸發 —— 追蹤是否有未儲存的變更
 let dirty = false;
-document.getElementById('editor').addEventListener('input', () => { dirty = true; });
+document.getElementById('editor').addEventListener('input', () => { dirty = true; updateReadiness(); });
 window.addEventListener('beforeunload', (e) => {
   if (dirty) { e.preventDefault(); e.returnValue = ''; }
 });
@@ -464,16 +533,9 @@ async function load() {
     document.getElementById('input-status').value = loadedStatus;
     updateStatusHint();
 
-    // 活動日期解析
-    const dateStr = ev.event_date || ev.created_at || '';
-    let isoDate = '';
-    if (dateStr.match(/^\d{4}-\d{2}-\d{2}/)) {
-      isoDate = dateStr.slice(0, 10);
-    } else if (dateStr.match(/^\d{4}\/\d{1,2}\/\d{1,2}/)) {
-      const p = dateStr.split('/');
-      isoDate = p[0] + '-' + String(p[1]).padStart(2, '0') + '-' + String(p[2]).padStart(2, '0');
-    }
-    document.getElementById('input-date').value = isoDate;
+    // 活動日期：只收純日期（見 eventDateIso 的說明），沒填就留空讓同仁自己選
+    document.getElementById('input-date').value = eventDateIso(ev);
+    updateReadiness();
 
     document.getElementById('preview-link').href = `/event?id=${encodeURIComponent(EVENT_ID)}`;
     // 訓練頁的授權吃網址上的 code，跟這個編輯頁用同一支，同仁不用另外要密碼就能直接點開。
@@ -544,7 +606,8 @@ async function save() {
   // 要對外（進行中／已結束）時才要求：記者問得到卻什麼都答不出來，比晚一點發布更糟。
   const statusForCheck = document.getElementById('input-status').value;
   if (!knowledge_base && statusForCheck !== 'draft') {
-    toast('要發布（進行中／已結束）之前，知識庫不可為空；還沒定稿的話先維持「未發布」存檔即可');
+    highlightMissing(['新聞稿']);
+    toast('要發布（進行中／已結束）之前，知識庫不可為空；還沒定稿的話先維持「未發布」存檔即可', 8000);
     return;
   }
 
@@ -605,6 +668,15 @@ async function save() {
       })
     });
     const data = await res.json();
+    if (data.code === 'publish_blocked') {
+      // 把狀態改成公開（進行中／已結束）但必填沒齊：後端擋下來了，內容都還在畫面上。
+      // 把缺的欄位框起來、捲過去，並告訴他最簡單的出路——先維持「未發布」存起來。
+      highlightMissing(data.missing);
+      toast(`${data.error}`, 8000);
+      btn.disabled = false;
+      btn.innerHTML = '<i class="ti ti-device-floppy"></i> 儲存內容';
+      return;
+    }
     if (!res.ok || data.error) throw new Error(data.error || '儲存失敗');
     dirty = false;
     loadedStatus = status;
@@ -689,12 +761,13 @@ async function uploadExposure() {
 }
 
 let toastTimer;
-function toast(msg) {
+function toast(msg, ms) {
   const el = document.getElementById('toast');
   el.textContent = msg;
   el.style.display = 'block';
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => el.style.display = 'none', 3200);
+  // 長一點的說明（被擋下來、儲存失敗）停久一點，讓人讀得完；以前一律 3.2 秒，手機上讀到一半就沒了
+  toastTimer = setTimeout(() => el.style.display = 'none', ms || Math.min(9000, 3200 + String(msg).length * 60));
 }
 
 // ── 從 Word 檔匯入（批次 79）─────────────────────────────────────

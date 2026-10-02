@@ -672,7 +672,7 @@
   <!-- ③ 打字作答：永遠留著這條路。麥克風壞了、在開放空間不方便講、辨識一直失敗，
        都得有辦法把這場練完。 -->
   <div id="type-pane" style="display:none">
-    <textarea id="user-input" rows="1" placeholder="輸入您的回答…（Enter 送出，Shift+Enter 換行）" disabled></textarea>
+    <textarea id="user-input" rows="1" placeholder="輸入您的回答…" disabled></textarea>
     <button id="send-btn" disabled><i class="ti ti-send"></i></button>
     <button id="switch-to-voice" class="link-btn" type="button">改用講的</button>
   </div>
@@ -1091,6 +1091,12 @@ async function init() {
     if (chip) pickQ(Number(chip.dataset.n));
   });
 
+  // 手機沒有 Shift+Enter 可按，那串鍵盤提示只給有實體鍵盤的裝置——手機上它會折成兩行、被單行輸入框切掉一半
+  //（跟記者頁 public/event.html 的 INPUT_HINT 同一個道理）。
+  if (!(window.matchMedia && matchMedia('(pointer: coarse)').matches)) {
+    document.getElementById('user-input').placeholder = '輸入您的回答…（Enter 送出，Shift+Enter 換行）';
+  }
+
   // 作答方式：沿用上次的選擇；這台機器根本錄不了音就直接退回打字，不要讓人
   // 按了麥克風才發現不能用。
   let saved = 'voice';
@@ -1186,6 +1192,60 @@ async function loadOneEvent(id) {
   } catch (e) { return null; }
 }
 
+// ── 活動選擇器（批次 106）──────────────────────────────────────────────
+// 以前是試算表的順序（最舊的在最上面）、每顆按鈕只有名字：十幾場活動時，這禮拜要練的那一場得
+// 捲到最底下找，也分不出哪些還沒發布、哪些根本還沒有新聞稿。改成跟後台一樣分「接下來要辦」
+// 「已辦完」兩區，日期近的在前，每顆按鈕寫出日期與狀態。
+// ⚠️ 下面 WEEKDAYS 到 eventSections 這一段與 public/index.html 是同一份（靜態頁沒辦法共用程式）；
+//    test/test-batch106-training.mjs 比對兩邊的原始碼逐字相同。
+const WEEKDAYS = ['日','一','二','三','四','五','六'];
+function eventDateIso(ev) {
+  const m = String((ev && (ev.event_date || ev.created_at)) || '').trim().match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/);
+  return m ? `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}` : '';
+}
+function daysBetween(fromIso, toIso) {
+  return Math.round((Date.parse(toIso + 'T00:00:00Z') - Date.parse(fromIso + 'T00:00:00Z')) / 86400000);
+}
+function shortDateLabel(iso) {
+  const [y, m, d] = iso.split('-').map(Number);
+  return `${m}/${d}（${WEEKDAYS[new Date(Date.UTC(y, m - 1, d)).getUTCDay()]}）`;
+}
+function eventSections(events, todayIso) {
+  const upcoming = [], past = [], archived = [];
+  for (const ev of events || []) {
+    const d = eventDateIso(ev);
+    if (ev.status === 'archived') archived.push(ev);
+    else if (ev.status === 'ended' || (d && d < todayIso)) past.push(ev);
+    else upcoming.push(ev);
+  }
+  const name = (a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'zh-Hant');
+  const asc = (a, b) => { const x = eventDateIso(a), y = eventDateIso(b); return x && y ? (x.localeCompare(y) || name(a, b)) : x ? -1 : y ? 1 : name(a, b); };
+  const desc = (a, b) => { const x = eventDateIso(a), y = eventDateIso(b); return x && y ? (y.localeCompare(x) || name(a, b)) : x ? -1 : y ? 1 : name(a, b); };
+  return { upcoming: upcoming.sort(asc), past: past.sort(desc), archived: archived.sort(desc) };
+}
+// 台灣的今天（不是瀏覽器所在時區的今天；批次 103 起全站一致）
+function todayTaipeiIso() {
+  return new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Taipei' });
+}
+
+// 按鈕第二行：日期・狀態・還缺什麼
+function eventMeta(ev, today) {
+  const d = eventDateIso(ev);
+  const bits = [];
+  if (d) {
+    const diff = daysBetween(today, d);
+    bits.push(shortDateLabel(d) + (diff === 0 ? '・今天' : diff > 0 ? `・還有 ${diff} 天` : ev.status === 'ended' ? '' : `・${-diff} 天前`));
+  } else {
+    bits.push('日期未定');
+  }
+  if (ev.status === 'draft') bits.push('未發布');
+  else if (ev.status === 'ended') bits.push('已結束');
+  // 沒有新聞稿的活動，AI 記者只能憑活動名稱發問，題目會很空泛——先講清楚，免得練了半天才發現
+  if (ev.has_kb === false || (Array.isArray(ev.missing) && ev.missing.includes('新聞稿'))) bits.push('還沒有新聞稿，題目會比較空泛');
+  return bits.join('　·　');
+}
+
+const PAST_SHOWN = 3;
 function showEventSelector(events) {
   // 隱藏進度條與開始按鈕，顯示選擇器
   document.getElementById('progress-bar').style.display = 'none';
@@ -1194,27 +1254,49 @@ function showEventSelector(events) {
   const container = document.createElement('div');
   container.id = 'event-selector';
   container.style.cssText = 'padding:20px 16px;';
+  const today = todayTaipeiIso();
+  const { upcoming, past } = eventSections(events, today);
 
-  const title = document.createElement('p');
-  title.style.cssText = 'font-size:0.9rem;color:#7c3a0a;margin-bottom:14px;font-weight:600;';
-  title.textContent = '請選擇要進行訓練的活動：';
-  container.appendChild(title);
+  const heading = (text, first) => {
+    const p = document.createElement('p');
+    p.style.cssText = `font-size:0.9rem;color:#7c3a0a;margin:${first ? '0' : '18px'} 0 10px;font-weight:600;`;
+    p.textContent = text;
+    return p;
+  };
+  container.appendChild(heading('請選擇要進行訓練的活動：', true));
+  container.appendChild(createSelectorBtn('🗂 彙整訓練（全部活動）', 'all', '把所有未封存的活動（含還沒發布的）合在一起練', '工研院彙整媒體訓練'));
 
-  // 彙整選項
-  const allBtn = createSelectorBtn('🗂 彙整訓練（全部活動）', 'all', '涵蓋所有進行中活動的知識庫');
-  container.appendChild(allBtn);
-
-  // 各活動選項
-  events.forEach(ev => {
-    const btn = createSelectorBtn('📋 ' + ev.name, ev.id, '');
-    container.appendChild(btn);
-  });
+  const addBtns = (list, into) => list.forEach(ev => into.appendChild(createSelectorBtn('📋 ' + ev.name, ev.id, eventMeta(ev, today), ev.name)));
+  if (upcoming.length) {
+    container.appendChild(heading(`接下來要辦（${upcoming.length}）`));
+    addBtns(upcoming, container);
+  }
+  if (past.length) {
+    container.appendChild(heading(`已辦完（${past.length}）`));
+    const box = document.createElement('div');
+    container.appendChild(box);
+    addBtns(past.slice(0, PAST_SHOWN), box);
+    if (past.length > PAST_SHOWN) {
+      const more = document.createElement('button');
+      more.type = 'button';
+      more.className = 'link-btn';
+      more.textContent = `顯示全部 ${past.length} 場`;
+      more.onclick = () => { more.remove(); addBtns(past.slice(PAST_SHOWN), box); };
+      container.appendChild(more);
+    }
+  }
+  if (!upcoming.length && !past.length) {
+    const none = document.createElement('p');
+    none.style.cssText = 'color:#6b7280;font-size:0.85rem;';
+    none.textContent = '目前沒有可以練習的單場活動，可以先用上面的「彙整訓練」。';
+    container.appendChild(none);
+  }
 
   // 插入在 info-card 之後
   document.getElementById('info-card').insertAdjacentElement('afterend', container);
 }
 
-function createSelectorBtn(label, id, desc) {
+function createSelectorBtn(label, id, desc, name) {
   const btn = document.createElement('button');
   btn.style.cssText = 'display:block;width:100%;text-align:left;background:white;border:1.5px solid #e5e7eb;border-radius:10px;padding:12px 16px;margin-bottom:10px;cursor:pointer;font-family:var(--font);font-size:0.9rem;font-weight:600;transition:all 0.15s;';
   btn.textContent = label;
@@ -1228,7 +1310,7 @@ function createSelectorBtn(label, id, desc) {
   btn.onmouseout = () => { btn.style.borderColor = '#e5e7eb'; btn.style.background = 'white'; };
   btn.onclick = () => {
     // 報告與下載檔要寫得出活動名稱——選擇器進來的，init() 那時還不知道是哪一場
-    if (id !== 'all') eventName = label.replace(/^📋\s*/, '');
+    eventName = name || label.replace(/^📋\s*/, '');
     selectEvent(id);
   };
   return btn;
@@ -1245,10 +1327,17 @@ function selectEvent(id) {
   document.getElementById('progress-bar').style.display = '';
   document.getElementById('start-area').style.display = 'flex';
 
+  // 標題要寫出是哪一場。以前只有「彙整」會改標題，選了單場活動，頁首還是「媒體訓練模式」，
+  // 練的人（尤其同時開了好幾個分頁）看不出這一頁是在練哪一場。
   if (id === 'all') {
     eventName = '工研院彙整媒體訓練';
     document.getElementById('event-title').textContent = '彙整媒體訓練 — 全部活動';
     document.getElementById('event-subtitle').textContent = 'AI 記者實戰演練（綜合所有活動）';
+    document.title = '彙整媒體訓練';
+  } else {
+    document.getElementById('event-title').textContent = eventName + ' — 媒體訓練';
+    document.getElementById('event-subtitle').textContent = 'AI 記者實戰演練';
+    document.title = eventName + ' — 媒體訓練';
   }
   renderLastSession();
   offerResume();

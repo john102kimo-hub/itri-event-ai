@@ -1607,7 +1607,7 @@ function onPickEvent(){
     hint.textContent = '（帶入建立日，請改成實際活動日）';
   }else{
     hint.textContent = '';
-    if(other) d.value = d.value || new Date().toISOString().slice(0,10);
+    if(other) d.value = d.value || new Date().toLocaleDateString('sv-SE',{timeZone:'Asia/Taipei'});
   }
 }
 
@@ -1620,7 +1620,7 @@ function onStandingToggle(){
     document.getElementById('s-title-fld').style.display = 'none';
     document.getElementById('s-date-hint').textContent = '（開始追蹤日，不是發稿日）';
     const d = document.getElementById('s-date');
-    d.value = d.value || new Date().toISOString().slice(0,10);
+    d.value = d.value || new Date().toLocaleDateString('sv-SE',{timeZone:'Asia/Taipei'});
   } else {
     onPickEvent();
   }

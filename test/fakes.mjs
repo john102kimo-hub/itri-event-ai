@@ -4,6 +4,19 @@
 // O press_contact, P contacts（邀訪窗口分工）, Q invite_letter（媒體邀請函）,
 // R invite_letter_chips（活動前快速提問）
 
+// ── 相對「今天」的日期（台灣時間）──────────────────────────────────────
+// 批次 103：以前這裡寫死 `2026-10-01`，日期一過，「近期場次」的測試就在沒人改程式的情況下
+// 全紅（2026-10-02 發生）。凡是「還沒到／剛辦完／很久以前」這種**相對今天**的關係，一律用
+// 這兩支算，不要再寫死日期。想驗證有沒有漏網的，跑 SHIFT_DAYS=90 npm test（見 tools/time-travel）。
+export const isoOffset = (days) => {
+  const t = new Date(Date.now() + days * 86400000);
+  return t.toLocaleDateString('sv-SE', { timeZone: 'Asia/Taipei' });
+};
+export const weekdayOf = (iso) => {
+  const [y, m, d] = iso.split('-').map(Number);
+  return '日一二三四五六'[new Date(Date.UTC(y, m - 1, d)).getUTCDay()];
+};
+
 // 全域技術窗口分工（contacts_directory!A2，見 lib/contacts-directory.js）的預設假
 // 資料，格式：主題｜單位｜聯絡人｜電話｜LINE ID｜簡介，一行一組。獨立成常數（不是
 // 直接寫進 state 物件字面量）是因為 reset() 要能把它還原回這份預設值——見 reset()
@@ -32,8 +45,8 @@ export const state = {
   events: [
     ['quad', '經濟部四足機器人國產研發平台發表記者會', '#0F9E7A', '【新聞稿】四足機器人…', 'ended', '2026-08-08', '重點\n應用', '', '', '工研院', 'code1', '', '', '', '王小明 03-1111111',
       '技術規格｜陳美玲｜03-1111111 分機9999｜lineid_amy\n新聞稿｜王小明｜03-1111111 分機1234', '', ''],
-    ['semi', '半導體先進封裝技術發表會', '#0F9E7A', '【新聞稿】先進封裝…', 'active', '2026-09-20', '', '', '', '工研院', 'code2', '', '', '', '陳大文 03-2222222 分機5678', '', '', ''],
-    ['med', '智慧醫療解決方案記者會', '#0F9E7A', '【新聞稿】智慧醫療…', 'active', '2026-10-01', '', '', '', '工研院', 'code3', '', '', '', '', '', '', ''],
+    ['semi', '半導體先進封裝技術發表會', '#0F9E7A', '【新聞稿】先進封裝…', 'active', isoOffset(-4), '', '', '', '工研院', 'code2', '', '', '', '陳大文 03-2222222 分機5678', '', '', ''],
+    ['med', '智慧醫療解決方案記者會', '#0F9E7A', '【新聞稿】智慧醫療…', 'active', isoOffset(7), '', '', '', '工研院', 'code3', '', '', '', '', '', '', ''],
     // 活動日期動態算「明天」，配合媒體邀請函測試（見 test-flow.mjs 情境 14）——不能寫死
     // 日期字串，不然這個 fixture 過幾個月就會變成「已過期」，測試會跟著失效。
     // chips（G 欄）刻意填一題「活動內容」問句，invite_letter_chips（R 欄）刻意填一題
@@ -295,7 +308,9 @@ function fakeUpdate(text) {
   let value = m[2].trim();
   let field = (FAKE_FIELD.find(([w]) => text.includes(w)) || [])[1] || '';
   const d = value.match(/^(\d{1,2})\/(\d{1,2})$/);
-  if (d) { field = field || 'date'; value = `2026-${d[1].padStart(2, '0')}-${d[2].padStart(2, '0')}`; }
+  if (d) { field = field || 'date'; value = `${isoOffset(0).slice(0, 4)}-${d[1].padStart(2, '0')}-${d[2].padStart(2, '0')}`; }
+  // 完整日期：測試用 isoOffset() 算相對今天的日期，直接傳 YYYY-MM-DD，不受跨年影響（批次 103）
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) field = field || 'date';
   if (!field && /點/.test(value)) field = 'time';
   return { field, value };
 }

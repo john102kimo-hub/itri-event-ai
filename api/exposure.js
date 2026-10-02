@@ -13,6 +13,7 @@
 
 import { readRange, appendRows, ensureSheets, listSheets, batchUpdate } from '../lib/sheets.js';
 import { parseExposureFile, normalizeOutlet } from '../lib/exposure-parse.js';
+import { groupOutlets } from '../lib/media-name.js';
 
 const SHEETS = {
   exposure: ['event_id', '則數', '日期', '類型', '媒體名稱', '版位', '標題', '上傳時間', '來源檔'],
@@ -104,19 +105,17 @@ const CAVEAT = 'AI 問答的媒體名稱由記者自行輸入，露出清單的�
 function crossAnalyze(expRows, qaRows) {
   const exp = expRows.map((r) => ({ outlet: r[4], date: r[2], type: r[3], title: r[6] }));
 
-  const asked = [...new Set(qaRows.map((r) => String(r[3] || '').trim())
-    .filter((m) => m && m !== '（未填寫）'))];
+  // 批次 105：提問側的媒體用 groupOutlets() 併成「家」——「經濟日報 王小明」與「經濟日報 林小美」是
+  // 同一家，「（未提供）」「（群組提問）」「（內部職員）」不算任何一家。以前拿 D 欄整串去重，
+  // 分母（有提問的媒體數）被灌大，「提問 → 發稿」的比例跟著偏低；這個比例是要報給長官的。
+  const askedGroups = groupOutlets(qaRows.map((r) => r[3]));
+  const asked = askedGroups.map((g) => g.name);
   const published = [...new Set(exp.map((r) => r.outlet).filter(Boolean))];
 
   const askedAndPublished = asked.filter((a) => published.some((p) => outletMatches(a, p)));
   const askedNotPublished = asked.filter((a) => !published.some((p) => outletMatches(a, p)));
   const publishedNotAsked = published.filter((p) => !asked.some((a) => outletMatches(a, p)));
 
-  const qCount = {};
-  qaRows.forEach((r) => {
-    const m = String(r[3] || '').trim();
-    if (m && m !== '（未填寫）') qCount[m] = (qCount[m] || 0) + 1;
-  });
 
   return {
     exposure: summarize(exp),
@@ -133,8 +132,7 @@ function crossAnalyze(expRows, qaRows) {
         publishedNotAsked: publishedNotAsked.slice(0, 40),
       },
     },
-    topAskers: Object.entries(qCount).sort((a, b) => b[1] - a[1]).slice(0, 10)
-      .map(([media, n]) => ({ media, n })),
+    topAskers: askedGroups.slice(0, 10).map((g) => ({ media: g.name, n: g.count })),
   };
 }
 
