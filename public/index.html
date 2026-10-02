@@ -472,7 +472,7 @@ details.adv[open] > summary { border-bottom:1px solid var(--border); margin-bott
   .top-grid { grid-template-columns: 1fr; }
   .modal { padding: 20px 16px; }
   .search-input { min-width: 0; width: 100%; }
-  /* 批次 104：底部選單只留四個最常用的 ＋「更多」，其餘（邀訪窗口分工／彙整媒體訓練／媒體報名／登出）收進面板。
+  /* 批次 104：底部選單只留四個最常用的 ＋「更多」，其餘（邀訪窗口分工／彙整媒體訓練／活動報名／登出）收進面板。
      原本八個項目擠不下，「AI 能見度」「成效報告」「登出」被推到畫面外、也沒有任何捲動提示。 */
   #sidebar { justify-content: space-around; }
   #sidebar .nav-item.nav-secondary, #sidebar .sidebar-bottom { display: none; }
@@ -540,7 +540,7 @@ details.adv[open] > summary { border-bottom:1px solid var(--border); margin-bott
       <i class="ti ti-microphone"></i> 彙整媒體訓練
     </a>
     <a class="nav-item nav-secondary" href="/registrations" style="text-decoration:none;color:rgba(255,255,255,0.7)">
-      <i class="ti ti-ticket"></i> 媒體報名
+      <i class="ti ti-ticket"></i> 活動報名
     </a>
     <a class="nav-item" href="/report" style="text-decoration:none;color:rgba(255,255,255,0.7)">
       <i class="ti ti-chart-histogram"></i> 成效報告
@@ -1350,7 +1350,7 @@ function openNavMore(btn) {
   const items = [
     { icon: 'address-book', label: '邀訪窗口分工', run: () => showView('contacts') },
     { icon: 'microphone', label: '彙整媒體訓練', run: () => { location.href = '/training'; } },
-    { icon: 'ticket', label: '媒體報名', run: () => { location.href = '/registrations'; } },
+    { icon: 'ticket', label: '活動報名', run: () => { location.href = '/registrations'; } },
     { sep: true },
     { icon: 'logout', label: '登出', run: () => logout() }
   ];
