@@ -232,11 +232,13 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); min-
 .empty-state p { font-size: 0.95rem; }
 
 /* ── 統計卡片 ──────────────────────────────────────────── */
-.stats-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: 16px; margin-bottom: 24px; }
-.stat-card { background: white; border: 1px solid var(--border); border-radius: var(--radius); padding: 18px 20px; }
-.stat-label { font-size: 0.78rem; color: var(--muted); margin-bottom: 6px; }
-.stat-value { font-size: 1.8rem; font-weight: 800; color: var(--text); }
-.stat-icon { float: right; font-size: 28px; color: var(--primary); opacity: 0.4; margin-top: -4px; }
+/* 批次 104：統計列搬到最上面、縮小——原本夾在行事曆與活動卡片中間，第一屏被行事曆佔滿 */
+.stats-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: 12px; margin-bottom: 22px; }
+.stat-card { background: white; border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 16px; }
+.stat-label { font-size: 0.76rem; color: var(--muted); margin-bottom: 2px; }
+.stat-value { font-size: 1.5rem; font-weight: 800; color: var(--text); line-height: 1.25; }
+.stat-note { font-size: 0.68rem; color: var(--muted); margin-top: 1px; }
+.stat-icon { float: right; font-size: 22px; color: var(--primary); opacity: 0.4; }
 
 /* ── 分析面板 ──────────────────────────────────────────── */
 #analytics-view .section-title { font-size: 1rem; font-weight: 700; margin-bottom: 14px; display: flex; align-items: center; gap: 8px; }
@@ -254,7 +256,8 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); min-
 .qa-table td { padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
 .qa-table tr:hover td { background: #f9fafb; }
 .media-bar { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
-.media-bar-label { font-size: 0.82rem; min-width: 80px; }
+/* 批次 104：標籤給固定比例並截斷。原本 min-width 80px 又不截斷，窄螢幕上標籤吃掉整列、長條縮成一個小點 */
+.media-bar-label { font-size: 0.82rem; flex: 0 0 38%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .media-bar-track { flex: 1; height: 8px; background: var(--border); border-radius: 4px; }
 .media-bar-fill { height: 100%; background: var(--primary); border-radius: 4px; }
 .media-bar-count { font-size: 0.78rem; color: var(--muted); min-width: 24px; text-align: right; }
@@ -270,7 +273,7 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); min-
 .modal {
   background: white;
   border-radius: 16px;
-  width: 600px; max-width: 100%;
+  width: 680px; max-width: 100%;
   max-height: 90vh;
   overflow-y: auto;
   padding: 28px;
@@ -327,6 +330,111 @@ textarea.form-control { min-height: 200px; resize: vertical; line-height: 1.6; }
 .skeleton { background: linear-gradient(90deg, #f3f4f6 25%, #e9ebee 37%, #f3f4f6 63%); background-size: 400px 100%; animation: shimmer 1.4s ease infinite; height: 180px; border-radius: var(--radius); }
 @keyframes shimmer { 0% { background-position: -400px 0; } 100% { background-position: 400px 0; } }
 
+
+/* ══ 批次 104：後台易用性（活動分區、卡片收納、發布檢查、問答分析）══════════════════ */
+.check-inline { display:inline-flex; align-items:center; gap:6px; font-size:0.85rem; color:var(--muted); cursor:pointer; white-space:nowrap; }
+.check-inline input { cursor:pointer; }
+
+/* 活動分區：接下來要辦／已辦完／已封存 */
+.ev-section { margin-bottom: 26px; }
+.ev-section-head { display:flex; align-items:center; gap:10px; margin-bottom:12px; flex-wrap:wrap; }
+.ev-section-head h2 { font-size:1rem; font-weight:700; display:flex; align-items:center; gap:8px; }
+.ev-section-head h2 i { color: var(--primary); font-size:20px; }
+.ev-section-head .count { font-size:0.74rem; font-weight:700; background:var(--primary-light); color:var(--primary); padding:2px 9px; border-radius:20px; }
+.ev-section-head .grow { flex:1; }
+.linkbtn { background:none; border:none; color:var(--primary); font:inherit; font-size:0.82rem; font-weight:600; cursor:pointer; padding:2px 4px; text-decoration:underline; text-underline-offset:3px; }
+.ev-section.quiet .event-card { background:#fcfcfd; }
+.ev-empty { background:white; border:1px dashed var(--border); border-radius:var(--radius); padding:26px 20px; text-align:center; color:var(--muted); font-size:0.9rem; }
+.ev-empty .btn { margin-top:12px; }
+
+/* 活動卡片：同一列的卡片等高，按鈕列貼在卡片底部（有的卡片有「必填還缺」提示、有的沒有，
+   不貼底的話同一列的按鈕會高高低低） */
+.event-card { display:flex; flex-direction:column; }
+.event-card-body { padding:16px; flex:1; display:flex; flex-direction:column; }
+.event-card-body .event-actions { margin-top:auto; }
+.event-meta { margin-bottom:12px; }
+.event-meta .tbd { color:#b45309; font-weight:600; }
+.event-meta .rel { color:var(--primary-dark); font-weight:600; }
+.ready-line { display:flex; align-items:flex-start; gap:6px; font-size:0.78rem; line-height:1.55; border-radius:8px; padding:7px 10px; margin:0 0 12px; }
+.ready-line i { font-size:16px; flex-shrink:0; margin-top:1px; }
+.ready-line.warn { background:#fffbeb; color:#92400e; border:1px solid #fde68a; }
+.ready-line.ok { background:#ecfdf5; color:#065f46; border:1px solid #a7f3d0; }
+.ready-line .linkbtn { margin-left:auto; color:inherit; flex-shrink:0; }
+.action-btn.more { padding:6px 10px; }
+.card-flash { animation: cardFlash 1.8s ease; }
+@keyframes cardFlash { 0%,65% { box-shadow:0 0 0 3px var(--primary); } 100% { box-shadow:none; } }
+
+/* 「更多」選單：電腦是浮在按鈕旁的小選單，手機是從底部升起的面板 */
+.more-backdrop { position:fixed; inset:0; z-index:65; display:none; }
+.more-pop { position:fixed; z-index:70; display:none; background:#fff; border:1px solid var(--border); border-radius:12px;
+  box-shadow:0 14px 36px rgba(0,0,0,0.2); padding:6px; min-width:200px; max-width:calc(100vw - 16px); }
+.more-pop button { display:flex; align-items:center; gap:9px; width:100%; text-align:left; background:none; border:0; padding:9px 11px;
+  border-radius:8px; font-family:var(--font); font-size:0.85rem; color:var(--text); cursor:pointer; }
+.more-pop button:hover, .more-pop button:focus-visible { background:var(--primary-light); outline:none; }
+.more-pop button i { font-size:17px; color:var(--muted); }
+.more-pop button.danger, .more-pop button.danger i { color:#dc2626; }
+.more-pop .sep { height:1px; background:var(--border); margin:5px 2px; }
+.more-pop .more-title { font-size:0.74rem; color:var(--muted); padding:6px 11px 4px; }
+
+/* 行事曆收合 */
+.cal-box { background:white; border:1px solid var(--border); border-radius:var(--radius); padding:12px 16px; margin-top:6px; }
+.cal-box-head { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+.cal-box-head .toggle { display:inline-flex; align-items:center; gap:8px; background:none; border:0; font-family:var(--font); font-size:1rem; font-weight:700; cursor:pointer; padding:4px 0; color:var(--text); }
+.cal-box-head .toggle i:first-child { color:var(--primary); font-size:20px; }
+.cal-box-head .grow { flex:1; }
+.cal-box .cal-body { margin-top:12px; }
+.cal-box.collapsed .cal-body, .cal-box.collapsed .cal-nav { display:none; }
+.cal-box.collapsed #cal-chevron { transform:rotate(-90deg); }
+#cal-chevron { transition:transform 0.15s; color:var(--muted); font-size:16px; }
+
+/* 新增／編輯活動表單：基本資料 → 知識庫 → 進階（收合） */
+.readiness { position:sticky; top:-1px; z-index:3; background:#fff; border:1px solid var(--border); border-radius:10px; padding:9px 12px;
+  margin:0 0 14px; display:flex; flex-wrap:wrap; gap:4px 14px; align-items:center; font-size:0.8rem; box-shadow:0 4px 10px rgba(0,0,0,0.04); }
+.readiness .lead { color:var(--muted); font-weight:600; }
+.readiness .ok { color:#047857; font-weight:600; }
+.readiness .miss { color:#b45309; font-weight:600; }
+.readiness.all-ok { background:#f0fdf4; border-color:#bbf7d0; }
+.form-section { border:1px solid var(--border); border-radius:12px; padding:14px 16px 2px; margin-bottom:16px; }
+.form-section > .sec-title { font-size:0.92rem; font-weight:700; margin-bottom:12px; display:flex; align-items:center; gap:8px; }
+.form-section > .sec-title i { color:var(--primary); font-size:18px; }
+.form-section > .sec-title small { font-weight:500; color:var(--muted); font-size:0.76rem; }
+.form-row2 { display:grid; grid-template-columns:1fr 1fr; gap:0 12px; }
+details.adv { border:1px dashed #cbd5e1; border-radius:12px; padding:0 16px; margin-bottom:16px; }
+details.adv > summary { cursor:pointer; padding:13px 0; font-weight:700; font-size:0.9rem; list-style:none; display:flex; align-items:center; gap:8px; }
+details.adv > summary::-webkit-details-marker { display:none; }
+details.adv > summary small { font-weight:500; color:var(--muted); font-size:0.76rem; }
+details.adv[open] > summary { border-bottom:1px solid var(--border); margin-bottom:14px; }
+.color-row { display:flex; gap:10px; align-items:center; }
+.color-row input[type=color] { width:46px; height:40px; padding:2px; border:1.5px solid var(--border); border-radius:8px; background:#fff; cursor:pointer; flex-shrink:0; }
+.field-missing { border-color:#f59e0b !important; box-shadow:0 0 0 3px rgba(245,158,11,0.18); }
+.pb-list { list-style:none; margin:10px 0 14px; display:flex; flex-direction:column; gap:6px; }
+.pb-list li { display:flex; align-items:center; gap:8px; font-size:0.92rem; padding:8px 12px; background:#fffbeb; border:1px solid #fde68a; border-radius:8px; color:#92400e; font-weight:600; }
+
+/* 問答分析 */
+.top-grid { display:grid; grid-template-columns:1fr 1fr; gap:18px; margin-bottom:22px; }
+.qa-box { background:white; border:1px solid var(--border); border-radius:var(--radius); padding:20px; }
+.qa-summary { display:flex; flex-wrap:wrap; gap:6px 18px; align-items:center; font-size:0.84rem; color:var(--muted); margin-bottom:14px; }
+.qa-summary b { color:var(--text); }
+.qa-table .t-time { white-space:nowrap; font-size:0.76rem; color:var(--muted); }
+.qa-table .t-event { font-size:0.78rem; max-width:160px; }
+.qa-table .t-media { font-size:0.82rem; }
+.qa-table .qtext { font-weight:600; line-height:1.5; }
+.qa-ans-prev { color:var(--muted); font-size:0.78rem; margin-top:4px; line-height:1.5; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+.tag { display:inline-block; border-radius:20px; padding:1px 8px; font-size:0.68rem; font-weight:700; margin-left:6px; vertical-align:1px; }
+.tag-unans { background:#fff7ed; color:#c2410c; border:1px solid #fed7aa; }
+.tag-line { background:#ecfdf5; color:#047857; border:1px solid #a7f3d0; }
+.qa-full { background:#f9fafb; border:1px solid var(--border); border-radius:10px; padding:12px 14px; font-size:0.84rem; line-height:1.75; white-space:pre-wrap; word-break:break-word; margin-top:8px; }
+.qa-full .copy-row { margin-top:8px; text-align:right; }
+.mini-btn { background:#f8fafc; border:1px solid var(--border); border-radius:6px; cursor:pointer; color:#334155; font-size:0.76rem; font-weight:600; padding:4px 8px; font-family:var(--font); }
+.mini-btn:hover { border-color:var(--primary); color:var(--primary); }
+.mini-btn.blue { background:#f0f9ff; border-color:#bae6fd; color:#0369a1; }
+.mini-btn.red { background:#fef2f2; border-color:#fecaca; color:#ef4444; }
+.search-input { border:1.5px solid var(--border); border-radius:8px; padding:8px 12px; font-family:var(--font); font-size:0.85rem; min-width:190px; outline:none; }
+.search-input:focus { border-color:var(--primary); }
+
+/* 手機底部選單的「更多」 */
+.nav-more-btn { display:none; }
+
 /* 響應式 */
 @media (max-width: 768px) {
   /* 手機：左側選單改成底部選單列（批次 82）。
@@ -354,8 +462,36 @@ textarea.form-control { min-height: 200px; resize: vertical; line-height: 1.6; }
   .topbar-actions { flex-wrap: wrap; }
   .content { padding: 16px; }
   #toast { right: 16px; left: 16px; bottom: calc(80px + env(safe-area-inset-bottom)); }
-  .stats-grid { grid-template-columns: repeat(2,1fr); }
+  .stats-grid { grid-template-columns: repeat(2,1fr); gap: 8px; margin-bottom: 16px; }
+  /* 手機的統計卡縮小、圖示拿掉：四張原本佔掉第一屏近一半，活動卡片被擠到要往下捲才看得到 */
+  .stat-card { padding: 9px 12px; }
+  .stat-value { font-size: 1.3rem; }
+  .stat-icon { display: none; }
   .events-grid { grid-template-columns: 1fr; }
+  .form-row2 { grid-template-columns: 1fr; }
+  .top-grid { grid-template-columns: 1fr; }
+  .modal { padding: 20px 16px; }
+  .search-input { min-width: 0; width: 100%; }
+  /* 批次 104：底部選單只留四個最常用的 ＋「更多」，其餘（邀訪窗口分工／彙整媒體訓練／媒體報名／登出）收進面板。
+     原本八個項目擠不下，「AI 能見度」「成效報告」「登出」被推到畫面外、也沒有任何捲動提示。 */
+  #sidebar { justify-content: space-around; }
+  #sidebar .nav-item.nav-secondary, #sidebar .sidebar-bottom { display: none; }
+  #sidebar .nav-more-btn { display: flex; }
+  #sidebar .nav-item { flex: 1 1 0; min-width: 0; padding: 8px 4px; }
+  /* 問答表在手機上變成一則一張卡片：原本橫向捲動，問題欄在畫面外 */
+  .qa-table thead { display: none; }
+  .qa-table, .qa-table tbody, .qa-table tr, .qa-table td { display: block; width: 100%; }
+  .qa-table tr { border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; margin-bottom: 10px; background: #fff; }
+  .qa-table td { border: 0; padding: 2px 0; }
+  .qa-table tr:hover td { background: transparent; }
+  .qa-table .t-event { max-width: none; }
+  .qa-table .t-ops { padding-top: 8px; }
+  /* 更多選單：從底部升起 */
+  .more-backdrop { background: rgba(0,0,0,0.35); }
+  .more-pop { left: 0 !important; right: 0 !important; top: auto !important; bottom: 0 !important; max-width: none; border-radius: 16px 16px 0 0;
+    padding: 10px 10px calc(10px + env(safe-area-inset-bottom)); }
+  .more-pop button { padding: 14px 12px; font-size: 0.95rem; }
+  .topbar-actions { width: 100%; }
 }
 /* iPhone 對字級小於 16px 的輸入框，一點下去整頁自動放大、而且不會縮回來（批次 68 在
    媒體訓練頁踩過）。只在手機／觸控裝置放大，桌機維持原本比較緊湊的字級。 */
@@ -395,15 +531,15 @@ textarea.form-control { min-height: 200px; resize: vertical; line-height: 1.6; }
     <button class="nav-item" data-view="analytics" onclick="showView('analytics')">
       <i class="ti ti-chart-bar"></i> 問答分析
     </button>
-    <button class="nav-item" data-view="contacts" onclick="showView('contacts')">
+    <button class="nav-item nav-secondary" data-view="contacts" onclick="showView('contacts')">
       <i class="ti ti-address-book"></i> 邀訪窗口分工
     </button>
     <!-- 這條不能開新分頁。彙整訓練（event_id=all）後端只認管理員密碼，密碼放在 sessionStorage，
          新分頁不保證帶得過去，帶不過去就會被擋在「這個功能只給內部同仁使用」。同分頁開才穩。 -->
-    <a class="nav-item" href="/training" style="text-decoration:none;color:rgba(255,255,255,0.7)">
+    <a class="nav-item nav-secondary" href="/training" style="text-decoration:none;color:rgba(255,255,255,0.7)">
       <i class="ti ti-microphone"></i> 彙整媒體訓練
     </a>
-    <a class="nav-item" href="/registrations" style="text-decoration:none;color:rgba(255,255,255,0.7)">
+    <a class="nav-item nav-secondary" href="/registrations" style="text-decoration:none;color:rgba(255,255,255,0.7)">
       <i class="ti ti-ticket"></i> 媒體報名
     </a>
     <a class="nav-item" href="/report" style="text-decoration:none;color:rgba(255,255,255,0.7)">
@@ -412,6 +548,10 @@ textarea.form-control { min-height: 200px; resize: vertical; line-height: 1.6; }
     <a class="nav-item" href="/geo" style="text-decoration:none;color:rgba(255,255,255,0.7)">
       <i class="ti ti-radar"></i> AI 能見度
     </a>
+    <!-- 手機才出現：把電腦版側邊欄多出來的項目收在這裡（批次 104） -->
+    <button class="nav-item nav-more-btn" id="nav-more-btn" onclick="openNavMore(this)" aria-haspopup="true">
+      <i class="ti ti-dots"></i> 更多
+    </button>
     <div class="sidebar-bottom">
       <button class="logout-btn" onclick="logout()">
         <i class="ti ti-logout"></i> 登出
@@ -426,8 +566,8 @@ textarea.form-control { min-height: 200px; resize: vertical; line-height: 1.6; }
       <div class="topbar">
         <h1><i class="ti ti-calendar-event" style="color:var(--primary)"></i> 活動管理</h1>
         <div class="topbar-actions">
-          <label style="display:inline-flex;align-items:center;gap:6px;font-size:0.85rem;color:var(--muted);cursor:pointer;white-space:nowrap">
-            <input type="checkbox" id="show-archived" onchange="renderEvents()" style="cursor:pointer">
+          <label class="check-inline">
+            <input type="checkbox" id="show-archived" onchange="renderEvents()">
             顯示封存
           </label>
           <button class="btn btn-outline" onclick="loadAll()"><i class="ti ti-refresh"></i> 重整</button>
@@ -435,58 +575,61 @@ textarea.form-control { min-height: 200px; resize: vertical; line-height: 1.6; }
         </div>
       </div>
       <div class="content">
-        <!-- 行事曆（上） -->
-        <div class="section-block">
-          <div class="section-header">
-            <h2><i class="ti ti-calendar-month"></i> 活動行事曆</h2>
-            <div class="cal-nav">
-              <button class="btn btn-outline" onclick="calShiftMonth(-1)"><i class="ti ti-chevron-left"></i></button>
+        <!-- 數字列（批次 104：搬到最上面、縮小；不含測試資料與同仁自己問的）-->
+        <div class="stats-grid" id="stats-grid">
+          <div class="stat-card">
+            <div class="stat-icon"><i class="ti ti-calendar-event"></i></div>
+            <div class="stat-label">進行中活動</div>
+            <div class="stat-value" id="stat-events">—</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon"><i class="ti ti-message-dots"></i></div>
+            <div class="stat-label">記者問答</div>
+            <div class="stat-value" id="stat-total-qa">—</div>
+            <div class="stat-note">不含測試與同仁自己問的</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon"><i class="ti ti-building-newspaper"></i></div>
+            <div class="stat-label">服務媒體（家）</div>
+            <div class="stat-value" id="stat-media">—</div>
+            <div class="stat-note">同一家只算一次</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon"><i class="ti ti-trending-up"></i></div>
+            <div class="stat-label">今日問答</div>
+            <div class="stat-value" id="stat-today">—</div>
+          </div>
+        </div>
+
+        <!-- 活動列表：接下來要辦的在最上面（批次 104，原本行事曆佔滿第一屏、卡片排在最下面）-->
+        <div id="events-sections">
+          <div class="events-grid"><div class="skeleton"></div><div class="skeleton"></div></div>
+        </div>
+
+        <!-- 行事曆：可收合，記住你的選擇（手機預設收起來）-->
+        <div class="cal-box" id="cal-box">
+          <div class="cal-box-head">
+            <button class="toggle" id="cal-toggle" onclick="toggleCalendar()" aria-expanded="true" aria-controls="cal-body">
+              <i class="ti ti-calendar-month"></i> 活動行事曆 <i class="ti ti-chevron-down" id="cal-chevron"></i>
+            </button>
+            <div class="grow"></div>
+            <div class="cal-nav" id="cal-nav">
+              <button class="btn btn-outline" onclick="calShiftMonth(-1)" aria-label="上個月"><i class="ti ti-chevron-left"></i></button>
               <span class="cal-month-label" id="cal-month-label">—</span>
-              <button class="btn btn-outline" onclick="calShiftMonth(1)"><i class="ti ti-chevron-right"></i></button>
+              <button class="btn btn-outline" onclick="calShiftMonth(1)" aria-label="下個月"><i class="ti ti-chevron-right"></i></button>
               <button class="btn btn-outline" onclick="calGoToday()">今天</button>
             </div>
           </div>
-          <div class="cal-legend">
-            <span><i class="ti ti-circle-filled" style="color:#065f46"></i> 進行中·可問答</span>
-            <span><i class="ti ti-circle-filled" style="color:#475569"></i> 進行中·僅基本資料</span>
-            <span><i class="ti ti-circle-filled" style="color:#92400e"></i> 已結束</span>
-            <span><i class="ti ti-circle-filled" style="color:#3730a3"></i> 未發布（虛線框＝僅後台看得到）</span>
-            <span><i class="ti ti-circle-filled" style="color:#9ca3af"></i> 已封存</span>
-          </div>
-          <div class="cal-grid" id="calendar-grid"></div>
-          <div class="form-hint" style="margin-top:10px">點空白日期可直接新增當天的活動；點色塊可開啟該場編輯；沒有日期或日期解析不出來的活動不會出現在這裡。</div>
-        </div>
-
-        <!-- 活動列表（下） -->
-        <div class="section-block" style="margin-top:32px">
-          <div class="section-header">
-            <h2><i class="ti ti-layout-grid"></i> 活動列表</h2>
-          </div>
-          <div class="stats-grid" id="stats-grid">
-            <div class="stat-card">
-              <div class="stat-icon"><i class="ti ti-calendar-event"></i></div>
-              <div class="stat-label">進行中活動</div>
-              <div class="stat-value" id="stat-events">—</div>
+          <div class="cal-body" id="cal-body">
+            <div class="cal-legend">
+              <span><i class="ti ti-circle-filled" style="color:#065f46"></i> 進行中·可問答</span>
+              <span><i class="ti ti-circle-filled" style="color:#475569"></i> 進行中·僅基本資料</span>
+              <span><i class="ti ti-circle-filled" style="color:#92400e"></i> 已結束</span>
+              <span><i class="ti ti-circle-filled" style="color:#3730a3"></i> 未發布（虛線框＝僅後台看得到）</span>
+              <span><i class="ti ti-circle-filled" style="color:#9ca3af"></i> 已封存</span>
             </div>
-            <div class="stat-card">
-              <div class="stat-icon"><i class="ti ti-message-dots"></i></div>
-              <div class="stat-label">總問答次數</div>
-              <div class="stat-value" id="stat-total-qa">—</div>
-            </div>
-            <div class="stat-card">
-              <div class="stat-icon"><i class="ti ti-building-newspaper"></i></div>
-              <div class="stat-label">媒體數（填寫）</div>
-              <div class="stat-value" id="stat-media">—</div>
-            </div>
-            <div class="stat-card">
-              <div class="stat-icon"><i class="ti ti-trending-up"></i></div>
-              <div class="stat-label">今日問答</div>
-              <div class="stat-value" id="stat-today">—</div>
-            </div>
-          </div>
-          <div class="events-grid" id="events-grid">
-            <div class="skeleton"></div>
-            <div class="skeleton"></div>
+            <div class="cal-grid" id="calendar-grid"></div>
+            <div class="form-hint" style="margin-top:10px">點空白日期可直接新增當天的活動；點色塊可開啟該場編輯；沒有日期的活動不會出現在這裡（它們在上面的列表裡標示「日期未定」）。</div>
           </div>
         </div>
       </div>
@@ -497,12 +640,17 @@ textarea.form-control { min-height: 200px; resize: vertical; line-height: 1.6; }
       <div class="topbar">
         <h1><i class="ti ti-chart-bar" style="color:var(--primary)"></i> 問答分析</h1>
         <div class="topbar-actions">
-          <select id="analytics-event-filter" class="btn btn-outline" style="font-family:var(--font);cursor:pointer">
+          <select id="analytics-event-filter" class="btn btn-outline" style="font-family:var(--font);cursor:pointer" onchange="loadAnalytics()">
             <option value="">全部活動</option>
           </select>
-          <label style="display:inline-flex;align-items:center;gap:6px;font-size:0.85rem;color:var(--muted);cursor:pointer;white-space:nowrap">
-            <input type="checkbox" id="analytics-exclude-test" checked onchange="loadAnalytics()" style="cursor:pointer">
+          <input type="search" id="analytics-search" class="search-input" placeholder="搜尋問題、媒體、AI 回答…" oninput="renderQaList()" aria-label="搜尋">
+          <label class="check-inline">
+            <input type="checkbox" id="analytics-exclude-test" checked onchange="loadAnalytics()">
             排除測試資料
+          </label>
+          <label class="check-inline" title="AI 回答裡有「這部分我沒有資料」這類說法的問題——最值得回頭補知識庫">
+            <input type="checkbox" id="analytics-only-unanswered" onchange="renderQaList()">
+            只看疑似答不出來
           </label>
           <button class="btn btn-primary" onclick="loadAnalytics()"><i class="ti ti-refresh"></i> 更新</button>
           <button class="btn btn-outline" onclick="exportCSV()"><i class="ti ti-download"></i> 匯出 CSV</button>
@@ -546,7 +694,11 @@ textarea.form-control { min-height: 200px; resize: vertical; line-height: 1.6; }
   </div>
 </div>
 
-<!-- 新增/編輯活動 Modal -->
+<!-- 新增/編輯活動 Modal
+     批次 104：十六個欄位不再一路排下去（3000 多 px、約四個畫面）——
+       ① 最上面一條「發布前必填」即時顯示還缺什麼（跟後端發布閘門同一套規則）
+       ② 基本資料與知識庫放在前面；其餘（主色、類型、主辦、窗口分工、邀請函、提問、開場白、照片、狀態）收進「進階設定」
+     所有欄位的 id 都沒變，MODAL_FIELDS／草稿保護照舊。-->
 <div id="event-modal" class="modal-overlay" style="display:none" onclick="if(event.target===this)requestCloseModal('backdrop')">
   <div class="modal">
     <h2><i class="ti ti-calendar-plus" style="color:var(--primary)"></i>
@@ -561,75 +713,36 @@ textarea.form-control { min-height: 200px; resize: vertical; line-height: 1.6; }
       <button type="button" class="btn btn-outline" onclick="discardDraft()">捨棄</button>
     </div>
     <input type="hidden" id="edit-event-id">
-    <div class="form-group">
-      <label>活動名稱 *</label>
-      <input class="form-control" id="input-name" placeholder="例：工研院 AI 智慧醫療大平台發表記者會">
-    </div>
-    <div class="form-group">
-      <label>品牌主色
-        <span class="color-preview" id="color-preview" style="background:#0F9E7A"></span>
-      </label>
-      <input class="form-control" id="input-color" placeholder="#0F9E7A" value="#0F9E7A"
-        oninput="document.getElementById('color-preview').style.background=this.value">
-      <div class="form-hint">輸入 HEX 色碼，例如工研院綠 #0F9E7A</div>
-    </div>
-    <div class="form-group">
-      <label><i class="ti ti-calendar-event"></i> 活動日期</label>
-      <input class="form-control" id="input-date" type="date">
-      <div class="form-hint">設定記者會/活動的實際舉辦日期，會顯示在「活動行事曆」上</div>
-    </div>
-    <div class="form-group">
-      <label><i class="ti ti-clock"></i> 活動時間（選填）</label>
-      <input class="form-control" id="input-time" placeholder="例：10:00">
-    </div>
-    <div class="form-group">
-      <label><i class="ti ti-map-pin"></i> 活動地點（選填）</label>
-      <input class="form-control" id="input-venue" placeholder="例：工研院中興院區 中興文薈廳">
-    </div>
-    <div class="form-group">
-      <label><i class="ti ti-tag"></i> 活動類型（選填）</label>
-      <input class="form-control" id="input-type" list="type-list" placeholder="例：記者會">
-      <datalist id="type-list">
-        <option value="記者會"></option>
-        <option value="發表會"></option>
-        <option value="論壇"></option>
-        <option value="參訪"></option>
-      </datalist>
-    </div>
-    <div class="form-group">
-      <label><i class="ti ti-headset"></i> 新聞聯絡人（選填）</label>
-      <input class="form-control" id="input-contact" placeholder="例：王小明 03-1234567 分機 8888">
-      <div class="form-hint">AI 答不出來時會請記者洽詢這裡填的人，建議每場都填</div>
-    </div>
-    <div class="form-group">
-      <label><i class="ti ti-address-book"></i> 邀訪聯絡窗口分工（選填，每行一組）</label>
-      <textarea class="form-control" id="input-contacts" rows="4"
-        placeholder="新聞稿｜王小明｜03-1234567 分機8888&#10;技術規格｜陳美玲｜03-1234567 分機9999｜LINE ID"
-        style="font-size:0.85rem"></textarea>
-      <div class="form-hint">記者在 LINE 點「媒體邀訪需求」時會列出這裡的關鍵字，點了直接給對應窗口的聯絡方式；LINE ID 選填。格式：<code>關鍵字｜姓名｜電話｜LINE ID</code>，半形 <code>|</code> 或全形 <code>｜</code> 都可以。留空則只給上面的「新聞聯絡人」。</div>
-    </div>
-    <div class="form-group">
-      <label><i class="ti ti-mail-forward"></i> 媒體邀請函（選填，活動前用）</label>
-      <textarea class="form-control" id="input-invite-letter" rows="6"
-        placeholder="貼入邀請媒體來採訪時附的說明文字…"
-        style="font-size:0.85rem"></textarea>
-      <div class="form-hint">活動日期還沒到、又有填這裡的話，記者問答（LINE 跟網頁都算）只會用這份內容回答，不會提前給正式新聞稿全文或活動照片——避免新聞稿還在改、照片還沒有正式版就先曝光。活動當天起自動改回用上面的「活動知識庫」正常回答，不用手動切換。留空則沒有這層限制。</div>
-    </div>
-    <div class="form-group">
-      <label><i class="ti ti-list-details"></i> 活動前快速提問（選填，每行一題）</label>
-      <textarea class="form-control" id="input-invite-letter-chips" rows="4"
-        placeholder="邀請函內容是什麼？&#10;採訪申請方式？&#10;活動時間地點？"
-        style="font-size:0.85rem"></textarea>
-      <div class="form-hint">活動前優先顯示這裡的快速提問按鈕，取代下面「快速問題按鈕」那組——活動前才有意義（例如問邀請函內容、採訪申請方式），跟活動內容那組問句分開設定，記者才不會點了按鈕卻只得到「這部分我沒有資料」。留空則活動前也繼續用下面那組。</div>
-    </div>
-    <div class="form-group">
-      <label><i class="ti ti-building"></i> 主辦單位</label>
-      <input class="form-control" id="input-organizer" list="organizer-list" value="工研院" placeholder="工研院">
-      <datalist id="organizer-list">
-        <option value="工研院"></option>
-        <option value="經濟部"></option>
-      </datalist>
-      <div class="form-hint">會自動帶入 AI 回答結尾的警語「以○○官網新聞稿或發言為準」；可直接輸入其他單位</div>
+
+    <div class="readiness" id="readiness" aria-live="polite"></div>
+
+    <div class="form-section">
+      <div class="sec-title"><i class="ti ti-file-description"></i> 基本資料</div>
+      <div class="form-group">
+        <label>活動名稱 *</label>
+        <input class="form-control" id="input-name" placeholder="例：工研院 AI 智慧醫療大平台發表記者會">
+      </div>
+      <div class="form-row2">
+        <div class="form-group">
+          <label><i class="ti ti-calendar-event"></i> 活動日期 *</label>
+          <input class="form-control" id="input-date" type="date">
+          <div class="form-hint">會顯示在「活動行事曆」上；發布前要填</div>
+        </div>
+        <div class="form-group">
+          <label><i class="ti ti-clock"></i> 活動時間（選填）</label>
+          <input class="form-control" id="input-time" placeholder="例：10:00">
+        </div>
+      </div>
+      <div class="form-group">
+        <label><i class="ti ti-map-pin"></i> 活動地點 *</label>
+        <input class="form-control" id="input-venue" placeholder="例：工研院中興院區 中興文薈廳">
+        <div class="form-hint">發布前要填；記者問「在哪裡」時 AI 靠這一欄回答</div>
+      </div>
+      <div class="form-group">
+        <label><i class="ti ti-headset"></i> 新聞聯絡人 *</label>
+        <input class="form-control" id="input-contact" placeholder="例：王小明 03-1234567 分機 8888">
+        <div class="form-hint">發布前要填；AI 答不出來時會請記者洽詢這裡填的人</div>
+      </div>
     </div>
 
     <div class="form-group" id="copy-template-group" style="display:none;background:var(--primary-light);border:1px solid var(--border);border-radius:10px;padding:14px">
@@ -640,51 +753,113 @@ textarea.form-control { min-height: 200px; resize: vertical; line-height: 1.6; }
       <div class="form-hint">選一場舊活動，會把它的知識庫與主辦單位帶進下方欄位，你再修改即可。</div>
     </div>
 
-    <div class="form-group">
-      <label>活動知識庫（新聞稿 / 技術資料）*</label>
-      <textarea class="form-control" id="input-kb"
-        placeholder="貼入本次活動的新聞稿或重要資訊，AI 將根據此內容回答記者問題…"
-        oninput="updateKbCount()"></textarea>
-      <div class="char-count" id="kb-count">0 / 8000 字</div>
-      <div class="form-hint">新增活動時已內建固定範本，照格式填空即可，不會漏欄位。<b>範圍限制與結尾警語由系統自動加上，不需自己寫。</b>建議 8000 字以內（超過會讓 AI 每次回答變慢、變貴）；硬上限 45000 字，超過存不進去。</div>
-    </div>
-    <div class="form-group">
-      <label>快速問題按鈕（每行一題）</label>
-      <textarea class="form-control" id="input-chips" rows="4"
-        placeholder="這次活動的主要發表內容是什麼？&#10;有哪些合作廠商參與？&#10;這項技術的應用場域為何？"
-        style="font-size:0.85rem"></textarea>
-      <div class="form-hint">留空則使用預設通用問題；每行填一個問題，建議 3–6 題</div>
-    </div>
-    <div class="form-group">
-      <label>AI 開場白（記者前台初始問候語）</label>
-      <textarea class="form-control" id="input-greeting" rows="3"
-        placeholder="您好！我是「活動名稱」的 AI 新聞助理。&#10;&#10;請先填寫上方的媒體名稱，再開始提問。"
-        style="font-size:0.85rem"></textarea>
-      <div class="form-hint">留空則使用預設問候語；可自訂歡迎詞、注意事項等</div>
-    </div>
-    <div class="form-group">
-      <label>圖片資源（供記者下載技術照片）</label>
-      <textarea class="form-control" id="input-images" rows="3"
-        placeholder="https://example.com/photo1.jpg&#10;https://example.com/photo2.png|何次長致詞"
-        style="font-size:0.85rem"></textarea>
-      <div style="margin-top:8px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-        <input type="file" id="input-image-file" accept="image/*" multiple style="display:none">
-        <button type="button" class="btn btn-outline" onclick="document.getElementById('input-image-file').click()">
-          <i class="ti ti-upload"></i> 上傳照片檔案
-        </button>
-        <span id="upload-status" style="font-size:0.8rem;color:var(--muted)"></span>
+    <div class="form-section">
+      <div class="sec-title"><i class="ti ti-database"></i> 活動知識庫（新聞稿／技術資料）* <small>AI 只會根據這裡回答記者</small></div>
+      <div class="form-group">
+        <textarea class="form-control" id="input-kb"
+          placeholder="貼入本次活動的新聞稿或重要資訊，AI 將根據此內容回答記者問題…"
+          oninput="updateKbCount()"></textarea>
+        <div class="char-count" id="kb-count">0 / 8000 字</div>
+        <div class="form-hint">新增活動時已內建固定範本，照格式填空即可，不會漏欄位；<b>範本沒填內容，不算有新聞稿，不能發布</b>。<b>範圍限制與結尾警語由系統自動加上，不需自己寫。</b>建議 8000 字以內（超過會讓 AI 每次回答變慢、變貴）；硬上限 45000 字，超過存不進去。</div>
       </div>
-      <div class="form-hint">可直接上傳照片檔案（自動加到上面清單），或手動貼圖片直連 URL；記者在前台可點擊放大並下載；單檔上限 10MB。想加圖說的話，在網址後面加一條分隔線再接圖說，半形 <code>|</code> 或全形 <code>｜</code> 都可以，例如：https://.../a.jpg｜何次長致詞</div>
     </div>
-    <div class="form-group" id="status-group" style="display:none">
-      <label>狀態</label>
-      <select class="form-control" id="input-status">
-        <option value="draft">未發布（僅後台看得到）</option>
-        <option value="active">進行中</option>
-        <option value="ended">已結束</option>
-        <option value="archived">封存</option>
-      </select>
-    </div>
+
+    <details class="adv" id="adv-box">
+      <summary><i class="ti ti-adjustments"></i> 進階設定 <small>選填，通常不用動：品牌色、主辦單位、快速提問、邀請函、照片…</small></summary>
+
+      <div class="form-group">
+        <label>品牌主色</label>
+        <div class="color-row">
+          <input type="color" id="color-picker" value="#0F9E7A" aria-label="選擇品牌主色"
+            oninput="document.getElementById('input-color').value=this.value.toUpperCase();document.getElementById('color-preview').style.background=this.value;markModalChanged()">
+          <input class="form-control" id="input-color" placeholder="#0F9E7A" value="#0F9E7A"
+            oninput="syncColorPicker(this.value)">
+          <span class="color-preview" id="color-preview" style="background:#0F9E7A" title="預覽"></span>
+        </div>
+        <div class="form-hint">點色塊選顏色，或直接輸入 HEX 色碼（例如工研院綠 #0F9E7A）</div>
+      </div>
+      <div class="form-row2">
+        <div class="form-group">
+          <label><i class="ti ti-tag"></i> 活動類型</label>
+          <input class="form-control" id="input-type" list="type-list" placeholder="例：記者會">
+          <datalist id="type-list">
+            <option value="記者會"></option>
+            <option value="發表會"></option>
+            <option value="論壇"></option>
+            <option value="參訪"></option>
+          </datalist>
+        </div>
+        <div class="form-group">
+          <label><i class="ti ti-building"></i> 主辦單位</label>
+          <input class="form-control" id="input-organizer" list="organizer-list" value="工研院" placeholder="工研院">
+          <datalist id="organizer-list">
+            <option value="工研院"></option>
+            <option value="經濟部"></option>
+          </datalist>
+          <div class="form-hint">會自動帶入 AI 回答結尾的警語「以○○官網新聞稿或發言為準」</div>
+        </div>
+      </div>
+      <div class="form-group">
+        <label><i class="ti ti-address-book"></i> 邀訪聯絡窗口分工（每行一組）</label>
+        <textarea class="form-control" id="input-contacts" rows="4"
+          placeholder="新聞稿｜王小明｜03-1234567 分機8888&#10;技術規格｜陳美玲｜03-1234567 分機9999｜LINE ID"
+          style="font-size:0.85rem"></textarea>
+        <div class="form-hint">記者在 LINE 點「媒體邀訪需求」時會列出這裡的關鍵字，點了直接給對應窗口的聯絡方式；LINE ID 選填。格式：<code>關鍵字｜姓名｜電話｜LINE ID</code>，半形 <code>|</code> 或全形 <code>｜</code> 都可以。留空則只給上面的「新聞聯絡人」。（跨活動、依技術單位分的窗口在左側「邀訪窗口分工」。）</div>
+      </div>
+      <div class="form-group">
+        <label><i class="ti ti-mail-forward"></i> 媒體邀請函（活動前用）</label>
+        <textarea class="form-control" id="input-invite-letter" rows="6"
+          placeholder="貼入邀請媒體來採訪時附的說明文字…"
+          style="font-size:0.85rem"></textarea>
+        <div class="form-hint">活動日期還沒到、又有填這裡的話，記者問答（LINE 跟網頁都算）只會用這份內容回答，不會提前給正式新聞稿全文或活動照片——避免新聞稿還在改、照片還沒有正式版就先曝光。活動當天起自動改回用上面的「活動知識庫」正常回答，不用手動切換。留空則沒有這層限制。</div>
+      </div>
+      <div class="form-group">
+        <label><i class="ti ti-list-details"></i> 活動前快速提問（每行一題）</label>
+        <textarea class="form-control" id="input-invite-letter-chips" rows="4"
+          placeholder="邀請函內容是什麼？&#10;採訪申請方式？&#10;活動時間地點？"
+          style="font-size:0.85rem"></textarea>
+        <div class="form-hint">活動前優先顯示這裡的快速提問按鈕，取代下面「快速問題按鈕」那組——活動前才有意義（例如問邀請函內容、採訪申請方式），跟活動內容那組問句分開設定，記者才不會點了按鈕卻只得到「這部分我沒有資料」。留空則活動前也繼續用下面那組。</div>
+      </div>
+      <div class="form-group">
+        <label>快速問題按鈕（每行一題）</label>
+        <textarea class="form-control" id="input-chips" rows="4"
+          placeholder="這次發表的重點是什麼？&#10;有哪些合作廠商參與？&#10;何時量產？"
+          style="font-size:0.85rem"></textarea>
+        <div class="form-hint"><b>留空就好</b>：系統會依知識庫實際寫了什麼自動出題（有【常見問答】就用裡面的 Q，有得獎名單才出「得獎名單有哪些？」），不會再出跟這場無關的問題。想自己決定才在這裡填，每行一題，建議 3–6 題。</div>
+      </div>
+      <div class="form-group">
+        <label>AI 開場白（記者前台初始問候語）</label>
+        <textarea class="form-control" id="input-greeting" rows="3"
+          placeholder="您好！我是「活動名稱」的 AI 新聞助理。&#10;&#10;請先填寫上方的媒體名稱，再開始提問。"
+          style="font-size:0.85rem"></textarea>
+        <div class="form-hint">留空則使用預設問候語；可自訂歡迎詞、注意事項等</div>
+      </div>
+      <div class="form-group">
+        <label>圖片資源（供記者下載技術照片）</label>
+        <textarea class="form-control" id="input-images" rows="3"
+          placeholder="https://example.com/photo1.jpg&#10;https://example.com/photo2.png|何次長致詞"
+          style="font-size:0.85rem"></textarea>
+        <div style="margin-top:8px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <input type="file" id="input-image-file" accept="image/*" multiple style="display:none">
+          <button type="button" class="btn btn-outline" onclick="document.getElementById('input-image-file').click()">
+            <i class="ti ti-upload"></i> 上傳照片檔案
+          </button>
+          <span id="upload-status" style="font-size:0.8rem;color:var(--muted)"></span>
+        </div>
+        <div class="form-hint">可直接上傳照片檔案（自動加到上面清單），或手動貼圖片直連 URL；記者在前台可點擊放大並下載；單檔上限 10MB。想加圖說的話，在網址後面加一條分隔線再接圖說，半形 <code>|</code> 或全形 <code>｜</code> 都可以，例如：https://.../a.jpg｜何次長致詞</div>
+      </div>
+      <div class="form-group" id="status-group" style="display:none">
+        <label>狀態</label>
+        <select class="form-control" id="input-status" onchange="updateStatusHint()">
+          <option value="draft">未發布（僅後台看得到）</option>
+          <option value="active">進行中</option>
+          <option value="ended">已結束</option>
+          <option value="archived">封存</option>
+        </select>
+        <div class="form-hint" id="status-hint"></div>
+      </div>
+    </details>
+
     <div class="modal-actions">
       <button class="btn btn-outline" onclick="requestCloseModal('button')">取消</button>
       <button class="btn btn-danger" id="archive-btn" onclick="archiveEvent()" style="display:none">封存活動</button>
@@ -716,8 +891,47 @@ textarea.form-control { min-height: 200px; resize: vertical; line-height: 1.6; }
   </div>
 </div>
 
+<!-- 發布被擋（批次 103 發布閘門）：列出缺什麼、帶去補 -->
+<div id="publish-blocked-modal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closePublishBlocked()">
+  <div class="modal" style="width:460px">
+    <h2><i class="ti ti-alert-triangle" style="color:var(--accent)"></i> 還不能發布</h2>
+    <div id="pb-name" style="font-weight:700"></div>
+    <ul class="pb-list" id="pb-list"></ul>
+    <div class="form-hint">發布前必填四項：<b>日期、地點、新聞聯絡人、新聞稿</b>（知識庫只有範本、沒填內容不算）。補齊之後再按「發布」。</div>
+    <div class="modal-actions">
+      <button class="btn btn-outline" onclick="closePublishBlocked()">知道了</button>
+      <button class="btn btn-primary" id="pb-go"><i class="ti ti-edit"></i> 去補齊</button>
+    </div>
+  </div>
+</div>
+
+<!-- 修改單筆問答的媒體與姓名（取代原本的 prompt()，批次 105） -->
+<div id="media-edit-modal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeMediaEdit()">
+  <div class="modal" style="width:440px">
+    <h2><i class="ti ti-edit" style="color:var(--primary)"></i> 修改這筆的媒體與姓名</h2>
+    <div class="form-hint" id="me-q" style="margin:-8px 0 14px"></div>
+    <div class="form-group">
+      <label>媒體／單位</label>
+      <input class="form-control" id="me-media" placeholder="例：經濟日報" maxlength="60">
+      <div class="form-hint">統計「服務幾家媒體」靠這一欄；同一家請寫成一樣的名稱</div>
+    </div>
+    <div class="form-group">
+      <label>姓名（選填）</label>
+      <input class="form-control" id="me-person" placeholder="例：王小明" maxlength="40">
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-outline" onclick="closeMediaEdit()">取消</button>
+      <button class="btn btn-primary" id="me-save" onclick="saveMediaEdit()"><i class="ti ti-check"></i> 儲存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 「更多」選單（活動卡片、手機底部選單共用一個）-->
+<div class="more-backdrop" id="more-backdrop" onclick="closeMore()"></div>
+<div class="more-pop" id="more-pop" role="menu"></div>
+
 <!-- Toast -->
-<div id="toast"></div>
+<div id="toast" role="status" aria-live="polite"></div>
 
 <script>
 let state = { password: '', events: [], analytics: null };
@@ -730,7 +944,9 @@ async function login() {
   errEl.style.display = 'none';
   // 驗證：嘗試取分析資料（需要密碼）
   try {
-    const res = await fetch('/api/analytics', { headers: { 'X-Admin-Password': pwd } });
+    // summary=1：只驗密碼、順便拿首頁數字，不載全部問答。以前這裡抓一份完整的（120 筆就 211KB），
+    // 接著 loadAll() 又抓一份，一登入就傳兩次（批次 104）。
+    const res = await fetch('/api/analytics?summary=1&exclude_test=1', { headers: { 'X-Admin-Password': pwd } });
     if (res.status === 401) {
       errEl.textContent = '密碼錯誤，請重試';
       errEl.style.display = 'block';
@@ -768,6 +984,9 @@ function logout() {
   location.reload();
 }
 
+// 行事曆展開／收合偏好（批次 104）
+applyCalOpen(calOpenPref());
+
 // 自動登入（Session 已有密碼）
 const savedPwd = sessionStorage.getItem('itri_pwd');
 if (savedPwd) {
@@ -787,6 +1006,11 @@ function showView(name) {
   document.querySelectorAll('.nav-item[data-view]').forEach(el => {
     el.classList.toggle('active', el.dataset.view === name);
   });
+  // 手機：「邀訪窗口分工」收在「更多」裡，它是目前的頁面時「更多」要亮著
+  const more = document.getElementById('nav-more-btn');
+  if (more) more.classList.toggle('active', name === 'contacts');
+  closeMore();
+  window.scrollTo?.(0, 0);
   if (name === 'analytics') loadAnalytics();
   if (name === 'contacts') loadContactsDirectory();
 }
@@ -836,7 +1060,7 @@ async function loadAll() {
 
 async function loadEvents() {
   try {
-    // list_admin：後台專用列表，含未發布(draft)與已封存活動，並附 has_kb——
+    // list_admin：後台專用列表，含未發布(draft)與已封存活動，並附 has_kb 與 missing（發布前必填還缺什麼）——
     // 卡片檢視、行事曆、範本下拉都共用同一份 state.events。
     const res = await authedFetch('/api/events?action=list_admin');
     const data = await res.json();
@@ -848,14 +1072,16 @@ async function loadEvents() {
     updateEventCount();
     renderCalendar();
   } catch(e) {
-    document.getElementById('events-grid').innerHTML =
-      '<div style="color:#ef4444;padding:20px">載入失敗：' + e.message + '</div>';
+    document.getElementById('events-sections').innerHTML =
+      '<div style="color:#ef4444;padding:20px">載入失敗：' + escHtml(e.message) + '</div>';
   }
 }
 
 async function loadStatsQuick() {
   try {
-    const res = await authedFetch('/api/analytics');
+    // 首頁只要數字：summary=1 不帶逐筆問答；exclude_test=1 排除測試與同仁自己問的——
+    // 跟「問答分析」「成效報告」同一個算法（批次 104。以前首頁沒排除，同一份資料三個畫面三個數字）。
+    const res = await authedFetch('/api/analytics?summary=1&exclude_test=1');
     const data = await res.json();
     if (!data.error) {
       state.analytics = data;
@@ -878,106 +1104,273 @@ function updateEventCount() {
 function updateStats(data) {
   updateEventCount();
   document.getElementById('stat-total-qa').textContent = data.total || 0;
-
-  const allMedia = new Set();
-  (data.by_event || []).forEach(e => (e.media_list || []).forEach(m => allMedia.add(m)));
-  document.getElementById('stat-media').textContent = allMedia.size;
-
+  // 服務媒體家數由後端算（同一家併在一起、不算「未提供」「群組提問」「內部職員」，見 lib/media-name.js）
+  document.getElementById('stat-media').textContent = data.media_total ?? 0;
   // 後端對全量資料算好的今日筆數 —— 之前是在最近 50 筆裡數今天的，記者會當天問答一旦破 50
   // 就會低估，而那正是最需要盯著這個數字的時候。
   document.getElementById('stat-today').textContent = data.today_count ?? 0;
 }
 
-function renderEvents() {
-  const grid = document.getElementById('events-grid');
-  // 依建立時間新到舊排序，且預設不顯示已封存的活動——依 Sheet 列序（等於建立順序舊到新）
-  // 平鋪、封存的活動混在裡面，辦到十幾場後最常用的「進行中」活動反而被埋在最下面。
-  const showArchived = document.getElementById('show-archived')?.checked;
-  let events = [...state.events].sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
-  if (!showArchived) events = events.filter(e => e.status !== 'archived');
-  if (!events.length) {
-    grid.innerHTML = `<div class="empty-state" style="grid-column:1/-1">
-      <i class="ti ti-calendar-off"></i>
-      <p>${state.events.length ? '沒有進行中的活動（可勾選「顯示封存」查看已封存的活動）' : '尚無活動，點擊「新增活動」建立第一個'}</p>
-    </div>`;
-    return;
+// ── 活動資料整理（批次 104）──────────────────────────────────────
+const WEEKDAYS = ['日','一','二','三','四','五','六'];
+
+// 活動日期（YYYY-MM-DD）。events 表的日期欄有兩種既有格式：手填的 "2026-07-08"，以及沒填日期時系統寫入的
+// 建立時間戳 "2026/6/18 下午11:06:04"——後者**不是活動日期**，不能拿來排序、畫行事曆或判斷「接下來要辦」。
+// 跟後端 lib/event-status.js eventDateOf() 同一條規則（只收純日期）：發布閘門認為這種活動「沒有日期」，
+// 後台就要照實顯示「日期未定」，不然卡片寫 6/18、閘門說缺日期，使用者兩邊對不起來。
+function eventDateIso(ev) {
+  const m = String((ev && (ev.event_date || ev.created_at)) || '').trim().match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/);
+  return m ? `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}` : '';
+}
+function daysBetween(fromIso, toIso) {
+  return Math.round((Date.parse(toIso + 'T00:00:00Z') - Date.parse(fromIso + 'T00:00:00Z')) / 86400000);
+}
+function shortDateLabel(iso) {
+  const [y, m, d] = iso.split('-').map(Number);
+  return `${m}/${d}（${WEEKDAYS[new Date(Date.UTC(y, m - 1, d)).getUTCDay()]}）`;
+}
+
+// 分成「接下來要辦」「已辦完／已過期」「已封存」三區並排好順序。
+// 以前是對 created_at 這個字串直接 localeCompare：兩種日期格式混在一起比（"2026/6/18 …" 的「/」比
+// 「-」大），沒填日期的活動永遠排在最前面，還排在十月的活動之上（批次 103 實測）。
+//   接下來：草稿與進行中、日期還沒到或日期未定。有日期的由近到遠，日期未定的排最後。
+//   已辦完：已結束，或日期已過。最近辦的在最上面。
+function eventSections(events, todayIso) {
+  const upcoming = [], past = [], archived = [];
+  for (const ev of events || []) {
+    const d = eventDateIso(ev);
+    if (ev.status === 'archived') archived.push(ev);
+    else if (ev.status === 'ended' || (d && d < todayIso)) past.push(ev);
+    else upcoming.push(ev);
+  }
+  const name = (a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'zh-Hant');
+  const asc = (a, b) => { const x = eventDateIso(a), y = eventDateIso(b); return x && y ? (x.localeCompare(y) || name(a, b)) : x ? -1 : y ? 1 : name(a, b); };
+  const desc = (a, b) => { const x = eventDateIso(a), y = eventDateIso(b); return x && y ? (y.localeCompare(x) || name(a, b)) : x ? -1 : y ? 1 : name(a, b); };
+  return { upcoming: upcoming.sort(asc), past: past.sort(desc), archived: archived.sort(desc) };
+}
+
+// 日期那一行：10/05（日）・還有 3 天；沒有日期就寫「日期未定」（橘字，因為它是發布的必填）
+function dateMetaHtml(ev, todayIso) {
+  const d = eventDateIso(ev);
+  if (!d) return '<span class="tbd"><i class="ti ti-calendar-question"></i> 日期未定</span>';
+  const diff = daysBetween(todayIso, d);
+  const rel = diff === 0 ? '今天' : diff > 0 ? `還有 ${diff} 天` : `${-diff} 天前`;
+  const showRel = ev.status !== 'ended' && ev.status !== 'archived' || diff <= 0;
+  return `<span><i class="ti ti-calendar"></i> ${shortDateLabel(d)}${showRel ? `・<span class="rel">${rel}</span>` : ''}</span>`;
+}
+
+let pastExpanded = false;
+const PAST_COLLAPSED_COUNT = 3;
+
+function eventCardHtml(ev, ctx) {
+  const { count, today } = ctx;
+  const meta = eventStatusMeta(ev);
+  const color = /^#[0-9A-Fa-f]{6}$/.test(ev.color || '') ? ev.color : '#0F9E7A';
+  const id = escHtml(ev.id);
+  const metaBits = [dateMetaHtml(ev, today)];
+  if (ev.venue) metaBits.push(`<span><i class="ti ti-map-pin"></i> ${escHtml(ev.venue)}</span>`);
+  metaBits.push(`<span><i class="ti ti-message-dots"></i> ${count} 則問答</span>`);
+
+  // 發布前必填（草稿與進行中才顯示）：缺什麼直接寫在卡片上，不用按了「發布」才被擋
+  let ready = '';
+  const missing = Array.isArray(ev.missing) ? ev.missing : [];
+  if (ev.status === 'draft' || ev.status === 'active') {
+    if (missing.length) {
+      ready = `<div class="ready-line warn"><i class="ti ti-alert-triangle"></i><span>${ev.status === 'draft' ? '發布前還缺' : '必填還缺'}：${missing.map(escHtml).join('、')}</span>
+        <button class="linkbtn" onclick="showEditModal('${id}')">去補</button></div>`;
+    } else if (ev.status === 'draft') {
+      ready = `<div class="ready-line ok"><i class="ti ti-circle-check"></i><span>必填都齊了，可以發布</span></div>`;
+    }
   }
 
-  // 取各活動問答數
-  const qCount = {};
-  if (state.analytics) {
-    (state.analytics.by_event || []).forEach(e => qCount[e.event_id] = e.count);
-  }
-
-  grid.innerHTML = events.map(ev => {
-    const count = qCount[ev.id] || 0;
-    const meta = eventStatusMeta(ev);
-    const color = ev.color || '#0F9E7A';
-    const metaBits = [
-      `<span><i class="ti ti-message-dots"></i> ${count} 則問答</span>`,
-      `<span><i class="ti ti-calendar"></i> ${(ev.event_date || ev.created_at || '').slice(0,10) || '—'}</span>`
+  const btn = (cls, icon, label, onclick, title) =>
+    `<button class="action-btn ${cls}" onclick="${onclick}"${title ? ` title="${escHtml(title)}"` : ''}><i class="ti ti-${icon}"></i> ${label}</button>`;
+  const link = (cls, icon, label, href) =>
+    `<a class="action-btn ${cls}" href="${href}" target="_blank"><i class="ti ti-${icon}"></i> ${label}</a>`;
+  const hasLine = !!(state.line && state.line.basic_id);
+  const front = `/event?id=${encodeURIComponent(ev.id)}`;
+  let primary;
+  if (ev.status === 'draft') {
+    primary = [
+      btn('primary', 'send', '發布', `publishEvent('${id}')`, '發布後記者前台與公開列表才看得到這場；必填沒齊會被擋下來'),
+      btn('', 'edit', '編輯', `showEditModal('${id}')`)
     ];
-    if (ev.venue) metaBits.push(`<span><i class="ti ti-map-pin"></i> ${escHtml(ev.venue)}</span>`);
-    return `
-    <div class="event-card">
+  } else if (ev.status === 'active') {
+    primary = [
+      btn('primary', 'edit', '編輯', `showEditModal('${id}')`),
+      link('', 'external-link', '記者前台', front),
+      hasLine ? btn('', 'qrcode', 'LINE QR', `openLineQr('${id}')`, '記者掃了直接在 LINE 接上這一場') : '',
+      btn('', 'chart-bar', '分析', `showAnalyticsByEvent('${id}')`)
+    ];
+  } else if (ev.status === 'ended') {
+    primary = [
+      btn('primary', 'chart-bar', '分析', `showAnalyticsByEvent('${id}')`),
+      btn('', 'download', '匯出', `exportCSV('${id}')`),
+      btn('', 'edit', '編輯', `showEditModal('${id}')`)
+    ];
+  } else {
+    primary = [btn('', 'edit', '編輯', `showEditModal('${id}')`)];
+  }
+  primary.push(`<button class="action-btn more" onclick="openCardMore(event, '${id}')" aria-haspopup="true" aria-label="更多操作" title="更多"><i class="ti ti-dots"></i> 更多</button>`);
+
+  return `
+    <div class="event-card" data-id="${id}">
       <div class="event-card-color" style="background:${escHtml(color)}"></div>
       <div class="event-card-body">
         <div class="event-card-header">
           <div class="event-name">${escHtml(ev.name)}</div>
-          <span class="status-badge ${meta.badgeClass}">
-            ${meta.badgeText}
-          </span>
+          <span class="status-badge ${meta.badgeClass}">${meta.badgeText}</span>
         </div>
-        <div class="event-meta">
-          ${metaBits.join('')}
-        </div>
-        <div class="event-actions">
-          ${ev.status === 'draft' ? `
-          <button class="action-btn primary" onclick="publishEvent('${escHtml(ev.id)}')" title="發布後記者前台與公開列表才看得到這場">
-            <i class="ti ti-send"></i> 發布
-          </button>` : `
-          <a class="action-btn primary" href="/event?id=${encodeURIComponent(ev.id)}" target="_blank">
-            <i class="ti ti-external-link"></i> 記者前台
-          </a>`}
-          ${ev.status === 'active' ? `
-          <button class="action-btn" onclick="unpublishEvent('${escHtml(ev.id)}')" title="收回為未發布，記者前台會立即顯示找不到活動">
-            <i class="ti ti-eye-off"></i> 收回草稿
-          </button>` : ''}
-          <button class="action-btn orange" onclick="openTraining('${escHtml(ev.id)}', this)">
-            <i class="ti ti-microphone"></i> 媒體訓練
-          </button>
-          <button class="action-btn" onclick="showAnalyticsByEvent('${escHtml(ev.id)}')">
-            <i class="ti ti-chart-bar"></i> 分析
-          </button>
-          <button class="action-btn" onclick="exportCSV('${escHtml(ev.id)}')">
-            <i class="ti ti-download"></i> 匯出
-          </button>
-          <button class="action-btn" onclick="showEditModal('${escHtml(ev.id)}')">
-            <i class="ti ti-edit"></i> 編輯
-          </button>
-          <button class="action-btn" onclick="copyLink('${escHtml(ev.id)}')">
-            <i class="ti ti-copy"></i> 記者連結
-          </button>
-          ${state.line && state.line.basic_id ? `
-          <button class="action-btn" onclick="openLineQr('${escHtml(ev.id)}')" title="記者掃了直接在 LINE 接上這一場">
-            <i class="ti ti-qrcode"></i> LINE QR
-          </button>` : ''}
-          <button class="action-btn" onclick="copyEditLink('${escHtml(ev.id)}', this)" title="給負責同仁自行更新內容用；對方只能改這一場，看不到後台與數據">
-            <i class="ti ti-user-edit"></i> 同仁編輯連結
-          </button>
-          ${ev.status === 'draft' || ev.status === 'archived' ? `
-          <button class="action-btn danger" onclick="deleteEvent('${escHtml(ev.id)}')" title="永久刪除這一場（只限未發布或已封存的活動）">
-            <i class="ti ti-trash"></i> 刪除
-          </button>` : ''}
-        </div>
+        <div class="event-meta">${metaBits.join('')}</div>
+        ${ready}
+        <div class="event-actions">${primary.filter(Boolean).join('')}</div>
       </div>
     </div>`;
-  }).join('');
 }
+
+// 「更多」選單的內容：卡片上放不下的次要操作。刪除只對未發布／已封存（後端另外把關，批次 84）。
+// 每一項是函式、不是字串——不把活動 id 拼進一段要被執行的程式碼裡。
+function moreMenuItems(ev) {
+  const items = [];
+  const add = (icon, label, run, danger) => items.push({ icon, label, run, danger: !!danger });
+  const id = ev.id;
+  const hasLine = !!(state.line && state.line.basic_id);
+  if (ev.status !== 'draft') add('external-link', ev.status === 'ended' ? '開啟存檔頁／記者前台' : '開啟記者前台', () => window.open('/event?id=' + encodeURIComponent(id), '_blank'));
+  if (ev.status !== 'draft') add('copy', '複製記者連結', () => copyLink(id));
+  if (hasLine && ev.status === 'ended') add('qrcode', 'LINE QR', () => openLineQr(id));
+  add('user-edit', '同仁編輯連結', () => copyEditLink(id));
+  if (ev.status !== 'archived') add('microphone', '媒體訓練', () => openTraining(id));
+  if (ev.status === 'draft' || ev.status === 'active') add('chart-bar', '問答分析', () => showAnalyticsByEvent(id));
+  if (ev.status === 'active' || ev.status === 'ended') add('download', '匯出問答 CSV', () => exportCSV(id));
+  if (ev.status === 'active') add('eye-off', '收回為未發布', () => unpublishEvent(id));
+  if (ev.status === 'draft' || ev.status === 'archived') { items.push({ sep: true }); add('trash', '永久刪除', () => deleteEvent(id), true); }
+  return items;
+}
+
+function renderEvents() {
+  const host = document.getElementById('events-sections');
+  if (!host) return;
+  const showArchived = !!document.getElementById('show-archived')?.checked;
+  const today = todayTaipeiIso();
+  const { upcoming, past, archived } = eventSections(state.events, today);
+
+  // 取各活動問答數（已排除測試資料，跟首頁數字同一個算法）
+  const qCount = {};
+  if (state.analytics) (state.analytics.by_event || []).forEach(e => qCount[e.event_id] = e.count);
+  const cards = (list) => list.map(ev => eventCardHtml(ev, { count: qCount[ev.id] || 0, today })).join('');
+
+  if (!(state.events || []).length) {
+    host.innerHTML = `<div class="ev-empty"><i class="ti ti-calendar-off" style="font-size:40px;display:block;opacity:.3;margin-bottom:8px"></i>
+      尚無活動。<br><button class="btn btn-primary" onclick="showCreateModal()"><i class="ti ti-plus"></i> 新增第一場活動</button></div>`;
+    return;
+  }
+
+  let html = `
+    <section class="ev-section" id="sec-upcoming">
+      <div class="ev-section-head">
+        <h2><i class="ti ti-calendar-event"></i> 接下來要辦 <span class="count">${upcoming.length}</span></h2>
+      </div>
+      ${upcoming.length
+        ? `<div class="events-grid">${cards(upcoming)}</div>`
+        : `<div class="ev-empty">目前沒有接下來要辦的活動。<br><button class="btn btn-primary" onclick="showCreateModal()"><i class="ti ti-plus"></i> 新增活動</button></div>`}
+    </section>`;
+
+  if (past.length) {
+    const shown = pastExpanded ? past : past.slice(0, PAST_COLLAPSED_COUNT);
+    html += `
+    <section class="ev-section quiet" id="sec-past">
+      <div class="ev-section-head">
+        <h2><i class="ti ti-history"></i> 已辦完／已過期 <span class="count">${past.length}</span></h2>
+        <div class="grow"></div>
+        ${past.length > PAST_COLLAPSED_COUNT
+          ? `<button class="linkbtn" onclick="togglePast()">${pastExpanded ? '收合' : `顯示全部 ${past.length} 場`}</button>` : ''}
+      </div>
+      <div class="events-grid">${cards(shown)}</div>
+    </section>`;
+  }
+  if (showArchived) {
+    html += `
+    <section class="ev-section quiet" id="sec-archived">
+      <div class="ev-section-head"><h2><i class="ti ti-archive"></i> 已封存 <span class="count">${archived.length}</span></h2></div>
+      ${archived.length ? `<div class="events-grid">${cards(archived)}</div>` : '<div class="ev-empty">沒有已封存的活動。</div>'}
+    </section>`;
+  }
+  host.innerHTML = html;
+}
+
+function togglePast() { pastExpanded = !pastExpanded; renderEvents(); }
+
+// 新增／發布之後把剛動過的那張卡捲到眼前、閃一下，免得人要自己在一堆卡片裡找
+function flashCard(id) {
+  const el = Array.from(document.querySelectorAll('.event-card')).find(c => c.dataset.id === id);
+  if (!el) return;
+  el.scrollIntoView?.({ behavior: 'smooth', block: 'center' });
+  el.classList.add('card-flash');
+  setTimeout(() => el.classList.remove('card-flash'), 1900);
+}
+
+// ── 「更多」選單 ───────────────────────────────────────────────
+// 一個選單元素、兩個用途（活動卡片的「更多」與手機底部選單的「更多」）。電腦版浮在按鈕旁，
+// 手機版（CSS）從底部升起。按 Esc、點外面、捲動、縮放都會關。
+function showMore(items, anchorRect, title) {
+  const pop = document.getElementById('more-pop');
+  pop.innerHTML = (title ? `<div class="more-title">${escHtml(title)}</div>` : '') + items.map((it, i) =>
+    it.sep ? '<div class="sep"></div>' :
+    `<button type="button" role="menuitem" class="${it.danger ? 'danger' : ''}" data-i="${i}"><i class="ti ti-${it.icon}"></i> ${escHtml(it.label)}</button>`
+  ).join('');
+  pop.querySelectorAll('button[data-i]').forEach(b => {
+    const it = items[+b.dataset.i];
+    b.onclick = () => { closeMore(); try { it.run(); } catch (e) { console.error(e); } };
+  });
+  document.getElementById('more-backdrop').style.display = 'block';
+  pop.style.display = 'block';
+  // 電腦版：放在按鈕下方、靠右對齊；下面放不下就放上面。手機版由 CSS 固定在底部。
+  const w = pop.offsetWidth, h = pop.offsetHeight;
+  let left = Math.min(Math.max(8, anchorRect.right - w), window.innerWidth - w - 8);
+  let top = anchorRect.bottom + 6;
+  if (top + h > window.innerHeight - 8) top = Math.max(8, anchorRect.top - h - 6);
+  pop.style.left = left + 'px';
+  pop.style.top = top + 'px';
+  pop.querySelector('button')?.focus();
+}
+function closeMore() {
+  const pop = document.getElementById('more-pop');
+  if (pop) { pop.style.display = 'none'; pop.innerHTML = ''; }
+  const bd = document.getElementById('more-backdrop');
+  if (bd) bd.style.display = 'none';
+}
+function openCardMore(e, id) {
+  e.stopPropagation();
+  const ev = (state.events || []).find(x => x.id === id);
+  if (!ev) return;
+  showMore(moreMenuItems(ev), e.currentTarget.getBoundingClientRect(), ev.name);
+}
+// 手機底部選單的「更多」：電腦版側邊欄放得下的次要項目
+function openNavMore(btn) {
+  const items = [
+    { icon: 'address-book', label: '邀訪窗口分工', run: () => showView('contacts') },
+    { icon: 'microphone', label: '彙整媒體訓練', run: () => { location.href = '/training'; } },
+    { icon: 'ticket', label: '媒體報名', run: () => { location.href = '/registrations'; } },
+    { sep: true },
+    { icon: 'logout', label: '登出', run: () => logout() }
+  ];
+  showMore(items, btn.getBoundingClientRect());
+}
+window.addEventListener('resize', () => closeMore());
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Escape') return;
+  const pop = document.getElementById('more-pop');
+  if (pop && pop.style.display === 'block') { e.stopPropagation(); closeMore(); return; }
+  for (const [id, close] of [['publish-blocked-modal', closePublishBlocked], ['media-edit-modal', closeMediaEdit], ['line-qr-modal', closeLineQr]]) {
+    const el = document.getElementById(id);
+    if (el && el.style.display === 'flex') { close(); return; }
+  }
+});
 
 // ── 分析 ──────────────────────────────────────────────────
 function updateEventFilter() {
   const sel = document.getElementById('analytics-event-filter');
+  const keep = sel.value;
   const activeIds = new Set(state.events.map(e => e.id));
   // 從分析資料補入已封存但有問答紀錄的活動
   const archivedWithData = (state.analytics?.by_event || [])
@@ -986,6 +1379,7 @@ function updateEventFilter() {
   const allEvents = [...state.events, ...archivedWithData];
   sel.innerHTML = '<option value="">全部活動</option>' +
     allEvents.map(e => `<option value="${escHtml(e.id)}">${escHtml(e.name)}</option>`).join('');
+  sel.value = keep;
 }
 
 function showAnalyticsByEvent(eventId) {
@@ -994,11 +1388,14 @@ function showAnalyticsByEvent(eventId) {
   loadAnalytics();
 }
 
+// 問答分析的畫面狀態：目前載入的逐筆問答、已展開的回答、載入筆數上限
+state.qa = { rows: [], total: 0, limit: 200, answers: {}, open: new Set() };
+
 async function deleteQA(rowNum) {
   if (!confirm('確定要刪除這筆問答紀錄嗎？')) return;
   // 帶上這一列目前顯示的時間戳與問題內容，後端會比對是否相符才刪除——避免試算表被手動
   // 整理過、row_num 早就指向別筆資料時，誤刪到別的記者的問答。
-  const row = (state.recentCache || []).find(r => r.row_num === rowNum);
+  const row = (state.qa.rows || []).find(r => r.row_num === rowNum);
   try {
     const res = await authedFetch('/api/analytics', {
       method: 'POST',
@@ -1013,37 +1410,58 @@ async function deleteQA(rowNum) {
     toast('已刪除');
     loadAnalytics();
   } catch(e) {
-    toast('刪除失敗：' + e.message);
+    toast('刪除失敗：' + e.message, 'error');
   }
 }
 
 // LINE 問答沒辦法強制記者一定要打媒體名稱（聊天視窗做不出網頁版那種「不填不能問」
-// 的彈窗），現場公關人員多半認得出對方是哪家媒體，這支就是手動補的入口。
-// 用 prompt() 而不是另外做一個編輯彈窗——跟這頁其他操作（刪除用 confirm()）同一種
-// 簡單、低成本的互動方式，這個功能本來就是偶爾手動點幾次，不需要更重的 UI。
-async function editMedia(rowNum) {
-  const row = (state.recentCache || []).find(r => r.row_num === rowNum);
-  const current = row?.media && row.media !== '—' ? row.media : '';
-  const next = prompt('這筆問答的媒體名稱：', current);
-  if (next === null) return; // 按取消
-  const trimmed = next.trim();
-  if (!trimmed) { toast('媒體名稱不可空白'); return; }
+// 的彈窗），現場公關人員多半認得出對方是哪家媒體，這裡就是手動補的入口。
+// 批次 105：原本用 prompt() 只能改一個欄位；網頁問答現在把「媒體」與「姓名」分開記，所以改成一個
+// 小視窗、兩個欄位（舊資料的 D 欄常是「媒體 人名」整串，在這裡拆開存就整理乾淨了）。
+let mediaEditRow = null;
+function openMediaEdit(rowNum) {
+  const row = (state.qa.rows || []).find(r => r.row_num === rowNum);
+  if (!row) return;
+  mediaEditRow = rowNum;
+  const raw = row.media && row.media !== '（未填寫）' ? row.media : '';
+  // 舊資料「經濟日報 王小明」：幫忙拆開預填（只是預填，要按儲存才會寫入）
+  const m = !row.reporter ? raw.match(/^(\S{2,})\s+(.*[㐀-鿿].*)$/) : null;
+  document.getElementById('me-media').value = m ? m[1] : raw;
+  document.getElementById('me-person').value = m ? m[2] : (row.reporter || '');
+  document.getElementById('me-q').textContent = '問題：' + String(row.question || '').slice(0, 60);
+  document.getElementById('media-edit-modal').style.display = 'flex';
+  setTimeout(() => document.getElementById('me-media').focus?.(), 50);
+}
+function closeMediaEdit() {
+  document.getElementById('media-edit-modal').style.display = 'none';
+  mediaEditRow = null;
+}
+async function saveMediaEdit() {
+  const row = (state.qa.rows || []).find(r => r.row_num === mediaEditRow);
+  const media = document.getElementById('me-media').value.trim();
+  const person = document.getElementById('me-person').value.trim();
+  if (!row) { closeMediaEdit(); return; }
+  if (!media) { toast('媒體名稱不可空白（要清空請填「（未填寫）」）', 'error'); return; }
+  const btn = document.getElementById('me-save');
+  btn.disabled = true;
   try {
     const res = await authedFetch('/api/analytics', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        action: 'update_media', row_num: rowNum, password: state.password,
-        timestamp: row?.time, question: row?.question, media_name: trimmed
+        action: 'update_media', row_num: row.row_num, password: state.password,
+        timestamp: row.time, question: row.question, media_name: media, reporter_name: person
       })
     });
     const data = await res.json();
     if (data.error) throw new Error(data.error);
-    toast('已更新媒體名稱');
+    toast('已更新媒體與姓名');
+    closeMediaEdit();
     loadAnalytics();
   } catch(e) {
-    toast('更新失敗：' + e.message);
+    toast('更新失敗：' + e.message, 'error');
   }
+  btn.disabled = false;
 }
 
 // 掃出「媒體名稱欄其實是問題」的髒資料（見 api/analytics.js isDirtyMediaName 的
@@ -1084,7 +1502,7 @@ async function scanDirtyMedia() {
       <button class="btn btn-outline" style="font-size:0.78rem;padding:6px 14px" onclick="document.getElementById('dirty-media-panel').style.display='none'">取消</button>
     `;
   } catch(e) {
-    panel.innerHTML = `<div style="color:#ef4444;font-size:0.85rem">掃描失敗：${e.message}</div>`;
+    panel.innerHTML = `<div style="color:#ef4444;font-size:0.85rem">掃描失敗：${escHtml(e.message)}</div>`;
   }
 }
 
@@ -1103,13 +1521,14 @@ async function applyDirtyMediaClean() {
     document.getElementById('dirty-media-panel').style.display = 'none';
     loadAnalytics();
   } catch(e) {
-    toast('清理失敗：' + e.message);
+    toast('清理失敗：' + e.message, 'error');
   }
 }
 
-async function loadAnalytics() {
+async function loadAnalytics(opts = {}) {
   const eid = document.getElementById('analytics-event-filter').value;
   const view = document.getElementById('analytics-view');
+  if (!opts.keepLimit) state.qa.limit = 200;
   view.innerHTML = '<div style="text-align:center;padding:60px;color:var(--muted)"><i class="ti ti-loader" style="font-size:32px;display:block;margin-bottom:12px"></i>載入中…</div>';
 
   try {
@@ -1117,25 +1536,33 @@ async function loadAnalytics() {
     const params = new URLSearchParams();
     if (eid) params.set('event_id', eid);
     if (noTest) params.set('exclude_test', '1');
-    // 問答分析併入了原本「最新問答」的功能，limit 拉高到 200 筆，涵蓋範圍不縮水。
-    params.set('limit', '200');
+    // 列表只帶 AI 回答的預覽；整段回答點開那一列才載（見 toggleAnswer）
+    params.set('limit', String(state.qa.limit));
     const res = await authedFetch(`/api/analytics?${params.toString()}`);
     const data = await res.json();
     if (data.error) throw new Error(data.error);
-    state.recentCache = data.recent || [];
+    state.qa.rows = data.recent || [];
+    state.qa.total = data.total || 0;
+    state.qa.answers = {};
+    state.qa.open = new Set();
     renderAnalytics(data, eid);
   } catch(e) {
-    view.innerHTML = `<div style="color:#ef4444;padding:20px">載入失敗：${e.message}</div>`;
+    view.innerHTML = `<div style="color:#ef4444;padding:20px">載入失敗：${escHtml(e.message)}</div>`;
   }
+}
+
+function loadMoreQa() {
+  state.qa.limit = Math.min(500, state.qa.limit + 300);
+  loadAnalytics({ keepLimit: true });
 }
 
 function renderAnalytics(data, eid) {
   const maxMedia = Math.max(...(data.top_media || []).map(m => m.count), 1);
-  const maxKw = data.top_keywords?.[0]?.count || 1;
+  const unans = data.unanswered_count || 0;
 
   document.getElementById('analytics-view').innerHTML = `
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-bottom:24px">
-    <div style="background:white;border:1px solid var(--border);border-radius:var(--radius);padding:20px">
+  <div class="top-grid">
+    <div class="qa-box">
       <div class="section-title"><i class="ti ti-hash" style="color:var(--primary)"></i> 熱門關鍵字</div>
       ${data.top_keywords?.length ? `
       <div class="keyword-cloud">
@@ -1146,59 +1573,120 @@ function renderAnalytics(data, eid) {
       </div>` : '<div style="color:var(--muted);font-size:0.85rem">尚無資料</div>'}
     </div>
 
-    <div style="background:white;border:1px solid var(--border);border-radius:var(--radius);padding:20px">
-      <div class="section-title"><i class="ti ti-building-newspaper" style="color:var(--primary)"></i> 媒體排行</div>
+    <div class="qa-box">
+      <div class="section-title"><i class="ti ti-building-newspaper" style="color:var(--primary)"></i> 媒體排行 <span style="font-size:0.74rem;font-weight:400;color:var(--muted)">（同一家併在一起）</span></div>
       ${data.top_media?.length ? data.top_media.map(m => `
       <div class="media-bar">
-        <div class="media-bar-label">${escHtml(m.name)}</div>
+        <div class="media-bar-label" title="${escHtml(m.name)}">${escHtml(m.name)}</div>
         <div class="media-bar-track"><div class="media-bar-fill" style="width:${(m.count/maxMedia*100).toFixed(0)}%"></div></div>
         <div class="media-bar-count">${m.count}</div>
       </div>`).join('') : '<div style="color:var(--muted);font-size:0.85rem">尚無媒體填寫資料</div>'}
     </div>
   </div>
 
-  <div style="background:white;border:1px solid var(--border);border-radius:var(--radius);padding:20px">
-    <div class="section-title" style="display:flex;justify-content:space-between;align-items:center">
-      <span><i class="ti ti-message-circle" style="color:var(--primary)"></i> 最新問答紀錄
-        <span style="font-size:0.78rem;font-weight:400;color:var(--muted);margin-left:8px">共 ${data.total} 則</span>
-      </span>
+  <div class="qa-box">
+    <div class="section-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+      <span><i class="ti ti-message-circle" style="color:var(--primary)"></i> 最新問答紀錄</span>
       <span style="display:flex;gap:8px">
         <button class="btn btn-outline" style="font-size:0.78rem;padding:5px 12px" onclick="scanDirtyMedia()" title="找出媒體名稱欄其實是問題內容的髒資料">
           <i class="ti ti-wand"></i> 清理媒體欄
         </button>
-        <button class="btn btn-outline" style="font-size:0.78rem;padding:5px 12px" onclick="exportCSV('${eid}')">
-          <i class="ti ti-download"></i> 匯出 CSV
-        </button>
       </span>
     </div>
+    <div class="qa-summary">
+      <span>共 <b>${data.total}</b> 則</span>
+      <span>服務 <b>${data.media_total ?? 0}</b> 家媒體</span>
+      <span>疑似答不出來 <b style="color:${unans ? '#c2410c' : 'inherit'}">${unans}</b> 則${unans ? ' <button class="linkbtn" onclick="filterUnanswered()">只看這些</button>' : ''}</span>
+    </div>
     <div id="dirty-media-panel" style="display:none;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:14px;margin-bottom:16px"></div>
-    ${data.recent?.length ? `
-    <div style="overflow-x:auto">
-    <table class="qa-table">
-      <thead><tr><th>時間</th><th>活動</th><th>媒體</th><th>問題</th><th style="width:110px">操作</th></tr></thead>
-      <tbody>${data.recent.map(r => `
-        <tr>
-          <td style="white-space:nowrap;font-size:0.78rem;color:var(--muted)">${escHtml(r.time||'')}</td>
-          <td style="white-space:nowrap;font-size:0.78rem">${escHtml(r.event||r.event_id||'')}</td>
-          <td style="font-size:0.82rem">${escHtml(r.media||'—')}</td>
-          <td>${escHtml(r.question||'')}</td>
-          <td style="white-space:nowrap">
-            <button onclick="editMedia(${r.row_num})" title="手動填寫／修改媒體名稱"
-              style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:6px;cursor:pointer;color:#0369a1;font-size:0.78rem;font-weight:600;padding:4px 8px;font-family:var(--font);margin-right:4px">
-              ✎ 媒體</button>
-            <button onclick="deleteQA(${r.row_num})" title="刪除此筆"
-              style="background:#fef2f2;border:1px solid #fecaca;border-radius:6px;cursor:pointer;color:#ef4444;font-size:0.78rem;font-weight:600;padding:4px 8px;font-family:var(--font)">
-              🗑 刪除</button>
-          </td>
-        </tr>`).join('')}
-      </tbody>
-    </table>
-    </div>` : '<div style="color:var(--muted);font-size:0.85rem;padding:20px 0;text-align:center">尚無問答紀錄</div>'}
+    <div id="qa-list"></div>
   </div>`;
+  renderQaList();
 }
 
-// 「最新問答」併入問答分析後移除——功能重複（同一張表、同一個刪除鈕），
-// 問答分析的「全部活動」篩選 + 上面拉高的 limit 已經涵蓋原本這個視圖的用途。
+function filterUnanswered() {
+  const cb = document.getElementById('analytics-only-unanswered');
+  cb.checked = true;
+  renderQaList();
+}
+
+// 依搜尋框與「只看疑似答不出來」篩已載入的那些筆，畫成表格（手機上 CSS 會把每一列變成一張卡片）
+function renderQaList() {
+  const host = document.getElementById('qa-list');
+  if (!host) return;
+  const q = (document.getElementById('analytics-search')?.value || '').trim().toLowerCase();
+  const onlyUnans = !!document.getElementById('analytics-only-unanswered')?.checked;
+  const all = state.qa.rows || [];
+  const rows = all.filter(r =>
+    (!onlyUnans || r.unanswered) &&
+    (!q || [r.question, r.media, r.reporter, r.event, r.answer_preview].some(x => String(x || '').toLowerCase().includes(q))));
+
+  if (!all.length) { host.innerHTML = '<div style="color:var(--muted);font-size:0.85rem;padding:20px 0;text-align:center">尚無問答紀錄</div>'; return; }
+  if (!rows.length) { host.innerHTML = '<div style="color:var(--muted);font-size:0.85rem;padding:20px 0;text-align:center">沒有符合的問答（換個關鍵字，或取消「只看疑似答不出來」）</div>'; return; }
+
+  const more = state.qa.total > all.length && !q && !onlyUnans
+    ? `<div style="text-align:center;margin-top:14px;font-size:0.82rem;color:var(--muted)">目前只顯示最近 ${all.length} 則（共 ${state.qa.total} 則）
+        ${state.qa.limit < 500 ? '<button class="linkbtn" onclick="loadMoreQa()">載入更多</button>' : '；要看全部請用「匯出 CSV」'}</div>` : '';
+
+  host.innerHTML = `
+  <table class="qa-table">
+    <thead><tr><th>時間</th><th>活動</th><th>媒體／姓名</th><th>問題與 AI 回答</th><th style="width:150px">操作</th></tr></thead>
+    <tbody>${rows.map(r => {
+      const open = state.qa.open.has(r.row_num) && state.qa.answers[r.row_num] !== undefined;
+      return `
+      <tr>
+        <td class="t-time">${escHtml(r.time||'')}</td>
+        <td class="t-event">${escHtml(r.event||r.event_id||'')}${r.source === 'line' ? '<span class="tag tag-line">LINE</span>' : ''}</td>
+        <td class="t-media">${escHtml(r.media||'—')}${r.reporter ? `<div class="form-hint" style="margin:1px 0 0">${escHtml(r.reporter)}</div>` : ''}</td>
+        <td class="q">
+          <div class="qtext">${escHtml(r.question||'')}${r.unanswered ? '<span class="tag tag-unans" title="AI 回答裡有「這部分我沒有資料」這類說法">疑似答不出來</span>' : ''}</div>
+          ${r.answer_preview ? `<div class="qa-ans-prev">${escHtml(r.answer_preview)}</div>` : ''}
+          <div class="qa-full" id="ans-${r.row_num}" style="display:${open ? 'block' : 'none'}">${open ? answerBoxHtml(r.row_num) : ''}</div>
+        </td>
+        <td class="t-ops" style="white-space:nowrap">
+          <button class="mini-btn" onclick="toggleAnswer(${r.row_num})" title="看 AI 完整回答，抽查有沒有講錯">看回答</button>
+          <button class="mini-btn blue" onclick="openMediaEdit(${r.row_num})" title="手動填寫／修改媒體與姓名">✎ 媒體</button>
+          <button class="mini-btn red" onclick="deleteQA(${r.row_num})" title="刪除此筆">刪除</button>
+        </td>
+      </tr>`;
+    }).join('')}
+    </tbody>
+  </table>${more}`;
+}
+
+function answerBoxHtml(rowNum) {
+  return `${escHtml(state.qa.answers[rowNum] ?? '')}<div class="copy-row"><button class="mini-btn" onclick="copyAnswer(${rowNum})">複製回答</button></div>`;
+}
+
+// 展開／收合一筆的 AI 完整回答。列表只帶 140 字預覽（每筆回答動輒上千字，200 筆全帶是好幾百 KB），
+// 點開才向後端要那一筆。承辦人要的是「抽查 AI 有沒有講錯」——以前這張表只看得到問題，看不到答案。
+async function toggleAnswer(rowNum) {
+  const box = document.getElementById('ans-' + rowNum);
+  if (!box) return;
+  if (box.style.display === 'block') { box.style.display = 'none'; state.qa.open.delete(rowNum); return; }
+  box.style.display = 'block';
+  state.qa.open.add(rowNum);
+  if (state.qa.answers[rowNum] === undefined) {
+    box.textContent = '載入中…';
+    try {
+      const res = await authedFetch(`/api/analytics?answer_row=${rowNum}`);
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data.error || '載入失敗');
+      state.qa.answers[rowNum] = data.answer || '（這筆沒有回答內容）';
+    } catch (e) {
+      box.textContent = '載入失敗：' + e.message;
+      state.qa.open.delete(rowNum);
+      return;
+    }
+  }
+  box.innerHTML = answerBoxHtml(rowNum);
+}
+
+async function copyAnswer(rowNum) {
+  const text = state.qa.answers[rowNum];
+  if (text === undefined) return;
+  await copyText(text, '已複製這則回答', '複製失敗，請直接選取文字複製');
+}
 
 // ── 知識庫字數上限 ────────────────────────────────────────
 // 原本三個地方各說各話：這裡的文案寫「最多 8000 字」但完全不擋（送出去才被後端退）、
@@ -1284,7 +1772,80 @@ function applySnapshot(snap) {
 function syncModalDerived() {
   const color = (document.getElementById('input-color').value || '').trim() || '#0F9E7A';
   document.getElementById('color-preview').style.background = color;
+  syncColorPicker(color);
   updateKbCount();
+  updateStatusHint();
+  updateReadiness();
+}
+
+// 色票與 HEX 欄互相同步。<input type=color> 只吃 #rrggbb，格式不對就維持上一個顏色，不報錯。
+function syncColorPicker(v) {
+  const hex = String(v || '').trim();
+  const pv = document.getElementById('color-preview');
+  if (/^#[0-9A-Fa-f]{6}$/.test(hex)) {
+    const pk = document.getElementById('color-picker');
+    if (pk) pk.value = hex.toLowerCase();
+    if (pv) pv.style.background = hex;
+  }
+}
+
+// ── 發布前必填（批次 104）─────────────────────────────────────
+// 規則跟後端發布閘門（api/events.js → lib/event-status.js）一模一樣：日期、地點、新聞聯絡人、新聞稿
+// （範本沒填內容不算）。後端是真正擋人的那一道（CLAUDE.md 第 2 條），這裡只是讓人填的時候就看得到
+// 還缺什麼，不用按了儲存／發布才被退。
+// ⚠️ 下面兩支是 lib/kb-template.js kbHasContent() 的鏡射（靜態頁沒辦法 import lib/）——
+//    test/test-batch104-admin.mjs 拿同一批樣本比對兩邊的結果。
+let KB_TEMPLATE_LINES = null;   // 第一次用到才建（KB_TEMPLATE 在檔案後面才宣告）
+const KB_EMPTY_SHAPES = [/^[-・•*]+$/, /^【[^】]*】(（[^）]*）|\([^)]*\))?$/, /^[-・•*]?\s*[^：:]{0,30}[：:]$/];
+function kbHasContent(kb) {
+  if (!KB_TEMPLATE_LINES) KB_TEMPLATE_LINES = new Set(KB_TEMPLATE.split('\n').map(l => l.trim()).filter(Boolean));
+  return String(kb || '').split('\n').map(l => l.trim()).filter(Boolean)
+    .some(l => !KB_TEMPLATE_LINES.has(l) && !KB_EMPTY_SHAPES.some(re => re.test(l)));
+}
+function missingForPublish() {
+  const v = id => (document.getElementById(id)?.value || '').trim();
+  const miss = [];
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(v('input-date'))) miss.push({ label: '日期', field: 'input-date' });
+  if (!v('input-venue')) miss.push({ label: '地點', field: 'input-venue' });
+  if (!v('input-contact')) miss.push({ label: '新聞聯絡人', field: 'input-contact' });
+  if (!kbHasContent(v('input-kb'))) miss.push({ label: '新聞稿', field: 'input-kb' });
+  return miss;
+}
+function updateReadiness() {
+  const box = document.getElementById('readiness');
+  if (!box) return;
+  const miss = missingForPublish();
+  const missLabels = new Set(miss.map(m => m.label));
+  const chip = l => missLabels.has(l) ? `<span class="miss"><i class="ti ti-square"></i> ${l}</span>` : `<span class="ok"><i class="ti ti-circle-check"></i> ${l}</span>`;
+  box.className = 'readiness' + (miss.length ? '' : ' all-ok');
+  box.innerHTML = `<span class="lead">發布前必填</span>${['日期', '地點', '新聞聯絡人', '新聞稿'].map(chip).join('')}` +
+    (miss.length ? '' : '<span class="ok">　都齊了，儲存後就可以按「發布」</span>');
+}
+// 儲存／發布被擋下來時，把缺的欄位框起來並捲過去
+function highlightMissing(labels) {
+  const map = { '日期': 'input-date', '地點': 'input-venue', '新聞聯絡人': 'input-contact', '新聞稿': 'input-kb' };
+  let first = null;
+  (labels || []).forEach(l => {
+    const el = document.getElementById(map[l]);
+    if (!el) return;
+    el.classList.add('field-missing');
+    setTimeout(() => el.classList.remove('field-missing'), 6000);
+    first = first || el;
+  });
+  first?.scrollIntoView?.({ behavior: 'smooth', block: 'center' });
+}
+
+// 狀態下拉的說明（跟同仁編輯頁同一套字）。「已結束」不是裝飾——選了以後存檔頁會把完整新聞稿公開給搜尋引擎與 AI 收錄。
+const STATUS_HINTS = {
+  draft:    '尚未對外：記者前台的連結會顯示「找不到活動」，可以慢慢把內容填好。',
+  active:   '記者前台正常提供問答；新聞稿全文尚不會被搜尋引擎／AI（如 ChatGPT、Perplexity）收錄完整內容。',
+  ended:    '活動確定結束、新聞稿已正式對外發布後再選這個。選了以後，完整新聞稿會開放讓搜尋引擎與 AI 收錄索引，且無法完全收回。',
+  archived: '封存後記者前台將立即無法使用。'
+};
+function updateStatusHint() {
+  const el = document.getElementById('status-hint');
+  const sel = document.getElementById('input-status');
+  if (el && sel) el.textContent = STATUS_HINTS[sel.value] || '';
 }
 
 // 跟基準比，而不是「有沒有打過字」——打了又改回來就該算沒改，
@@ -1399,6 +1960,8 @@ window.addEventListener('beforeunload', e => {
 // 綁在 overlay 上用事件冒泡收所有欄位，之後加欄位不用再補一條 listener
 document.getElementById('event-modal').addEventListener('input', markModalChanged);
 document.getElementById('event-modal').addEventListener('change', markModalChanged);
+document.getElementById('event-modal').addEventListener('input', () => updateReadiness());
+document.getElementById('event-modal').addEventListener('change', () => updateReadiness());
 
 // ── Modal ─────────────────────────────────────────────────
 // prefillDate：從行事曆點空白日期新增活動時，把那天帶進來（YYYY-MM-DD）
@@ -1409,7 +1972,8 @@ function showCreateModal(prefillDate) {
   document.getElementById('input-organizer').value = '工研院';
   document.getElementById('input-color').value = '#0F9E7A';
   document.getElementById('color-preview').style.background = '#0F9E7A';
-  document.getElementById('input-date').value = prefillDate || new Date().toISOString().slice(0,10);
+  syncColorPicker('#0F9E7A');
+  document.getElementById('input-date').value = prefillDate || todayTaipeiIso();
   document.getElementById('input-time').value = '';
   document.getElementById('input-venue').value = '';
   document.getElementById('input-type').value = '';
@@ -1433,6 +1997,10 @@ function showCreateModal(prefillDate) {
   populateCopyTemplate();
   document.getElementById('copy-template-group').style.display = 'block';
   document.getElementById('copy-template-select').value = '';
+  const adv = document.getElementById('adv-box');
+  if (adv) adv.open = false;           // 進階設定預設收起來
+  updateStatusHint();
+  updateReadiness();
   openModal();
 }
 
@@ -1486,6 +2054,7 @@ async function showEditModal(eventId) {
     document.getElementById('input-organizer').value = ev.organizer || '工研院';
     document.getElementById('input-color').value = ev.color || '#0F9E7A';
     document.getElementById('color-preview').style.background = ev.color || '#0F9E7A';
+    syncColorPicker(ev.color || '#0F9E7A');
     document.getElementById('input-kb').value = ev.knowledge_base || '';
     updateKbCount();
     document.getElementById('input-chips').value = ev.chips || '';
@@ -1503,16 +2072,14 @@ async function showEditModal(eventId) {
     const deletable = ev.status === 'draft' || ev.status === 'archived';
     document.getElementById('delete-btn').style.display = deletable ? 'inline-flex' : 'none';
     document.getElementById('archive-btn').style.display = ev.status === 'archived' ? 'none' : 'inline-flex';
-    // 解析活動日期為 date input 格式（YYYY-MM-DD）；event_date 是新別名，created_at 是舊欄名相容
-    const dateStr = ev.event_date || ev.created_at || '';
-    let isoDate = '';
-    if (dateStr.match(/^\d{4}-\d{2}-\d{2}/)) {
-      isoDate = dateStr.slice(0, 10);
-    } else if (dateStr.match(/^\d{4}\/\d{1,2}\/\d{1,2}/)) {
-      const parts = dateStr.split('/');
-      isoDate = parts[0] + '-' + String(parts[1]).padStart(2,'0') + '-' + String(parts[2]).padStart(2,'0');
-    }
-    document.getElementById('input-date').value = isoDate;
+    // 活動日期（date input 格式 YYYY-MM-DD）。只收「純日期」：沒填日期的活動，日期欄裡是系統寫的建立時間戳
+    // （"2026/6/18 下午11:06:04"），以前這裡把它的前半段當成活動日期預填進去——使用者一按儲存，
+    // 「建立那天」就變成正式的活動日期（批次 103）。現在留空，要他自己選。
+    document.getElementById('input-date').value = eventDateIso(ev);
+    const adv = document.getElementById('adv-box');
+    if (adv) adv.open = false;
+    updateStatusHint();
+    updateReadiness();
     openModal();
   } catch(e) {
     toast('載入失敗：' + e.message);
@@ -1547,11 +2114,11 @@ async function saveEvent() {
   const invite_letter = document.getElementById('input-invite-letter').value.trim();
   const invite_letter_chips = document.getElementById('input-invite-letter-chips').value.trim();
 
-  if (!name) { toast('活動名稱必填'); return; }
-  if (!knowledge_base) { toast('知識庫不可為空'); return; }
+  if (!name) { toast('活動名稱必填', 'error'); return; }
+  if (!knowledge_base) { toast('知識庫不可為空', 'error'); return; }
   // 硬上限在前台就擋掉。打了四萬多字才被後端退 400，是最傷的一種失敗。
   if (knowledge_base.length > KB_HARD_LIMIT) {
-    toast(`知識庫 ${knowledge_base.length} 字，超過上限 ${KB_HARD_LIMIT} 字，請刪減後再存`);
+    toast(`知識庫 ${knowledge_base.length} 字，超過上限 ${KB_HARD_LIMIT} 字，請刪減後再存`, 'error');
     return;
   }
   if (knowledge_base.length > KB_SOFT_LIMIT &&
@@ -1575,19 +2142,33 @@ async function saveEvent() {
       })
     });
     const data = await res.json();
+    if (data.code === 'publish_blocked') {
+      // 把狀態改成公開（進行中／已結束）但必填沒齊：後端擋下來了。modal 不關、內容都還在，
+      // 把缺的欄位框起來，並告訴他最簡單的出路——先維持「未發布」存起來。
+      saveDraft();
+      highlightMissing(data.missing);
+      toast(`${data.error}`, 'error');
+      return finishSave(btn);
+    }
     if (data.error) throw new Error(data.error);
 
     clearDraft();          // 存進後端了，草稿的任務結束
     closeModal();
-    toast(id ? '活動已更新！' : '活動已建立！');
+    // 新活動一律從「未發布」開始：記者掃 QR、點連結都還看不到。以前只說「活動已建立！」，
+    // 承辦人以為好了，記者會當天掃出來才發現找不到活動（批次 104）。
+    toast(id ? '活動已更新！' : '活動已建立——目前是「未發布」，記者還看不到。補齊必填後，到卡片上按「發布」。', id ? 'ok' : 'notice');
     await loadEvents();
+    if (!id && data.id) flashCard(data.id);
   } catch(e) {
     // 存不進去（網路斷、Sheets 掛了、內容過長）時 modal 刻意不關，
     // 草稿也再推一次——這正是最容易整段蒸發的時刻
     saveDraft();
-    toast('儲存失敗（內容已留在畫面上）：' + e.message);
+    toast('儲存失敗（內容已留在畫面上）：' + e.message, 'error');
   }
+  finishSave(btn);
+}
 
+function finishSave(btn) {
   btn.disabled = false; btn.innerHTML = '<i class="ti ti-check"></i> 儲存';
 }
 
@@ -1683,6 +2264,8 @@ async function deleteEvent(eventId) {
 }
 
 // 發布：draft → active。卡片與行事曆共用。
+// 必填沒齊時後端會擋（批次 103 發布閘門，code=publish_blocked）：這裡不只丟一句錯誤，而是列出缺什麼、
+// 帶人去補（批次 104）。
 async function publishEvent(id) {
   try {
     const res = await authedFetch('/api/events', {
@@ -1691,12 +2274,29 @@ async function publishEvent(id) {
       body: JSON.stringify({ action: 'update', password: state.password, id, status: 'active' })
     });
     const data = await res.json();
+    if (data.code === 'publish_blocked') { showPublishBlocked(id, data.missing || []); return; }
     if (data.error) throw new Error(data.error);
-    toast('已發布，記者前台現在看得到這場了');
+    toast('已發布，記者前台現在看得到這場了', 'ok');
     await loadEvents();
+    flashCard(id);
   } catch(e) {
-    toast('發布失敗：' + e.message);
+    toast('發布失敗：' + e.message, 'error');
   }
+}
+
+function showPublishBlocked(id, missing) {
+  const ev = (state.events || []).find(e => e.id === id);
+  document.getElementById('pb-name').textContent = ev ? ev.name : id;
+  document.getElementById('pb-list').innerHTML = (missing || []).map(m => `<li><i class="ti ti-square"></i> ${escHtml(m)}</li>`).join('');
+  document.getElementById('pb-go').onclick = async () => {
+    closePublishBlocked();
+    await showEditModal(id);
+    highlightMissing(missing);
+  };
+  document.getElementById('publish-blocked-modal').style.display = 'flex';
+}
+function closePublishBlocked() {
+  document.getElementById('publish-blocked-modal').style.display = 'none';
 }
 
 // 收回為未發布：active → draft。跟封存不一樣——封存不能自己復原，這個可以隨時再發布回來。
@@ -1713,11 +2313,28 @@ async function unpublishEvent(id) {
     toast('已收回為未發布');
     await loadEvents();
   } catch(e) {
-    toast('操作失敗：' + e.message);
+    toast('操作失敗：' + e.message, 'error');
   }
 }
 
 // ── 行事曆 ────────────────────────────────────────────────
+// 可收合、記住選擇（批次 104）：電腦預設展開（在活動卡片下面，不擋第一屏）、手機預設收起來。
+function calOpenPref() {
+  try { const v = localStorage.getItem('itri_cal_open'); if (v === '1') return true; if (v === '0') return false; } catch (e) {}
+  return !(window.matchMedia && window.matchMedia('(max-width: 768px)').matches);
+}
+function applyCalOpen(open) {
+  const box = document.getElementById('cal-box');
+  if (!box) return;
+  box.classList.toggle('collapsed', !open);
+  const t = document.getElementById('cal-toggle');
+  t?.setAttribute?.('aria-expanded', open ? 'true' : 'false');
+}
+function toggleCalendar() {
+  const open = document.getElementById('cal-box').classList.contains('collapsed');
+  applyCalOpen(open);
+  try { localStorage.setItem('itri_cal_open', open ? '1' : '0'); } catch (e) {}
+}
 let calState = (() => { const d = new Date(); return { year: d.getFullYear(), month: d.getMonth() }; })();
 
 function calShiftMonth(delta) {
@@ -1736,8 +2353,10 @@ function calGoToday() {
 // "2026/6/18 下午11:06:04"（建立時間戳記）。跟後端 event-page.js 的 parseEventDate
 // 用同一套規則，兩邊對日期的認定才會一致。
 function calParseDate(raw) {
+  // 只收純日期（批次 103）：「2026/6/18 下午11:06:04」是系統寫的建立時間戳，不是活動日期，
+  // 以前也被當成活動日期畫在行事曆上，沒填日期的活動就憑空出現在「建立那一天」。
   if (!raw) return null;
-  const m = String(raw).trim().match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+  const m = String(raw).trim().match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/);
   if (!m) return null;
   const d = new Date(+m[1], +m[2] - 1, +m[3]);
   return isNaN(d.getTime()) ? null : d;
@@ -1834,7 +2453,7 @@ async function exportCSV(eventId) {
     const blob = await res.blob();
     const cd = res.headers.get('Content-Disposition') || '';
     const m = cd.match(/filename\*=UTF-8''([^;]+)/);
-    const filename = m ? decodeURIComponent(m[1]) : `qa-export-${new Date().toISOString().slice(0,10)}.csv`;
+    const filename = m ? decodeURIComponent(m[1]) : `qa-export-${todayTaipeiIso()}.csv`;
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
     a.download = filename;
@@ -1843,13 +2462,36 @@ async function exportCSV(eventId) {
     a.remove();
     URL.revokeObjectURL(a.href);
   } catch (e) {
-    toast('匯出失敗：' + e.message);
+    toast('匯出失敗：' + e.message, 'error');
   }
+}
+
+// 複製文字到剪貼簿。navigator.clipboard 在非 https、部分手機瀏覽器或權限被擋時會失敗——以前
+// copyLink 只處理成功的情況，失敗就是按了沒反應（批次 104）。失敗時退回舊式 execCommand，
+// 再失敗就把文字直接顯示出來讓人自己選取。
+async function copyText(text, okMsg, failMsg) {
+  try {
+    await navigator.clipboard.writeText(text);
+    toast(okMsg, 'ok');
+    return true;
+  } catch (e) { /* 往下試備援 */ }
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text; ta.setAttribute('readonly', '');
+    ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0;font-size:16px';
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand('copy');
+    ta.remove();
+    if (ok) { toast(okMsg, 'ok'); return true; }
+  } catch (e) { /* 往下 */ }
+  toast((failMsg || '複製失敗，請自行選取文字複製') + (text.length < 200 ? '：' + text : ''), 'error');
+  return false;
 }
 
 function copyLink(eventId) {
   const url = `${location.origin}/event?id=${encodeURIComponent(eventId)}`;
-  navigator.clipboard.writeText(url).then(() => toast('記者前台連結已複製！'));
+  copyText(url, '記者前台連結已複製！', '複製失敗，請自行複製這個連結');
 }
 
 // 產生 / 取得該活動的「同仁編輯連結」並複製。同仁憑此連結只能更新這一場的內容，
@@ -1866,10 +2508,9 @@ async function copyEditLink(eventId, btn) {
     const data = await res.json();
     if (data.error) throw new Error(data.error);
     const url = `${location.origin}/edit?id=${encodeURIComponent(eventId)}&code=${encodeURIComponent(data.edit_code)}`;
-    await navigator.clipboard.writeText(url);
-    toast('同仁編輯連結已複製！貼給負責同仁即可（對方只能改這一場）');
+    await copyText(url, '同仁編輯連結已複製！貼給負責同仁即可（對方只能改這一場）', '複製失敗，請自行複製這個連結');
   } catch (e) {
-    toast('產生失敗：' + e.message);
+    toast('產生失敗：' + e.message, 'error');
   }
   if (btn) { btn.disabled = false; btn.innerHTML = original; }
 }
@@ -1895,7 +2536,7 @@ async function openTraining(eventId, btn) {
     else location.href = url;  // 快顯被擋就改同分頁開
   } catch (e) {
     if (win) win.close();
-    toast('開啟媒體訓練失敗：' + e.message);
+    toast('開啟媒體訓練失敗：' + e.message, 'error');
   }
   if (btn) { btn.disabled = false; btn.innerHTML = original; }
 }
@@ -1988,12 +2629,7 @@ async function copyLineQr(kind) {
   const text = kind === 'url' ? lineQrState.url
     : kind === 'code' ? '#' + lineQrState.ev.id
     : (state.line && state.line.add_friend_url) || '';
-  try {
-    await navigator.clipboard.writeText(text);
-    toast(kind === 'code' ? '代碼已複製' : '連結已複製');
-  } catch (e) {
-    toast('複製失敗，請直接選取文字複製');
-  }
+  await copyText(text, kind === 'code' ? '代碼已複製' : '連結已複製', '複製失敗，請直接選取文字複製');
 }
 // 用 Blob 網址下載，不用 data: 網址——有些瀏覽器對 data: 網址不理 download 屬性，
 // 存下來的檔名會變成「download」，承辦人一次下載好幾場就分不出哪張是哪場。
@@ -2014,13 +2650,31 @@ function downloadLineQr() {
   }, 'image/png');
 }
 
+// 提示訊息（批次 104）：錯誤與重要提醒停得久一點，並且點一下就關。以前一律 3 秒——
+// 「儲存失敗：…」「還不能發布，必填還缺…」這種要讀、要照著做的訊息，3 秒讀不完就消失了。
+//   toast('已儲存')               普通：3 秒
+//   toast(msg, 'ok')              成功：3 秒、綠色
+//   toast(msg, 'notice')          重要提醒：9 秒
+//   toast(msg, 'error')           錯誤：8 秒、紅色
 let toastTimer;
-function toast(msg) {
+function toast(msg, type) {
   const el = document.getElementById('toast');
+  const ms = type === 'error' ? 8000 : type === 'notice' ? 9000 : 3000;
   el.textContent = msg;
   el.style.display = 'block';
+  el.style.background = type === 'error' ? '#b91c1c' : type === 'ok' ? '#047857' : type === 'notice' ? '#92400e' : '#1a1a2e';
+  el.style.cursor = 'pointer';
+  el.title = '點一下關閉';
+  el.onclick = () => { el.style.display = 'none'; };
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => el.style.display = 'none', 3000);
+  toastTimer = setTimeout(() => el.style.display = 'none', ms);
+}
+
+// 台灣時間的今天（YYYY-MM-DD）。新增活動的預設日期以前用 new Date().toISOString().slice(0,10)，
+// 那是 UTC 日期——台灣 00:00–08:00 打開會預設成「昨天」，清晨準備當天活動的人剛好踩到（批次 103）。
+// 明講時區，不跟著瀏覽器的設定走：這個平台的「今天」一律是台灣的今天（後端也是）。
+function todayTaipeiIso() {
+  return new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Taipei' });
 }
 
 function escHtml(str) {

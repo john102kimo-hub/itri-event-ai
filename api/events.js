@@ -24,6 +24,8 @@ import { CONTACTS_DIR_RANGE, ensureContactsDirectorySheet } from '../lib/contact
 import { resolveEventContent } from '../lib/prompt.js';
 import { lineBindUrl, lineAddFriendUrl, lineBasicId } from '../lib/line-link.js';
 import { handleRegistrationRequest } from '../lib/registration-api.js';
+import { publishBlockers, isPublishing, taipeiToday } from '../lib/event-status.js';
+import { effectiveChips } from '../lib/default-chips.js';
 
 // 跟 events 的 knowledge_base 同一個上限理由：Google Sheets 單一儲存格上限約 5 萬字元，
 // 這份清單目前十幾行遠遠用不到，留餘裕只是避免同仁哪天貼了整份含備註的原始文件進來。
@@ -54,6 +56,19 @@ const KB_MAX_LEN = 45000;
 //   archived 已封存（記者前台下架）。
 // 同仁自助編輯與管理員共用同一份檢查，避免寫入允許值以外的字串。
 const EVENT_STATUSES = ['draft', 'active', 'ended', 'archived'];
+
+// 發布閘門（批次 103）：活動從「未發布／封存／新建」變成公開（進行中、已結束）之前，必填要齊——
+// 日期、地點、新聞聯絡人、新聞稿（範本沒動過不算）。朱朱批次 76 的決定，當時只擋了 LINE 職員模式；
+// 後台的「發布」鈕、後台編輯視窗的狀態下拉、同仁編輯頁的狀態下拉，走的都是這支，現在一律擋在這裡
+// （CLAUDE.md 第 2 條：絕對不能發生的事，擋在程式出口，不是寫在畫面上提醒）。
+// 回應帶 `code: 'publish_blocked'` 與 `missing`，前端據此列出缺哪幾項、帶人去補。
+function publishBlocked(res, missing) {
+  return res.status(400).json({
+    error: `還不能發布，必填還缺：${missing.join('、')}。請先補齊，或讓活動維持在「未發布」。`,
+    code: 'publish_blocked',
+    missing
+  });
+}
 
 // 同仁可編輯的內容欄位 → 組出完整 16 欄，編輯碼(K)一律沿用既有值。
 // 狀態(E) 開放同仁自行切換（未發布/進行中/已結束/已封存）；呼叫端須先用 EVENT_STATUSES
@@ -144,7 +159,15 @@ export default async function handler(req, res) {
           event: {
             id: row[0], name: row[1], color: row[2] || '#0F9E7A',
             status: publicFields.status, created_at: row[5] || '', event_date: publicFields.event_date,
-            chips: publicFields.chips, images: publicFields.images, greeting: row[8] || '',
+            // 快速提問（批次 104）：同仁自訂的優先；沒自訂就依知識庫實際有寫的小節算，不再是一組寫死的
+            // 「技術商業化」五題（院士授證典禮點下去只會得到「沒有資料」）。算法與 LINE 共用 lib/default-chips.js。
+            chips: effectiveChips({
+              status: publicFields.status, event_date: row[5] || '',
+              chips: row[6] || '', images: row[7] || '',
+              invite_letter: row[16] || '', invite_letter_chips: row[17] || '',
+              knowledge_base: row[3] || '', press_contact: row[14] || '', venue: row[12] || '', event_time: row[11] || ''
+            }).join('\n'),
+            images: publicFields.images, greeting: row[8] || '',
             event_time: row[11] || '', venue: row[12] || '', event_type: row[13] || '', press_contact: row[14] || '',
             // 「用 LINE 問」的入口（沒設定 LINE_BASIC_ID 時是空字串，前台就不顯示）
             line_url: lineBindUrl(row[0])
@@ -202,6 +225,7 @@ export default async function handler(req, res) {
       // 跟 action=get 共用同一把密碼驗證。
       if (action === 'list_admin') {
         if (password !== adminPassword) return res.status(401).json({ error: '密碼錯誤' });
+        const today = taipeiToday();
         const events = rows
           .filter(r => r[0])
           .map(r => ({
@@ -210,7 +234,9 @@ export default async function handler(req, res) {
             chips: r[6] || '', images: r[7] || '', greeting: r[8] || '', organizer: r[9] || '工研院',
             has_kb: !!(r[3] && String(r[3]).trim()),
             event_time: r[11] || '', venue: r[12] || '', event_type: r[13] || '', press_contact: r[14] || '',
-            contacts: r[15] || ''
+            contacts: r[15] || '',
+            // 必填還缺哪幾項（批次 103）：卡片上直接寫出來，發布前就知道缺什麼，不用按了才被擋
+            missing: publishBlockers(r, today)
           }));
         // LINE 官方帳號資訊（批次 82）：給活動卡片的「LINE QR」與「同仁加入 LINE」用，
         // 沒設定 LINE_BASIC_ID 時都是空字串，後台就不顯示那兩個入口。
@@ -296,6 +322,10 @@ export default async function handler(req, res) {
           return res.status(400).json({ error: '狀態值不正確' });
         }
         const updated = buildContentRow(existing, body);
+        if (isPublishing(existing[4] || 'active', updated[4])) {
+          const missing = publishBlockers(updated);
+          if (missing.length) return publishBlocked(res, missing);
+        }
         await updateRange(`events!A${rowIndex + 2}:R${rowIndex + 2}`, [updated]);
         return res.status(200).json({ success: true });
       }
@@ -321,12 +351,18 @@ export default async function handler(req, res) {
         // 預設 draft（未發布）：新活動先只在後台看得到，記者前台、公開列表都查不到，
         // 按活動卡片上的「發布」（其實是 action=update 帶 status=active）之後才對外開放。
         const initialStatus = status || 'draft';
-        await appendRows('events!A:R', [[
+        const newRow = [
           newId, name, color || '#0F9E7A', knowledge_base || '', initialStatus, created_at,
           chips || '', images || '', greeting || '', organizer || '工研院', editCode,
           event_time || '', venue || '', event_type || '', press_contact || '', contacts || '',
           invite_letter || '', invite_letter_chips || ''
-        ]]);
+        ];
+        // 直接以「進行中」建立也要過閘門，不能繞過去（後台畫面不會這樣送，但 API 是公開的入口）
+        if (isPublishing('', initialStatus)) {
+          const missing = publishBlockers(newRow);
+          if (missing.length) return publishBlocked(res, missing);
+        }
+        await appendRows('events!A:R', [newRow]);
         return res.status(200).json({ success: true, id: newId, edit_code: editCode, status: initialStatus });
       }
 
@@ -356,6 +392,10 @@ export default async function handler(req, res) {
           invite_letter !== undefined ? invite_letter : (existing[16] || ''),
           invite_letter_chips !== undefined ? invite_letter_chips : (existing[17] || '')
         ];
+        if (isPublishing(existing[4] || 'active', updated[4])) {
+          const missing = publishBlockers(updated);
+          if (missing.length) return publishBlocked(res, missing);
+        }
         await updateRange(`events!A${rowIndex + 2}:R${rowIndex + 2}`, [updated]);
         return res.status(200).json({ success: true, edit_code: updated[10] });
       }

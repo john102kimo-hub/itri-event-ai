@@ -91,6 +91,8 @@
 5. 點 ＋ 新增分頁，重新命名為 `qa_log`
 6. 在 A1~F1 填入標題：`timestamp` `event_id` `event_name` `media_name` `question` `answer`
    - G 欄留給系統標記刪除用（後台按「刪除」時會在這欄寫 `1`，不用手動填、也不用管它）
+   - H 欄 `source`（`web` 網頁問的、`line` LINE 問的）、I 欄 `reporter_name`（記者姓名，批次 105 起）是系統自動寫的，標題可以補上方便自己看，不補也不影響功能（程式照欄位位置讀寫）。
+   - **D 欄 `media_name` 只放「媒體」**，姓名另外放 I 欄——後台的「服務媒體家數」只數 D 欄、同一家媒體的不同記者併成一家。舊資料常是「經濟日報 王小明」一整串放在 D 欄，統計時會自動拆開（不改動試算表裡的原始內容）；要整理成兩欄，後台「問答分析」每一列的「✎ 媒體」可以分別改。
 7. 其餘分頁（`exposure`、`geo_prompts`、`geo_runs`、`geo_events`、`geo_settings`、`media_roster`、`media_settings`）
    不用手動建立——第一次用到「露出上傳」「AI 能見度」「記者名單健檢」等功能時，系統會自動建好並補上表頭。
 

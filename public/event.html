@@ -58,13 +58,16 @@
     flex-shrink: 0;
   }
   #media-banner label { font-size: 0.82rem; color: var(--muted); white-space: nowrap; }
-  #media-input {
-    flex: 1; border: 1px solid var(--border); border-radius: 8px;
+  /* 批次 105：「媒體」「姓名」拆成兩欄。媒體必填（後台統計服務了幾家媒體靠它），姓名選填 */
+  #media-input, #person-input {
+    min-width: 0; border: 1px solid var(--border); border-radius: 8px;
     padding: 6px 12px; font-family: var(--font); font-size: 16px;
     background: white; outline: none;
     transition: border-color 0.2s;
   }
-  #media-input:focus { border-color: var(--primary); }
+  #media-input { flex: 3; }
+  #person-input { flex: 2; }
+  #media-input:focus, #person-input:focus { border-color: var(--primary); }
   #media-saved {
     font-size: 0.78rem; color: var(--primary); font-weight: 600;
     white-space: nowrap; display: none;
@@ -106,8 +109,6 @@
   .line-qr b { display: block; font-size: 0.92rem; color: #059a48; margin-bottom: 2px; }
   .line-qr span { display: block; font-size: 0.8rem; line-height: 1.55; color: var(--muted); }
   .line-qr code { font-family: inherit; font-weight: 700; color: var(--text); user-select: all; }
-  #geo-article .geo-contact { margin-top: 24px; font-size: 0.9rem; }
-  #geo-article #image-gallery { margin-top: 28px; }
 
   /* Quick chips */
   #chips {
@@ -221,6 +222,45 @@
   .typing-dot:nth-child(3) { animation-delay: 0.4s; }
   @keyframes blink { 0%,80%,100% { opacity: 0.2; } 40% { opacity: 1; } }
 
+  /* 出錯的那一則：跟 AI 的回答分開看得出來，並附「再問一次」（錯誤訊息不會進對話紀錄，見 sendMessage） */
+  .msg.err .bubble { background: #fff7ed; border-color: #fed7aa; color: #9a3412; }
+  .retry-btn {
+    background: #fff; border: 1px solid #fdba74; color: #c2410c; border-radius: 8px;
+    padding: 5px 12px; font-size: 0.78rem; font-family: var(--font); cursor: pointer;
+  }
+  .retry-btn:hover { background: #fff7ed; }
+  /* AI 說「沒有資料」的那一則底下，直接給真人的聯絡方式 */
+  .human-help {
+    font-size: 0.8rem; color: var(--muted); line-height: 1.5;
+    display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  }
+  .human-help svg { flex-shrink: 0; color: var(--primary); }
+  .human-help a { color: var(--primary); font-weight: 700; text-decoration: none; border-bottom: 1px solid currentColor; }
+  #welcome .welcome-contact { margin-top: 8px; font-size: 0.82rem; }
+  #welcome .welcome-contact a { color: var(--primary); font-weight: 700; }
+  .sys-note {
+    align-self: center; font-size: 0.78rem; color: var(--muted); background: #fff;
+    border: 1px dashed var(--border); border-radius: 20px; padding: 4px 14px; text-align: center;
+  }
+  .sys-note button { background: none; border: 0; color: var(--primary); font: inherit; font-weight: 700; cursor: pointer; text-decoration: underline; padding: 0 2px; }
+
+  /* 已結束的活動：新聞稿存檔收成標題列上的一顆按鈕，點了才整頁展開（記者會後仍然可以提問） */
+  #archive-btn {
+    margin-left: auto; background: rgba(255,255,255,0.18); color: #fff; border: 1px solid rgba(255,255,255,0.45);
+    border-radius: 20px; padding: 5px 12px; font-family: var(--font); font-size: 0.78rem; font-weight: 600;
+    cursor: pointer; display: inline-flex; align-items: center; gap: 5px; white-space: nowrap;
+  }
+  #archive-btn:hover { background: rgba(255,255,255,0.3); }
+  #archive-btn:not([hidden]) + #status-dot { margin-left: 8px; }
+  #archive-panel { position: fixed; inset: 0; z-index: 150; background: #fff; display: flex; flex-direction: column; }
+  #archive-bar { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--border); background: var(--card); flex-shrink: 0; }
+  #archive-bar b { flex: 1; font-size: 0.95rem; }
+  #archive-close {
+    background: var(--primary); color: #fff; border: 0; border-radius: 10px; padding: 8px 16px;
+    font-family: var(--font); font-size: 0.85rem; font-weight: 700; cursor: pointer;
+  }
+  #archive-panel #geo-article { padding-top: 20px; }
+
   /* AI 回答的「複製」鈕 */
   .bubble-wrap { display: flex; flex-direction: column; align-items: flex-start; gap: 5px; max-width: 80%; }
   .bubble-wrap .bubble { max-width: 100%; }
@@ -303,8 +343,9 @@
   }
   #media-modal-box {
     background: white; border-radius: 20px;
-    padding: 40px 32px 32px;
+    padding: 32px 28px 28px;
     width: 100%; max-width: 400px;
+    max-height: calc(100dvh - 40px); overflow-y: auto;
     box-shadow: 0 24px 64px rgba(0,0,0,0.25);
     text-align: center;
     animation: modalIn 0.25s cubic-bezier(.34,1.56,.64,1);
@@ -313,16 +354,19 @@
     from { transform: scale(0.88); opacity: 0; }
     to   { transform: scale(1);    opacity: 1; }
   }
-  #media-modal-icon { font-size: 52px; color: var(--primary); margin-bottom: 14px; }
+  #media-modal-icon { font-size: 44px; color: var(--primary); margin-bottom: 10px; }
   #media-modal-title { font-size: 1.35rem; font-weight: 800; color: var(--text); margin-bottom: 8px; }
-  #media-modal-sub { font-size: 0.88rem; color: var(--muted); margin-bottom: 28px; line-height: 1.6; }
-  #media-modal-input {
+  #media-modal-sub { font-size: 0.88rem; color: var(--muted); margin-bottom: 22px; line-height: 1.6; }
+  #media-modal-input, #media-modal-person {
     width: 100%; border: 2px solid var(--border); border-radius: 12px;
-    padding: 15px 16px; font-family: var(--font); font-size: 1rem;
+    padding: 13px 16px; font-family: var(--font); font-size: 1rem;
     outline: none; transition: border-color 0.2s; margin-bottom: 14px;
-    text-align: center;
+    text-align: left;
   }
-  #media-modal-input:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(15,158,122,0.15); }
+  #media-modal-input:focus, #media-modal-person:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(15,158,122,0.15); }
+  .modal-label { display: block; text-align: left; font-size: 0.82rem; font-weight: 700; color: var(--text); margin: 0 2px 6px; }
+  .modal-label em { font-style: normal; font-weight: 600; font-size: 0.72rem; color: #b45309; background: #fffbeb; border: 1px solid #fde68a; border-radius: 10px; padding: 0 7px; margin-left: 6px; }
+  .modal-label em.opt { color: var(--muted); background: #f3f4f6; border-color: var(--border); }
   #media-modal-btn {
     width: 100%; background: var(--primary); color: white;
     border: none; border-radius: 12px; padding: 15px;
@@ -352,6 +396,8 @@
     #header-text h1 { font-size: 1rem; line-height: 1.35; }
     #media-banner { padding: 8px 14px; gap: 8px; }
     #media-banner label { font-size: 0; }              /* 只留圖示，placeholder 已寫明要填什麼 */
+    #media-banner input { padding: 6px 10px; }
+    #archive-btn { padding: 5px 10px; }
     #media-banner label i { font-size: 18px; color: var(--muted); }
     #messages { padding: 8px 12px 12px; }
     #welcome { font-size: 0.92rem; padding: 12px 14px; }
@@ -377,13 +423,16 @@
   <p id="error-msg">此活動不存在或已結束，請確認網址是否正確。</p>
 </div>
 
-<!-- 媒體名稱強制彈窗 -->
-<div id="media-modal" hidden>
+<!-- 媒體名稱強制彈窗：媒體必填、姓名選填（批次 105）。後台的「服務媒體家數」只數媒體欄，姓名另存一欄 -->
+<div id="media-modal" hidden role="dialog" aria-modal="true" aria-labelledby="media-modal-title">
   <div id="media-modal-box">
     <div id="media-modal-icon"><i class="ti ti-id-badge"></i></div>
-    <div id="media-modal-title">請填寫媒體/貴賓 職稱與人名</div>
-    <div id="media-modal-sub">填寫後即可向 AI 提問<br>所有資訊，隨問隨答</div>
-    <input id="media-modal-input" type="text" placeholder="請填寫媒體/貴賓 職稱與人名" maxlength="40" autocomplete="organization">
+    <div id="media-modal-title">先留下您的媒體與姓名</div>
+    <div id="media-modal-sub">填寫後即可向 AI 提問，所有資訊隨問隨答。<br>只用來統計服務了哪些媒體，不會公開。</div>
+    <label class="modal-label" for="media-modal-input">媒體／單位<em>必填</em></label>
+    <input id="media-modal-input" type="text" placeholder="例：經濟日報（貴賓請寫單位）" maxlength="40" autocomplete="organization">
+    <label class="modal-label" for="media-modal-person">姓名<em class="opt">選填</em></label>
+    <input id="media-modal-person" type="text" placeholder="例：王小明" maxlength="40" autocomplete="name">
     <button id="media-modal-btn" disabled>開始提問</button>
   </div>
 </div>
@@ -394,12 +443,14 @@
     <h1 id="event-title">AI 新聞助理</h1>
     <p id="event-subtitle">工研院活動</p>
   </div>
+  <button id="archive-btn" type="button" hidden><i class="ti ti-news"></i> 新聞稿存檔</button>
   <div id="status-dot"></div>
 </div>
 
 <div id="media-banner">
-  <label><i class="ti ti-id-badge"></i> 媒體/貴賓：</label>
-  <input id="media-input" type="text" placeholder="媒體/貴賓 職稱與人名（選填）" maxlength="40">
+  <label for="media-input"><i class="ti ti-id-badge"></i> 媒體：</label>
+  <input id="media-input" type="text" placeholder="媒體／單位（必填）" maxlength="40" autocomplete="organization">
+  <input id="person-input" type="text" placeholder="姓名（選填）" maxlength="40" autocomplete="name" aria-label="姓名（選填）">
   <span id="media-saved"><i class="ti ti-check"></i> 已記錄</span>
 </div>
 
@@ -414,7 +465,7 @@
   </a>
 </div>
 
-<div id="messages">
+<div id="messages" role="log" aria-live="polite">
   <div id="welcome">
     歡迎使用 <strong id="welcome-name">AI 新聞助理</strong>，直接提問即可，無需登入。
   </div>
@@ -434,7 +485,7 @@
 
 <div id="input-area">
   <textarea id="user-input" rows="1" placeholder="請輸入您的問題…"></textarea>
-  <button id="send-btn" aria-label="送出問題" title="送出"><i class="ti ti-send"></i></button>
+  <button id="send-btn" aria-label="送出問題" title="送出"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4 20-7z"/></svg></button>
 </div>
 
 <script>
@@ -442,8 +493,23 @@ const params = new URLSearchParams(location.search);
 const eventId = params.get('id');
 let hist = [];
 let eventColor = '#0F9E7A';
-let mediaName = '';
+let mediaName = '';       // 媒體／單位（必填）
+let personName = '';      // 姓名（選填）
+let contactText = '';     // 活動資料裡的新聞聯絡人；AI 答不出來時直接給記者
 let isWaiting = false;
+let conversationStarted = false;
+
+// 圖示字型（Tabler）是從 CDN 載的：會場網路擋 CDN、或 LINE 內建瀏覽器載入失敗時，沒有文字陪伴的
+// 圖示鈕會變成一個空白方塊——送出鈕就是這樣，記者看不出那是什麼。這幾個沒有文字的圖示改內嵌 SVG，
+// 不靠外部字型（有文字的按鈕與裝飾用的圖示照舊用字型，載不到只是少了小圖示）。
+const svgIcon = (inner, size = 18) => `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${inner}</svg>`;
+const ICON = {
+  robot: svgIcon('<rect x="4" y="8" width="16" height="12" rx="3"/><path d="M12 8V4"/><circle cx="12" cy="3" r="1"/><circle cx="9" cy="14" r="1" fill="currentColor"/><circle cx="15" cy="14" r="1" fill="currentColor"/>'),
+  user: svgIcon('<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/>'),
+  copy: svgIcon('<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/>', 14),
+  check: svgIcon('<path d="M5 12l5 5L20 7"/>', 14),
+  phone: svgIcon('<path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2"/>', 15)
+};
 
 // 手機沒有 Shift+Enter 可按，提示只給有實體鍵盤的裝置；手機上那串字還會折成兩行被切掉
 const INPUT_HINT = (window.matchMedia && matchMedia('(pointer: coarse)').matches)
@@ -465,7 +531,7 @@ function lockUntilMedia() {
   const btn = document.getElementById('send-btn');
   inp.disabled = true;
   btn.disabled = true;
-  inp.placeholder = '請先填寫上方媒體/貴賓職稱與人名，再開始提問…';
+  inp.placeholder = '請先填寫上方「媒體」，再開始提問…';
 }
 function unlockChat() {
   const inp = document.getElementById('user-input');
@@ -499,46 +565,36 @@ async function init() {
     document.documentElement.style.setProperty('--primary-dark', shadeColor(eventColor, -15));
     document.documentElement.style.setProperty('--primary-light', hexToRgba(eventColor, 0.08));
 
-    // 已結束活動：鎖定前台，禁止提問
-    if (event.status === 'ended') {
-      document.getElementById('loading').style.display = 'none';
-      // 伺服器端已把新聞資料存檔渲染進來時，改顯示存檔文章，不要蓋鎖定畫面
-      const article = document.getElementById('geo-article');
-      if (article) {
-        document.body.classList.add('archive-mode');
-        document.getElementById('event-title').textContent = event.name;
-        document.getElementById('event-subtitle').textContent = '記者會已結束 · 新聞資料存檔';
-        document.title = event.name + ' — 新聞資料存檔';
-        // 會後回來找照片、找聯絡人的記者：照片與新聞聯絡人照樣給（批次 82）。
-        // 以前存檔頁把照片區整個藏起來，記者會後要補抓新聞照反而找不到。
-        // 這兩樣只在瀏覽器端補上——爬蟲不執行 JS，承辦人的電話不會被搜尋引擎收錄
-        // （跟 api/event-page.js extractPressBody() 在【聯絡窗口】截斷是同一個立場）。
-        const foot = article.querySelector('.geo-foot');
-        if (renderGallery(event.images)) article.insertBefore(document.getElementById('image-gallery'), foot);
-        if (event.press_contact) {
-          const p = document.createElement('p');
-          p.className = 'geo-contact';
-          p.textContent = '新聞聯絡人：' + event.press_contact;
-          article.insertBefore(p, foot);
-        }
-        addLineLink(article, foot, event.line_url, '還有問題？用 LINE 問 AI 新聞助理（會自動帶入這一場）');
-        return;
-      }
-      document.getElementById('error-screen').style.background = '#fffbeb';
-      document.querySelector('#error-screen i').style.color = '#d97706';
-      document.querySelector('#error-screen i').className = 'ti ti-lock';
-      document.querySelector('#error-screen h2').textContent = '記者會已結束';
-      document.getElementById('error-msg').textContent = '此記者會的提問功能已關閉，感謝您的參與。如需相關資料請洽主辦單位。';
-      document.getElementById('loading').style.display = 'none';
-      document.getElementById('error-screen').hidden = false;
-      return;
-    }
+    // 已結束的活動照樣可以提問（批次 105，朱朱的決定：跟 LINE 一樣）。以前網頁版在「已結束」就整個鎖起來，
+    // 只剩一篇新聞稿存檔——記者會後才來補問的人（最常見的是隔天交稿前確認數字）反而問不到，
+    // 只能去 LINE 或打電話。新聞稿存檔（給搜尋引擎與 AI 爬蟲的那篇，見 api/event-page.js）改成標題列上
+    // 的一顆按鈕，點了才整頁展開；伺服器端 api/chat.js 本來就沒擋已結束的活動。
+    const ended = event.status === 'ended';
+    const hasArchive = ended && !!document.getElementById('geo-article');
+    if (hasArchive) setupArchive(document.getElementById('geo-article'));
 
     document.getElementById('event-title').textContent = event.name;
-    document.getElementById('event-subtitle').textContent = 'AI 新聞助理 · 無需登入';
+    document.getElementById('event-subtitle').textContent = ended ? '記者會已結束 · 仍可提問' : 'AI 新聞助理 · 無需登入';
     document.getElementById('welcome-name').textContent = event.name;
     document.title = event.name + ' — AI 新聞助理';
-    addLineLink(document.getElementById('welcome'), null, event.line_url, '也可以用 LINE 問米亞', '會自動帶入這一場，會後也能隨時問');
+    contactText = String(event.press_contact || '').trim();
+    const welcomeEl = document.getElementById('welcome');
+    if (ended) {
+      const note = document.createElement('div');
+      note.className = 'welcome-contact';
+      note.textContent = hasArchive
+        ? '記者會已結束，新聞稿已存檔（右上角「新聞稿存檔」可看全文）；您仍然可以直接提問。'
+        : '記者會已結束；您仍然可以直接提問。';
+      welcomeEl.appendChild(note);
+    }
+    if (contactText) {
+      const c = document.createElement('div');
+      c.className = 'welcome-contact';
+      c.appendChild(document.createTextNode('AI 答不出來時，可直接聯絡新聞聯絡人：'));
+      c.appendChild(contactNode(contactText));
+      welcomeEl.appendChild(c);
+    }
+    addLineLink(welcomeEl, null, event.line_url, '也可以用 LINE 問米亞', '會自動帶入這一場，會後也能隨時問');
 
     // 快速問題：優先使用活動自訂 chips，否則用預設
     const chipsEl = document.getElementById('chips');
@@ -571,7 +627,7 @@ async function init() {
 // 圖片資源（若活動有設定）；每行格式為「網址」或「網址|圖說」
 // 分隔符半形｜全形都收：同仁在中文輸入法下打出來的多半是全形「｜」，
 // 只認半形的話整串圖說會被當成網址的一部分，圖就永遠載不出來。
-// 回傳有沒有畫出任何一張（存檔頁要知道要不要把照片區搬進文章裡）。
+// 回傳有沒有畫出任何一張。
 function renderGallery(raw) {
   if (!raw) return false;
   const lines = String(raw).split('\n').map(s => s.trim()).filter(Boolean);
@@ -689,13 +745,46 @@ function showError(msg) {
 }
 
 // ── 媒體彈窗邏輯 ──────────────────────────────────────
-let _pendingEvent = null;
+// ── 媒體／姓名（批次 105：原本一欄「媒體/貴賓 職稱與人名」，拆成兩欄）──────────────
+// 為什麼要拆：後台的「服務媒體家數」是把這一欄整串拿去數的，記者想怎麼寫就怎麼寫——「經濟日報 王小明」與
+// 「經濟日報 林小美」被算成兩家，「請問何時量產？」這種問句也進了媒體排行。這個數字是要報給長官的。
+// 現在媒體（必填）與姓名（選填）各存一欄（qa_log 的 D 欄與 I 欄，見 api/chat.js），統計只看媒體。
+//
+// 上一次填過的記在瀏覽器裡，下次直接帶出來（同一位記者重新整理、會後再開一次連結，不用重打，
+// 也不會打得跟上次不一樣）。localStorage 拿不到（無痕視窗、瀏覽器擋資料）就當作沒填過，流程不受影響。
+const MEDIA_LS_KEY = 'itri_media_name';          // 舊版：「媒體 人名」一整串
+const OUTLET_LS_KEY = 'itri_media_outlet';
+const PERSON_LS_KEY = 'itri_media_person';
+function lsGet(k) { try { return localStorage.getItem(k) || ''; } catch (e) { return ''; } }
+function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* 存不了就算了，不影響提問 */ } }
 
-// 上一次填過的名稱記在瀏覽器裡，下次直接帶出來。
-// 為什麼要做：同一位記者重新整理、或會後再開一次連結，就要再打一次名字——他多半
-// 不會打得跟上次一模一樣（「經濟日報 王小明」vs「經濟日報記者王小明」），後台的
-// 「服務媒體家數」就把同一個人算成兩家。這個數字是要報給長官的，不能靠運氣。
-// localStorage 拿不到（無痕視窗、瀏覽器擋第三方資料）就當作沒填過，流程不受影響。
+// 舊版留下來的那一整串，第一次進來時盡量拆成兩欄帶出來——記者看得到、不對可以直接改。
+// ⚠️ 跟 lib/media-name.js 的 splitMedia() 同一條規則（鏡射，靜態頁沒辦法 import lib/）；
+//    test/test-batch105-media.mjs 拿同一批樣本比對。
+const ROLE_TAIL_RE = /(特派員|攝影記者|記者|編輯|主播|攝影|採訪組|採訪中心|新聞部|同仁|先生|小姐)$/;
+function splitLegacyMedia(raw) {
+  const s = String(raw || '').trim().replace(/[\s　]+/g, ' ');
+  if (!s) return { outlet: '', person: '' };
+  const parts = s.split(' ');
+  const rest = parts.slice(1).join(' ');
+  // 後面那段要有中文字才當成「人名」：英文媒體名稱本身就有空白（Taipei Times）
+  if (parts.length >= 2 && [...parts[0]].length >= 2 && /[㐀-鿿]/.test(rest)) return { outlet: parts[0], person: rest };
+  const stripped = s.replace(ROLE_TAIL_RE, '');
+  return { outlet: [...stripped].length >= 2 ? stripped : s, person: '' };
+}
+function rememberedMedia() {
+  let outlet = lsGet(OUTLET_LS_KEY), person = lsGet(PERSON_LS_KEY);
+  if (!outlet) {
+    const legacy = lsGet(MEDIA_LS_KEY);
+    if (legacy) ({ outlet, person } = splitLegacyMedia(legacy));
+  }
+  return { outlet, person };
+}
+function rememberMedia(outlet, person) {
+  lsSet(OUTLET_LS_KEY, outlet);
+  lsSet(PERSON_LS_KEY, person || '');
+}
+
 // 這台瀏覽器的匿名代號，只給後端當「限流的 key」用（不寫進任何資料表、不跟媒體名稱
 // 綁在一起）。存在的理由：記者會現場所有人掛同一組會場 Wi-Fi，對外是同一個 IP，
 // 只用 IP 限流等於全場記者共用一份額度，開場十分鐘大家一起問就會互相誤殺。
@@ -710,21 +799,90 @@ function clientId() {
   } catch (e) { return gen(); }
 }
 
-const MEDIA_LS_KEY = 'itri_media_name';
-function rememberedMedia() {
-  try { return localStorage.getItem(MEDIA_LS_KEY) || ''; } catch (e) { return ''; }
+// ── 對話紀錄（批次 105）──────────────────────────────────
+// 記者在 LINE 裡點連結開這一頁，切去別的 App 再回來、或 iPhone 把分頁丟掉重載，整段對話就沒了，
+// 還要重新填媒體、重問一次。把最近的對話存在這台瀏覽器裡（不經過伺服器），12 小時內回來會接上。
+const CHAT_LS_PREFIX = 'itri_chat_';
+const CHAT_TTL_MS = 12 * 3600 * 1000;
+const CHAT_KEEP = 40;                       // 最多留 40 則（20 輪），免得越存越大
+function saveChat() {
+  if (!eventId) return;
+  lsSet(CHAT_LS_PREFIX + eventId, JSON.stringify({ t: Date.now(), hist: hist.slice(-CHAT_KEEP) }));
 }
-function rememberMedia(v) {
-  try { localStorage.setItem(MEDIA_LS_KEY, v); } catch (e) { /* 存不了就算了，不影響提問 */ }
+function clearChat() { try { localStorage.removeItem(CHAT_LS_PREFIX + eventId); } catch (e) {} }
+function loadChat() {
+  try {
+    const d = JSON.parse(lsGet(CHAT_LS_PREFIX + eventId) || 'null');
+    if (!d || !Array.isArray(d.hist) || Date.now() - d.t > CHAT_TTL_MS) return [];
+    const list = d.hist.filter(m => m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string' && m.content);
+    while (list.length && list[0].role !== 'user') list.shift();   // 只留最近 40 則時可能從 AI 的回答切起，開頭一定要是記者的問題
+    return list;
+  } catch (e) { return []; }
 }
+
+// 新聞聯絡人：「王小明 03-5911234 分機 8888」——電話那一段做成 tel: 連結，手機上點一下就撥。
+// 一律用 textContent／文字節點組（這欄是同仁自己填的，不信任它是安全的 HTML）。
+const PHONE_RE = /(\+?0\d{1,2}[-\s]?\d{3,4}[-\s]?\d{3,4}|09\d{2}[-\s]?\d{3}[-\s]?\d{3})/;
+function contactNode(text) {
+  const frag = document.createDocumentFragment();
+  const t = String(text || '');
+  const m = t.match(PHONE_RE);
+  if (!m) { frag.appendChild(document.createTextNode(t)); return frag; }
+  frag.appendChild(document.createTextNode(t.slice(0, m.index)));
+  const a = document.createElement('a');
+  a.href = 'tel:' + m[0].replace(/[^\d+]/g, '');
+  a.textContent = m[0];
+  frag.appendChild(a);
+  frag.appendChild(document.createTextNode(t.slice(m.index + m[0].length)));
+  return frag;
+}
+// AI 說「沒有資料」的那一則底下，直接給真人的聯絡方式——不用記者再回頭去翻聯絡人在哪。
+// ⚠️ 這條規則是 api/analytics.js UNANSWERED_RE 的鏡射（後台標「疑似答不出來」用的同一句）；
+//    test/test-batch105-media.mjs 比對兩邊不准漂開。
+const UNANSWERED_RE = /這部分我沒有資料|背景資料(?:中|裡)?(?:並)?沒有(?:提到|提供|記載)|沒有(?:相關|這方面的)資料|查無相關資料/;
+function addHumanHelp(wrap) {
+  if (!contactText || !wrap) return;
+  const row = document.createElement('div');
+  row.className = 'human-help';
+  row.innerHTML = ICON.phone;
+  const label = document.createElement('span');
+  label.textContent = '需要真人協助？新聞聯絡人：';
+  row.appendChild(label);
+  row.appendChild(contactNode(contactText));
+  wrap.appendChild(row);
+}
+
+// 已結束活動的新聞稿存檔：SSR 把整篇文章渲染在 body 最後面（給爬蟲讀，見 api/event-page.js），
+// 瀏覽器端把它搬進一個全螢幕面板，標題列的「新聞稿存檔」按鈕點了才展開。
+function setupArchive(article) {
+  const btn = document.getElementById('archive-btn');
+  if (!article || !btn) return;
+  const panel = document.createElement('div');
+  panel.id = 'archive-panel';
+  panel.hidden = true;
+  panel.setAttribute('role', 'dialog');
+  panel.setAttribute('aria-label', '新聞資料存檔');
+  panel.innerHTML = '<div id="archive-bar"><b>新聞資料存檔</b><button id="archive-close" type="button">回到提問</button></div>';
+  panel.appendChild(article);
+  document.body.appendChild(panel);
+  const close = () => { panel.hidden = true; };
+  btn.hidden = false;
+  btn.onclick = () => { panel.hidden = false; };
+  panel.querySelector('#archive-close').onclick = close;
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
+}
+
+let _pendingEvent = null;
 
 function showMediaModal(event) {
   _pendingEvent = event || _pendingEvent;
   const modal = document.getElementById('media-modal');
   const input = document.getElementById('media-modal-input');
-  const prev = rememberedMedia();
-  if (prev) {
-    input.value = prev;
+  const person = document.getElementById('media-modal-person');
+  const prev = mediaName ? { outlet: mediaName, person: personName } : rememberedMedia();
+  if (prev.outlet) {
+    input.value = prev.outlet;
+    person.value = prev.person || '';
     document.getElementById('media-modal-btn').disabled = false;
     document.getElementById('media-modal-sub').innerHTML =
       '已帶出您上次填寫的資料，直接按「開始提問」即可<br>不是您本人請改寫';
@@ -733,14 +891,30 @@ function showMediaModal(event) {
   setTimeout(() => { input.focus(); input.select(); }, 120);
 }
 
+function setReporter(outlet, person) {
+  mediaName = outlet;
+  personName = person || '';
+  rememberMedia(mediaName, personName);
+  document.getElementById('media-input').value = mediaName;
+  document.getElementById('person-input').value = personName;
+}
+
 function confirmMediaModal() {
-  const val = document.getElementById('media-modal-input').value.trim();
-  if (!val) return;
-  mediaName = val;
-  rememberMedia(val);
-  document.getElementById('media-input').value = val;
+  const outlet = document.getElementById('media-modal-input').value.trim();
+  if (!outlet) return;
+  setReporter(outlet, document.getElementById('media-modal-person').value.trim());
   document.getElementById('media-modal').hidden = true;
   unlockChat();
+  startConversation();
+}
+
+// 第一次填完媒體：有 12 小時內的舊對話就接上，沒有就打招呼。只做一次——
+// 之後媒體被清空、彈窗再打開，填完不會再招呼一次。
+function startConversation() {
+  if (conversationStarted) return;
+  conversationStarted = true;
+  const saved = loadChat();
+  if (saved.length) { restoreChat(saved); return; }
   if (_pendingEvent) {
     const greeting = _pendingEvent.greeting
       || ('您好！我是「' + _pendingEvent.name + '」的 AI 新聞助理。有任何問題歡迎直接提問！');
@@ -748,49 +922,86 @@ function confirmMediaModal() {
   }
 }
 
-const _modalInput = document.getElementById('media-modal-input');
-const _modalBtn   = document.getElementById('media-modal-btn');
+function restoreChat(saved) {
+  hist = saved.slice();
+  const welcomeEl = document.getElementById('welcome');
+  if (welcomeEl) welcomeEl.style.display = 'none';
+  dockChips();
+  const box = document.getElementById('messages');
+  const note = document.createElement('div');
+  note.className = 'sys-note';
+  note.appendChild(document.createTextNode('已帶回您剛才的對話　'));
+  const again = document.createElement('button');
+  again.type = 'button';
+  again.textContent = '重新開始';
+  again.onclick = () => { clearChat(); location.reload(); };
+  note.appendChild(again);
+  box.appendChild(note);
+  hist.forEach(m => {
+    const el = addMessage(m.role === 'user' ? 'user' : 'ai', m.content, { quiet: true });
+    if (m.role === 'assistant' && UNANSWERED_RE.test(m.content)) addHumanHelp(el.querySelector('.bubble-wrap'));
+  });
+  box.scrollTop = box.scrollHeight;
+}
+
+const _modalInput  = document.getElementById('media-modal-input');
+const _modalPerson = document.getElementById('media-modal-person');
+const _modalBtn    = document.getElementById('media-modal-btn');
 _modalInput.addEventListener('input',   () => { _modalBtn.disabled = !_modalInput.value.trim(); });
-_modalInput.addEventListener('keydown', e  => {
-  if (e.isComposing || e.keyCode === 229) return; // 中文輸入法選字時的 Enter，不當作送出
-  if (e.key === 'Enter') confirmMediaModal();
+// Enter：在「媒體」那一欄是跳到「姓名」，在「姓名」那一欄才送出（中文輸入法選字時的 Enter 一律不算）
+_modalInput.addEventListener('keydown', e => {
+  if (e.isComposing || e.keyCode === 229) return;
+  if (e.key === 'Enter') { e.preventDefault(); if (_modalInput.value.trim()) _modalPerson.focus(); }
+});
+_modalPerson.addEventListener('keydown', e => {
+  if (e.isComposing || e.keyCode === 229) return;
+  if (e.key === 'Enter') { e.preventDefault(); confirmMediaModal(); }
 });
 _modalBtn.addEventListener('click', confirmMediaModal);
 
-// 媒體名稱處理（banner 可修改媒體名稱）
-document.getElementById('media-input').addEventListener('input', e => {
-  mediaName = e.target.value.trim();
+// 上方的媒體／姓名可以隨時改。媒體清空了就再鎖住輸入框——跟一開始的彈窗同一條規則（先填媒體才能提問），
+// 不再是「欄位寫選填、輸入框卻鎖著」。
+const _mediaInput  = document.getElementById('media-input');
+const _personInput = document.getElementById('person-input');
+function onBannerEdit() {
+  mediaName = _mediaInput.value.trim();
+  personName = _personInput.value.trim();
   if (mediaName) {
-    rememberMedia(mediaName);
+    rememberMedia(mediaName, personName);
     unlockChat();
     const savedEl = document.getElementById('media-saved');
     savedEl.style.display = 'inline';
     setTimeout(() => savedEl.style.display = 'none', 2000);
+  } else {
+    lockUntilMedia();
   }
-});
+}
+_mediaInput.addEventListener('input', onBannerEdit);
+_personInput.addEventListener('input', onBannerEdit);
 
 // 訊息處理
-function addMessage(role, text) {
+// opts.error：出錯的那一則（淡橘色、沒有「複製」）；opts.quiet：還原舊對話時用，不要每則都捲一次
+function addMessage(role, text, opts = {}) {
   const msgEl = document.createElement('div');
-  msgEl.className = `msg ${role}`;
-  const icon = role === 'ai' ? 'ti-robot' : 'ti-user';
+  msgEl.className = `msg ${role}${opts.error ? ' err' : ''}`;
+  const icon = role === 'ai' ? ICON.robot : ICON.user;
   const content = role === 'ai' ? renderMarkdown(text) : escHtml(text);
   if (role === 'ai') {
     msgEl.innerHTML = `
-      <div class="avatar"><i class="ti ${icon}"></i></div>
+      <div class="avatar">${icon}</div>
       <div class="bubble-wrap">
         <div class="bubble">${content}</div>
-        <button class="copy-btn" type="button"><i class="ti ti-copy"></i> 複製</button>
+        ${opts.error ? '' : `<button class="copy-btn" type="button">${ICON.copy} 複製</button>`}
       </div>`;
     const btn = msgEl.querySelector('.copy-btn');
-    btn.addEventListener('click', () => copyText(text, btn));
+    if (btn) btn.addEventListener('click', () => copyText(text, btn));
   } else {
     msgEl.innerHTML = `
-      <div class="avatar"><i class="ti ${icon}"></i></div>
+      <div class="avatar">${icon}</div>
       <div class="bubble">${content}</div>`;
   }
   document.getElementById('messages').appendChild(msgEl);
-  msgEl.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  if (!opts.quiet) msgEl.scrollIntoView({ behavior: 'smooth', block: 'end' });
   return msgEl;
 }
 
@@ -806,7 +1017,7 @@ function copyText(text, btn) {
     const orig = btn.dataset.orig || btn.innerHTML;
     btn.dataset.orig = orig;
     btn.classList.toggle('copied', ok);
-    btn.innerHTML = ok ? '<i class="ti ti-check"></i> 已複製' : '請長按文字自行複製';
+    btn.innerHTML = ok ? ICON.check + ' 已複製' : '請長按文字自行複製';
     setTimeout(() => { btn.innerHTML = orig; btn.classList.remove('copied'); }, ok ? 1600 : 2600);
   };
   const legacy = () => {
@@ -835,7 +1046,7 @@ function showTyping() {
   msgEl.className = 'msg ai';
   msgEl.id = 'typing';
   msgEl.innerHTML = `
-    <div class="avatar"><i class="ti ti-robot"></i></div>
+    <div class="avatar">${ICON.robot}</div>
     <div class="bubble">
       <span class="typing-dot"></span><span class="typing-dot"></span><span class="typing-dot"></span>
     </div>`;
@@ -889,12 +1100,13 @@ async function streamReply(res) {
   }
 
   document.getElementById('typing')?.remove();
+  const gotText = !!acc;
   // 答到一半斷掉（後端逾時、模型那端出錯）：已經出現的那一段留著，後面補一句說明，
   // 不要讓記者以為那就是完整答案、直接拿去引用。
   if (acc && errMsg) acc += '\n\n' + errMsg;
   const reply = acc || errMsg || '抱歉，發生錯誤。';
   if (!msgEl) {
-    addMessage('ai', reply);
+    msgEl = addMessage('ai', reply);
   } else {
     flush();
     // addMessage 當初綁的複製按鈕抓的是那個空字串，串流結束要重綁成完整內容
@@ -905,13 +1117,35 @@ async function streamReply(res) {
       btn.addEventListener('click', () => copyText(reply, btn));
     }
   }
-  hist.push({ role: 'assistant', content: reply });
+  // 要不要記進對話紀錄、要不要附「再問一次」由 sendMessage 決定（出錯的不能進紀錄）
+  return { msgEl, reply, failed: !!errMsg, gotText };
+}
+
+// 這一題沒答成（限流、模型那端出錯、斷線）：把「問題」從對話紀錄拿掉，畫面上留一則說明並附「再問一次」。
+// 以前是把錯誤訊息當成 AI 的回答記進紀錄——下一題送出時，AI 會看到一個沒有回答的問題、加上一句
+// 「目前詢問的人比較多」像是它自己說過的話，回答跟著受影響；而且錯誤那一輪的問題會跟重問的同一題重複送。
+function addRetry(el, q, userEl) {
+  const wrap = el.querySelector('.bubble-wrap');
+  if (!wrap) return;
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'retry-btn';
+  btn.textContent = '再問一次';
+  btn.onclick = () => { el.remove(); userEl?.remove(); sendMessage(q); };
+  wrap.appendChild(btn);
+}
+function failTurn(q, userEl, message) {
+  hist.pop();   // 這一題的問題（剛才推進去、還沒有回答）
+  document.getElementById('typing')?.remove();
+  addRetry(addMessage('ai', message, { error: true }), q, userEl);
 }
 
 async function sendMessage(text) {
   if (isWaiting) return; // AI 還在回覆時，Enter 連按或連點 chip 不會平行送出第二個請求
   const q = (text || document.getElementById('user-input').value).trim();
   if (!q) return;
+  // 輸入框在沒有媒體時本來就是鎖住的；這是保險（例如上方的媒體欄被清空的瞬間按了快速提問）
+  if (!mediaName) { lockUntilMedia(); showMediaModal(); return; }
   isWaiting = true;
 
   // 首次提問後收合歡迎卡，釋放（尤其手機）對話空間；快速提問收成輸入框上方的一列
@@ -923,7 +1157,7 @@ async function sendMessage(text) {
   document.getElementById('user-input').style.height = 'auto';
   document.getElementById('send-btn').disabled = true;
 
-  addMessage('user', q);
+  const userEl = addMessage('user', q);
   hist.push({ role: 'user', content: q });
 
   showTyping();
@@ -935,7 +1169,8 @@ async function sendMessage(text) {
       body: JSON.stringify({
         messages: hist,
         event_id: eventId,
-        media_name: mediaName || document.getElementById('media-input').value.trim(),
+        media_name: mediaName,
+        reporter_name: personName,
         client_id: clientId(),
         stream: true
       })
@@ -945,20 +1180,43 @@ async function sendMessage(text) {
     // 仍然是原本那種一次回傳的 JSON，所以這裡要兩條路都留著。
     const isStream = res.ok && (res.headers.get('content-type') || '').includes('text/event-stream');
     if (isStream) {
-      await streamReply(res);
+      const r = await streamReply(res);
+      if (r.failed && !r.gotText) {
+        r.msgEl.remove();
+        failTurn(q, userEl, r.reply);
+      } else if (r.failed) {
+        hist.pop();                      // 答到一半斷掉：已經出現的那段留在畫面上，但不進對話紀錄
+        addRetry(r.msgEl, q, userEl);
+      } else {
+        hist.push({ role: 'assistant', content: r.reply });
+        if (UNANSWERED_RE.test(r.reply)) addHumanHelp(r.msgEl.querySelector('.bubble-wrap'));
+        saveChat();
+      }
     } else {
       const data = await res.json().catch(() => ({}));
-      document.getElementById('typing')?.remove();
-      const reply = data.reply || data.error || '抱歉，發生錯誤。';
-      hist.push({ role: 'assistant', content: reply });
-      addMessage('ai', reply);
+      if (data.code === 'media_required') {
+        // 後端要求先留媒體名稱（舊版頁面還開著、或媒體欄剛被清空）：把這題收回來，重新打開彈窗
+        hist.pop();
+        userEl.remove();
+        document.getElementById('typing')?.remove();
+        lockUntilMedia();
+        showMediaModal();
+        document.getElementById('user-input').value = q;
+      } else if (!res.ok || !data.reply) {
+        failTurn(q, userEl, data.error || '抱歉，發生錯誤。');
+      } else {
+        document.getElementById('typing')?.remove();
+        hist.push({ role: 'assistant', content: data.reply });
+        const el = addMessage('ai', data.reply);
+        if (UNANSWERED_RE.test(data.reply)) addHumanHelp(el.querySelector('.bubble-wrap'));
+        saveChat();
+      }
     }
   } catch (err) {
-    document.getElementById('typing')?.remove();
-    addMessage('ai', '連線錯誤，請稍後再試。');
+    failTurn(q, userEl, '連線錯誤，請確認網路後再問一次。');
   }
 
-  document.getElementById('send-btn').disabled = false;
+  document.getElementById('send-btn').disabled = !mediaName;
   isWaiting = false;
 }
 

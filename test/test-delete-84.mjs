@@ -128,9 +128,24 @@ book.events = [HEADER];
 console.log('\n── 三、後台頁面：刪除鍵只出現在未發布／已封存，按了要打「刪除」才會送出 ──');
 const html = read('public/index.html');
 {
-  const card = html.slice(html.indexOf('<div class="event-actions">'), html.indexOf("}).join('');", html.indexOf('<div class="event-actions">')));
-  check('卡片上有「刪除」鍵，條件是 draft 或 archived',
-    /ev\.status === 'draft' \|\| ev\.status === 'archived' \? `[\s\S]*deleteEvent\(/.test(card), card.slice(-600));
+  // 批次 104：卡片改成只放主要按鈕，其餘收進「更多」選單。刪除鍵在選單裡，條件一樣：只有未發布／已封存。
+  const a = html.indexOf('function moreMenuItems(ev)');
+  const b = html.indexOf('function renderEvents()');
+  let items = null;
+  try { items = a > 0 && b > a ? new Function('state', 'copyLink', 'openLineQr', 'copyEditLink', 'openTraining', 'showAnalyticsByEvent', 'exportCSV', 'unpublishEvent', 'deleteEvent', 'window', html.slice(a, b) + '; return moreMenuItems;') : null; } catch { items = null; }
+  check('抽得出 moreMenuItems()', !!items);
+  if (items) {
+    const noop = () => {};
+    const menu = items({ line: { basic_id: '@x' } }, noop, noop, noop, noop, noop, noop, noop, noop, { open: noop });
+    const labels = (status) => menu({ id: 't1', status }).map((i) => i.label);
+    check('★ 「永久刪除」只出現在未發布', labels('draft').includes('永久刪除'), JSON.stringify(labels('draft')));
+    check('★ 「永久刪除」只出現在已封存', labels('archived').includes('永久刪除'), JSON.stringify(labels('archived')));
+    check('★ 進行中的活動沒有「永久刪除」（要先封存）', !labels('active').includes('永久刪除'), JSON.stringify(labels('active')));
+    check('★ 已結束的活動沒有「永久刪除」（要先封存）', !labels('ended').includes('永久刪除'), JSON.stringify(labels('ended')));
+    const del = menu({ id: 't1', status: 'draft' }).find((i) => i.label === '永久刪除');
+    check('　 刪除項目是紅色（danger），而且前面隔一條分隔線，不會跟一般項目擠在一起',
+      del && del.danger === true && menu({ id: 't1', status: 'draft' }).some((i) => i.sep), JSON.stringify(del));
+  }
   check('編輯視窗有「永久刪除」鍵，而且只對 draft／archived 顯示',
     /id="delete-btn"/.test(html) && /deletable \? 'inline-flex' : 'none'/.test(html));
 }

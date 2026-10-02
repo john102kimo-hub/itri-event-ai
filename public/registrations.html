@@ -398,7 +398,7 @@ async function exportCsv() {
     const blob = await res.blob();
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = `媒體報名_${CUR}_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.download = `媒體報名_${CUR}_${new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Taipei' })}.csv`;
     document.body.appendChild(a); a.click(); a.remove();
   } catch (e) { alert(e.message); }
 }

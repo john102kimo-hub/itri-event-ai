@@ -152,7 +152,8 @@ console.log('\n── 三、打「選單」叫回按鈕 ──');
   out = await say('dm', 'Umenu', '半導體先進封裝技術發表會');
   out = await say('dm', 'Umenu', '選單');
   const b = lastButtons(out) || [];
-  check('1 對 1 正在問某一場時，「選單」給的是那場的整排', b.some((x) => x.text === '回首頁') && b.length >= 11 && /半導體先進封裝/.test(out.at(-1)?.text || ''), JSON.stringify(out.at(-1)));
+  // 批次 104：預設快速提問改成依知識庫算（semi 是 3 題：重點／時間地點／聯絡人），整排從 11 顆變 9 顆
+  check('1 對 1 正在問某一場時，「選單」給的是那場的整排', b.some((x) => x.text === '回首頁') && b.some((x) => x.text === '這次活動的重點是什麼？') && b.length >= 9 && /半導體先進封裝/.test(out.at(-1)?.text || ''), JSON.stringify(out.at(-1)));
   out = await say('dm', 'Umenu2', '米亞');
   check('1 對 1 只打「米亞」也叫得出按鈕', (lastButtons(out) || []).length >= 6, JSON.stringify(out));
 }

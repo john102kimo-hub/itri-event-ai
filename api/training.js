@@ -22,10 +22,40 @@ import { readRange, appendRows, ensureSheets } from '../lib/sheets.js';
 import { toTraditionalTW } from '../lib/zh-tw.js';
 import { resolveOutlet, resolveRole, buildPersonaBlock } from '../lib/training-persona.js';
 import { reportAiFailure } from '../lib/ai-alert.js';
+import { kbHasContent } from '../lib/kb-template.js';
+import { eventDateOf } from '../lib/event-status.js';
+import { isTestMedia } from '../lib/media-name.js';
 
 const CACHE_TTL_MS = 60 * 1000; // 60 秒；同仁改完知識庫應該很快能在訓練模式看到新版
 
 const eventCache = new Map();
+
+// 「彙整訓練」的素材（批次 106）。以前是把所有未封存活動的知識庫整份串起來：
+//   ・還沒填內容的草稿（知識庫只有範本）也串進去，記者拿到一堆空標題；
+//   ・活動愈辦愈多，總長度沒有上限——十幾場、每場幾千字，每一次出題與評分都要整份送進模型，
+//     愈來愈慢、愈來愈貴，最後撞到模型的逾時（MODEL_TIMEOUT_MS）或長度上限，主管只看到「再試一次」。
+// 改成：只收真的有內容的、日期近的優先、每場最多 ALL_PER_EVENT_MAX 字、全部加起來最多 ALL_TOTAL_MAX 字。
+export const ALL_PER_EVENT_MAX = 6000;
+export const ALL_TOTAL_MAX = 60000;
+export function buildAllEventsKnowledge(rows) {
+  const usable = (rows || [])
+    .filter(r => r[0] && r[4] !== 'archived' && kbHasContent(r[3]))
+    // 日期近的在前；沒有日期的排後面（eventDateOf 只收純日期，建立時間戳不算）
+    .sort((a, b) => (eventDateOf(b[5]) || '').localeCompare(eventDateOf(a[5]) || ''));
+  const parts = [], names = [];
+  let total = 0;
+  for (const r of usable) {
+    const part = `【${r[1] || r[0]}】\n${String(r[3]).trim().slice(0, ALL_PER_EVENT_MAX)}`;
+    if (parts.length && total + part.length > ALL_TOTAL_MAX) break;
+    parts.push(part);
+    names.push(r[1] || r[0]);
+    total += part.length;
+  }
+  return {
+    knowledge_base: parts.join('\n\n---\n\n') || '（無活動資料）',
+    names, skipped: usable.length - parts.length
+  };
+}
 
 async function getEventConfig(eventId) {
   // 特殊模式：彙整所有活動
@@ -35,15 +65,12 @@ async function getEventConfig(eventId) {
     if (cached && Date.now() < cached.expiry) return cached.data;
 
     const rows = await readRange('events!A2:K');
-    const activeRows = rows.filter(r => r[0] && r[4] !== 'archived');
-    const combined = activeRows
-      .map(r => `【${r[1] || r[0]}】\n${r[3] || ''}`)
-      .join('\n\n---\n\n');
-    const names = activeRows.map(r => r[1] || r[0]).join('、');
+    const { knowledge_base, names, skipped } = buildAllEventsKnowledge(rows);
+    const shown = names.slice(0, 6).join('、') + (names.length > 6 ? `等 ${names.length} 場` : '');
     const data = {
       id: 'all',
-      name: `工研院彙整訓練（${names}）`,
-      knowledge_base: combined || '（無活動資料）'
+      name: `工研院彙整訓練（${shown || '尚無活動資料'}）`,
+      knowledge_base: skipped ? `${knowledge_base}\n\n（另有 ${skipped} 場較早的活動資料因長度限制未帶入）` : knowledge_base
     };
     eventCache.set(cacheKey, { data, expiry: Date.now() + CACHE_TTL_MS });
     return data;
@@ -79,8 +106,10 @@ async function getRealQuestions(eventId) {
 
   let rows = [];
   try { rows = await readRange('qa_log!A2:G'); } catch { rows = []; }
-  // 已刪除的問答（G 欄標記，或舊資料殘留的 B 欄 [deleted]）不該被當成訓練素材
-  rows = rows.filter(r => r[1] !== '[deleted]' && r[6] !== '1');
+  // 已刪除的問答（G 欄標記，或舊資料殘留的 B 欄 [deleted]）不該被當成訓練素材。
+  // 測試資料與同仁在 LINE 職員模式自己問的（「（內部職員）」）也不是記者「真的問過」的——
+  // 它們會被當成「記者最關心的角度」餵給 AI 記者（批次 106；判斷與後台統計共用 lib/media-name.js）。
+  rows = rows.filter(r => r[1] !== '[deleted]' && r[6] !== '1' && !isTestMedia(r[3]));
 
   const norm = (q) => String(q || '').replace(/\s+/g, '').replace(/[？?。.，,、！!]/g, '');
   const seen = new Set();
@@ -128,6 +157,14 @@ async function ensureTrainingLogSheet() {
 }
 
 const sanitize = (s, max) => String(s || '').replace(/\s+/g, ' ').trim().slice(0, max);
+
+// 模型那端出狀況時，主管看到的是一句中文，不是「Overloaded」「invalid_request_error」這種 API 原文
+// （原文照樣寫進 log，除錯用的資訊不會少；跟 api/chat.js 的 friendlyApiError 同一個道理）。
+// 訓練頁把這句話放在「再試一次」按鈕上方——對話歷程都還在，按了就從剛才那一步接著走。
+export function friendlyModelError(status) {
+  if (status === 429 || status === 529 || status === 503) return 'AI 目前比較忙。您剛才的進度都還在，稍等幾秒按「再試一次」就好。';
+  return 'AI 這次沒有答成。您剛才的進度都還在，按「再試一次」；如果一直這樣，請通知後台管理員。';
+}
 
 // 把「原始分數」清成只留 0–10 的有限數字。輸入可以是陣列（log_session 收到的
 // body.scores，某一題解析失敗時前端會塞 null）或本專案慣用的 pipe-separated
@@ -824,10 +861,11 @@ export default async function handler(req, res) {
       });
     }
 
-    const data = await response.json();
+    const data = await response.json().catch(() => ({}));
     if (!response.ok) {
+      console.error('training Anthropic API 錯誤:', response.status, data.error?.message || '', event_id, mode);
       await reportAiFailure({ status: response.status, message: data.error?.message, where: '媒體訓練' }); // 批次 85
-      return res.status(response.status).json({ error: data.error?.message || 'API 錯誤' });
+      return res.status(response.status).json({ error: friendlyModelError(response.status) });
     }
 
     if (data.stop_reason === 'max_tokens') {

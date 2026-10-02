@@ -330,7 +330,7 @@ console.log('\n── 六、前端 ──');
   check('網址裡的 & 不會被切斷', renderMarkdown('看 https://x.tw/a?b=1&c=2 喔').includes('href="https://x.tw/a?b=1&amp;c=2"'));
   check('HTML 照樣被跳脫（不能塞腳本進記者畫面）', !renderMarkdown('<img src=x onerror=alert(1)> https://x.tw/"onmouseover=1').includes('<img'));
   check('粗體照舊', renderMarkdown('**重點** https://x.tw').startsWith('<strong>重點</strong>'));
-  check('★ 快速提問與照片在對話捲動區裡面（不再釘在上方吃掉手機畫面）', /<div id="messages">[\s\S]*id="chips"[\s\S]*id="image-gallery"[\s\S]*<\/div>\s*<div id="chip-dock"/.test(html));
+  check('★ 快速提問與照片在對話捲動區裡面（不再釘在上方吃掉手機畫面）', /<div id="messages"[^>]*>[\s\S]*id="chips"[\s\S]*id="image-gallery"[\s\S]*<\/div>\s*<div id="chip-dock"/.test(html));
   check('複製鈕在拿不到剪貼簿時有備援（LINE 內建瀏覽器）', /execCommand\('copy'\)/.test(html));
   check('★ 電腦版「用 LINE 問」不給 line.me 連結、改畫 QR（電腦點 oaMessage 會被導到 LINE 官網首頁）', /IS_TOUCH_DEVICE/.test(html) && /className = 'line-qr'/.test(html) && /qrcode\(0, 'M'\)/.test(html));
   check('手機版「用 LINE 問」是 44px 以上的按鈕', /\.line-link \{[^}]*min-height: 48px/.test(html));

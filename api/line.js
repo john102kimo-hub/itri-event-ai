@@ -62,6 +62,7 @@ import { proposeChange, applyChange, findLastChangeBy, fieldLabel, displayValue,
 import { saveEventPhoto } from '../lib/photo-upload.js';
 import { addPhoto, pendingPhotos, consumePhotos } from '../lib/photo-inbox.js';
 import { isPreEventMode } from '../lib/prompt.js';
+import { effectiveChips } from '../lib/default-chips.js';
 import { lineBindUrl } from '../lib/line-link.js';
 import { reportAiFailure } from '../lib/ai-alert.js';
 import {
@@ -987,7 +988,11 @@ async function askAnthropic(systemPrompt, userText, history = [], { extraSystem 
   }
 }
 
-// 網頁版 public/event.html 沒有自訂 chips 時的預設建議問題（見該檔的 defaultChips）。
+// ⚠️ 批次 104 起，這組已經**不再顯示給記者**（沒有自訂 chips 的活動改由 lib/default-chips.js 依知識庫
+// 計算）。留著只有一個用途：LINE 的快速回覆按鈕會永遠留在對話紀錄裡，上線前送出去的舊按鈕
+// （「這項技術預計何時商業化？」）記者隔天照樣會點——ownChipEventId() 的 ③ 靠這份認得它們，
+// 按了不能沒反應。
+// （以下是原本的說明）網頁版 public/event.html 沒有自訂 chips 時的預設建議問題（見該檔的 defaultChips）。
 // ⚠️ 兩邊各自維護一份同樣的文字，不是共用模組：event.html 是純瀏覽器 <script>，
 // 沒有打包流程可以匯入 lib/ 底下的 ESM 模組。這份只是「建議問題的預設文案」，跟
 // LINE-PLAN.md 說的「不要做兩邊同步」講的是知識庫／答案內容那種一改就走鐘、記者
@@ -1159,9 +1164,9 @@ function takeQuoteToken(targetId) {
 // 場」。實際症狀：在群組按「回首頁」（本來就是要解除綁定）之後再按「媒體邀訪需求」，
 // 會被接回剛剛那場、拿到那場的窗口，而不是跨活動的全域窗口清單。
 function eventContentChips(rawEvent) {
-  const event = resolveEventContent(rawEvent || {});
-  const custom = String(event?.chips || '').split('\n').map(s => s.trim()).filter(Boolean);
-  return custom.length ? custom : DEFAULT_CHIPS;
+  // 批次 104：沒有自訂 chips 時不再退回寫死的五題，改依知識庫實際有寫的小節算（lib/default-chips.js，
+  // 網頁版 get_public 用同一支，兩邊一致）。活動前（邀請函模式）那一組也在裡面處理。
+  return effectiveChips(rawEvent || {});
 }
 
 function eventQuickChips(rawEvent, { reserve = 0 } = {}) { // 呼叫端傳的 group 已經不影響結果（批次 84）
@@ -3691,6 +3696,13 @@ const GREETING_RE = /^(你好|妳好|您好|哈囉|哈嘍|嗨|hi|hello|hey|早�
 // 不會誤中這條規則。
 const SENTENCE_RE = /(?:如何|怎麼|怎麽|怎么|怎樣|什麼|甚麼|什么|為何|為什麼|哪|誰|嗎|呢|吧|嘛|多少|幾點|幾號|幾天|幾歲|(.)[不沒]\1|你|妳|您|我|他|她|它|沒$|否$)/;
 
+// 整句只由笑聲、附和、語助詞組成（批次 103）：「哈哈好喔」「對啊」「哈哈哈哈」「是喔」「真的假的」。
+// 這些字不可能組成一個主題詞，但它們 2～8 個字、沒有疑問詞，GREETING_RE 又只認得單獨出現的
+// 「哈哈」「好喔」——組合起來就漏了，於是被當成裸名詞：1 對 1 會被複誦成「『哈哈好喔』我可以從兩個
+// 方向幫您找」，群組守門第 ③ 關也會放行（見 looksAddressedToBot()）。主題詞裡不會有「整個字串
+// 全是這幾個字」的，所以這條不會誤擋「對話機器人」「真空」這類真的題目。
+const PARTICLE_ONLY_RE = /^[哈呵嘿嘻笑好喔哦噢對是嗯欸啊耶啦吧囉喲唷呀哇哎唉讚棒真假的了]+$/;
+
 function looksLikeBareTopic(text) {
   const s = String(text || '').trim();
   // 一-鿿 是中日韓統一表意文字（常用中文字）；連同英數之外的字元一律不算
@@ -3701,7 +3713,7 @@ function looksLikeBareTopic(text) {
   // 「好的謝謝」就等於在別人的群組裡插一句「不客氣」。
   const core = s.replace(/米亞/g, '');
   return /^[一-鿿A-Za-z0-9]{2,8}$/.test(s) && !!core && !GREETING_RE.test(core) && !SENTENCE_RE.test(s)
-    && !detectCourtesy(s) && !detectChitchat(s);
+    && !PARTICLE_ONLY_RE.test(core) && !detectCourtesy(s) && !detectChitchat(s);
 }
 
 // ── 風趣兜底：天氣／告白這種「連四條路都不用比」的閒聊（批次 62）───────────────
@@ -4118,9 +4130,12 @@ async function ownChipEventId(groupId, text) {
   //    按鈕。判斷是整句**完全相同**才算，而且要剛好等於某場設定過的字，誤觸機率
   //    不高；反過來若限制成「只認目前這場的」，換過場之後點舊按鈕就會再度沉默——
   //    那正是回報的問題本身。按鈕不動的代價比偶爾多答一句大得多，所以往這邊靠。
+  // 批次 104：預設快速提問改成「依知識庫算」之後，每場的按鈕不一樣，這裡也要拿同一支算出來的結果
+  // 比對（只有某一場有的題目，例如「得獎名單有哪些？」，唯一命中就能回推是哪一場）。
   const customOf = ev => [
     ...String(ev.chips || '').split('\n'),
-    ...String(ev.invite_letter_chips || '').split('\n')
+    ...String(ev.invite_letter_chips || '').split('\n'),
+    ...effectiveChips(ev)
   ].map(x => x.trim()).filter(Boolean);
   const owners = (await getAllEventRows()).map(rowToEvent).filter(isUsable)
     .filter(ev => customOf(ev).includes(s) || parseEventContacts(ev).some(c => c.keyword === s));
@@ -4180,6 +4195,17 @@ async function looksAddressedToBot(groupId, text, speakerId) {
   // ③ 剛回答完趨勢／技術題時的裸名詞追問（「太空」）——那是我們自己在上一則答案
   // 結尾邀請他打的。沒有話題記憶時**不**放行：一個沒頭沒尾的名詞在群組裡多半是
   // 別人在聊自己的事（「半導體」），不是在問我們。
+  //
+  // ⚠️ 批次 103：話題記憶是 'calendar'（剛列過活動清單，批次 101 新增）時**不能**再用「像一個
+  // 裸名詞」放行。批次 101 只想到路由（TOPIC_HINTS 沒有 calendar），沒想到這一關也讀同一份話題
+  // 記憶——結果清單送出後的 10 分鐘內，群組裡的「哈哈好喔」「對啊」「哈哈哈哈」都是 2～8 個字、
+  // 沒有疑問詞，全被當成裸名詞放行，米亞對著閒聊回一整段答案加 11 顆按鈕（對照實驗：沒列過
+  // 清單時同樣四句全部安靜）。清單不像趨勢／技術題那樣邀請記者「打個名詞」，它邀請的是「打活動
+  // 名稱」，所以這一關只認一件事：整句是剛剛清單上某一場名稱的一部分（matchShownEvents，
+  // 跟 1 對 1 點名清單同一支規則）。比不中就安靜。
+  if (await getRecentTopic(groupId) === 'calendar') {
+    return matchShownEvents(buildCalendarCards(await getAllEventRows()), s).length > 0;
+  }
   if (looksLikeBareTopic(s) && await getRecentTopic(groupId)) return true;
 
   return false;

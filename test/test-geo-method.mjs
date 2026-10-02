@@ -471,7 +471,9 @@ console.log('\n── 九、GEO-METHOD.md 與程式一致 ──');
   check('文件有「被問到時怎麼回答」', /被問到/.test(doc));
   check('文件誠實列出與準則的落差', /落差|還沒做到|尚未做到/.test(doc));
   check('文件講明測量日期：資料取得日 2026-10-01', /2026-10-01|2026 年 10 月 1 日/.test(doc));
-  check('package.json 的測試鏈有這支', /test-geo-method\.mjs/.test(read('package.json')));
+  // 批次 103：npm test 改成 test/run-all.mjs 掃資料夾，不再手寫清單；只要檔名是 test-*.mjs 就一定會跑到
+  check('npm test 跑得到這支（package.json 指向 run-all，檔名符合它的掃描規則）',
+    /run-all\.mjs/.test(read('package.json')) && /^test-.*\.mjs$/.test('test-geo-method.mjs'));
 }
 
 console.log(`\n${fail ? '❌' : '✅'} GEO 測量方法測試：${pass} 通過，${fail} 失敗`);
