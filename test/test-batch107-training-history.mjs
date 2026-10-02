@@ -1,0 +1,28 @@
+// 批次 107：受訓者歷次演練（後端 training_log）——認證、姓名比對、篩選、前端對照。
+import { register } from 'node:module';
+register('./loader-82.mjs', import.meta.url);
+import fs from 'node:fs';
+process.env.ADMIN_PASSWORD = 'pw'; process.env.ANTHROPIC_API_KEY = 'x'; process.env.GOOGLE_SPREADSHEET_ID = 's';
+const { book, reset } = await import('./fakes-sheets82.mjs');
+const training = (await import('../api/training.js')).default;
+let pass = 0, fail = 0;
+const check = (l, c, d) => { c ? (pass++, console.log('✅ ' + l)) : (fail++, console.log('❌ ' + l + (d ? '\n   ' + d : ''))); };
+const get = async (query, headers = {}) => { const r = { statusCode: 200 }; r.setHeader = () => r; r.status = (c) => (r.statusCode = c, r); r.json = (o) => (r.body = o, r); r.end = () => r; await training({ method: 'GET', query, headers }, r); return r; };
+reset();
+book.events = [['id'], ['e1', '場一', '', 'kb', 'active', '2026-10-01', '', '', '', '', 'CODE1'], ['e2', '場二', '', 'kb', 'active', '2026-10-02', '', '', '', '', 'CODE2']];
+const row = (ev, who, n, avg, scores, note = '') => ['2026/10/2 下午3:05:00', ev, '名', who, n, avg, scores, note];
+book.training_log = [['timestamp'], row('e1', '王小明', 3, 6, '5|6|7'), row('e1', ' 王 小明 ', 3, 8, '7|8|9', '語音作答 3/3 題'), row('e1', '林小美', 3, 9, '9|9|9'), row('e2', '王小明', 5, 4, '4|4|4|4|4')];
+let r = await get({ action: 'history', event_id: 'e1', trainee: '王小明', code: 'CODE1' });
+check('用編輯碼：只回這位、這一場的紀錄（空白不計）', r.statusCode === 200 && r.body.sessions.length === 2 && r.body.sessions.map((x) => x.avg).join() === '6,8', JSON.stringify(r.body));
+check('語音場次有標記', r.body.sessions[1].voice === true && r.body.sessions[0].voice === false);
+r = await get({ action: 'history', event_id: 'all', trainee: '王小明' }, { 'x-admin-password': 'pw' });
+check('彙整訓練（管理員）：跨場次', r.statusCode === 200 && r.body.sessions.length === 3);
+r = await get({ action: 'history', event_id: 'e1', trainee: '王小明', code: 'WRONG' });
+check('★ 編輯碼錯 → 401，不洩漏紀錄', r.statusCode === 401 && !r.body.sessions);
+r = await get({ action: 'history', event_id: 'e1', trainee: '王小明', code: 'CODE2' });
+check('別場的編輯碼看不到這一場', r.statusCode === 401);
+r = await get({ action: 'history', event_id: 'e1', trainee: '', code: 'CODE1' });
+check('沒填姓名 → 空清單', r.statusCode === 200 && r.body.sessions.length === 0);
+const html = fs.readFileSync(new URL('../public/training.html', import.meta.url), 'utf8');
+check('前端：換手機也看得到（後端優先、拿不到退回本機）', /action=history/.test(html) && /serverHist\.length \? serverHist : local/.test(html));
+console.log(`\n${fail ? '❌' : '✅'} 批次 107 測試：${pass} 通過，${fail} 失敗`); process.exit(fail ? 1 : 0);
