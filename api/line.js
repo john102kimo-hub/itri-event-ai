@@ -43,7 +43,7 @@ import {
 import { buildCalendarCards, buildAllCalendarCards, routeIntent, formatCalendarReply, calendarQuickReplyItems, matchShownEvents } from '../lib/router.js';
 import {
   detectMetaIntent, detectCourtesy, isOrgWideNewsAsk, isHumanRequest, isEventTopicAsk, isExactMetaAsk, matchEventByName, MENU_WORDS, HELP_TEXT, ORG_INTRO_TEXT, buildWelcomeFlex,
-  REPORTER_MENU, STAFF_MENU, findEventMentioned
+  REPORTER_MENU, STAFF_MENU, isStaffMoreCommand, findEventMentioned
 } from '../lib/menu.js';
 import {
   listOpenCampaigns, listRegistrationTopics, loadCampaigns, findRegistrationsForLineUser, bindRegistrationToLine, parseRegBindText,
@@ -2228,11 +2228,29 @@ const GROUP_ANSWER_RULE = '這一題是在多人 LINE 群組裡問的，群組�
 // 只認「要整份稿子」的講法。刻意不收「完整版」「逐字稿」：「有完整版影片嗎？」「有沒有
 // 逐字稿？」問的不是新聞稿，後面接一段「完整新聞稿比較長…」就是答非所問。
 const GROUP_FULL_TEXT_RE = /(完整|整篇|整份)的?(新聞)?稿|新聞稿的?(全文|全部|完整)|全文|完整的?內容|整篇(貼|給|傳|發)/;
+// 「整句就只是在要完整新聞稿、沒帶任何主題」：圖文選單「新聞稿全文」那一格送出的固定句型（「給我完整新聞稿」）
+// 與記者手打的常見講法。批次 115：這種句子**不能交給模型判**。回報（截圖）：按那一格，回來的是「工研院官網
+// 新聞中心目前沒有找到跟『給我完整新聞稿』直接相關的報導」——正式環境的模型把它判成 tech_query、又抽不出關鍵字，
+// 整句被丟去官網搜尋。上面反問「要哪一場」的規則（批次 85）排在路由「之後」，路由判成別的就永遠輪不到。
+// 刻意收得緊：有主題的（「半導體的完整新聞稿」）、點名活動的（《ＸＸ》的完整新聞稿）都不吃，那些照舊交給路由。
+const FULL_TEXT_ASK_EXACT_RE = /^(請|麻煩)?(給我|我要|我想要|想要|可以給我|能給我)?((完整|整篇|整份)的?新聞稿|新聞稿(全文|全部|完整版?))(嗎|呢)?[?？!！。]*$/;
+const isFullTextAsk = (text) => FULL_TEXT_ASK_EXACT_RE.test(String(text || '').trim());
 // 「要哪一場的完整新聞稿」那排按鈕送出的字（批次 85）。固定格式，才能不靠模型、直接認出是哪一場，
 // 群組裡別人按也認得（見 isOwnButtonText()）。有人照這個格式自己打字，意思也一樣。
 const FULL_TEXT_PICK_RE = /^給我《(.+)》的完整新聞稿$/;
 function fullTextPickButton(name) {
   return { label: name, text: `給我《${name}》的完整新聞稿` };
+}
+// 「要哪一場的完整新聞稿」那一則。eventIds：路由已經認出的場次（有知識庫的才算）；沒有就列全部。
+// 回 false＝一場都列不出來（呼叫端照原流程往下走）。
+async function sendFullTextPicker(replyToken, userId, cards, eventIds = []) {
+  const named = eventIds.map(id => cards.find(c => c.id === id)).filter(c => c?.has_kb);
+  const picks = named.length ? named.map(c => c.name) : calendarQuickReplyItems(cards);
+  if (!picks.length) return false;
+  await replyOrPush(replyToken, userId,
+    `想要哪一場的完整新聞稿呢？點下面的活動就給您：\n${picks.map(n => '・' + n).join('\n')}`,
+    [...picks.map(fullTextPickButton), BTN.events, BTN.human].slice(0, 13));
+  return true;
 }
 async function fullTextPickEvent(text) {
   const m = String(text || '').trim().match(FULL_TEXT_PICK_RE);
@@ -2874,6 +2892,12 @@ async function handleStaffMessage(replyToken, userId, text) {
     return;
   }
 
+  // 選單最右下那一格（批次 114）。字面比對、不進模型：每次回的都是同一則固定文字。
+  if (isStaffMoreCommand(text)) {
+    await sendStaffMore(replyToken, userId);
+    return;
+  }
+
   // ── 用對話教米亞（批次 46）────────────────────────────────────────────
   // ⚠️ 一定要排在 routeStaffIntent() 之前，而且用字面比對——跟 isExitStaffCommand()
   // 同一個理由：「這句話會不會被寫進知識庫、讓每個記者都讀到」，不該取決於模型當下
@@ -3185,12 +3209,34 @@ async function handleStaffMessage(replyToken, userId, text) {
 // 照樣答得出來（批次 52 修的是 handleStaffMessage() 的路由，不是這段文字）——
 // 那條路被拿掉的話，回報過的「問新聞稿拿到一面功能清單的牆」就會整個回來。
 // 測試釘住了這一條。
+// 【教米亞】那一段：功能表與「更多功能」兩處都要寫，抄兩份遲早有一份跟不上。
+const STAFF_TEACH_TEXT =
+  '【教米亞】\n' +
+  '・「記住：這場的技術還在實驗階段，不要說已經量產」——只記這一場\n' +
+  '・「語氣：回答再短一點」——全站通用\n' +
+  '・打「記憶清單」看目前記得什麼';
+
+// 選單「更多功能」那一格（批次 114）。只回格子底下寫的那三件事——訓練、教米亞、退出——
+// 不是整份功能表；要看完整的打「使用說明」。按鈕列照規矩帶整套入口（staffChips），
+// 只是把這一則最相關的三顆排在前面。
+async function sendStaffMore(replyToken, userId) {
+  await replyOrPush(replyToken, userId,
+    '更多功能 🧰\n\n' +
+    '【媒體訓練】\n' +
+    '・「要媒體訓練連結」——發言練習（每張活動卡上也有）\n\n' +
+    STAFF_TEACH_TEXT + '\n\n' +
+    '【其他】\n' +
+    '・「設定圖文選單」——重設下方選單\n' +
+    '・「退出職員模式」——回到記者身分\n\n' +
+    '完整的功能說明打「使用說明」。',
+    staffChips('要媒體訓練連結', '記憶清單', '退出職員模式', '使用說明'));
+}
+
 async function sendStaffMenu(replyToken, userId) {
   await replyOrPush(replyToken, userId,
     '職員模式 🔧 下面按鈕直接點，或用講的都可以。\n\n' +
     '【管理】\n' +
-    // 「更多功能」這一格送出的就是「使用說明」＝這一則本身，不列自己
-    STAFF_MENU.buttons.filter(b => b.text !== '退出職員模式' && b.text !== '使用說明').map(b => `・${b.label}——${b.sub}`).join('\n') +
+    STAFF_MENU.buttons.map(b => `・${b.label}——${b.sub}`).join('\n') +
     '\n・要媒體訓練連結——發言練習（每張活動卡上也有）' +
     '\n・設定圖文選單——重設下方選單\n' +
     '・點活動名稱——看那一場的活動卡：填寫進度、編輯頁、催填訊息、媒體訓練\n' +
@@ -3200,10 +3246,7 @@ async function sendStaffMenu(replyToken, userId) {
     '・「發布 某某那場」——必填都齊了才能發布\n' +
     '・打「復原上一個修改」改回去\n' +
     '・直接傳照片——選一場，照片就加進那一場的活動照片\n\n' +
-    '【教米亞】\n' +
-    '・「記住：這場的技術還在實驗階段，不要說已經量產」——只記這一場\n' +
-    '・「語氣：回答再短一點」——全站通用\n' +
-    '・打「記憶清單」看目前記得什麼\n\n' +
+    STAFF_TEACH_TEXT + '\n\n' +
     '【離開】打「退出職員模式」回到記者身分。',
     STAFF_QUICK_REPLIES);
 }
@@ -3543,6 +3586,10 @@ async function handleUnbound(replyToken, userId, text, { silentOnOther = false, 
       return;
     }
   }
+  // 整句只是在要完整新聞稿（選單「新聞稿全文」）：規則先接，不等模型（批次 115，見 FULL_TEXT_ASK_EXACT_RE）。
+  // silentOnOther（群組裡沒被叫到）照舊不開口。
+  if (!silentOnOther && isFullTextAsk(text) && await sendFullTextPicker(replyToken, userId, cards)) return;
+
   // groupChatter（批次 83）：群組裡沒被叫到的訊息，提醒路由「群組成員彼此也在聊天」——
   // silentOnOther 為 true 的情況正好就是這種（見 lib/router.js 的說明）。
   const { intent, event_ids, confidence, tech_keyword } = await routeIntent(text, cards, { ...topicCtx, groupChatter: silentOnOther });
@@ -3591,16 +3638,7 @@ async function handleUnbound(replyToken, userId, text, { silentOnOther = false, 
   // 要的是「某一場的完整新聞稿」，但沒講哪一場、目前也沒在問哪一場（批次 85）。以前掉到兜底
   // 「這句我不太確定該從哪邊幫您找答案」——其實我們很清楚他要什麼，只是不知道哪一場。
   // 反問一次，每一場一顆按鈕，按下去直接給那一場（見 FULL_TEXT_PICK_RE）。
-  if (!silentOnOther && GROUP_FULL_TEXT_RE.test(text)) {
-    const named = event_ids.map(id => cards.find(c => c.id === id)).filter(c => c?.has_kb);
-    const picks = named.length ? named.map(c => c.name) : calendarQuickReplyItems(cards);
-    if (picks.length) {
-      await replyOrPush(replyToken, userId,
-        `想要哪一場的完整新聞稿呢？點下面的活動就給您：\n${picks.map(n => '・' + n).join('\n')}`,
-        [...picks.map(fullTextPickButton), BTN.events, BTN.human].slice(0, 13));
-      return;
-    }
-  }
+  if (!silentOnOther && GROUP_FULL_TEXT_RE.test(text) && await sendFullTextPicker(replyToken, userId, cards, event_ids)) return;
 
   if (intent === 'qa' && event_ids.length > 0) {
     const names = event_ids.map(id => cards.find(c => c.id === id)?.name).filter(Boolean).slice(0, 3);
@@ -4473,10 +4511,13 @@ async function handleGroupMessage(replyToken, groupId, text, { mentioned, speake
   // 形狀：守門放行跟真的答得出來，是兩道各自獨立的門，兩道都要開）。
   // 綁定中才開：沒綁定時 handleUnbound() 的 silentOnOther 不動，不會為了一個名詞去反問「哪一場」。
   const topicAsk = !mentioned && !ownButton && (isEventTopicAsk(text) || isExactMetaAsk(text));
-  const routed = pinGenericTechQueryToEvent(
-    await routeIntent(text, buildCalendarCards(await getAllEventRows()),
-      { currentEventId: event.id, ...(await recentTopicContext(groupId)), groupChatter: !mentioned && !ownButton && !topicAsk }),
-    text, event.id);
+  // 綁定中、被叫到、整句只是在要完整新聞稿：就是在要這一場的，不等模型（批次 115）。
+  const routed = (mentioned || ownButton) && isFullTextAsk(text)
+    ? { intent: 'qa', event_ids: [event.id], confidence: 'high' }
+    : pinGenericTechQueryToEvent(
+      await routeIntent(text, buildCalendarCards(await getAllEventRows()),
+        { currentEventId: event.id, ...(await recentTopicContext(groupId)), groupChatter: !mentioned && !ownButton && !topicAsk }),
+      text, event.id);
 
   // 回報的意見：批次 14 只擋得住「明確 @ 別人」這種訊號很強的情況，續問視窗內
   // 純聊天、答非所問的訊息（例如「友信你覺得呢」）當時沒有安全的判斷依據——
@@ -4829,10 +4870,13 @@ async function handleEvent(ev) {
   // ⚠️ 批次 58：只帶話題標籤不夠——記者的追問常常是一句完整問句（回報的截圖：
   // 「有談機器人發展的嗎」），標籤給不出任何依據，那句話照樣被 currentEventId 拉回
   // 這一場。recentTopicContext() 會連「上一則實際答了什麼」一起帶上去。
-  const routed = pinGenericTechQueryToEvent(
-    await routeIntent(text, buildCalendarCards(await getAllEventRows()),
-      { currentEventId: event.id, ...(await recentTopicContext(userId)) }),
-    text, event.id);
+  // 整句只是在要完整新聞稿（選單「新聞稿全文」）：綁定中就是這一場的，不等模型（批次 115）。
+  const routed = isFullTextAsk(text)
+    ? { intent: 'qa', event_ids: [event.id], confidence: 'high' }
+    : pinGenericTechQueryToEvent(
+      await routeIntent(text, buildCalendarCards(await getAllEventRows()),
+        { currentEventId: event.id, ...(await recentTopicContext(userId)) }),
+      text, event.id);
 
   // 綁定中，但這題其實是在問「有哪些場次」——不動原本的活動綁定，只列清單（跟
   // handleMetaIntent() 的 calendar 分支同一支，見 sendCalendarReply()）。
