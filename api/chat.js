@@ -169,13 +169,13 @@ export default async function handler(req, res) {
   }
 
   // 裁切輸入：只留最近 12 則、每則截 8000 字 —— 沒有這道限制，輸入成本完全由呼叫者決定
+  // ⚠️ 批次 116：只收字串。以前 content 不是字串就原樣轉給模型——傳一個 [{type:'text', text:…}]
+  // 陣列，8000 字的上限就整個失效（實測 60 萬字照送），還能夾帶圖片、PDF 區塊。前台本來就只送字串，
+  // 跟 api/training.js normalizeMessages() 同一個做法。
   const trimmed = messages
     .slice(-12)
-    .filter(m => m && (m.role === 'user' || m.role === 'assistant'))
-    .map(m => ({
-      role: m.role,
-      content: typeof m.content === 'string' ? m.content.slice(0, 8000) : m.content
-    }));
+    .filter(m => m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string' && m.content.trim())
+    .map(m => ({ role: m.role, content: m.content.slice(0, 8000) }));
   // 模型 API 要求第一則一定是使用者的話。「只留最近 12 則」會把一輪問答從中間切開：前端每一題都是
   // 「問、答、問、答…最後一個是問」，總數是奇數，往回數 12 則剛好從 AI 的回答開始——
   // 同一場對話問到第 7 題起，每一題都會被模型 API 退件（記者看到「暫時無法取得回應」）。
@@ -203,12 +203,7 @@ export default async function handler(req, res) {
     const eventName = event.name;
     const systemPrompt = buildSystemPrompt(event);
     const basicsBlock = formatEventBasics(event);
-    const lastUserMsg = [...trimmed].reverse().find(m => m.role === 'user');
-    const question = !lastUserMsg
-      ? ''
-      : (typeof lastUserMsg.content === 'string'
-          ? lastUserMsg.content
-          : (lastUserMsg.content?.[0]?.text || ''));
+    const question = [...trimmed].reverse().find(m => m.role === 'user')?.content || '';
 
     logCtx = { event_id, eventName, media_name, reporter_name, question };
 

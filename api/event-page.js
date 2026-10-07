@@ -26,6 +26,7 @@ import fs from 'fs';
 import path from 'path';
 import { readEventRows } from '../lib/events-table.js';
 import { resolveOrg, BRAND_KEY } from '../lib/geo-orgs.js';
+import { resolveEventContent } from '../lib/prompt.js';
 
 // 用到 L 欄時間、M 欄地點：結構化資料的 Event 要有 location 才完整（批次 82）。讀取走 lib/events-table.js 的共用快取（批次 109）。
 
@@ -286,7 +287,12 @@ async function serveEventPage(req, res) {
   const pressBody = concluded ? extractPressBody(ev.knowledge_base) : '';
   const summary = makeSummary(ev.name, ev.organizer, pressBody, concluded);
   const chipList = ev.chips.split('\n').map(s => s.trim()).filter(Boolean);
-  const ogImage = firstImageUrl(ev.images);
+  // 預覽圖也要過「活動前只給邀請函」那道門（批次 116）：get_public 與公開列表都擋了活動前的正式照片，
+  // 這裡以前直接拿 H 欄第一張——還在禁發期的新聞照就出現在 og:image，LINE／FB 一貼連結就是那張預覽圖。
+  const ogImage = firstImageUrl(resolveEventContent({
+    status: ev.status, event_date: ev.date, images: ev.images, chips: ev.chips,
+    invite_letter: row[16] || '', invite_letter_chips: row[17] || ''
+  }).images);
 
   // ── head 注入：title / meta / Open Graph / JSON-LD ────────────────
   const org = isItri(ev.organizer)

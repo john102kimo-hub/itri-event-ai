@@ -6,7 +6,7 @@
 
 import { handleUpload } from '@vercel/blob/client';
 import { readEventRows } from '../lib/events-table.js';
-import { isAdminPassword, codeMatches, authBlocked, authFailed } from '../lib/auth.js';
+import { adminAttempt, codeMatches, authFailed } from '../lib/auth.js';
 
 const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
 const MAX_SIZE = 10 * 1024 * 1024; // 10MB
@@ -24,11 +24,12 @@ export default async function handler(req, res) {
         const { event_id, code, password } = payload;
 
         // 批次 110：沒設 ADMIN_PASSWORD 一律不是管理員；固定時間比對；猜編輯碼的來源有失敗限流（lib/auth.js）
-        const isAdmin = isAdminPassword(password);
+        // 批次 116：密碼帶錯也要記失敗、被擋下的來源連密碼都不比——以前這裡猜密碼不受任何限流
+        const who = adminAttempt(req, password);
+        if (who === 'blocked') throw new Error('嘗試的次數太多了，請 10 分鐘後再試');
 
-        if (!isAdmin) {
+        if (who !== 'admin') {
           if (!event_id || !code) throw new Error('缺少授權資訊');
-          if (authBlocked(req)) throw new Error('嘗試的次數太多了，請 10 分鐘後再試');
           const rows = await readEventRows(); // 批次 109：共用快取，亂填 event_id 不多打 Sheets
           const row = rows.find(r => r[0] === event_id);
           if (!row) { authFailed(req); throw new Error('活動不存在'); }
