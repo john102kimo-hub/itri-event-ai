@@ -27,6 +27,7 @@ import { lineBindUrl, lineAddFriendUrl, lineBasicId } from '../lib/line-link.js'
 import { handleRegistrationRequest } from '../lib/registration-api.js';
 import { publishBlockers, isPublishing, taipeiToday, PUBLIC_STATUSES } from '../lib/event-status.js';
 import { effectiveChips } from '../lib/default-chips.js';
+import { kbHasContent } from '../lib/kb-template.js';
 import { readEventRows, invalidateEventsTable, EVENTS_RANGE } from '../lib/events-table.js';
 import { requireAdmin, passwordFrom, codeMatches, authBlocked, authFailed, tooManyAttempts } from '../lib/auth.js';
 
@@ -260,7 +261,7 @@ export default async function handler(req, res) {
             id: r[0], name: r[1], color: r[2] || '#0F9E7A',
             status: r[4] || 'active', created_at: r[5] || '', event_date: r[5] || '',
             chips: r[6] || '', images: r[7] || '', greeting: r[8] || '', organizer: r[9] || '工研院',
-            has_kb: !!(r[3] && String(r[3]).trim()),
+            has_kb: kbHasContent(r[3]),   // 批次 117：範本沒動過不算有資料（同發布閘門）
             event_time: r[11] || '', venue: r[12] || '', event_type: r[13] || '', press_contact: r[14] || '',
             contacts: r[15] || '',
             // 必填還缺哪幾項（批次 103）：卡片上直接寫出來，發布前就知道缺什麼，不用按了才被擋
@@ -292,7 +293,7 @@ export default async function handler(req, res) {
             id: r[0], name: r[1], color: r[2] || '#0F9E7A',
             status: r[4] || 'active', created_at: r[5] || '', event_date: r[5] || '',
             chips: pub.chips, images: pub.images, greeting: r[8] || '', organizer: r[9] || '工研院',
-            has_kb: !!(r[3] && String(r[3]).trim()),
+            has_kb: kbHasContent(r[3]),   // 批次 117：範本沒動過不算有資料（同發布閘門）
             event_time: r[11] || '', venue: r[12] || '', event_type: r[13] || '', press_contact: r[14] || ''
           };
         });

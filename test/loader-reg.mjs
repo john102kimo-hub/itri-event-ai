@@ -3,7 +3,7 @@
 //   - lib/line.js、lib/photo-upload.js → fakes.mjs（收下米亞送出的每一則訊息，測試才看得到）
 //   - 其餘 lib 帶版本號重載（跟 loader.mjs 一樣，每個情境拿到乾淨的模組快取）
 // load 沿用 loader.mjs 的（?stub=line、?stub=photo 的產生方式一模一樣），只多補 @vercel/blob 的空殼。
-import { load as baseLoad } from './loader.mjs';
+import { load as baseLoad, lineStateBust } from './loader.mjs';
 
 export async function load(url, ctx, next) {
   if (url === 'stub:blob') {
@@ -34,5 +34,7 @@ export async function resolve(specifier, context, next) {
   if (r.url.endsWith('/lib/line.js')) return { ...r, url: bust(r.url + '?stub=line'), shortCircuit: true };
   if (r.url.endsWith('/lib/photo-upload.js')) return { ...r, url: bust(r.url + '?stub=photo'), shortCircuit: true };
   if (v && /\/lib\/[^/]+\.js$/.test(r.url)) return { ...r, url: bust(r.url), shortCircuit: true };
+  const own = lineStateBust(context.parentURL, r.url); // 批次 117，見 loader.mjs
+  if (own) return { ...r, url: own, shortCircuit: true };
   return r;
 }

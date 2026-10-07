@@ -17,7 +17,7 @@
 import { register } from 'node:module';
 import { createHmac } from 'node:crypto';
 import { EventEmitter } from 'node:events';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 
 register('./loader.mjs', import.meta.url);
 
@@ -184,7 +184,7 @@ console.log('── 道歉本身送不出去，也不能把例外往外丟（LIN
 console.log('── 每一個對外呼叫都要有逾時 ──');
 const src = f => readFileSync(new URL(`../${f}`, import.meta.url), 'utf8');
 for (const [file, label] of [
-  ['api/line.js', '答題模型（Anthropic）'],
+  ['lib/line-runtime.js', '答題模型（Anthropic）'], // 批次 117 從 api/line.js 搬過去
   ['lib/router.js', '意圖路由（Anthropic）'],
   ['lib/itri-news.js', '工研院官網新聞中心'],
   ['lib/industry-trends.js', 'IEK 產業情報網'],
@@ -196,7 +196,10 @@ for (const [file, label] of [
 }
 // 死線是共用的，不是每支各自寫死一個秒數——加起來超過 60 秒的話，寫得再合理也沒用。
 {
-  const text = src('api/line.js');
+  // 批次 117：api/line.js 拆成 lib/line-*.js，死線的定義（line-runtime）、起算（api/line.js 的 handler）、
+  // 補查官網的呼叫（line-reporter）分在不同檔案——整組 LINE 的程式一起看。
+  const text = ['api/line.js', ...readdirSync(new URL('../lib/', import.meta.url)).filter((f) => /^line-.+\.js$/.test(f)).map((f) => `lib/${f}`)]
+    .map(src).join('\n');
   ok(/REQUEST_BUDGET_MS\s*=\s*55_000/.test(text), '請求死線是 55 秒（留 5 秒給送出回覆與寫 qa_log）');
   // 死線放在 AsyncLocalStorage、不是模組層變數：同一個執行個體同時處理兩個請求時，
   // 共用變數會讓後到的把先到的死線往後推，先到的那個就會以為還很寬裕然後被砍掉。

@@ -14,6 +14,7 @@ export async function load(url, context, next) {
       format: 'module', shortCircuit: true,
       source: `import { sheets } from ${JSON.stringify(FAKES)};
 export const readRange = (...a) => sheets.readRange(...a);
+export const readRanges = (rs) => Promise.all(rs.map((r) => sheets.readRange(r)));
 export const appendRows = async () => {};
 export const updateRange = async () => {};
 export const ensureSheets = async () => {};`

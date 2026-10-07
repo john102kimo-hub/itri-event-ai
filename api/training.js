@@ -26,6 +26,8 @@ import { kbHasContent } from '../lib/kb-template.js';
 import { eventDateOf } from '../lib/event-status.js';
 import { isTestMedia } from '../lib/media-name.js';
 import { readEventRows } from '../lib/events-table.js';
+import { readQaRowsWithoutAnswers } from '../lib/qa-log.js';
+import { logAiUsage } from '../lib/ai-usage.js';
 import { isAdminPassword, codeMatches, passwordFrom, requireAdmin, authBlocked, authFailed, tooManyAttempts } from '../lib/auth.js';
 
 const CACHE_TTL_MS = 60 * 1000; // 60 秒；同仁改完知識庫應該很快能在訓練模式看到新版
@@ -107,7 +109,7 @@ async function getRealQuestions(eventId) {
   if (cached && Date.now() < cached.expiry) return cached.data;
 
   let rows = [];
-  try { rows = await readRange('qa_log!A2:G'); } catch { rows = []; }
+  try { rows = await readQaRowsWithoutAnswers(); } catch { rows = []; } // 批次 117：不讀 AI 回答全文（F 欄）
   // 已刪除的問答（G 欄標記，或舊資料殘留的 B 欄 [deleted]）不該被當成訓練素材。
   // 測試資料與同仁在 LINE 職員模式自己問的（「（內部職員）」）也不是記者「真的問過」的——
   // 它們會被當成「記者最關心的角度」餵給 AI 記者（批次 106；判斷與後台統計共用 lib/media-name.js）。
@@ -898,6 +900,7 @@ export default async function handler(req, res) {
     }
 
     const data = await response.json().catch(() => ({}));
+    logAiUsage(`媒體訓練（${mode}）`, 'claude-sonnet-5-5', data.usage); // 批次 117
     if (!response.ok) {
       console.error('training Anthropic API 錯誤:', response.status, data.error?.message || '', event_id, mode);
       await reportAiFailure({ status: response.status, message: data.error?.message, where: '媒體訓練' }); // 批次 85

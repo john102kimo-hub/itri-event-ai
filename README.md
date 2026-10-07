@@ -8,7 +8,7 @@
 | 誰用 | 網址 | 主要檔案 |
 |---|---|---|
 | 記者（網頁問答） | `/event?id=…` | `public/event.html`、`api/chat.js`、`api/event-page.js`（SSR，給搜尋引擎與 AI 爬蟲讀） |
-| 記者（LINE 米亞） | LINE 官方帳號 | `api/line.js`（webhook）、`lib/router.js`、`lib/menu.js`、`lib/staff.js`（職員模式） |
+| 記者（LINE 米亞） | LINE 官方帳號 | `api/line.js`（webhook 入口）、`lib/line-*.js`（記者、群組、職員、報名各一支，對照表在 `api/line.js` 開頭）、`lib/router.js`、`lib/menu.js`、`lib/staff.js` |
 | 承辦人（後台） | `/admin` | `public/index.html`、`api/events.js`、`api/analytics.js`、`api/export.js` |
 | 同仁（改自己那一場） | `/edit?id=…&code=…` | `public/edit.html`、`api/events.js`（`get_edit`／`update_edit`） |
 | 主管（成效報告） | `/report` | `public/report.html`、`api/exposure.js` |
@@ -52,4 +52,5 @@ GitHub Actions（`.github/workflows/test.yml`）每個 PR 與 main 推送都會�
 - **管理員與編輯碼的比對一律走 `lib/auth.js`**（`requireAdmin()`、`codeMatches()`），不要自己寫 `password !== …`——那樣在密碼沒設定時會放行。
 - **「絕對不能發生」的事擋在程式出口**，不是寫在 prompt：繁體字（`lib/zh-tw.js` 的 `toTraditionalTW()`）、發布閘門（`lib/event-status.js`）、網頁問答一定要有媒體名稱（`api/chat.js`）、管理員驗證（`lib/auth.js`）。
 - 新增後台頁面時，要把它加進 `vercel.json` 的安全標頭規則（`test/test-batch110.mjs` 會逐頁檢查）。
+- **寫入 Sheets 不是每一種都能重送**：`appendRows()`（加一列）與 `batchUpdate()`（刪列、加分頁）逾時或 500 時不重試，免得多一列或刪錯列（批次 117，見 `lib/sheets.js`）。新增會呼叫模型的地方，記得接 `logAiUsage()`（`test-batch117` 會檢查）。
 - 紀錄要寫：改了什麼、為什麼、踩到什麼坑——寫在 `docs/batches/`，不是 commit message（見 CLAUDE.md 第 5 條）。

@@ -31,6 +31,7 @@ import {
 import { reportAiFailure } from '../lib/ai-alert.js';
 import { safeEqual, isAdminPassword, codeMatches, passwordFrom, authBlocked, authFailed, tooManyAttempts } from '../lib/auth.js';
 import { generateShareCode } from '../lib/ids.js';
+import { logAiUsage } from '../lib/ai-usage.js';
 
 const SHEETS = {
   geo_prompts: ['id', 'topic', 'prompt', 'keyword', 'brand', 'competitors', 'active', 'created_at'],
@@ -197,6 +198,7 @@ async function anthropic(body, timeoutMs = 15_000) {
     signal: AbortSignal.timeout(timeoutMs),
   });
   const data = await res.json();
+  logAiUsage('AI 能見度', body.model, data.usage); // 批次 117
   if (!res.ok) {
     await reportAiFailure({ status: res.status, message: data.error?.message, where: 'GEO 檢查' }); // 批次 85
     throw new Error(data.error?.message || `Anthropic ${res.status}`);

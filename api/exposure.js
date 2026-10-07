@@ -15,6 +15,7 @@ import { readRange, appendRows, ensureSheets, listSheets, batchUpdate } from '..
 import { parseExposureFile, normalizeOutlet } from '../lib/exposure-parse.js';
 import { groupOutlets } from '../lib/media-name.js';
 import { readEventRows } from '../lib/events-table.js';
+import { readQaRowsWithoutAnswers } from '../lib/qa-log.js';
 import { adminAttempt, requireAdmin, passwordFrom, codeMatches, authFailed } from '../lib/auth.js';
 
 const SHEETS = {
@@ -172,7 +173,7 @@ export default async function handler(req, res) {
       if (action === 'analysis' || action === 'analysis_all') {
         if (!requireAdmin(req, res, password)) return;
         const [expRows, qaRowsRaw] = await Promise.all([
-          safeRead('exposure!A2:I'), safeRead('qa_log!A2:G'),
+          safeRead('exposure!A2:I'), readQaRowsWithoutAnswers().catch(() => []), // 批次 117：不讀 AI 回答全文
         ]);
         // 已刪除的問答（G 欄標記，或舊資料殘留的 B 欄 [deleted]）不該算進交叉分析
         const qaRows = qaRowsRaw.filter((r) => r[1] !== '[deleted]' && r[6] !== '1');

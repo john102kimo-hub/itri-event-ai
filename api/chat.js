@@ -9,6 +9,9 @@ import { buildSystemPrompt, resolveEventContent, formatEventBasics } from '../li
 import { toTraditionalTW, createTraditionalStream, ZH_TW_RULE } from '../lib/zh-tw.js';
 import { reportAiFailure } from '../lib/ai-alert.js';
 import { readEventRows } from '../lib/events-table.js';
+import { logAiUsage } from '../lib/ai-usage.js';
+
+const CHAT_MODEL = 'claude-haiku-4-5-20251001';
 
 // 這支是記者看得到的出口，跟 api/line.js 一樣要過繁體轉換（CLAUDE.md 第 1、2 條）。
 // 批次 82 之前這裡完全沒有接：LINE 在批次 45 補了兩層防線，網頁版一層都沒有——
@@ -219,7 +222,7 @@ export default async function handler(req, res) {
       // Sheets 若卡在配額重試，花掉的時間也要扣掉（最少留 5 秒給模型）。
       signal: AbortSignal.timeout(Math.max(5_000, REQUEST_BUDGET_MS - (Date.now() - startedAt))),
       body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
+        model: CHAT_MODEL,
         max_tokens: 4096,
         stream: !!stream,
         // 知識庫在 60 秒快取視窗內逐 byte 穩定，加 ephemeral cache 讓同場記者連續發問時
@@ -248,6 +251,7 @@ export default async function handler(req, res) {
 
     if (!stream) {
       const data = await response.json();
+      logAiUsage('網頁問答', CHAT_MODEL, data.usage); // 批次 117
       // 不能寫死 content[0]：第一塊不保證是文字（見 api/line.js askAnthropic() 的說明）
       const text = (data.content || []).filter(b => b?.type === 'text').map(b => b.text).join('\n').trim();
       reply = toTraditionalTW(text) || '抱歉，無法取得回應。';
@@ -277,6 +281,8 @@ export default async function handler(req, res) {
     };
     let buf = '';
     let brokenMidway = false;
+    // 用量（批次 117）：串流的 token 數分兩次來——message_start 帶輸入與快取，message_delta 帶輸出
+    const usage = {};
 
     for (;;) {
       const { done, value } = await reader.read();
@@ -292,6 +298,10 @@ export default async function handler(req, res) {
         try { evt = JSON.parse(payload); } catch (e) { continue; }
         if (evt.type === 'content_block_delta' && evt.delta?.type === 'text_delta') {
           send(zh.push(evt.delta.text));
+        } else if (evt.type === 'message_start') {
+          Object.assign(usage, evt.message?.usage || {});
+        } else if (evt.type === 'message_delta') {
+          Object.assign(usage, evt.usage || {});
         } else if (evt.type === 'error') {
           // 串流途中模型那端出錯（例如 overloaded）：原文記 log，記者看中文
           console.error('Anthropic 串流錯誤:', evt.error?.type, evt.error?.message);
@@ -300,6 +310,7 @@ export default async function handler(req, res) {
       }
     }
     send(zh.flush());
+    if (Object.keys(usage).length) logAiUsage('網頁問答', CHAT_MODEL, usage);
 
     if (brokenMidway) {
       res.write(`data: ${JSON.stringify({ error: reply ? STREAM_BROKEN_MSG : friendlyApiError(529) })}\n\n`);

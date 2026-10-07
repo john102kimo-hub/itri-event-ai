@@ -35,6 +35,9 @@ export function reset() {
 }
 export async function readRange(range) {
   calls.push(['read', range]);
+  return readNoLog(range);
+}
+function readNoLog(range) {
   const { tab, c1, r1, c2, r2 } = parse(range);
   if (ctl.failReads.has(tab)) throw new Error('模擬 Sheets 讀取失敗');
   if (ctl.strictTabs && !book[tab]) throw new Error(`Unable to parse range: ${range}`);
@@ -47,6 +50,12 @@ export async function readRange(range) {
   }
   while (out.length && !out[out.length - 1].length) out.pop();
   return out;
+}
+// 批次 117：values:batchGet。真的 API 是一次請求，這裡也只記一筆讀取（範圍用「|」串起來），
+// 數讀取次數的測試（批次 109）才不會因為改用一次讀兩段而多算。
+export async function readRanges(ranges) {
+  calls.push(['read', ranges.join('|')]);
+  return ranges.map(readNoLog);
 }
 export async function appendRows(range, values) {
   maybeFail('append', range);

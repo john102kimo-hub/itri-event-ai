@@ -120,9 +120,11 @@ for (const f of ['public/register.html', 'public/registrations.html', 'lib/regis
   check(`${f}：顯示文字沒有「${LABELS.join('」「')}」`, bad.length === 0, bad.join('、'));
 }
 {
-  const line = noComments(read('api/line.js'));
+  // 批次 117：api/line.js 拆成 lib/line-*.js，米亞的回覆散在那幾支，一起看
+  const files = ['api/line.js', ...fs.readdirSync(path.join(ROOT, 'lib')).filter((f) => /^line-.+\.js$/.test(f)).map((f) => `lib/${f}`)];
+  const line = files.map((f) => noComments(read(f))).join('\n');
   const hit = line.split('\n').filter((l) => /媒體報名|媒體聯絡人/.test(l));
-  check('api/line.js：米亞的回覆沒有「媒體報名」「媒體聯絡人」', hit.length === 0, hit.join('\n'));
+  check('api/line.js 與 lib/line-*.js：米亞的回覆沒有「媒體報名」「媒體聯絡人」', hit.length === 0 && files.length >= 8, hit.join('\n'));
 }
 check('registrationLabel 預設「活動報名」、歡迎卡按鈕與卡片小標跟著', R.registrationLabel({}) === '活動報名' && R.welcomeButtonLabel({}) === '📝 活動報名（1 分鐘）');
 check('LINE 卡片的 altText 與純文字備援都用新名稱', /活動報名/.test(R.buildRegistrationFlex([{ id: 'x', title: 'T', sessions: [], closes_at: '' }]).altText) && !/採訪/.test(R.buildRegistrationText([{ id: 'x', title: 'T', sessions: [], closes_at: '' }])));

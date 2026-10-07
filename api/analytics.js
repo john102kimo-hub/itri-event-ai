@@ -22,6 +22,7 @@
 import { readRange, updateRange } from '../lib/sheets.js';
 import { groupOutlets, isTestMedia, isNotMedia, splitMedia } from '../lib/media-name.js';
 import { requireAdmin } from '../lib/auth.js';
+import { readQaRowsWithoutAnswers } from '../lib/qa-log.js';
 
 // 「AI 這題疑似沒答到」：提示詞規定答不出來時要說「這部分我沒有資料，建議洽現場新聞聯絡人」
 // （lib/prompt.js），所以這句話的出現是個可靠的線索。只是**線索**——模型偶爾會換個說法，
@@ -158,7 +159,9 @@ export default async function handler(req, res) {
   const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 500);
 
   try {
-    const rawRows = await readRange('qa_log!A2:I');   // I 欄＝記者姓名（批次 105），舊資料是空的
+    // I 欄＝記者姓名（批次 105），舊資料是空的。儀表板的摘要版用不到 AI 回答全文（F 欄），
+    // 跳過那一欄（批次 117，見 lib/qa-log.js）；完整版要算「疑似沒答到」與預覽，照舊整張讀。
+    const rawRows = summaryOnly ? await readQaRowsWithoutAnswers() : await readRange('qa_log!A2:I');
     // 保留原始 row_num（sheet 第幾列，row 2 = index 0）
     const rowsWithNum = rawRows.map((r, i) => ({ r, rowNum: i + 2 }));
 
