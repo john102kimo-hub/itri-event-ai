@@ -49,6 +49,10 @@
       "destination": "/api/event-page?_r=go&k=n&n=:id"
     },
     {
+      "source": "/i/:id",
+      "destination": "/api/event-page?_r=go&k=i&n=:id"
+    },
+    {
       "source": "/robots.txt",
       "destination": "/api/event-page?_r=robots"
     },

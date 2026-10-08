@@ -121,6 +121,14 @@ console.log('\n── 三、短網址（導回官網；不可能被拿去導到�
   for (const [k, n] of [['t', 'abc'], ['t', '1&MmmID=9'], ['t', '//evil.com'], ['x', '123'], ['', '123'], ['t', ''], ['n', 'https://evil.com'], ['t', '9'.repeat(40)]]) {
     check(`★ 不合法的組合回空字串：${k}/${n.slice(0, 20)}`, shortLink.resolveShortLink(k, n) === '');
   }
+  // 批次 122：產業趨勢（IEK）的連結也用短網址
+  check('IEK 長網址 → 短網址 /i/領域-報告編號', shortLink.shortenIekUrl('https://ieknet.iek.org.tw/iekrpt/rpt_more.aspx?actiontype=rpt&indu_idno=0&domain=28&rpt_idno=343831942') === 'https://itri-event-ai.vercel.app/i/28-343831942');
+  check('短網址 → IEK 原文（indu_idno=0、領域、編號都對）', shortLink.resolveShortLink('i', '28-343831942') === 'https://ieknet.iek.org.tw/iekrpt/rpt_more.aspx?actiontype=rpt&indu_idno=0&domain=28&rpt_idno=343831942');
+  check('★ 認不得的網址原樣回傳，不產生錯的短網址', shortLink.shortenIekUrl('https://example.com/x?domain=1&rpt_idno=2') === 'https://example.com/x?domain=1&rpt_idno=2' && shortLink.shortenIekUrl('') === '');
+  for (const bad of ['28', '28-', '-5', 'a-b', '28-1;x', '28-343831942-1', '1'.repeat(9) + '-1', '//evil.com']) {
+    check(`★ IEK 短網址編號不合法 → 空字串：${bad}`, shortLink.resolveShortLink('i', bad) === '');
+  }
+  check('種類 i 不接受技術／新聞那種單一數字編號', shortLink.resolveShortLink('i', '11246') === '' && shortLink.resolveShortLink('t', '28-343831942') === '');
   const call = async (query) => {
     const r = { code: 0, headers: {}, body: null,
       setHeader(k, v) { this.headers[k] = v; return this; }, status(c) { this.code = c; return this; }, send(b) { this.body = b; return this; }, end() { return this; } };
@@ -133,16 +141,37 @@ console.log('\n── 三、短網址（導回官網；不可能被拿去導到�
   check('端點：/n/… → 302 導到官網新聞', r.code === 302 && /MGID=115100714231450331/.test(r.headers.Location || ''));
   r = await call({ _r: 'go', k: 't', n: 'http://evil.com' });
   check('★ 端點：編號夾帶網址 → 404，不導走', r.code === 404 && !r.headers.Location, JSON.stringify([r.code, r.headers.Location]));
+  r = await call({ _r: 'go', k: 'i', n: '28-343831942' });
+  check('端點：/i/28-343831942 → 302 導到 IEK', r.code === 302 && /^https:\/\/ieknet\.iek\.org\.tw\//.test(r.headers.Location || ''), JSON.stringify([r.code, r.headers.Location]));
+  r = await call({ _r: 'go', k: 'i', n: 'http://evil.com' });
+  check('★ 端點：/i/ 夾帶網址 → 404', r.code === 404 && !r.headers.Location);
   r = await call({ _r: 'go', k: 'z', n: '1' });
   check('端點：不認得的種類 → 404', r.code === 404);
   r = await call({ _r: 'go' });
   check('端點：什麼都沒帶 → 404（不噴例外）', r.code === 404);
   const vercel = JSON.parse((await import('node:fs')).readFileSync(new URL('../vercel.json', import.meta.url), 'utf8'));
-  check('vercel.json：/t/:id、/n/:id 兩條 rewrite 都有，且沒有多開 Function（Hobby 上限 12）',
+  check('vercel.json：/t/:id、/n/:id、/i/:id 三條 rewrite 都有，且沒有多開 Function（Hobby 上限 12）',
     vercel.rewrites.some((x) => x.source === '/t/:id' && /_r=go&k=t&n=:id/.test(x.destination))
-    && vercel.rewrites.some((x) => x.source === '/n/:id' && /_r=go&k=n&n=:id/.test(x.destination)));
+    && vercel.rewrites.some((x) => x.source === '/n/:id' && /_r=go&k=n&n=:id/.test(x.destination))
+    && vercel.rewrites.some((x) => x.source === '/i/:id' && /_r=go&k=i&n=:id/.test(x.destination)));
   const fs = await import('node:fs');
   check('api/ 底下的 Function 數量沒超過 12', fs.readdirSync(new URL('../api', import.meta.url)).filter((f) => f.endsWith('.js')).length <= 12);
+}
+
+// ═══ 三之二、產業趨勢的連結走短網址（走完整 LINE 流程）═══════════════════════
+console.log('\n── 三之二、產業趨勢分析：原文連結是短網址 ──');
+seed(); await fresh();
+{
+  state.fallbackReply = null;
+  const iek = (await import('../lib/industry-trends.js')).parseDigestHtml(state.iekHtml);
+  const first = iek[0]?.url || '';
+  state.answerText = 'AI 資料中心帶動電力與儲能需求。\n來源編號：1,2'; // 模擬模型照規定標出引用了第幾則
+  const out = await dm('Utrend', '產業趨勢分析');
+  state.answerText = '';
+  const t = allText(out);
+  check('★ 產業趨勢回覆附「原文連結」，而且是 /i/ 短網址（不是 IEK 長網址）', /🔗 原文連結：\nhttps:\/\/itri-event-ai\.vercel\.app\/i\/\d+-\d+/.test(t) && !/ieknet\.iek\.org\.tw/.test(t), t.slice(0, 300));
+  check('　 「來源編號」那行沒有漏給記者看', !/來源編號/.test(t), t.slice(0, 200));
+  check('（前置）假資料的 IEK 項目能轉成短網址', /^https:\/\/itri-event-ai\.vercel\.app\/i\/\d+-\d+$/.test(shortLink.shortenIekUrl(first)), first);
 }
 
 // ═══ 四、選單與意圖 ═════════════════════════════════════════════════════════
