@@ -39,6 +39,6 @@ check('延伸思考關掉的寫法是 between_tools，且沒帶其他欄位', JS
 check('沒送 temperature／top_p／top_k（5.5 不收非預設值）', !('temperature' in answer) && !('top_p' in answer) && !('top_k' in answer));
 check('沒有 tool_choice（5.5 不收強制工具）', !('tool_choice' in answer));
 const route = bodies.find((b) => (b.system?.[0]?.text || '').includes('意圖判斷器'));
-check('路由仍是 Haiku 4.5（刻意不跟著換）', !route || route.model === 'claude-haiku-4-5-20251001', route?.model);
+check('路由用 Haiku 5.5（批次 120 起），且明確關掉 thinking', !route || (route.model === 'claude-haiku-5-5' && route.thinking?.type === 'disabled'), JSON.stringify([route?.model, route?.thinking]));
 console.log(`\n${fail ? '❌' : '✅'} 批次 98 測試：${pass} 通過，${fail} 失敗`);
 if (fail) process.exit(1);

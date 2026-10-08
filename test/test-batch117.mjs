@@ -166,6 +166,8 @@ const releaseLogs = () => { console.log = realLog; };
   const M = 1e6;
   check('價目：Haiku 4.5 輸入 1 百萬 = $1、輸出 1 百萬 = $5',
     estimateUsd('claude-haiku-4-5-20251001', { input_tokens: M }) === 1 && estimateUsd('claude-haiku-4-5-20251001', { output_tokens: M }) === 5);
+  check('價目：Haiku 5.5 輸入 1 百萬 = $0.10、輸出 1 百萬 = $0.50（100K 以內那一檔）',
+    Math.abs(estimateUsd('claude-haiku-5-5', { input_tokens: M }) - 0.1) < 1e-9 && Math.abs(estimateUsd('claude-haiku-5-5', { output_tokens: M }) - 0.5) < 1e-9);
   check('　 快取讀取打一折、快取寫入 1.25 倍（Sonnet 5.5：$2／百萬）',
     Math.abs(estimateUsd('claude-sonnet-5-5', { cache_read_input_tokens: M }) - 0.2) < 1e-9 && Math.abs(estimateUsd('claude-sonnet-5-5', { cache_creation_input_tokens: M }) - 2.5) < 1e-9);
   check('　 不認得的模型不亂估（回 null，log 照記 token 數）', estimateUsd('claude-unknown', { input_tokens: 10 }) === null);
@@ -220,7 +222,7 @@ const releaseLogs = () => { console.log = realLog; };
   const sres = await ask(true, '10.1.1.1');
   releaseLogs();
   check('★ 串流：輸入（含快取讀取）與輸出合成一行——in=5000 cache_read=4200 out=120',
-    logs.length === 1 && /網頁問答 model=claude-haiku-4-5-20251001 in=5000 cache_read=4200 cache_write=0 out=120 usd≈/.test(logs[0]), logs.join('\n'));
+    logs.length === 1 && /網頁問答 model=claude-haiku-5-5 in=5000 cache_read=4200 cache_write=0 out=120 usd≈/.test(logs[0]), logs.join('\n'));
   check('　 記用量不影響回答：記者照樣收到內容與結束訊號', sres.chunks.join('').includes('四足機器人') && sres.chunks.join('').includes('"done":true'));
   captureLogs();
   const nres = await ask(false, '10.1.1.2');

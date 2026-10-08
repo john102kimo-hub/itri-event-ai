@@ -12,7 +12,9 @@ import { reportAiFailure, BUSINESS_KEY_NAME } from '../lib/ai-alert.js';
 import { readEventRows } from '../lib/events-table.js';
 import { logAiUsage } from '../lib/ai-usage.js';
 
-const CHAT_MODEL = 'claude-haiku-4-5-20251001';
+// 批次 120：Haiku 4.5 → Haiku 5.5。5.5 預設會開 adaptive thinking（4.5 不會），記者要的是聊天速度的回應，
+// 所以下面 body 明確送 thinking:{type:'disabled'}（5.5 在 effort medium 以下接受）。不送 temperature 等取樣參數（5.5 會 400）。
+const CHAT_MODEL = 'claude-haiku-5-5';
 
 // 這支是記者看得到的出口，跟 api/line.js 一樣要過繁體轉換（CLAUDE.md 第 1、2 條）。
 // 批次 82 之前這裡完全沒有接：LINE 在批次 45 補了兩層防線，網頁版一層都沒有——
@@ -232,6 +234,7 @@ export default async function handler(req, res) {
       body: JSON.stringify({
         model: CHAT_MODEL,
         max_tokens: 4096,
+        thinking: { type: 'disabled' },
         stream: !!stream && !business,
         // 知識庫在 60 秒快取視窗內逐 byte 穩定，加 ephemeral cache 讓同場記者連續發問時
         // 讀取只收 0.1 倍價（記者會現場正是這種「同一份知識庫、多人連續提問」的場景）。
