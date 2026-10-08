@@ -12,6 +12,8 @@ function versionOf(url) {
 }
 
 export async function resolve(specifier, context, next) {
+  // 批次 118：api/events.js（公開活動列表）會 import @vercel/blob，node_modules 不一定有裝——換成空殼（同 loader-82）
+  if (specifier === '@vercel/blob' || specifier === '@vercel/blob/client') return { url: 'stub:blob', shortCircuit: true };
   const r = await next(specifier, context);
   const v = versionOf(context.parentURL);
   const bust = u => (v ? u + (u.includes('?') ? '&' : '?') + 'v=' + v : u);
@@ -21,18 +23,39 @@ export async function resolve(specifier, context, next) {
   // 批次 79：照片上傳會打 LINE 與 Vercel Blob，測試換成假的
   if (r.url.endsWith('/lib/photo-upload.js')) return { ...r, url: bust(r.url + '?stub=photo'), shortCircuit: true };
   if (v && /\/lib\/[^/]+\.js$/.test(r.url)) return { ...r, url: bust(r.url), shortCircuit: true };
+  const own = lineStateBust(context.parentURL, r.url);
+  if (own) return { ...r, url: own, shortCircuit: true };
   return r;
 }
 
+// 批次 117：api/line.js 拆成 lib/line-*.js 之後，原本住在 api/line.js 裡的模組層狀態（活動列快取、
+// line_users 快取、限流、找真人的通知間隔…）搬進了那幾支。有些測試用 `?b85=N` 這種參數只重載
+// api/line.js、其餘 lib 共用同一份——以前這樣就清得掉那些狀態，現在要把同一個參數往下傳給
+// lib/line-*.js，語意才跟拆檔前一樣。`?v=N` 已經整個 lib 都傳了，不用再管。
+export function lineStateBust(parentURL, url) {
+  const tag = parentURL?.match(/[?&]([A-Za-z]\w*=\d+)/)?.[1];
+  if (!tag || versionOf(parentURL) || !/\/(api\/line|lib\/line-[^/]+)\.js(\?|$)/.test(parentURL)) return null;
+  if (!/\/lib\/line-[^/]+\.js$/.test(url)) return null;
+  return url + '?' + tag;
+}
+
 export async function load(url, context, next) {
+  if (url === 'stub:blob') {
+    return { format: 'module', shortCircuit: true, source: 'export async function del() {}\nexport async function put() { return { url: "" }; }\nexport async function handleUpload() { return {}; }' };
+  }
   if (url.includes('?stub=sheets')) {
     return {
       format: 'module', shortCircuit: true,
       source: `import { sheets } from ${JSON.stringify(FAKES)};
 export const readRange = (...a) => sheets.readRange(...a);
+export const readRanges = (rs) => Promise.all(rs.map((r) => sheets.readRange(r)));
 export const appendRows = (...a) => sheets.appendRows(...a);
 export const updateRange = (...a) => sheets.updateRange(...a);
-export const ensureSheets = (...a) => sheets.ensureSheets(...a);`
+export const ensureSheets = (...a) => sheets.ensureSheets(...a);
+export const warmAuth = () => Promise.resolve();
+export const listSheets = async () => [];
+export const batchUpdate = async () => ({});
+export const sheetsFor = () => { throw new Error('這支測試沒有接業發處的試算表（B2B_SPREADSHEET_ID）'); };`
     };
   }
   if (url.includes('?stub=photo')) {

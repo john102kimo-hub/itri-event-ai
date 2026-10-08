@@ -252,7 +252,8 @@ const adminPages = fs.readdirSync(path.join(ROOT, 'public')).filter((f) => f.end
 check('★ public/ 底下每一頁後台頁面（除了記者公開的三頁）都在保護清單裡——以後新增後台頁沒補規則會紅燈',
   adminPages.every((f) => hdrsFor('/' + f)['X-Frame-Options'] === 'SAMEORIGIN'), adminPages.filter((f) => !hdrsFor('/' + f)['X-Frame-Options']).join(', '));
 check('記者公開頁（/event、/register）維持可被嵌入（沒有擋 iframe）——這是刻意的，要改請連同使用情境一起想', !hdrsFor('/event')['X-Frame-Options'] && !hdrsFor('/register')['X-Frame-Options']);
-check('原有的 rewrites、functions、crons 沒被動到', vercel.rewrites.length === 10 && Object.keys(vercel.functions).length === 6 && vercel.crons.length === 5);
+// 批次 119 加了 /inquiry、/b2b 兩條 rewrite 與業發處的期限提醒排程（functions 不變：搭在 api/events.js 上）
+check('原有的 rewrites、functions、crons 沒被動到', vercel.rewrites.length === 12 && Object.keys(vercel.functions).length === 6 && vercel.crons.length === 6);
 
 /* ───────── 七、CDN 資源的 SRI、.gitignore、CI ───────── */
 console.log('\n── 七、供應鏈與工程衛生 ──');

@@ -13,7 +13,7 @@ process.env.LINE_CHANNEL_ACCESS_TOKEN = 'testtoken';
 process.env.ANTHROPIC_API_KEY = 'test';
 process.env.GOOGLE_SPREADSHEET_ID = '';
 
-// api/line.js 有模組層的 60 秒快取（eventsCache / lineUsersCache）。測試在同一個
+// api/line.js（批次 117 起在 lib/line-store.js）有模組層的 60 秒快取（eventsCache / lineUsersCache）。測試在同一個
 // 進程裡跑，情境之間直接改 state.bindings 不會讓那份快取失效，第二個情境就會讀到
 // 第一個情境的殘留。每個情境重新 import 一次（用查詢字串繞開模組快取）最乾淨，
 // 也順便驗證了冷啟動路徑。

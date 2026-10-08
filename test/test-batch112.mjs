@@ -120,9 +120,11 @@ for (const f of ['public/register.html', 'public/registrations.html', 'lib/regis
   check(`${f}：顯示文字沒有「${LABELS.join('」「')}」`, bad.length === 0, bad.join('、'));
 }
 {
-  const line = noComments(read('api/line.js'));
+  // 批次 117：api/line.js 拆成 lib/line-*.js，米亞的回覆散在那幾支，一起看
+  const files = ['api/line.js', ...fs.readdirSync(path.join(ROOT, 'lib')).filter((f) => /^line-.+\.js$/.test(f)).map((f) => `lib/${f}`)];
+  const line = files.map((f) => noComments(read(f))).join('\n');
   const hit = line.split('\n').filter((l) => /媒體報名|媒體聯絡人/.test(l));
-  check('api/line.js：米亞的回覆沒有「媒體報名」「媒體聯絡人」', hit.length === 0, hit.join('\n'));
+  check('api/line.js 與 lib/line-*.js：米亞的回覆沒有「媒體報名」「媒體聯絡人」', hit.length === 0 && files.length >= 8, hit.join('\n'));
 }
 check('registrationLabel 預設「活動報名」、歡迎卡按鈕與卡片小標跟著', R.registrationLabel({}) === '活動報名' && R.welcomeButtonLabel({}) === '📝 活動報名（1 分鐘）');
 check('LINE 卡片的 altText 與純文字備援都用新名稱', /活動報名/.test(R.buildRegistrationFlex([{ id: 'x', title: 'T', sessions: [], closes_at: '' }]).altText) && !/採訪/.test(R.buildRegistrationText([{ id: 'x', title: 'T', sessions: [], closes_at: '' }])));
@@ -131,7 +133,8 @@ check('表單欄位改成通用的字，驗證訊息也是', /服務單位／媒
 {
   const v = JSON.parse(read('vercel.json'));
   check('★ 網址沒變：/register、/registrations 仍在（邀請函上已經發出去的連結不能失效）', v.rewrites.some((r) => r.source === '/register' && r.destination === '/register.html') && v.rewrites.some((r) => r.source === '/registrations' && r.destination === '/registrations.html'));
-  check('★ 試算表分頁名稱沒變（正式站的資料還在原處）', R.CAMPAIGN_HEADERS.length === 14 && /reg_campaigns!/.test(read('lib/registration.js')) && /registrations!/.test(read('lib/registration.js')));
+  // 批次 118 在最後面加了第 15 欄 audience（報名對象），前 14 欄的位置不變
+  check('★ 試算表分頁名稱沒變（正式站的資料還在原處）', R.CAMPAIGN_HEADERS.length === 15 && R.CAMPAIGN_HEADERS[13] === 'venue' && /reg_campaigns!/.test(read('lib/registration.js')) && /registrations!/.test(read('lib/registration.js')));
   const menu = await import('../lib/menu.js');
   check('米亞仍認得舊的講法「媒體報名」與新的「活動報名」', menu.detectMetaIntent('媒體報名') === 'register' && menu.detectMetaIntent('活動報名') === 'register');
 }

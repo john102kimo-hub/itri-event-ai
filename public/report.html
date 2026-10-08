@@ -167,8 +167,9 @@ function topTopics(questions, n){
 function render(){
   if(!ANALYTICS) return;
   const minPerQ = parseInt(document.getElementById('min-per-q').value)||3;
-  const byEvent = ANALYTICS.by_event || [];
-  const total = ANALYTICS.total || 0;
+  // 企業場（批次 118，見 lib/audience.js）不是記者會：不列進這份成效報告——場次、題數、媒體家數都不算。
+  const byEvent = (ANALYTICS.by_event || []).filter(e => e.audience !== 'business');
+  const total = ANALYTICS.business_qa ? byEvent.reduce((n, e) => n + (e.count || 0), 0) : (ANALYTICS.total || 0);
 
   // 全體服務媒體家數（跨活動去重）：以後端算好的為準——同一家媒體的不同記者、不同寫法併成一家，
   // 「（未提供）」「（內部職員）」與整句問題不算（批次 105）。舊版後端沒有這個欄位時，才退回用各場名單去重。
@@ -237,6 +238,7 @@ function render(){
     <div class="foot-note">
       · 本報告數據來自 AI 新聞助理實際問答紀錄，已排除測試資料。<br>
       · 「服務媒體家數」以記者填寫之媒體名稱計算，同一家媒體的不同記者只算一家，實際觸及媒體數可能更高（部分記者未填寫）。<br>
+      ${ANALYTICS.business_qa ? `· 企業場（企業說明會、技術媒合會、客戶參訪、技術交流會）的 ${ANALYTICS.business_qa} 則問答不列入本報告。<br>` : ''}
       · 「估算節省人力工時」為 AI 代答題數 × 每題估算人工回覆時間，供效益評估參考。<br>
       · 除記者即時問答外，本平台亦提供「媒體訓練模式」供發言人於會前進行 AI 記者實戰演練。
     </div>`;

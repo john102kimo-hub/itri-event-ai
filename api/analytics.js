@@ -22,6 +22,9 @@
 import { readRange, updateRange } from '../lib/sheets.js';
 import { groupOutlets, isTestMedia, isNotMedia, splitMedia } from '../lib/media-name.js';
 import { requireAdmin } from '../lib/auth.js';
+import { readQaRowsWithoutAnswers } from '../lib/qa-log.js';
+import { readEventRows } from '../lib/events-table.js';
+import { isBusinessEvent } from '../lib/audience.js';
 
 // 「AI 這題疑似沒答到」：提示詞規定答不出來時要說「這部分我沒有資料，建議洽現場新聞聯絡人」
 // （lib/prompt.js），所以這句話的出現是個可靠的線索。只是**線索**——模型偶爾會換個說法，
@@ -158,7 +161,9 @@ export default async function handler(req, res) {
   const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 500);
 
   try {
-    const rawRows = await readRange('qa_log!A2:I');   // I 欄＝記者姓名（批次 105），舊資料是空的
+    // I 欄＝記者姓名（批次 105），舊資料是空的。儀表板的摘要版用不到 AI 回答全文（F 欄），
+    // 跳過那一欄（批次 117，見 lib/qa-log.js）；完整版要算「疑似沒答到」與預覽，照舊整張讀。
+    const rawRows = summaryOnly ? await readQaRowsWithoutAnswers() : await readRange('qa_log!A2:I');
     // 保留原始 row_num（sheet 第幾列，row 2 = index 0）
     const rowsWithNum = rawRows.map((r, i) => ({ r, rowNum: i + 2 }));
 
@@ -168,6 +173,15 @@ export default async function handler(req, res) {
     const filtered = event_id
       ? valid.filter(({ r }) => r[1] === event_id)
       : valid;
+
+    // 企業場（批次 118，見 lib/audience.js）：與會者填的是公司，不是媒體——不算進「服務媒體家數」、
+    // 媒體排行與填寫率（那幾個數字是要報給長官的公關成效）。問答則數照算。
+    // 只看單一場企業場時，同一組數字照算，畫面上改叫「單位」（audience）。活動表走共用快取，讀不到就當沒有企業場。
+    const businessIds = new Set(await readEventRows()
+      .then((rows) => rows.filter((r) => isBusinessEvent(r[13])).map((r) => r[0]))
+      .catch(() => []));
+    const audience = event_id && businessIds.has(event_id) ? 'business' : 'media';
+    const outletRows = audience === 'business' ? filtered : filtered.filter(({ r }) => !businessIds.has(r[1]));
 
     // 按活動分組（H 欄 source 是批次 2 才有的欄位，舊資料一律當 web）
     //
@@ -191,7 +205,8 @@ export default async function handler(req, res) {
 
     const byEventArr = Object.values(byEvent).map(({ medias, questions, ...e }) => {
       const outlets = groupOutlets(medias);
-      return { ...e, ...(summaryOnly ? {} : { questions }), media_list: outlets.map(o => o.name), media_count: outlets.length };
+      return { ...e, ...(summaryOnly ? {} : { questions }), media_list: outlets.map(o => o.name), media_count: outlets.length,
+        audience: businessIds.has(e.event_id) ? 'business' : 'media' };
     });
 
     // 關鍵字統計：改用字典比對（活動的 chips／知識庫小標題 + 通用產業詞表），
@@ -232,7 +247,7 @@ export default async function handler(req, res) {
     });
 
     // 媒體排行（同一家併在一起；不算「沒填／略過／員工自己問」）
-    const allOutlets = groupOutlets(filtered.map(({ r }) => r[3]));
+    const allOutlets = groupOutlets(outletRows.map(({ r }) => r[3]));
     const topMedia = allOutlets.slice(0, 10).map(({ name, count }) => ({ name, count }));
 
     // 今日筆數：對「全部」filtered 資料算，不是只看 recent 那截斷後的 50 筆
@@ -250,13 +265,15 @@ export default async function handler(req, res) {
     const todayCount = filtered.filter(({ r }) => dayOf(r[0]) === todayStr).length;
 
     // 有媒體名稱的筆數／全部筆數：成效報告的「媒體填寫率」
-    const filledRows = filtered.filter(({ r }) => !isNotMedia(r[3]) && splitMedia(r[3]).outlet).length;
+    const filledRows = outletRows.filter(({ r }) => !isNotMedia(r[3]) && splitMedia(r[3]).outlet).length;
 
     const base = {
       total: filtered.length,
       today_count: todayCount,
-      media_total: allOutlets.length,                       // 全部（或所選活動）服務了幾家媒體
+      media_total: allOutlets.length,                       // 全部（或所選活動）服務了幾家媒體；企業場不算（見上面）
       media_filled_count: filledRows,
+      audience,                                             // 所選的是企業場時，前台把「媒體」改叫「單位」
+      business_qa: audience === 'media' ? filtered.length - outletRows.length : 0, // 企業場的問答則數（沒算進媒體數字的那些）
       by_event: byEventArr,
       top_keywords: topKeywords,
       top_media: topMedia,

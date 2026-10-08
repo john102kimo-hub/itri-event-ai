@@ -82,7 +82,9 @@ console.log('\n── 四、依賴、字型與文件的接線 ──');
   const src = read('lib/richmenu-render.js').split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
   check('★ 這兩個套件只在畫圖時動態載入、不在檔案最上面 import（CI 不做 npm install，載入失敗只會讓畫圖失敗、不會讓整支 Function 起不來）', !/^import .*['"](opentype\.js|pngjs)['"]/m.test(src) && /await import\('opentype\.js'\)/.test(src) && /await import\('pngjs'\)/.test(src));
   const syncSrc = read('lib/richmenu-sync.js');
-  check('同步邏輯只有一份（lib/richmenu-sync.js），api/line.js 不再自己建選單', /export async function applyRichMenus/.test(syncSrc) && !/async function applyRichMenus|createRichMenu\(/.test(read('api/line.js')));
+  // 批次 117：api/line.js 拆成 lib/line-*.js，選單相關的程式搬到 lib/line-staff-mode.js——一起看
+const lineSrc = ['api/line.js', ...fs.readdirSync(path.join(ROOT, 'lib')).filter((f) => /^line-.+\.js$/.test(f)).map((f) => `lib/${f}`)].map(read).join('\n');
+check('同步邏輯只有一份（lib/richmenu-sync.js），api/line.js 與 lib/line-*.js 不再自己建選單', /export async function applyRichMenus/.test(syncSrc) && !/async function applyRichMenus|createRichMenu\(/.test(lineSrc) && /applyRichMenus\(/.test(lineSrc));
   check('字型檔放在 public/fonts/（Function 去網站抓），旁邊附授權（SIL OFL）', fs.existsSync(path.join(ROOT, 'public/fonts/NotoSansTC-Bold.ttf')) && /SIL Open Font License/.test(read('public/fonts/OFL.txt')) && /fonts\/NotoSansTC-Bold\.ttf/.test(syncSrc));
   check('字型檔是原封不動的 Noto Sans TC Bold（OFL 的保留字型名稱規則：不修改、不改名）', fs.statSync(path.join(ROOT, 'public/fonts/NotoSansTC-Bold.ttf')).size === 7104212);
   const v = JSON.parse(read('vercel.json'));

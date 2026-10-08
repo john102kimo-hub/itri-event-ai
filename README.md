@@ -1,20 +1,22 @@
 # 工研院活動溝通 AI 平台（itri-event-ai）
 
 多活動共用的記者會 AI 問答平台。記者在**網頁**或 **LINE（米亞）** 問活動的新聞稿內容，承辦人在**後台**管活動與看數據；
-另外還有 **AI 能見度追蹤（GEO）**、**媒體訓練**、**活動報名**（原名「媒體報名」，批次 112 改名）。純 Node serverless（Vercel）＋靜態 HTML＋Google Sheets 當資料庫，沒有前端框架。
+另外還有 **AI 能見度追蹤（GEO）**、**媒體訓練**、**活動報名**（原名「媒體報名」，批次 112 改名），以及給業發處的**企業場**與**合作洽詢**（批次 118、119）。純 Node serverless（Vercel）＋靜態 HTML＋Google Sheets 當資料庫，沒有前端框架。
 
 ## 有哪些入口
 
 | 誰用 | 網址 | 主要檔案 |
 |---|---|---|
 | 記者（網頁問答） | `/event?id=…` | `public/event.html`、`api/chat.js`、`api/event-page.js`（SSR，給搜尋引擎與 AI 爬蟲讀） |
-| 記者（LINE 米亞） | LINE 官方帳號 | `api/line.js`（webhook）、`lib/router.js`、`lib/menu.js`、`lib/staff.js`（職員模式） |
+| 記者（LINE 米亞） | LINE 官方帳號 | `api/line.js`（webhook 入口）、`lib/line-*.js`（記者、群組、職員、報名各一支，對照表在 `api/line.js` 開頭）、`lib/router.js`、`lib/menu.js`、`lib/staff.js` |
 | 承辦人（後台） | `/admin` | `public/index.html`、`api/events.js`、`api/analytics.js`、`api/export.js` |
 | 同仁（改自己那一場） | `/edit?id=…&code=…` | `public/edit.html`、`api/events.js`（`get_edit`／`update_edit`） |
 | 主管（成效報告） | `/report` | `public/report.html`、`api/exposure.js` |
 | AI 能見度追蹤 | `/geo` | `public/geo.html`、`api/geo.js`、`lib/geo-*.js` |
 | 主管（媒體訓練） | `/training` | `public/training.html`、`api/training.js` |
 | 記者（活動報名）／後台：所有活動與名單 | `/register`／`/registrations` | `public/register.html`、`public/registrations.html`、`lib/registration*.js` |
+| 企業（合作洽詢單） | `/inquiry` | `public/inquiry.html`、`lib/b2b-api.js`（搭在 `api/events.js` 的 `b2b_` 系列） |
+| 業發處（收件匣、成員、設定、稽核） | `/b2b`（每個人自己的連結 `/b2b#k=…`） | `public/b2b.html`、`lib/b2b.js`（資料在**另一本試算表**）、`lib/b2b-api.js`、`lib/b2b-line.js`（米亞那一端） |
 
 ## 先讀這幾份
 
@@ -32,7 +34,7 @@ npm test -- flow batch110   # 只跑檔名含這些字的測試
 SHIFT_DAYS=90 npm test      # 把「現在」往後撥 90 天再跑，專門抓寫死日期的測試
 ```
 
-GitHub Actions（`.github/workflows/test.yml`）每個 PR 與 main 推送都會跑上面第一種與第三種。
+GitHub Actions（`.github/workflows/test.yml`）每個 PR 與 main 推送都會跑上面第一種與第三種（`SHIFT_DAYS=90`），最後再把業發處的設定打開（`B2B_SPREADSHEET_ID`）把全部測試多跑一輪——業發處開著，既有功能照樣要全過（批次 119）。
 新增測試只要把 `test-*.mjs`／`*.test.mjs` 放進 `test/`，不用改清單。
 
 不進 `npm test` 的檢查（需要 playwright 與 Chromium，前置 `npm i playwright --no-save`；或要花錢、要網路）：
@@ -52,4 +54,7 @@ GitHub Actions（`.github/workflows/test.yml`）每個 PR 與 main 推送都會�
 - **管理員與編輯碼的比對一律走 `lib/auth.js`**（`requireAdmin()`、`codeMatches()`），不要自己寫 `password !== …`——那樣在密碼沒設定時會放行。
 - **「絕對不能發生」的事擋在程式出口**，不是寫在 prompt：繁體字（`lib/zh-tw.js` 的 `toTraditionalTW()`）、發布閘門（`lib/event-status.js`）、網頁問答一定要有媒體名稱（`api/chat.js`）、管理員驗證（`lib/auth.js`）。
 - 新增後台頁面時，要把它加進 `vercel.json` 的安全標頭規則（`test/test-batch110.mjs` 會逐頁檢查）。
+- **企業場不出現在記者看得到的地方**：活動類型是企業說明會／技術媒合會／客戶參訪／技術交流會的場次，以及報名對象選「企業」的報名，米亞的清單、公開列表、搜尋引擎都看不到（LINE-PLAN.md 第 8 節，`lib/audience.js`）。新增任何「列出活動」的入口，要先想清楚企業場該不該在裡面。
+- **寫入 Sheets 不是每一種都能重送**：`appendRows()`（加一列）與 `batchUpdate()`（刪列、加分頁）逾時或 500 時不重試，免得多一列或刪錯列（批次 117，見 `lib/sheets.js`）。新增會呼叫模型的地方，記得接 `logAiUsage()`（`test-batch117` 會檢查）。
+- **業發處的東西不能影響記者與既有功能**（朱朱 10/8：「務必確保不要影響既有的功能與媒體之使用」）：客戶資料只放 `B2B_SPREADSHEET_ID` 那本，沒設定就整套停用、絕不退回記者會那本（`lib/b2b.js` 的 `db()`）；業發處的 LINE 通知有每月上限（跟米亞共用推播額度）；企業場的 AI 可以用另一把金鑰（`ANTHROPIC_API_KEY_BUSINESS`）。測試的 `test/loader.mjs` 沒有接業發處那本，記者那邊的任何一條路碰到業發處的資料就會報錯，CI 的第三輪就是靠這個抓。兩邊共用的每一樣東西（推播額度、Sheets 額度、AI 警報、登入失敗的計數…）都要有一道擋，盤點表在 [批次 119 的紀錄](docs/batches/10-batch-117.md) 第三節；新增共用的東西時照著補一列。
 - 紀錄要寫：改了什麼、為什麼、踩到什麼坑——寫在 `docs/batches/`，不是 commit message（見 CLAUDE.md 第 5 條）。

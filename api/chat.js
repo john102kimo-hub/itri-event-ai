@@ -5,10 +5,14 @@
 //   2. 沒帶 → 維持原本一次回傳 { reply } 的 JSON（舊前端／外部呼叫者不會被打斷）
 
 import { appendRows, warmAuth } from '../lib/sheets.js';
-import { buildSystemPrompt, resolveEventContent, formatEventBasics } from '../lib/prompt.js';
+import { systemPromptFor, resolveEventContent, formatEventBasics } from '../lib/prompt.js';
+import { isBusinessEvent, guardBusinessAnswer } from '../lib/audience.js';
 import { toTraditionalTW, createTraditionalStream, ZH_TW_RULE } from '../lib/zh-tw.js';
-import { reportAiFailure } from '../lib/ai-alert.js';
+import { reportAiFailure, BUSINESS_KEY_NAME } from '../lib/ai-alert.js';
 import { readEventRows } from '../lib/events-table.js';
+import { logAiUsage } from '../lib/ai-usage.js';
+
+const CHAT_MODEL = 'claude-haiku-4-5-20251001';
 
 // 這支是記者看得到的出口，跟 api/line.js 一樣要過繁體轉換（CLAUDE.md 第 1、2 條）。
 // 批次 82 之前這裡完全沒有接：LINE 在批次 45 補了兩層防線，網頁版一層都沒有——
@@ -48,7 +52,9 @@ async function fetchEventConfig(eventId) {
     knowledge_base: row[3] || '', status: row[4] || 'active', event_date: row[5] || '',
     organizer: row[9] || '工研院', images: row[7] || '', invite_letter: row[16] || '',
     // 時間、地點、新聞聯絡人（批次 72）：記者問「幾點開始／在哪裡」時答得出來，見 formatEventBasics()
-    event_time: row[11] || '', venue: row[12] || '', press_contact: row[14] || ''
+    event_time: row[11] || '', venue: row[12] || '', press_contact: row[14] || '',
+    // 活動類型（批次 118）：企業場換一份 prompt、出口擋報價，見 lib/audience.js
+    event_type: row[13] || ''
   };
 }
 
@@ -201,7 +207,12 @@ export default async function handler(req, res) {
     const event = resolveEventContent(rawEvent);
 
     const eventName = event.name;
-    const systemPrompt = buildSystemPrompt(event);
+    // 企業場（批次 118）：企業版的規則；答案要先整則過出口檢查（背景資料沒有的金額＝報價，整則換掉），
+    // 所以不串流——串流的字一送出去就收不回來。企業場的流量小，慢幾秒換一個不會說錯價的保證。
+    const business = isBusinessEvent(event);
+    // 企業場（批次 119）：有設 ANTHROPIC_API_KEY_BUSINESS 就用那一把，費用與每月上限跟記者那邊分開（見 lib/line-runtime.js askAnthropic()）
+    const businessKey = business && !!process.env.ANTHROPIC_API_KEY_BUSINESS;
+    const systemPrompt = systemPromptFor(event);
     const basicsBlock = formatEventBasics(event);
     const question = [...trimmed].reverse().find(m => m.role === 'user')?.content || '';
 
@@ -211,7 +222,7 @@ export default async function handler(req, res) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-api-key': apiKey,
+        'x-api-key': businessKey ? process.env.ANTHROPIC_API_KEY_BUSINESS : apiKey,
         'anthropic-version': '2023-06-01'
       },
       // 涵蓋「等回應」與「讀串流」兩段：時間到，下面的 reader.read() 一樣會丟例外，
@@ -219,9 +230,9 @@ export default async function handler(req, res) {
       // Sheets 若卡在配額重試，花掉的時間也要扣掉（最少留 5 秒給模型）。
       signal: AbortSignal.timeout(Math.max(5_000, REQUEST_BUDGET_MS - (Date.now() - startedAt))),
       body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
+        model: CHAT_MODEL,
         max_tokens: 4096,
-        stream: !!stream,
+        stream: !!stream && !business,
         // 知識庫在 60 秒快取視窗內逐 byte 穩定，加 ephemeral cache 讓同場記者連續發問時
         // 讀取只收 0.1 倍價（記者會現場正是這種「同一份知識庫、多人連續提問」的場景）。
         // ZH_TW_RULE 是固定字串，放進這塊不影響快取。
@@ -242,15 +253,18 @@ export default async function handler(req, res) {
         detail = j.error?.message || '';
       } catch (e) { /* 回應不是 JSON 就沒有細節可記 */ }
       console.error('Anthropic API 錯誤:', response.status, detail);
-      await reportAiFailure({ status: response.status, message: detail, where: '網頁版記者問答' }); // 批次 85
+      // 批次 85；企業場那一把出事，通知寫明只影響企業場、節流也分開算（批次 119，見 lib/ai-alert.js）
+      await reportAiFailure({ status: response.status, message: detail, where: business ? '網頁版企業場問答' : '網頁版記者問答', keyName: businessKey ? BUSINESS_KEY_NAME : undefined });
       return res.status(response.status).json({ error: friendlyApiError(response.status) });
     }
 
-    if (!stream) {
+    if (!stream || business) {
       const data = await response.json();
+      logAiUsage(business ? '網頁問答（企業場）' : '網頁問答', CHAT_MODEL, data.usage); // 批次 117
       // 不能寫死 content[0]：第一塊不保證是文字（見 api/line.js askAnthropic() 的說明）
       const text = (data.content || []).filter(b => b?.type === 'text').map(b => b.text).join('\n').trim();
       reply = toTraditionalTW(text) || '抱歉，無法取得回應。';
+      if (business && text) reply = guardBusinessAnswer(reply, event).text;
       await logQA({ ...logCtx, reply });
       return res.status(200).json({ reply });
     }
@@ -277,6 +291,8 @@ export default async function handler(req, res) {
     };
     let buf = '';
     let brokenMidway = false;
+    // 用量（批次 117）：串流的 token 數分兩次來——message_start 帶輸入與快取，message_delta 帶輸出
+    const usage = {};
 
     for (;;) {
       const { done, value } = await reader.read();
@@ -292,6 +308,10 @@ export default async function handler(req, res) {
         try { evt = JSON.parse(payload); } catch (e) { continue; }
         if (evt.type === 'content_block_delta' && evt.delta?.type === 'text_delta') {
           send(zh.push(evt.delta.text));
+        } else if (evt.type === 'message_start') {
+          Object.assign(usage, evt.message?.usage || {});
+        } else if (evt.type === 'message_delta') {
+          Object.assign(usage, evt.usage || {});
         } else if (evt.type === 'error') {
           // 串流途中模型那端出錯（例如 overloaded）：原文記 log，記者看中文
           console.error('Anthropic 串流錯誤:', evt.error?.type, evt.error?.message);
@@ -300,6 +320,7 @@ export default async function handler(req, res) {
       }
     }
     send(zh.flush());
+    if (Object.keys(usage).length) logAiUsage('網頁問答', CHAT_MODEL, usage);
 
     if (brokenMidway) {
       res.write(`data: ${JSON.stringify({ error: reply ? STREAM_BROKEN_MSG : friendlyApiError(529) })}\n\n`);

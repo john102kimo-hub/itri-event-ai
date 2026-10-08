@@ -27,6 +27,7 @@ import path from 'path';
 import { readEventRows } from '../lib/events-table.js';
 import { resolveOrg, BRAND_KEY } from '../lib/geo-orgs.js';
 import { resolveEventContent } from '../lib/prompt.js';
+import { isBusinessEvent } from '../lib/audience.js';
 
 // 用到 L 欄時間、M 欄地點：結構化資料的 Event 要有 location 才完整（批次 82）。讀取走 lib/events-table.js 的共用快取（批次 109）。
 
@@ -210,8 +211,9 @@ async function serveSitemap(res) {
     console.error('sitemap 讀取活動失敗:', err.message);
   }
 
+  // 企業場（批次 118）不列：那不是新聞稿，客戶參訪的活動名稱也不該被搜尋引擎收錄（見 lib/audience.js）
   const items = rows
-    .filter(r => r[0] && r[4] !== 'archived' && isConcluded(r[4]))
+    .filter(r => r[0] && r[4] !== 'archived' && isConcluded(r[4]) && !isBusinessEvent(r[13]))
     .map(r => ({
       loc: `${SITE}/event?id=${encodeURIComponent(r[0])}`,
       lastmod: toISODate(parseEventDate(r[5]))
@@ -281,7 +283,9 @@ async function serveEventPage(req, res) {
     venue: row[12] || ''
   };
 
-  const concluded = isConcluded(ev.status);
+  // 企業場（批次 118）一律當「還沒結束」處理：掛 noindex、不出新聞稿全文與 NewsArticle——它的知識庫
+  // 是給與會企業看的技術資料，不是要讓搜尋引擎與 AI 爬蟲收錄的新聞稿（見 lib/audience.js）。
+  const concluded = isConcluded(ev.status) && !isBusinessEvent(row[13]);
   const isoDate = toISODate(parseEventDate(ev.date));
   const pageUrl = `${SITE}/event?id=${encodeURIComponent(ev.id)}`;
   const pressBody = concluded ? extractPressBody(ev.knowledge_base) : '';

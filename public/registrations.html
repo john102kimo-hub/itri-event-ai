@@ -282,6 +282,12 @@
       <div class="fld"><label for="e-closes">報名截止時間（選填）</label><input type="text" id="e-closes" placeholder="2026-10-27 12:00"><div class="help">到了就自動關閉，不用記得改狀態。只寫日期＝當天 23:59。台灣時間。</div></div>
     </div>
     <div class="row2">
+      <div class="fld"><label for="e-audience">報名對象</label><select id="e-audience" onchange="audienceHint()">
+        <option value="media">記者與一般貴賓</option><option value="business">企業（業發處：說明會、技術媒合、客戶參訪）</option></select>
+        <div class="help" id="e-audience-help">報名頁寫「服務單位／媒體」，個資告知選填。</div></div>
+      <div class="fld"></div>
+    </div>
+    <div class="row2">
       <div class="fld"><label for="e-venue">活動地點（選填）</label><input type="text" id="e-venue" maxlength="60" placeholder="場館名稱"><div class="help">出現在報名頁與米亞卡片。各場次的廳別填在下面的場次。</div></div>
       <div class="fld"><label for="e-short">LINE 簡稱（選填）</label><input type="text" id="e-short" maxlength="16" placeholder="例：春季說明會"><div class="help">米亞按鈕寫成「📝 簡稱＋報名」。留空只寫「活動報名」，同時有多場時記者分不出來，建議填。</div></div>
     </div>
@@ -311,11 +317,15 @@
     <h2>進階設定 <small>多半用不到</small></h2>
     <details class="more" style="margin-top:0"><summary>選填項目（餐盒、同行人數、聯訪意願⋯）</summary>
       <div class="rows" id="e-opt-rows"></div>
-      <div style="margin-top:10px"><button type="button" class="btn outline small" onclick="addOptRow()">＋ 加一項</button></div>
-      <div class="help muted small" style="margin-top:6px">「限定場次」可空（＝任何場次都顯示），要限定就寫場次代碼，例如 A1,A2。「人數」是 0–9 的選單，「勾選」是打勾。</div>
+      <div style="margin-top:10px"><button type="button" class="btn outline small" onclick="addOptRow()">＋ 加一項</button>
+        <button type="button" class="btn outline small" onclick="addBizOpts()">＋ 企業場常用項目</button></div>
+      <div class="help muted small" style="margin-top:6px">「限定場次」可空（＝任何場次都顯示），要限定就寫場次代碼，例如 A1,A2。「人數」是 0–9 的選單，「勾選」是打勾，「文字」是一行自由填寫（最多 200 字，例如「想了解的技術或合作主題」）。
+        「企業場常用項目」會加上「想了解的技術或合作主題」與「希望業務窗口與我聯繫」（代碼 <code>contact_me</code>）：業發處的合作洽詢有啟用時，勾了的人會自動轉成一筆洽詢、分給業務窗口。</div>
     </details>
-    <details class="more"><summary>個資告知</summary>
-      <div class="fld"><textarea id="e-privacy" style="min-height:90px"></textarea><div class="help">出現在送出鈕上方。留空＝不顯示（預設不放）。</div></div></details>
+    <details class="more" id="privacy-box"><summary>個資告知</summary>
+      <div class="fld"><textarea id="e-privacy" style="min-height:90px"></textarea><div class="help" id="e-privacy-help">出現在送出鈕上方。留空＝不顯示（預設不放）。</div>
+        <div style="margin-top:6px"><button type="button" class="btn outline small" onclick="fillPrivacyTemplate()">套用企業場範本</button>
+          <span class="muted small">範本只是起點，正式對外前請院內法務確認文字。</span></div></div></details>
     <details class="more"><summary>報名完成頁的「加米亞 LINE」說明</summary>
       <div class="fld"><textarea id="e-pitch" style="min-height:70px"></textarea><div class="help">只用第一行。留空＝使用預設；只寫米亞現在真的做得到的事。</div></div></details>
   </div>
@@ -430,7 +440,7 @@ function campCard(c) {
   const meta = [c.date_range, c.session_count ? `${c.session_count} 場` : '', c.venue ? `📍 ${c.venue}` : ''].filter(Boolean).map(esc).join('・');
   const live = c.status === 'draft' || (c.status === 'open' && c.accepting);
   return `<div class="ccard${live ? '' : ' done'}">
-    <div>${statusPill(c.status, c.accepting)}</div>
+    <div>${statusPill(c.status, c.accepting)}${c.audience === 'business' ? ' <span class="pill" style="background:#eef2ff;color:#3730a3" title="報名頁寫公司／單位、要勾同意個資告知">企業</span>' : ''}</div>
     <h3><a href="#/c/${esc(c.id)}">${esc(c.title)}</a></h3>
     <div class="muted small">${meta || '尚未設定場次'}${c.closes_at ? `<br>報名截止：${esc(c.closes_at)}` : ''}</div>
     <div class="nums"><div><b>${c.people}</b><span>報名人數</span></div><div><b>${c.outlets}</b><span>單位家數</span></div>${c.test ? `<div><b style="color:var(--warn)">${c.test}</b><span>測試報名</span></div>` : ''}</div>
@@ -566,6 +576,7 @@ function optText(g) {
   return DATA.options.map((o) => {
     const v = g.options[o.key];
     if (!v) return '';
+    if (o.type === 'text') return `${esc(o.label.replace(/（.*$/, ''))}：${esc(v)}`;
     return o.type === 'number' ? `${esc(o.label.replace(/（.*$/, ''))} ${esc(v)}` : esc(o.label.replace(/（.*$/, ''));
   }).filter(Boolean).join('<br>');
 }
@@ -709,7 +720,7 @@ function optRowEl(v = {}) {
     <input type="text" data-k="key" placeholder="meal" maxlength="16" value="${esc(v.key)}" aria-label="代碼（英文小寫）">
     <input type="text" data-k="label" placeholder="顯示文字，例：需要餐盒" value="${esc(v.label)}" aria-label="顯示文字">
     <input type="text" data-k="only" placeholder="限定場次（可空）" value="${esc(v.only)}" aria-label="限定場次">
-    <select data-k="type" aria-label="類型"><option value="">勾選</option><option value="number"${v.type === 'number' ? ' selected' : ''}>人數</option></select>
+    <select data-k="type" aria-label="類型"><option value="">勾選</option><option value="number"${v.type === 'number' ? ' selected' : ''}>人數</option><option value="text"${v.type === 'text' ? ' selected' : ''}>文字</option></select>
     <button type="button" class="x" title="刪除這一項" onclick="this.closest('.orow').remove()">✕</button>`;
   return d;
 }
@@ -737,6 +748,17 @@ function addSessRow() {
   $('e-sess-rows').append(row); row.querySelector('[data-k=time]').focus();
 }
 function addOptRow() { const r = optRowEl(); $('e-opt-rows').append(r); r.querySelector('input').focus(); }
+// 企業場常用的兩項（批次 119）。代碼是約定：topic 帶進洽詢的技術領域，contact_me 勾了的人轉成業發處的合作洽詢
+// （lib/registration-api.js 的 reg_submit、lib/b2b.js 的 inquiryFromRegistration()）。已經有同代碼的不重複加。
+const BIZ_OPTS = [
+  { key: 'topic', label: '想了解的技術或合作主題', only: '', type: 'text' },
+  { key: 'contact_me', label: '希望業務窗口與我聯繫', only: '', type: '' }
+];
+function addBizOpts() {
+  const have = new Set([...$('e-opt-rows').children].map((r) => String(rowVals(r).key || '').trim().toLowerCase()));
+  BIZ_OPTS.filter((o) => !have.has(o.key)).forEach((o) => $('e-opt-rows').append(optRowEl(o)));
+  $('e-opt-rows').closest('details').open = true;
+}
 
 function rowsToText(hostId, cols, map) {
   const lines = []; map.length = 0;
@@ -757,7 +779,7 @@ function optionsText() {
   [...$('e-opt-rows').children].forEach((row, i) => {
     const v = rowVals(row);
     if (!['key', 'label', 'only'].some((k) => String(v[k] || '').trim())) return;
-    lines.push([cell(v.key), cell(v.label), cell(v.only), v.type === 'number' ? 'number' : ''].join('｜').replace(/｜+$/, ''));
+    lines.push([cell(v.key), cell(v.label), cell(v.only), v.type === 'number' || v.type === 'text' ? v.type : ''].join('｜').replace(/｜+$/, ''));
     optLineMap.push(i);
   });
   return lines.join('\n');
@@ -773,7 +795,7 @@ function toggleSessMode() {
 }
 
 function blankCampaign() {
-  return { id: '', title: '', status: 'draft', short_name: '', venue: '', closes_at: '', contact: '', privacy: '', line_pitch: '',
+  return { id: '', title: '', status: 'draft', short_name: '', venue: '', closes_at: '', contact: '', privacy: '', line_pitch: '', audience: 'media',
     intro: '誠摯邀請您參加，勾選要參加的場次，約 1 分鐘完成；報名後仍可回來修改。',
     sessions_text: '', options_text: '' };
 }
@@ -796,6 +818,7 @@ function openForm(camp, copyId) {
   $('e-short').value = c.short_name || ''; $('e-venue').value = c.venue || ''; $('e-closes').value = c.closes_at || '';
   $('e-intro').value = c.intro || ''; $('e-contact').value = c.contact || '';
   $('e-privacy').value = c.privacy || ''; $('e-pitch').value = c.line_pitch || '';
+  $('e-audience').value = c.audience === 'business' ? 'business' : 'media'; audienceHint();
   setSessRows(c.sessions_text);
   if (!$('e-sess-rows').children.length) $('e-sess-rows').append(sessRowEl({ code: 'A1' }));
   setOptRows(c.options_text);
@@ -804,6 +827,32 @@ function openForm(camp, copyId) {
   $('f-cancel').href = isNew ? '#/' : `#/c/${CUR}`;
   $('f-note').textContent = isNew ? '' : `上次更新：${(c.updated_at || '').replace('T', ' ').replace('+08:00', '').slice(0, 16)}`;
   if (isNew) $('e-title').focus();
+}
+
+// 報名對象（批次 118）：企業場一定要有個資告知才能開放，報名頁會多一個「我已閱讀並同意」的勾選。
+// 伺服器端也擋（lib/registration.js adminSaveCampaign()），這裡只是讓承辦人一看就知道。
+function audienceHint() {
+  const biz = $('e-audience').value === 'business';
+  $('e-audience-help').textContent = biz
+    ? '報名頁寫「公司／單位」、要勾同意個資告知才能送出；不比對記者名單。開放報名前一定要填下面的「個資告知」；「進階設定 → 選填項目」可以一鍵加上企業場常用項目。'
+    : '報名頁寫「服務單位／媒體」，個資告知選填。';
+  $('e-privacy-help').textContent = biz
+    ? '企業場必填：出現在送出鈕上方，報名者要勾「我已閱讀並同意」才能送出。'
+    : '出現在送出鈕上方。留空＝不顯示（預設不放）。';
+  if (biz) $('privacy-box').open = true;
+}
+// 企業場的個資告知範本（跟 lib/registration.js 的 BUSINESS_PRIVACY_TEMPLATE 同一份，test-batch118 比對兩邊）
+const PRIVACY_TEMPLATE = [
+  '【個人資料蒐集告知】',
+  '工業技術研究院（以下簡稱本院）為辦理本活動之報名、聯繫與後續技術合作洽談，蒐集您的姓名、服務單位、Email、手機及報名內容。',
+  '上述資料僅於本院業務推廣與客戶服務之目的範圍內，以電子郵件、電話及書面方式於中華民國境內利用，利用期間至活動結束後一年。',
+  '您可依個人資料保護法第 3 條，向本院請求查詢、閱覽、製給複製本、補充、更正、停止蒐集處理利用或刪除，請洽本頁下方的活動聯絡人。',
+  '您可自由選擇是否提供；未提供將無法完成報名。'
+].join('\n');
+function fillPrivacyTemplate() {
+  const box = $('e-privacy');
+  if (box.value.trim() && !confirm('要用範本取代目前的個資告知嗎？')) return;
+  box.value = PRIVACY_TEMPLATE;
 }
 
 function markRows(details) {
@@ -828,7 +877,8 @@ async function saveForm() {
     const body = {
       id: $('e-id').value, title: $('e-title').value, status: $('e-status').value, closes_at: $('e-closes').value,
       intro: $('e-intro').value, sessions_text: sessionsText(), options_text: optionsText(),
-      contact: $('e-contact').value, privacy: $('e-privacy').value, line_pitch: $('e-pitch').value, short_name: $('e-short').value, venue: $('e-venue').value
+      contact: $('e-contact').value, privacy: $('e-privacy').value, line_pitch: $('e-pitch').value, short_name: $('e-short').value, venue: $('e-venue').value,
+      audience: $('e-audience').value
     };
     const r = await callJson('POST', 'reg_admin_save_campaign', body);
     markRows([]);

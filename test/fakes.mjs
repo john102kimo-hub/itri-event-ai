@@ -87,7 +87,7 @@ export const state = {
 };
 export const sent = [];
 
-// 只清假資料。api/line.js 那邊的模組層快取（eventsCache／lineUsersCache）從外面
+// 只清假資料。api/line.js（批次 117 起在 lib/line-store.js）的模組層快取（eventsCache／lineUsersCache）從外面
 // 碰不到，由 test-flow.mjs 的 freshModule() 重新 import 整支模組來清。
 //
 // ⚠️ contactsDirectory／iekHtml／itriHtml 這三個自由格式的假資料也要還原：批次 20
