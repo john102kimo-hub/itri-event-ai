@@ -15,7 +15,7 @@ import { readRange, appendRows, ensureSheets, listSheets, batchUpdate } from '..
 import { parseExposureFile, normalizeOutlet } from '../lib/exposure-parse.js';
 import { groupOutlets } from '../lib/media-name.js';
 import { readEventRows } from '../lib/events-table.js';
-import { isAdminPassword, requireAdmin, passwordFrom, codeMatches, authBlocked, authFailed } from '../lib/auth.js';
+import { adminAttempt, requireAdmin, passwordFrom, codeMatches, authFailed } from '../lib/auth.js';
 
 const SHEETS = {
   exposure: ['event_id', '則數', '日期', '類型', '媒體名稱', '版位', '標題', '上傳時間', '來源檔'],
@@ -29,10 +29,12 @@ async function safeRead(range) {
 
 /** edit_code 或管理員密碼皆可通過 */
 async function authorize({ id, code, password }, req) {
-  if (isAdminPassword(password)) return { ok: true, who: 'admin' };
+  // 批次 116：先看限流、密碼帶錯也記失敗（見 lib/auth.js adminAttempt()）。以前不帶 id 就能無限次猜密碼。
+  const who = adminAttempt(req, password);
+  if (who === 'blocked') return { ok: false, status: 429, msg: '嘗試的次數太多了，請 10 分鐘後再試。' };
+  if (who === 'admin') return { ok: true, who: 'admin' };
   if (!id) return { ok: false, status: 400, msg: '缺少活動 ID' };
   if (!code) return { ok: false, status: 401, msg: '缺少編輯碼，請使用承辦人給你的專屬編輯連結' };
-  if (authBlocked(req)) return { ok: false, status: 429, msg: '嘗試的次數太多了，請 10 分鐘後再試。' };
 
   const rows = await readEventRows(); // 批次 109：共用快取，亂填 id 不多打 Sheets
   const row = rows.find((r) => r[0] === id);

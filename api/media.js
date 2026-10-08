@@ -17,7 +17,8 @@
 // 排到前面讓人判斷，是否還在職、路線是什麼，一律由人工按一下確認。
 
 import { readRange, appendRows, updateRange, ensureSheets } from '../lib/sheets.js';
-import { isAdminPassword, requireAdmin, passwordFrom, codeMatches, authBlocked, authFailed } from '../lib/auth.js';
+import { adminAttempt, requireAdmin, passwordFrom, codeMatches, authFailed } from '../lib/auth.js';
+import { generateShareCode } from '../lib/ids.js';
 
 const SHEETS = {
   media_roster: [
@@ -39,12 +40,19 @@ async function safeRead(range) {
   try { return await readRange(range); } catch { return []; }
 }
 
-const CFG = { staffCode: null, loaded: false };
+// 設定快取 60 秒（批次 116）。以前是「這台機器讀過一次就永遠不再讀」：後台按「收回共用連結」
+// 只改得到按的那一台，其他還熱著的機器照樣放行舊連結，直到它們自己冷啟動——收回等於沒收回。
+// 跟活動表快取同一個尺度：別台最多晚一分鐘生效。讀不到時沿用手上的值，不要因為一次 Sheets 逾時把連結全關掉。
+const SETTINGS_TTL_MS = 60_000;
+const CFG = { staffCode: null, loadedAt: 0 };
 async function loadSettings() {
-  if (CFG.loaded) return CFG;
-  const rows = await safeRead('media_settings!A2:B');
-  rows.forEach(([k, v]) => { if (k === 'staff_code') CFG.staffCode = String(v || '').trim() || null; });
-  CFG.loaded = true;
+  if (CFG.loadedAt && Date.now() - CFG.loadedAt < SETTINGS_TTL_MS) return CFG;
+  try {
+    const rows = await readRange('media_settings!A2:B');
+    CFG.staffCode = null;
+    rows.forEach(([k, v]) => { if (k === 'staff_code') CFG.staffCode = String(v || '').trim() || null; });
+  } catch { /* 分頁還沒建、或暫時讀不到：沿用手上的 */ }
+  CFG.loadedAt = Date.now();
   return CFG;
 }
 async function saveSetting(key, value) {
@@ -87,16 +95,29 @@ function priority(rec) {
 }
 
 async function authorize({ code, password }, req) {
-  if (isAdminPassword(password)) return { ok: true, who: 'admin' };
-  if (authBlocked(req)) return { ok: false, status: 429, msg: '嘗試的次數太多了，請 10 分鐘後再試。' };
+  // 批次 116：先看限流、密碼帶錯也記失敗（見 lib/auth.js adminAttempt()）
+  const who = adminAttempt(req, password);
+  if (who === 'blocked') return { ok: false, status: 429, msg: '嘗試的次數太多了，請 10 分鐘後再試。' };
+  if (who === 'admin') return { ok: true, who: 'admin' };
   await loadSettings();
-  if (!CFG.staffCode) return { ok: false, status: 401, msg: '這個功能還沒開放共用連結，請向承辦人索取' };
+  if (!CFG.staffCode) {
+    if (code) authFailed(req);
+    return { ok: false, status: 401, msg: '這個功能還沒開放共用連結，請向承辦人索取' };
+  }
   if (!codeMatches(code, CFG.staffCode)) {
     authFailed(req);
     return { ok: false, status: 401, msg: '這條連結已失效，請向承辦人索取新的' };
   }
   return { ok: true, who: 'staff' };
 }
+
+// CSV 公式注入防護（批次 116，跟 api/export.js 同一套）：路線、更新者是拿共用連結的人寫的，
+// 寫「=HYPERLINK(…)」進去，管理員匯出用 Excel 一開就變成公式。開頭是 = + - @ Tab 歸位字元的補一個單引號。
+const csvCell = (v) => {
+  let s = String(v ?? '');
+  if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
+  return `"${s.replace(/"/g, '""')}"`;
+};
 
 /** 極簡 CSV 解析：逗號分隔、雙引號括住可含逗號的欄位。給管理員一次性貼資料用，不追求處理所有 Excel 怪狀況。 */
 function parseCsv(text) {
@@ -176,8 +197,7 @@ export default async function handler(req, res) {
         if (!requireAdmin(req, res, password)) return;
         const rows = await safeRead('media_roster!A2:N');
         const header = SHEETS.media_roster;
-        const csv = [header, ...rows].map((row) =>
-          row.map((cell) => `"${String(cell ?? '').replace(/"/g, '""')}"`).join(',')).join('\r\n');
+        const csv = [header, ...rows].map((row) => row.map(csvCell).join(',')).join('\r\n');
         res.setHeader('Content-Type', 'text/csv; charset=utf-8');
         res.setHeader('Content-Disposition', `attachment; filename="media_roster_${today()}.csv"`);
         return res.status(200).send('﻿' + csv);
@@ -197,13 +217,15 @@ export default async function handler(req, res) {
         if (body.revoke) {
           await saveSetting('staff_code', '');
           CFG.staffCode = null;
+          CFG.loadedAt = Date.now();
           return res.status(200).json({ success: true, code: null });
         }
         let c = CFG.staffCode;
         if (!c || body.regenerate) {
-          c = Math.random().toString(36).slice(2, 8) + Math.random().toString(36).slice(2, 6);
+          c = generateShareCode(); // 批次 116：密碼學亂數，不用 Math.random()
           await saveSetting('staff_code', c);
           CFG.staffCode = c;
+          CFG.loadedAt = Date.now();
         }
         return res.status(200).json({ success: true, code: c });
       }
@@ -283,6 +305,8 @@ export default async function handler(req, res) {
       if (action === 'update') {
         const { id, beat, mark, updated_by } = body;
         if (!id) return res.status(400).json({ error: '缺少記者 ID' });
+        // 路線只收選單上那幾個（批次 116）：頁面只給這幾顆按鈕，其他值只會是有人直接打 API
+        if (beat !== undefined && beat !== '' && !BEATS.includes(beat)) return res.status(400).json({ error: '路線請從選項裡挑' });
         const rows = await safeRead('media_roster!A2:N');
         const i = rows.findIndex((r) => r[0] === id);
         if (i < 0) return res.status(404).json({ error: '找不到這筆記者資料' });
@@ -292,7 +316,7 @@ export default async function handler(req, res) {
         if (mark === 'left') rec.status = 'left';
         else if (mark === 'active') rec.status = 'active';
         rec.updated_at = now();
-        rec.updated_by = (updated_by || '').slice(0, 20);
+        rec.updated_by = String(updated_by || '').slice(0, 20);
 
         await updateRange(`media_roster!A${rec.rowNum}:N${rec.rowNum}`, [[
           rec.id, rec.name, rec.outlet, rec.beat, rec.email, rec.phone,

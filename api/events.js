@@ -25,7 +25,7 @@ import { CONTACTS_DIR_RANGE, ensureContactsDirectorySheet } from '../lib/contact
 import { resolveEventContent } from '../lib/prompt.js';
 import { lineBindUrl, lineAddFriendUrl, lineBasicId } from '../lib/line-link.js';
 import { handleRegistrationRequest } from '../lib/registration-api.js';
-import { publishBlockers, isPublishing, taipeiToday } from '../lib/event-status.js';
+import { publishBlockers, isPublishing, taipeiToday, PUBLIC_STATUSES } from '../lib/event-status.js';
 import { effectiveChips } from '../lib/default-chips.js';
 import { readEventRows, invalidateEventsTable, EVENTS_RANGE } from '../lib/events-table.js';
 import { requireAdmin, passwordFrom, codeMatches, authBlocked, authFailed, tooManyAttempts } from '../lib/auth.js';
@@ -211,15 +211,22 @@ export default async function handler(req, res) {
           event_time: row[11] || '', venue: row[12] || '', event_type: row[13] || '', press_contact: row[14] || '',
           contacts: row[15] || '', invite_letter: row[16] || '', invite_letter_chips: row[17] || ''
         };
-        // 「以既有活動為範本」：同仁已用自己這一場的 edit_code 通過驗證，即視為可信的內部同仁，
-        // 可再指定 copy_from 帶出另一場活動的知識庫供複製參考——跟後台管理員版的複製範本邏輯一致，
-        // 只是驗證身分用的是這一場的 code，而不是管理員密碼。
+        // 「以既有活動為範本」：用自己這一場的 edit_code 換另一場的知識庫當範本。
+        // ⚠️ 批次 116：只給「記者本來就看得到」的版本。以前任何 id 都給原始知識庫——草稿、封存的照給，
+        // 活動前（邀請函模式）還在禁發期的正式新聞稿也照給；編輯頁的下拉選單只列公開活動，是畫面上的
+        // 限制，打 API 帶別的 id 就繞過去了，而且公開活動本身就含「活動前」的場次。編輯連結常常轉給
+        // 合辦單位，不能變成一把看所有場次的鑰匙（SETUP.md：同仁看不到其他活動）。
         if (req.query.copy_from) {
           const srcRow = rows.find(r => r[0] === req.query.copy_from);
-          if (srcRow) {
+          if (srcRow && PUBLIC_STATUSES.includes(srcRow[4] || 'active')) {
+            const pub = resolveEventContent({
+              status: srcRow[4] || 'active', event_date: srcRow[5] || '',
+              knowledge_base: srcRow[3] || '', chips: srcRow[6] || '', images: '',
+              invite_letter: srcRow[16] || '', invite_letter_chips: srcRow[17] || ''
+            });
             payload.copy_source = {
               id: srcRow[0], name: srcRow[1] || '',
-              knowledge_base: srcRow[3] || '', chips: srcRow[6] || '', organizer: srcRow[9] || '工研院'
+              knowledge_base: pub.knowledge_base || '', chips: pub.chips || '', organizer: srcRow[9] || '工研院'
             };
           }
         }

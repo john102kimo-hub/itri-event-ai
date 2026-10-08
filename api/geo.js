@@ -30,6 +30,7 @@ import {
 } from '../lib/geo-metrics.js';
 import { reportAiFailure } from '../lib/ai-alert.js';
 import { safeEqual, isAdminPassword, codeMatches, passwordFrom, authBlocked, authFailed, tooManyAttempts } from '../lib/auth.js';
+import { generateShareCode } from '../lib/ids.js';
 
 const SHEETS = {
   geo_prompts: ['id', 'topic', 'prompt', 'keyword', 'brand', 'competitors', 'active', 'created_at'],
@@ -47,21 +48,28 @@ const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-5';
 
 /**
  * 設定放在試算表，不放環境變數 —— Vercel 只需要填 API 金鑰，其餘都在網頁上點。
- * CFG 在每次請求開頭載入一次。
+ * CFG 在每次請求開頭載入，60 秒內沿用（批次 116）。
+ *
+ * ⚠️ 以前是「這台機器讀過一次就永遠不再讀」：後台收回同仁連結、換掉掃描引擎或判官，只改得到按的那一台，
+ * 其他還熱著的機器照樣放行舊連結、照樣用舊引擎掃（多花錢），直到它們自己冷啟動。
+ * 讀不到時沿用手上的值（第一次就讀不到＝預設值），不讓一次 Sheets 逾時把設定洗回預設。
  */
-const CFG = { engines: null, judge: null, loaded: false };
+const SETTINGS_TTL_MS = 60_000;
+const CFG = { engines: null, judge: null, staffCode: null, loadedAt: 0 };
 
 async function loadSettings() {
-  if (CFG.loaded) return CFG;
+  if (CFG.loadedAt && Date.now() - CFG.loadedAt < SETTINGS_TTL_MS) return CFG;
   try {
     const rows = await readRange('geo_settings!A2:B');
+    const next = { engines: null, judge: null, staffCode: null };
     rows.forEach(([k, v]) => {
-      if (k === 'engines') CFG.engines = String(v || '').split(',').map((s) => s.trim()).filter(Boolean);
-      if (k === 'judge') CFG.judge = String(v || '').trim() || null;
-      if (k === 'staff_code') CFG.staffCode = String(v || '').trim() || null;
+      if (k === 'engines') next.engines = String(v || '').split(',').map((s) => s.trim()).filter(Boolean);
+      if (k === 'judge') next.judge = String(v || '').trim() || null;
+      if (k === 'staff_code') next.staffCode = String(v || '').trim() || null;
     });
-  } catch { /* 分頁還沒建就用預設 */ }
-  CFG.loaded = true;
+    Object.assign(CFG, next);
+  } catch { /* 分頁還沒建、或暫時讀不到：沿用手上的 */ }
+  CFG.loadedAt = Date.now();
   return CFG;
 }
 
@@ -1872,7 +1880,7 @@ export default async function handler(req, res) {
       return ok(res, { success: true });
     }
 
-    /** 同仁專用連結：產生／重新產生一組 code。舊連結會立刻失效。 */
+    /** 同仁專用連結：產生／重新產生一組 code。舊連結在這一台立刻失效，其他機器最多晚一分鐘（見 loadSettings()）。 */
     if (body.action === 'staff_link') {
       if (body.revoke) {
         await saveSetting('staff_code', '');
@@ -1881,7 +1889,7 @@ export default async function handler(req, res) {
       }
       let c = CFG.staffCode;
       if (!c || body.regenerate) {
-        c = Math.random().toString(36).slice(2, 8) + Math.random().toString(36).slice(2, 6);
+        c = generateShareCode(); // 批次 116：密碼學亂數，不用 Math.random()
         await saveSetting('staff_code', c);
         CFG.staffCode = c;
       }

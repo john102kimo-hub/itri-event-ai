@@ -47,8 +47,9 @@ import {
 } from '../lib/menu.js';
 import {
   listOpenCampaigns, listRegistrationTopics, loadCampaigns, findRegistrationsForLineUser, bindRegistrationToLine, parseRegBindText,
-  buildRegistrationFlex, buildRegistrationText, describeSessions, welcomeButtonLabel, isCampaignRegisterPhrase
+  parseRegBindCheck, buildRegistrationFlex, buildRegistrationText, describeSessions, welcomeButtonLabel, isCampaignRegisterPhrase
 } from '../lib/registration.js';
+import { createLimiter } from '../lib/rate-limit.js';
 import { applyRichMenus, syncRegistrationMenu, autoSyncRegistrationMenu, registrationMenuStatus, pickMenuCampaign, buildRegMenu } from '../lib/richmenu-sync.js';
 import {
   isPasscodeMatch, isStaffAuthenticated, authenticateStaff, routeStaffIntent,
@@ -2407,10 +2408,20 @@ async function rememberMediaNameFromRegistration(userId, outlet) {
   }
 }
 
-async function handleRegBind(replyToken, userId, code) {
+// 綁定失敗的限流（批次 116）：報名編號只有 5 碼，舊按鈕又不帶檢查碼——同一個 LINE 帳號一天錯 5 次
+// 就先停手，一個一個猜編號的路走不通。正常人按的是完成頁的按鈕，一天錯不到兩次。
+// 跟其他限流一樣只記在這個 instance 的記憶體裡（best-effort，見 lib/rate-limit.js）。
+const regBindFails = createLimiter({ windowMs: 24 * 3600e3, max: 5 });
+
+async function handleRegBind(replyToken, userId, code, check = '') {
+  if (regBindFails.blocked(userId)) {
+    await replyOrPush(replyToken, userId, '連結報名的嘗試次數太多了，請明天再試；或打「找真人」，同仁會協助您。', HOME_MENU);
+    return;
+  }
   let r;
   try {
-    r = await bindRegistrationToLine(code, userId);
+    r = await bindRegistrationToLine(code, userId, { check });
+    if (!r.ok) regBindFails.hit(userId);
   } catch (e) {
     console.error('綁定報名失敗:', e.message);
     await replyOrPush(replyToken, userId, '報名資料暫時讀不到，請稍後再按一次；如果一直不行，打「找真人」，同仁會協助您。', HOME_MENU);
@@ -4722,7 +4733,7 @@ async function handleEvent(ev) {
   // 「#活動代碼」之前：它也是 # 開頭，晚一步就會被當成活動代碼、回一句「找不到活動」。
   const regBindCode = parseRegBindText(text);
   if (regBindCode) {
-    await handleRegBind(replyToken, userId, regBindCode);
+    await handleRegBind(replyToken, userId, regBindCode, parseRegBindCheck(text));
     return;
   }
   if (await isStaffAuthenticated(userId)) {
