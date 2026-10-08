@@ -214,7 +214,7 @@ seed(); await fresh();
   out = await dm('U1', '技術領域：綠能與環境');
   let t = allText(out);
   check('按領域「綠能與環境」→ 列出該領域的技術（名稱、簡介、聯絡人、短網址）',
-    /綠能與環境（共 \d+ 項，第 1–2 項）/.test(t) && /【先期技術】藻類回收技術/.test(t) && /簡介：根據水中藻類/.test(t) && /聯絡人：劉晏嘉　yanjia@itri\.org\.tw/.test(t)
+    /工研院技術｜綠能與環境\n共 \d+ 項・第 1–2 項/.test(t) && /【先期技術】藻類回收技術/.test(t) && /📝 根據水中藻類/.test(t) && /👤 聯絡人：劉晏嘉\n✉️ yanjia@itri\.org\.tw/.test(t)
     && /🔗 https:\/\/itri-event-ai\.vercel\.app\/t\/10843/.test(t), t);
   check('★ 只有姓名＋信箱：沒有電話、沒有組別、沒有官網長網址', !/\+886|03-|低碳與儲能|ListStyle\.aspx|MmmID/.test(t) && !/＠/.test(t), t);
   check('　 沒有走模型（內容是程式照官網的字排的）', !hasAnswer(out));
@@ -244,7 +244,7 @@ seed(); await fresh();
 
   await dm('U1', '問技術與洽案');
   out = await dm('U1', '生醫與醫材');
-  check('打的字剛好是領域名稱 → 當領域查（不是當關鍵字）', /生醫與醫材（共/.test(allText(out)) && /核酸片段化裝置與方法/.test(allText(out)), allText(out));
+  check('打的字剛好是領域名稱 → 當領域查（不是當關鍵字）', /工研院技術｜生醫與醫材/.test(allText(out)) && /核酸片段化裝置與方法/.test(allText(out)), allText(out));
 
   await dm('U1', '問技術與洽案');
   out = await dm('U1', '量子火箭引擎');
@@ -264,12 +264,12 @@ seed(); await fresh();
   out = await dm('U1', '技術領域：綠能與環境');
   t = allText(out);
   check('★ 其中一項的內容頁抓失敗 → 那一項只留名稱與連結，其他項照常（整頁不能因為一項壞掉就消失）',
-    /竹材多元應用加工技術\n🔗 https:\/\/itri-event-ai\.vercel\.app\/t\/10842/.test(t) && /藻類回收技術\n簡介/.test(t), t);
+    /竹材多元應用加工技術\n🔗 https:\/\/itri-event-ai\.vercel\.app\/t\/10842/.test(t) && /藻類回收技術\n📝/.test(t), t);
   state.techDetailFail = ''; tech.__clearTechCache();
 
   out = await dm('U1', '技術領域：材料與化工');
   t = allText(out);
-  check('簡介欄是 none 的技術 → 改用「技術特色」，不顯示 none', /高效無鹵環保放電劑\n簡介：以無鹵配方取代傳統放電劑/.test(t) && !/none/i.test(t), t);
+  check('簡介欄是 none 的技術 → 改用「技術特色」，不顯示 none', /高效無鹵環保放電劑\n📝 以無鹵配方取代傳統放電劑/.test(t) && !/none/i.test(t), t);
 
   out = await dm('U1', '技術領域：生醫與醫材');
   check('官網簡介裡的 &ge; &mu; 符號解開', /≥ 300 μm/.test(allText(out)) && !/&\w+;/.test(allText(out)), allText(out));
@@ -281,7 +281,7 @@ seed(); await fresh();
 {
   let out = await dm('U2', '近期工研院新聞');
   let t = allText(out);
-  check('按「近期工研院新聞」→ 標題＋日期導言＋短網址，不經過模型', /📰 近期工研院新聞（共 \d+ 則/.test(t) && /1\. 工研院攜AMRA打造足型機器人新標準/.test(t) && /2026\/08\/20　機器人應用落地/.test(t)
+  check('按「近期工研院新聞」→ 標題＋日期導言＋短網址，不經過模型', /📰 近期工研院新聞\n共 \d+ 則/.test(t) && /① 工研院攜AMRA打造足型機器人新標準/.test(t) && /📅 2026\/08\/20\n機器人應用落地/.test(t)
     && /🔗 https:\/\/itri-event-ai\.vercel\.app\/n\/\d+/.test(t) && !hasAnswer(out), t);
   check('　 不含官網長網址', !/ListStyle\.aspx|MmmID/.test(t), t);
   check('　 提示可以打關鍵字，並附範例按鈕（固定句型）', /直接輸入關鍵字/.test(t) && chipTexts(out).includes('新聞關鍵字：半導體'), JSON.stringify(chipTexts(out)));
@@ -373,7 +373,7 @@ seed(); await fresh();
   check('★ 剛看完技術清單，按「📰 ＸＸ的新聞」按鈕 → 一定是新聞（不被改走技術）', /工研院新聞｜「機器人」/.test(allText(out)) && !/工研院技術｜|產業服務」目前沒有/.test(allText(out)), allText(out).slice(0, 150));
   await dm('U6', '技術領域：綠能與環境');
   out = await dm('U6', '近期工研院新聞 第2頁');
-  check('　 剛看完技術清單，按新聞翻頁 → 一定是新聞', /近期工研院新聞（共/.test(allText(out)) || /沒有更多/.test(allText(out)), allText(out).slice(0, 150));
+  check('　 剛看完技術清單，按新聞翻頁 → 一定是新聞', /近期工研院新聞\n共/.test(allText(out)) || /沒有更多/.test(allText(out)), allText(out).slice(0, 150));
 
   // 7-4c 自然語言的講法：殘留「做」「在」也要查得到
   await fresh();
@@ -403,7 +403,7 @@ seed(); await fresh();
   out = await dm('U7', '這場的重點是什麼');
   check('　 回頭問活動 → 照樣由這一場回答', out.some((o) => o.kind === 'answer' && o.event === 'past3'), JSON.stringify(out.map((o) => o.kind + (o.event || ''))));
   out = await dm('U7', '近期工研院新聞');
-  check('綁定時按「近期工研院新聞」→ 給全院新聞，不被釘回這一場', /近期工研院新聞（共/.test(allText(out)) && !hasAnswer(out), allText(out).slice(0, 100));
+  check('綁定時按「近期工研院新聞」→ 給全院新聞，不被釘回這一場', /近期工研院新聞\n共/.test(allText(out)) && !hasAnswer(out), allText(out).slice(0, 100));
 }
 
 // ═══ 八、群組 ═════════════════════════════════════════════════════════════════
@@ -423,7 +423,7 @@ seed(); await fresh();
   check('Alice 自己回來打「電池」→ 照樣查得到（守門沒把正主擋掉）', /電池電極奈米塗層技術/.test(allText(out)), allText(out).slice(0, 100));
 
   out = await g(G, 'Ucarol', '近期工研院新聞');
-  check('群組裡有人按選單上的「近期工研院新聞」（沒 @）→ 回新聞清單', /近期工研院新聞（共/.test(allText(out)) && /\/n\/\d+/.test(allText(out)), allText(out).slice(0, 100));
+  check('群組裡有人按選單上的「近期工研院新聞」（沒 @）→ 回新聞清單', /近期工研院新聞\n共/.test(allText(out)) && /\/n\/\d+/.test(allText(out)), allText(out).slice(0, 100));
   out = await g(G, 'Udave', '近期工研院新聞 第2頁');
   check('別人按「更多新聞」（沒 @）→ 照樣翻頁（第二頁沒有資料時老實說）', texts(out).length === 1, allText(out));
   out = await g(G, 'Udave', '技術領域：通訊與光電 第2頁');
@@ -461,6 +461,13 @@ console.log('\n── 九、出口：繁體字、長度、按鈕上限 ──');
   check('每一則都在 LINE 單則 5000 字內', all.every((o) => o.text.length < 4500), String(Math.max(...all.map((o) => o.text.length))));
   check('每則的快速回覆都在 13 顆內、label 在 20 字內', all.every((o) => (o.quickReply || []).length <= 13 && (o.quickReply || []).every((c) => String(c.label || c).length <= 20)),
     JSON.stringify(all.map((o) => (o.quickReply || []).length)));
+  // 版面（批次 123）：手機上好讀——項目之間有分隔線、信箱與網址各占一行（才好點）、每行不過長
+  const lists = all.filter((o) => /^(🔬|📰)/.test(o.text));
+  check('★ 技術／新聞清單：開頭兩行是「標題」「共 N 項（則）・第 a–b 項（則）」，下面接分隔線', lists.length >= 3 && lists.every((o) => /^(🔬|📰)[^\n]+\n共 \d+ [項則]・第 \d+–\d+ [項則]\n\n──────────\n/.test(o.text)), lists.map((o) => o.text.slice(0, 60)).join(' | '));
+  check('　 每一項都以線收尾（5 項就有 5 條收尾線，加上開頭那條）', lists.every((o) => (o.text.match(/──────────/g) || []).length === (o.text.match(/🔗 /g) || []).length + 1));
+  check('　 信箱獨立一行（✉️ 開頭），網址獨立一行（🔗 開頭），不跟別的字擠在一起', lists.filter((o) => /^🔬/.test(o.text)).every((o) => o.text.split('\n').filter((l) => /@itri\.org\.tw/.test(l)).every((l) => /^✉️ \S+$/.test(l)) && o.text.split('\n').filter((l) => /https:\/\//.test(l)).every((l) => /^🔗 \S+$/.test(l))));
+  check('　 項目編號用圈圈數字（①②③…），一眼分得出一項從哪裡開始', lists.every((o) => /^[①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳]/m.test(o.text)));
+  check('　 每一行都不超過 90 字（手機上折行不會太碎）', lists.every((o) => o.text.split('\n').filter((l) => !/^[①-⑳]|^🔗/.test(l)).every((l) => l.length <= 90)), lists.flatMap((o) => o.text.split('\n')).find((l) => l.length > 90));
   check('沒有 Markdown 符號（LINE 不會渲染）', all.every((o) => !/\*\*|^#{1,3} |`/m.test(o.text)));
 }
 
