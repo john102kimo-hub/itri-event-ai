@@ -174,6 +174,18 @@ seed(); await fresh();
   check('（前置）假資料的 IEK 項目能轉成短網址', /^https:\/\/itri-event-ai\.vercel\.app\/i\/\d+-\d+$/.test(shortLink.shortenIekUrl(first)), first);
 }
 
+// ═══ 三之三、「這場答不出來、補查官網」附的新聞連結也是短網址 ═══════════════════
+console.log('\n── 三之三、補查官網：原文連結是短網址 ──');
+seed(); await fresh();
+{
+  state.noDataKeyword = '院士';
+  state.bindings.set('Uhint', { event_id: 'past3', media_name: '中央社', note: '', bound_at: Date.now() });
+  const out = await dm('Uhint', '今年院士有誰？');
+  state.noDataKeyword = '';
+  const t = allText(out);
+  check('★ 補查官網附的新聞連結是 /n/ 短網址，沒有官網長網址', /https:\/\/itri-event-ai\.vercel\.app\/n\/\d+/.test(t) && !/itri\.org\.tw|ListStyle\.aspx|MmmID/.test(t), t.slice(-300));
+}
+
 // ═══ 四、選單與意圖 ═════════════════════════════════════════════════════════
 console.log('\n── 四、圖文選單改名、送出的字一定被認得（否則就是按了沒反應）──');
 {

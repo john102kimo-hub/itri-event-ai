@@ -1799,7 +1799,7 @@ out = await send('今年院士有誰');
   check('原本那句誠實的「我沒有資料」還在，沒有被補查蓋掉',
     /沒有資料/.test(sentText), JSON.stringify(out.map(o => o.text?.slice(0, 40))));
   check('後面接上工研院官網的相關報導與原文連結',
-    /工研院官網新聞中心/.test(sentText) && /itri\.org\.tw/.test(sentText),
+    /工研院官網新聞中心/.test(sentText) && /itri-event-ai\.vercel\.app\/n\/\d+/.test(sentText),
     JSON.stringify(sentText.slice(0, 300)));
   check('⚠️ 機器可讀標記一定要切掉，不能讓記者看到 [[NO_DATA:…]]',
     !/NO_DATA/.test(sentText), sentText);
@@ -2012,7 +2012,7 @@ out = await send('今年院士');
 {
   const sentText = out.filter(o => o.kind === 'text').map(o => o.text).join('\n');
   check('沒有標記也要補查官網並附上原文連結（不再只靠模型自己標記）',
-    /工研院官網新聞中心/.test(sentText) && /itri\.org\.tw/.test(sentText), sentText.slice(0, 300));
+    /工研院官網新聞中心/.test(sentText) && /itri-event-ai\.vercel\.app\/n\/\d+/.test(sentText), sentText.slice(0, 300));
   check('原本那句誠實的回答還在，沒有被補查蓋掉',
     /沒有具體的名單資料/.test(sentText), sentText.slice(0, 120));
 }
@@ -2040,7 +2040,7 @@ out = await send('今年院士');
 {
   const sentText = out.filter(o => o.kind === 'text').map(o => o.text).join('\n');
   check('標記是一整句查不到 → 退回句型判斷猜的「院士」，照樣補查得到',
-    /工研院官網新聞中心/.test(sentText) && /itri\.org\.tw/.test(sentText), sentText.slice(-300));
+    /工研院官網新聞中心/.test(sentText) && /itri-event-ai\.vercel\.app\/n\/\d+/.test(sentText), sentText.slice(-300));
 }
 state.noDataKeyword = '';
 state.itriKeywordMustInclude = '';
@@ -2073,7 +2073,7 @@ out = await send('今年院士有誰');
     /工研院官網新聞中心 搜尋「院士」/.test(answers[1]?.sys || ''), (answers[1]?.sys || '').slice(0, 120));
   check('引言改成「我在工研院官網新聞中心找到了」，不是「有相關報導請自己看」',
     /我在工研院官網新聞中心找到了/.test(sentText), sentText.slice(0, 300));
-  check('原文連結照樣附上（讀懂了還是要能查證）', /itri\.org\.tw/.test(sentText), '');
+  check('原文連結照樣附上（讀懂了還是要能查證）', /itri-event-ai\.vercel\.app\/n\/\d+/.test(sentText), '');
   check('⚠️ 第二段也不能漏出機器可讀標記', !/NO_DATA/.test(sentText), sentText);
 }
 state.noDataKeyword = '';
@@ -2099,7 +2099,7 @@ state.answerText = ''; // 讓活動問答那支照舊帶標記
   globalThis.fetch = origFetch;
   const sentText = out.filter(o => o.kind === 'text').map(o => o.text).join('\n');
   check('官網摘要答不出來 → 退回只給連結，不硬掰一段答案',
-    /有相關報導/.test(sentText) && /itri\.org\.tw/.test(sentText), sentText.slice(-260));
+    /有相關報導/.test(sentText) && /itri-event-ai\.vercel\.app\/n\/\d+/.test(sentText), sentText.slice(-260));
 }
 state.noDataKeyword = '';
 
@@ -2312,7 +2312,7 @@ out = await send('今年院士有誰');
   check('模型那段「答不出來」的話不會出現在記者收到的訊息裡',
     !/沒有能直接回答|換個更明確的關鍵字|再幫您查一次/.test(sentText), sentText.slice(0, 400));
   check('退回「只附原文連結」那條路，連結還是給得到',
-    /itri\.org\.tw/.test(sentText), sentText.slice(0, 400));
+    /itri-event-ai\.vercel\.app\/n\/\d+/.test(sentText), sentText.slice(0, 400));
   check('⚠️ 引言不能說「找到了」——那是前後文自己打自己的來源',
     !/新聞中心找到了/.test(sentText), sentText.slice(0, 400));
 }
