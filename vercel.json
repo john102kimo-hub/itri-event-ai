@@ -41,6 +41,18 @@
       "destination": "/geo.html"
     },
     {
+      "source": "/t/:id",
+      "destination": "/api/event-page?_r=go&k=t&n=:id"
+    },
+    {
+      "source": "/n/:id",
+      "destination": "/api/event-page?_r=go&k=n&n=:id"
+    },
+    {
+      "source": "/i/:id",
+      "destination": "/api/event-page?_r=go&k=i&n=:id"
+    },
+    {
       "source": "/robots.txt",
       "destination": "/api/event-page?_r=robots"
     },

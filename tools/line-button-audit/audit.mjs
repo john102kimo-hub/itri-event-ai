@@ -74,7 +74,8 @@ for (const where of ['dm', 'group']) {
   await step(where, '換一場', await say(where, '智慧醫療解決方案記者會'));
   await step(where, '媒體邀訪需求', await say(where, '媒體邀訪需求'));
   await step(where, '產業趨勢分析', await say(where, '產業趨勢分析'));
-  await step(where, '想問什麼技術', await say(where, '想問什麼技術'));
+  await step(where, '問技術與洽案', await say(where, '問技術與洽案'));
+  await step(where, '近期工研院新聞', await say(where, '近期工研院新聞'));
   await step(where, '（技術名稱）', await say(where, '機器人'));
   await step(where, '使用說明', await say(where, '使用說明'));
   if (!m) dmUser = 'Uaudit2'; else groupId = 'Caudit2';

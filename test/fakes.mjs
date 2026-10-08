@@ -43,6 +43,47 @@ const DEFAULT_IEK_HTML = `<div class="listItem row no-gutters"><article class="c
 // 原本只有一則機器人新聞、卻拿「院士」去查的測試，在真的官網上本來就不會命中。
 const DEFAULT_ITRI_HTML = `<dl class="Bb_dotted pic_list sline" id="divContent"><dt><img src='x.webp' alt='x'></dt><dd><a href='ListStyle.aspx?DisplayStyle=01_content&SiteID=1&MmmID=1036276263153520257&MGID=115082015023981066' class='title'>&#24037;&#30740;&#38498;&#25884;AMRA&#25171;&#36896;&#36275;&#22411;&#27231;&#22120;&#20154;&#26032;&#27161;&#28310;</a><div class='Lb'><p>日期：2026/08/20</p></div><p>&#27231;&#22120;&#20154;&#25033;&#29992;&#33853;&#22320;&#30340;&#26368;&#22823;&#35506;&#38988;&#65292;&#24050;&#32147;&#24478;&#25171;&#36896;&#29986;&#21697;&#12290;</p></dd><dt><img src='y.webp' alt='y'></dt><dd><a href='ListStyle.aspx?DisplayStyle=01_content&SiteID=1&MmmID=1036276263153520257&MGID=115090715023981099' class='title'>工研院第十屆院士授證 年度得獎名單同步揭曉</a><div class='Lb'><p>日期：2026/09/07</p></div><p>工研院今日舉行院士授證典禮，並公布年度得獎名單與受證院士。</p></dd></dl>`;
 
+
+// ── 官網「產業服務」技術清單假資料（批次 121，結構節錄自實測的真實網站原始碼）──────────────────
+// 清單頁：<li><a href='…13_content…&Trt_idx=編號'>名稱</a></li> ＋ 隱藏的 lblDataSum（總數）；
+// 內容頁：技術簡介 <h4>…</h4><P>…</P>，聯絡資訊「聯絡人：姓名 組別」「電話：… 或 Email：xxx＠itri.org.tw」（⚠️ 全形＠）。
+// 領域 B（通訊與光電）多放 12 筆填充項，才測得到「翻第二頁、第三頁」。
+const TECH_DB = [
+  { id: '11246', d: 'C', title: '無基材乾式可撓性膜電極成型技術', intro: '本技術揭示一種無基材乾式可撓性膜電極成型技術，無需使用傳統濕式塗佈所需之有機溶劑。', name: '曾謙順', mail: 'fengshuntseng＠itri.org.tw' },
+  { id: '11245', d: 'D', title: '高效無鹵環保放電劑', intro: 'none', feat: '以無鹵配方取代傳統放電劑，兼顧環保與放電效率。', name: '李彥良', mail: 'nicklee＠itri.org.tw' },
+  { id: '10843', d: 'F', title: '【先期技術】藻類回收技術', intro: '根據水中藻類，進行絮凝劑配方設計，以達到快速且大面積藻類回收。', name: '劉晏嘉', mail: 'yanjia＠itri.org.tw' },
+  { id: '10842', d: 'F', title: '竹材多元應用加工技術', intro: '本技術結合生物科技、建築材料與農業生技等領域的創新技術，致力於開發多元化的竹材加工產品，目前已研發出七項具創新性的竹製產品，包括新型態空氣淨化產品、優質化竹炭貓砂、多樣居家驅蟻產品。', name: '黃盈賓', mail: 'YPHuang@itri.org.tw' },
+  { id: '10790', d: 'E', title: '核酸片段化裝置與方法', intro: '以微流道快速打斷核酸，提升定序前處理效率。&ge; 300 &mu;m', name: '林展生', mail: 'ZSLin＠itri.org.tw' },
+  { id: '10701', d: 'N', title: '電池電極奈米塗層技術', intro: '利用奈米塗層提升鋰電池電極循環壽命。', name: '王羽淇', mail: 'yuchiw＠itri.org.tw' },
+  { id: '10650', d: 'B', title: 'AI晶片先進封裝散熱技術', intro: '針對高功率 AI 晶片的 2.5D 封裝提出微流道散熱方案。', name: '張家豪', mail: 'changch＠itri.org.tw' },
+  ...Array.from({ length: 12 }, (_, i) => ({ id: String(9000 + i), d: 'B', title: `通訊模組範例技術 ${i + 1}`, intro: `第 ${i + 1} 項通訊技術的簡介。`, name: '測試員', mail: `tester${i + 1}＠itri.org.tw` }))
+];
+const techDetailHtml = (t) => `<h3 class="tt_title">技術名稱：<span id="spanTitle">
+    ${t.title}
+</span></h3>
+<div id="divContent">
+    <h4>技術簡介</h4><P>${t.intro}</P>
+                              <h4> Abstract </h4><P>none</P>
+                              <h4> 技術特色 </h4> <P>${t.feat || 'none'}</P>
+                              <h4>聯絡資訊</h4>
+                             <div class='connection Lb'>
+                             <p>聯絡人：${t.name} 低碳與儲能技術組</p>
+                             <p>電話：+886-6-3636952 或 Email：${t.mail}</p>
+                             <p>客服專線：+886-800-45-8899 </p></div>
+</div>
+<ul class="tt_contact_info" id="ul_tt_contact_info"></ul>`;
+function techListHtml(url) {
+  const kw = decodeURIComponent((url.match(/[?&]keyword=([^&]*)/) || [])[1] || '');
+  const dom = (url.match(/[?&]keyword2=([A-Z])/) || [])[1] || '';
+  const page = Number((url.match(/[?&]Page=(\d+)/) || [])[1] || 1);
+  const hit = TECH_DB.filter(t => (!dom || t.d === dom) && (!kw || t.title.includes(kw)));
+  const lis = hit.slice((page - 1) * 10, page * 10)
+    .map(t => `<li><a href='ListStyle.aspx?DisplayStyle=13_content&SiteID=1&MmmID=1036233405427625204&Trt_idx=${t.id}'>${t.title}</a></li>`).join('\n');
+  return `<div id="divContent"><ul>${lis}</ul></div><label id="lblDataSum" style="display:none">
+            ${hit.length}
+        </label>`;
+}
+
 export const state = {
   events: [
     ['quad', '經濟部四足機器人國產研發平台發表記者會', '#0F9E7A', '【新聞稿】四足機器人…', 'ended', '2026-08-08', '重點\n應用', '', '', '工研院', 'code1', '', '', '', '王小明 03-1111111',
@@ -80,6 +121,8 @@ export const state = {
   // 見 fetchItriNews() 的說明）。
   itriHtml: DEFAULT_ITRI_HTML,
   itriFetchFail: false,
+  techFetchFail: false,        // 批次 121：官網「產業服務」技術清單抓取失敗
+  techDetailFail: '',           // 批次 121：非空＝該編號的內容頁抓失敗（只有那一項受影響）
   // 空字串＝預設關掉，不管 keyword 是什麼都回 itriHtml（見上面 fetch stub 的說明）。
   itriKeywordMustInclude: '',
   // 「輸入中」動畫被呼叫的紀錄（批次 60），見下面 line.startLoading() 的說明。
@@ -113,6 +156,8 @@ export function reset() {
   state.iekFetchFail = false; // 個別情境會開這個旗標模擬抓取失敗，其餘情境要看到預設值
   state.itriHtml = DEFAULT_ITRI_HTML;
   state.itriFetchFail = false;
+  state.techFetchFail = false;
+  state.techDetailFail = '';
   state.itriKeywordMustInclude = '';
   state.fallbackReply = null; // null＝用上面的預設假回覆，見 installFetchStub() 的兜底分支
   state.staffRouteForce = null; // 批次 115：同上，職員那一支
@@ -533,6 +578,17 @@ export function installFetchStub() {
     // 官網「接近精準比對」搜尋的落差（整句問句查不到、去語助詞剩下的關鍵字才查
     // 得到），見 fetchItriNews() 查無資料自動重試那段、test-flow.mjs 情境 18 的
     // 驗證。
+    // 批次 121：官網「產業服務」技術清單與內容頁（lib/itri-tech.js）。要放在下面通用的 itri.org.tw 分支之前。
+    if (u.includes('itri.org.tw') && u.includes('DisplayStyle=13')) {
+      if (state.techFetchFail) return { ok: false, status: 500, text: async () => '', json: async () => ({}) };
+      if (u.includes('DisplayStyle=13_content')) {
+        const id = (u.match(/Trt_idx=(\d+)/) || [])[1];
+        const t = TECH_DB.find(x => x.id === id);
+        if (!t || state.techDetailFail === id) return { ok: false, status: 500, text: async () => '', json: async () => ({}) };
+        return { ok: true, text: async () => techDetailHtml(t) };
+      }
+      return { ok: true, text: async () => techListHtml(u) };
+    }
     if (u.includes('itri.org.tw')) {
       if (state.itriFetchFail) return { ok: false, status: 500, text: async () => '', json: async () => ({}) };
       if (state.itriKeywordMustInclude) {

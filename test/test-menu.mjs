@@ -168,11 +168,10 @@ for (const m of ALL_MENUS) {
 // 按鈕送出的文字必須被對應的路由認得，否則就是「按了沒反應」
 console.log('── 選單按鈕送出的字要被路由認得 ──');
 for (const b of REPORTER_MENU.buttons) {
-  // 五顆走 detectMetaIntent（含新增的「想問什麼技術」「產業趨勢分析」）；剩下
-  // 「新聞稿全文」是問該場內容的常見問題，交給既有問答路徑，這裡只要確認它
-  // 「不會」被 meta 意圖誤攔走（誤攔的話記者永遠問不到內容）
+  // 批次 121：「想問什麼技術」→「問技術與洽案」、「新聞稿全文」→「近期工研院新聞」，六顆現在全部走 detectMetaIntent
+  // （「近期工研院新聞」是 'news' 意圖：列官網新聞中心最新的）
   const meta = detectMetaIntent(b.text);
-  const isMetaButton = ['最近有哪些活動', '回首頁', '想問什麼技術', '產業趨勢分析', '媒體邀訪需求'].includes(b.text);
+  const isMetaButton = ['最近有哪些活動', '回首頁', '問技術與洽案', '近期工研院新聞', '產業趨勢分析', '媒體邀訪需求'].includes(b.text);
   eq(meta !== null, isMetaButton, `記者選單「${b.label}」→ meta=${meta}（預期 ${isMetaButton ? '被攔' : '放行給問答'}）`);
 }
 eq(detectMetaIntent('退出職員模式'), null, '「退出職員模式」不能被記者的 meta 意圖攔走（那是職員指令）');

@@ -90,7 +90,7 @@ console.log('\n── 一之三、趨勢／技術題之後的「裸名詞追問�
 {
   reset(); await fresh();
   // 同一個人：@ 米亞問技術 → 米亞問「想了解哪一項」→ 他回「機器人」→ 答完留下 tech_query 話題記憶
-  await g('U王', '@米亞 想問什麼技術', { mention: true });
+  await g('U王', '@米亞 近期工研院新聞', { mention: true });
   const ans = await g('U王', '機器人');
   check('　（前置）回答了「機器人」這項技術', ans.length > 0, allText(ans));
   const follow = await g('U李', '太空');
