@@ -110,7 +110,7 @@ for (const t of ['報名費用多少', '報名截止是什麼時候', '以後會
 check('報名版選單那一格送出的字一定認得（不然就是按了沒反應）', detectMetaIntent(REG_MENU_TILE.text) === 'register' && REPORTER_MENU_REG.buttons.some((b) => b.text === REG_MENU_TILE.text));
 check('報名版只換掉一格（回首頁 → 報名），其他五格跟原本一模一樣',
   REPORTER_MENU_REG.buttons.length === 6 && REPORTER_MENU_REG.buttons.filter((b, i) => b.text !== REPORTER_MENU.buttons[i].text).length === 1 &&
-  REPORTER_MENU_REG.buttons.map((b) => b.label).join('/') === '最近有哪些活動/眺望研討會報名/想問什麼技術/新聞稿全文/產業趨勢分析/媒體邀訪需求');
+  REPORTER_MENU_REG.buttons.map((b) => b.label).join('/') === '最近有哪些活動/眺望研討會報名/問技術與洽案/近期工研院新聞/產業趨勢分析/媒體邀訪需求');
 check('★ 選單那一格寫明是哪個活動的報名（不是籠統的「媒體報名」——記者不知道報什麼）',
   /眺望/.test(REG_MENU_TILE.label) && /報名/.test(REG_MENU_TILE.label) && /10\/28/.test(REG_MENU_TILE.sub) && REG_MENU_TILE.label !== '媒體報名', JSON.stringify(REG_MENU_TILE));
 {

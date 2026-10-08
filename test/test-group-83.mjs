@@ -69,7 +69,7 @@ reset(); await fresh();
   const a = await g('U王', '半導體先進封裝技術發表會', { mention: true });
   const t = texts(a.out)[0];
   check('★ 軟綁定後的第一個答案帶群組導覽（產業趨勢、問技術）——以前是 1 對 1 那排',
-    t && btn(t).includes('產業趨勢分析') && btn(t).includes('想問什麼技術'), JSON.stringify(t && btn(t)));
+    t && btn(t).includes('產業趨勢分析') && btn(t).includes('問技術與洽案'), JSON.stringify(t && btn(t)));
   const sys = answers(a.out)[0]?.sys || '';
   check('第一個答案也套群組規則（精簡、不貼全文）', /多人 LINE 群組/.test(sys));
 }

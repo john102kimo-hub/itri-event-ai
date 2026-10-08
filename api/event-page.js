@@ -28,6 +28,7 @@ import { readEventRows } from '../lib/events-table.js';
 import { resolveOrg, BRAND_KEY } from '../lib/geo-orgs.js';
 import { resolveEventContent } from '../lib/prompt.js';
 import { isBusinessEvent } from '../lib/audience.js';
+import { resolveShortLink } from '../lib/short-link.js';
 
 // 用到 L 欄時間、M 欄地點：結構化資料的 Event 要有 location 才完整（批次 82）。讀取走 lib/events-table.js 的共用快取（批次 109）。
 
@@ -421,11 +422,27 @@ async function serveEventPage(req, res) {
   return res.status(200).send(html);
 }
 
+// 短網址 /t/<技術編號>、/n/<新聞編號>（批次 121，見 lib/short-link.js）：導回工研院官網。
+// 不另開一支 Function（Vercel Hobby 方案上限 12 支，這個專案已經 11 支），掛在這支下面用 _r 分流。
+// 導向的網域寫死在 resolveShortLink() 裡、編號只收純數字——這裡不可能被拿去導到別的網站。
+function serveShortLink(req, res) {
+  const target = resolveShortLink(req.query?.k, req.query?.n);
+  if (!target) {
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    return res.status(404).send('找不到這個連結');
+  }
+  res.setHeader('Cache-Control', 'public, max-age=0, s-maxage=86400');
+  res.setHeader('X-Robots-Tag', 'noindex, nofollow');
+  res.setHeader('Location', target);
+  return res.status(302).end();
+}
+
 export default async function handler(req, res) {
   // _r 由 vercel.json 的 rewrite 帶進來；直接打 /api/event-page 時預設當成頁面請求
   switch (req.query?._r) {
     case 'robots':  return serveRobots(res);
     case 'sitemap': return serveSitemap(res);
+    case 'go':      return serveShortLink(req, res);
     default:        return serveEventPage(req, res);
   }
 }

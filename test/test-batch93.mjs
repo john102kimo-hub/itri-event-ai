@@ -118,7 +118,8 @@ reset(); await fresh();
   // 查到了報導、但模型判斷關聯不大（AI 回答那一支）：結尾同樣要有人
   const out = await dm('Uai', '工研院 瀝青');
   const t = texts(out);
-  check('有查到報導的那一支：結尾也給綜合窗口，不是「請洽媒體邀訪窗口」', out.some((o) => o.kind === 'answer') && /朱則瑋/.test(t) && !/請洽媒體邀訪窗口/.test(t), t);
+  // 批次 121：新聞清單改由程式照官網的字排出來，不再經過模型（沒有 kind==='answer' 那一則了）
+  check('有查到報導的那一支：結尾也給綜合窗口，不是「請洽媒體邀訪窗口」', /工研院新聞｜「瀝青」/.test(t) && /朱則瑋/.test(t) && !/請洽媒體邀訪窗口/.test(t), t);
 }
 reset(); await fresh();
 state.itriHtml = '';

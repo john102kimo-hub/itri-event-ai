@@ -69,7 +69,8 @@ const NAV_LABELS = {
   '回首頁': ['🏠 回首頁'],
   '最近有哪些活動': ['📅 最近活動', '📅 其他活動', '📅 某一場的窗口', '📅 某一場活動窗口'],
   '產業趨勢分析': ['📊 產業趨勢'],
-  '想問什麼技術': ['🔬 問技術'],
+  '問技術與洽案': ['🔬 問技術與洽案'],
+  '近期工研院新聞': ['📰 近期新聞'],
   '媒體邀訪需求': ['📞 邀訪窗口'],
   '找真人': ['🙋 找真人'],
   '使用說明': ['❓ 使用說明']
@@ -106,8 +107,10 @@ async function walk(where) {
   await run('換一場', await say(where, A, '智慧醫療解決方案記者會'));
   await run('媒體邀訪需求', await say(where, A, '媒體邀訪需求'));
   await run('產業趨勢分析', await say(where, A, '產業趨勢分析'));
-  await run('想問什麼技術', await say(where, A, '想問什麼技術'));
-  await run('（技術名稱）', await say(where, A, '機器人'));
+  await run('問技術與洽案', await say(where, A, '問技術與洽案'));
+  await run('（技術名稱）', await say(where, A, '電池'));
+  await run('近期工研院新聞', await say(where, A, '近期工研院新聞'));
+  await run('（新聞關鍵字）', await say(where, A, '機器人'));
   await run('使用說明', await say(where, B, '使用說明'));
   await run('找真人', await say(where, B, '找真人'));
   await run('謝謝', await say(where, B, P + '謝謝'));
@@ -158,22 +161,25 @@ console.log('\n── 三、打「選單」叫回按鈕 ──');
   check('1 對 1 只打「米亞」也叫得出按鈕', (lastButtons(out) || []).length >= 6, JSON.stringify(out));
 }
 
-// ── 四、「想問什麼技術」的一鍵範例：群組裡別人按也會動 ─────────────────────────
-console.log('\n── 四、問技術的一鍵範例 ──');
+// ── 四、「問技術與洽案」的領域與範例按鈕：群組裡別人按也會動 ─────────────────────────
+console.log('\n── 四、問技術與洽案的一鍵按鈕 ──');
 {
   reset(); await fresh();
-  let out = await say('group', 'Ctech', '米亞 想問什麼技術');
-  const ex = (lastButtons(out) || []).find((b) => b.label === '機器人');
-  check('「想問什麼技術」附上一鍵範例（機器人／半導體／AI 晶片）', !!ex && ex.text === '工研院 機器人', JSON.stringify(lastButtons(out)));
+  let out = await say('group', 'Ctech', '米亞 問技術與洽案');
+  const ex = (lastButtons(out) || []).find((b) => b.label === '電池');
+  check('「問技術與洽案」附上六大領域按鈕與一鍵範例（電池／機器人／AI 晶片）',
+    !!ex && ex.text === '技術關鍵字：電池' && (lastButtons(out) || []).filter((b) => /^技術領域：/.test(b.text)).length === 6,
+    JSON.stringify(lastButtons(out)));
   // 另一位成員按範例（旗標綁的是發問的那個人），不 @
   sent.length = 0;
-  await handler(post([{ type: 'message', replyToken: 'rt' + (++seq), source: { type: 'group', groupId: 'Ctech', userId: 'Uother' }, message: { type: 'text', id: 'm' + seq, text: '工研院 機器人' } }]), res);
+  await handler(post([{ type: 'message', replyToken: 'rt' + (++seq), source: { type: 'group', groupId: 'Ctech', userId: 'Uother' }, message: { type: 'text', id: 'm' + seq, text: '技術關鍵字：電池' } }]), res);
   out = sent.slice();
-  check('★ 群組裡別人按範例按鈕也會回（不是按了沒反應）', out.some((o) => o.kind === 'text' || o.kind === 'answer'), JSON.stringify(out.map((o) => o.kind)));
-  out = await say('dm', 'Utech', '想問什麼技術');
-  out = await say('dm', 'Utech', '工研院 半導體');
-  check('1 對 1 按範例 → 查工研院的技術（送進模型的是半導體這一題）', out.some((o) => o.kind === 'answer' && /半導體/.test(JSON.stringify(o.question || o.sys || ''))) && out.some((o) => o.kind === 'text'),
-    JSON.stringify(out.map((o) => o.kind + ':' + String(o.question || o.text || '').slice(0, 30))));
+  check('★ 群組裡別人按範例按鈕也會回（不是按了沒反應）', out.some((o) => o.kind === 'text' && /電池電極奈米塗層技術/.test(o.text)), JSON.stringify(out.map((o) => o.kind)));
+  out = await say('dm', 'Utech', '問技術與洽案');
+  out = await say('dm', 'Utech', '技術領域：綠能與環境');
+  check('1 對 1 按領域按鈕 → 列出該領域的技術（名稱、簡介、聯絡人、短網址）',
+    out.some((o) => o.kind === 'text' && /藻類回收技術/.test(o.text) && /yanjia@itri\.org\.tw/.test(o.text) && /\/t\/10843/.test(o.text)),
+    JSON.stringify(out.map((o) => o.kind + ':' + String(o.text || '').slice(0, 40))));
 }
 
 // ── 五、按鈕上的字 ──────────────────────────────────────────────────────────

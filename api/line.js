@@ -68,8 +68,9 @@ import {
 import { pinGenericTechQueryToEvent } from '../lib/line-nodata.js';
 import { handleRegBind, resolveMetaIntent } from '../lib/line-register.js';
 import {
-  answerIndustryTrend, answerQuestion, answerTechQuery, fullTextPickEvent, handleContactTopicMessage,
-  handleMetaIntent, handleTechQueryMessage, handleUnbound, isFullTextAsk, sendCalendarReply
+  answerIndustryTrend, answerNewsQuery, answerQuestion, fullTextPickEvent, handleContactTopicMessage,
+  handleMetaIntent, handleNewsQueryMessage, handleTechNewsPick, handleTechQueryMessage, handleUnbound, isFullTextAsk,
+  sendCalendarReply
 } from '../lib/line-reporter.js';
 import { applyStaffMenu, handleStaffImage, handleStaffMessage } from '../lib/line-staff-mode.js';
 import { WAKE_WORD_RE, handleGroupEvent, handleGroupJoin } from '../lib/line-group.js';
@@ -284,8 +285,11 @@ async function handleEvent(ev) {
   // 跟 metaIntent 同一優先順序，命中就直接處理，不會被送進當前綁定活動的問答。
   if (await handleContactTopicMessage(replyToken, userId, text)) return;
 
-  // 「想問什麼技術」按鈕之後記者打的技術名稱（見 handleTechQueryMessage() 的說明）。
+  // 「問技術與洽案」「近期工研院新聞」的按鈕句型（領域、關鍵字、翻頁，見 handleTechNewsPick()），
+  // 以及按了那兩顆之後記者自己打的關鍵字（見 handleTechQueryMessage()／handleNewsQueryMessage()）。
+  if (await handleTechNewsPick(replyToken, userId, text)) return;
   if (await handleTechQueryMessage(replyToken, userId, text)) return;
+  if (await handleNewsQueryMessage(replyToken, userId, text)) return;
 
   if (!binding) {
     await handleUnbound(replyToken, userId, text);
@@ -419,7 +423,7 @@ async function handleEvent(ev) {
   // 優先用 routeIntent() 抽出來的關鍵字，不要整句原話去查——見 handleUnbound()
   // 那條同樣的說明（LINE-PLAN.md 批次 22）。
   if (routed.intent === 'tech_query') {
-    await answerTechQuery(replyToken, userId, routed.tech_keyword || text);
+    await answerNewsQuery(replyToken, userId, routed.tech_keyword || text, { rawText: text });
     return;
   }
 

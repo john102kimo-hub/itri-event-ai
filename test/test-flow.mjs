@@ -97,9 +97,9 @@ let pass = 0, fail = 0;
 // 批次 84：按鈕只有一份來源（api/line.js 的 BTN），1 對 1 與群組同一排：
 // 🏠 📅 ＋ 這場的內容提問 ＋ 📊 🔬 📞 🙋。比對一律看**送出的字**（text），不看顯示的 label。
 const qrTexts = (chips) => (chips || []).map(c => (typeof c === 'object' && c ? (c.text ?? c.label) : c));
-const NAV_TAIL_TEXTS = ['產業趨勢分析', '想問什麼技術', '媒體邀訪需求', '找真人'];
-const HOME_MENU_TEXTS = ['最近有哪些活動', '產業趨勢分析', '想問什麼技術', '媒體邀訪需求', '找真人', '使用說明'];
-const CAL_TAIL_TEXTS = ['產業趨勢分析', '想問什麼技術', '媒體邀訪需求', '找真人', '使用說明'];
+const NAV_TAIL_TEXTS = ['產業趨勢分析', '問技術與洽案', '媒體邀訪需求', '找真人'];
+const HOME_MENU_TEXTS = ['最近有哪些活動', '產業趨勢分析', '問技術與洽案', '近期工研院新聞', '媒體邀訪需求', '找真人', '使用說明'];
+const CAL_TAIL_TEXTS = ['產業趨勢分析', '問技術與洽案', '媒體邀訪需求', '找真人', '使用說明'];
 function chipsLookRight(chips, expectContent) {
   const texts = qrTexts(chips);
   return texts[0] === '回首頁' && texts[1] === '最近有哪些活動' &&
@@ -133,7 +133,7 @@ out = await send('回首頁');
 check('「回首頁」→ 解除綁定並列清單',
   out[0]?.kind === 'text' && /已經回到首頁/.test(out[0].text), JSON.stringify(out));
 check('回覆也點出產業趨勢／技術這兩個入口，不是只提活動（回報的意見：這裡不是只能問活動）',
-  /產業趨勢分析/.test(out[0]?.text || '') && /想問什麼技術/.test(out[0]?.text || ''), out[0]?.text);
+  /產業趨勢分析/.test(out[0]?.text || '') && /問技術與洽案/.test(out[0]?.text || ''), out[0]?.text);
 check('綁定真的被清掉', !state.bindings.get('U_reporter')?.bound_at,
   JSON.stringify(state.bindings.get('U_reporter')));
 
@@ -283,8 +283,8 @@ check('職員問「最近有發什麼新聞稿」→ 既不是職員功能清單
   !out.some(o => o.kind === 'text' && /【管理】|職員模式可以做這些事|【近期活動】/.test(o.text)),
   JSON.stringify(out));
 check('職員問新聞稿 → 真的去抓工研院官網新聞中心的最新清單',
-  out.some(o => o.sys?.includes('工研院官網新聞中心 最新新聞')),
-  JSON.stringify(out.map(o => o.sys?.slice(0, 60))));
+  out.some(o => o.kind === 'text' && /近期工研院新聞/.test(o.text) && o.text.includes('工研院攜AMRA打造足型機器人新標準')),
+  JSON.stringify(out.map(o => o.text?.slice(0, 60))));
 
 reset(); await freshModule();
 state.staff.push(['U_staff', '', '2026-08-27', '', '']);
@@ -499,7 +499,7 @@ out = await sendGroup('@我', { mentionSelf: true, mentionText: '@我' });
 check('只 @ 沒接問題 → 友善自我介紹，同時帶出「最近活動」與「媒體邀訪需求」兩種可以問的方向，不會噴例外或送空白問題給 AI',
   out[0]?.kind === 'text' && /米亞/.test(out[0].text) && /最近有哪些活動/.test(out[0].text) && /媒體邀訪需求/.test(out[0].text),
   JSON.stringify(out));
-check('只 @ 沒接問題也附快速回覆按鈕，記者不用自己打字就能點問（含新增的產業趨勢分析／想問什麼技術）',
+check('只 @ 沒接問題也附快速回覆按鈕，記者不用自己打字就能點問（含產業趨勢分析／問技術與洽案／近期工研院新聞）',
   JSON.stringify(qrTexts(out[0]?.quickReply)) === JSON.stringify(HOME_MENU_TEXTS) /* 批次 84：起點選單，多了找真人 */,
   JSON.stringify(out[0]?.quickReply));
 check('只 @ 沒接問題也算「有回答」，續問視窗要續命——不然按鈕點下去（沒有 @）會被當成沒被 @ 安靜吃掉，按鈕變成按了沒反應',
@@ -1102,7 +1102,7 @@ check('最終回覆附上警語＋公關窗口聯絡資訊，用使用者要求�
 // 該是預設出口，而不是讓記者自己猜下一步要打什麼（見情境 19 的回報截圖）。
 check('最終回覆附快速回覆按鈕（跨路入口／活動列表／媒體邀訪需求），不是只丟一句話就結束',
   out.some(o => o.kind === 'text' && o.quickReply?.[0]?.label === '工研院的半導體技術' &&
-    JSON.stringify(qrTexts(o.quickReply)) === JSON.stringify(['工研院 半導體', '最近有哪些活動', '想問什麼技術', '媒體邀訪需求', '找真人'])),
+    JSON.stringify(qrTexts(o.quickReply)) === JSON.stringify(['技術關鍵字：半導體', '最近有哪些活動', '問技術與洽案', '媒體邀訪需求', '找真人'])),
   JSON.stringify(out));
 
 // 實際回報的問題：點「產業趨勢分析」這顆按鈕，AI 沒有直接摘要最新幾則，反而列了
@@ -1171,50 +1171,48 @@ check('抓取失敗時一樣附上聯絡窗口，不是單純說一句抓不到�
 check('抓取失敗時沒有呼叫 Anthropic 硬答（沒有 answer 這個 kind）',
   !out.some(o => o.kind === 'answer'), JSON.stringify(out));
 
-// ── 情境 18：想問什麼技術（回報的新功能，資料來源見 lib/itri-news.js）───────
+// ── 情境 18：近期工研院新聞（原「想問什麼技術」那一整套，批次 121 搬到這一格；資料來源見 lib/itri-news.js）───────
 // 記者想直接問工研院自己在某項技術上的研發成果，不是在問某一場記者會、也不是在問
 // 整體產業趨勢（那是 industry_trend／情境 17 的事）——資料來源是工研院官網新聞
-// 中心，用記者給的技術名稱當關鍵字去查。跟產業趨勢問答不同，這裡不能直接答：
-// 「想問什麼技術」按鈕本身不是技術名稱，要先問一次、等記者打了名稱才真的去查
-// （見 handleTechQueryMessage() 的說明）。
+// 中心，用記者給的關鍵字去查。「近期工研院新聞」按下去先列最新的，再等記者打關鍵字
+// （見 handleNewsQueryMessage() 的說明）。批次 121 起回覆是程式照官網的字排的（標題＋導言＋短網址），不經過模型。
+// 「想問什麼技術」那顆按鈕現在是「問技術與洽案」（官網產業服務的技術清單），測試在 test-batch121.mjs。
 
 reset(); await freshModule();
-out = await send('想問什麼技術');
-check('1 對 1 按「想問什麼技術」→ 先問想了解哪一項技術，不會直接硬答',
-  out.length === 1 && out[0]?.kind === 'text' && /想了解工研院哪一項技術/.test(out[0].text),
+out = await send('近期工研院新聞');
+check('1 對 1 按「近期工研院新聞」→ 直接列最新新聞（標題＋導言＋短網址），並提示可以打關鍵字',
+  out.length === 1 && out[0]?.kind === 'text' && /近期工研院新聞/.test(out[0].text) && /https:\/\/itri-event-ai\.vercel\.app\/n\/\d+/.test(out[0].text)
+    && /直接輸入關鍵字/.test(out[0].text),
   JSON.stringify(out));
 
 out = await send('機器人');
-check('接著打技術名稱 → 真的去查工研院官網新聞（不是被當成一般提問吃掉）',
+check('接著打關鍵字 → 真的去查工研院官網新聞（不是被當成一般提問吃掉）',
   !out.some(o => o.kind === 'answer' && o.event !== 'unknown'), JSON.stringify(out));
-check('system prompt 帶了工研院官網新聞中心查到的標題與摘要，不是空氣',
-  out.some(o => o.sys?.includes('工研院攜AMRA打造足型機器人新標準') && o.sys?.includes('機器人應用落地的最大課題')),
-  JSON.stringify(out.map(o => o.sys?.slice(0, 60))));
+check('回覆帶了官網新聞中心查到的標題與導言（程式排的，不是模型改寫的）',
+  out.some(o => o.kind === 'text' && o.text.includes('工研院攜AMRA打造足型機器人新標準') && o.text.includes('機器人應用落地的最大課題')),
+  JSON.stringify(out.map(o => o.text?.slice(0, 60))));
 check('最終回覆比對到「機器人」這個技術領域的專屬窗口（不是只給一句「請洽媒體邀訪窗口」）',
   out.some(o => o.kind === 'text' && /譚宇哲/.test(o.text) && /03-3333333/.test(o.text)),
   JSON.stringify(out));
 
-// 實際回報（附截圖）：按鈕引導流程問「請問您想了解工研院哪一項技術呢？」之後，
-// 記者不是照範例打單一技術名稱，而是打一整句「最近的國際合作」——這條路徑不經過
-// routeIntent()，下面「工研院半導體有什麼新聞嗎」那段（PR #32）的關鍵字抽取只補
-// 了自然語言那條路，按鈕流程當時沒補到。實測過真的官網：「最近的國際合作」查 0
-// 筆，去掉語助詞的「國際合作」查得到——用 itriKeywordMustInclude 模擬這個真實
-// 落差，驗證 fetchItriNews() 查無資料時真的會去語助詞重試一次，不用逼呼叫端自己
-// 保證是乾淨關鍵字，見 lib/itri-news.js fetchItriNews() 的說明。
+// 實際回報（附截圖）：按鈕引導流程問之後，記者不是照範例打單一關鍵字，而是打一整句
+// 「最近的國際合作」——實測過真的官網：「最近的國際合作」查 0 筆，去掉語助詞的「國際合作」
+// 查得到。用 itriKeywordMustInclude 模擬這個真實落差，驗證 fetchNewsPage() 查無資料時
+// 真的會去語助詞重試一次，不用逼呼叫端自己保證是乾淨關鍵字。
 reset(); await freshModule();
 state.itriKeywordMustInclude = '國際合作';
-await send('想問什麼技術');
-out = await send('最近的國際合作');
+await send('近期工研院新聞');   // 這個假官網只在關鍵字含「國際合作」時才回清單，所以這一步列不出來、也不會等關鍵字
+out = await send('新聞關鍵字：最近的國際合作');
 check('按鈕引導流程回一整句（含語助詞）→ 去語助詞重試後查得到，不會誤報查無資料',
   !out.some(o => o.kind === 'text' && /沒有找到跟/.test(o.text)), JSON.stringify(out));
-check('重試查到的清單真的餵給 AI，不是空氣',
-  out.some(o => o.sys?.includes('工研院攜AMRA打造足型機器人新標準')),
-  JSON.stringify(out.map(o => o.sys?.slice(0, 60))));
+check('重試查到的清單真的排進回覆，不是空氣',
+  out.some(o => o.kind === 'text' && o.text.includes('工研院攜AMRA打造足型機器人新標準')),
+  JSON.stringify(out.map(o => o.text?.slice(0, 60))));
 
 // 群組：按鈕在續問視窗內一樣接得住，不用重新 @——跟「邀訪：其他」自由輸入同一套
 // 一次性旗標機制（見 handleTechQueryMessage() 的說明）。
 reset(); await freshModule();
-await sendGroup('@我 想問什麼技術', { mentionSelf: true, mentionText: '@我 ' });
+await sendGroup('@我 近期工研院新聞', { mentionSelf: true, mentionText: '@我 ' });
 out = await sendGroup('機器人', { mentionSelf: false });
 check('群組續問視窗內（沒 @）打技術名稱 → 照樣答得到，不會被安靜擋掉',
   out.some(o => o.kind === 'text' && /譚宇哲/.test(o.text)), JSON.stringify(out));
@@ -1230,7 +1228,7 @@ await sendGroup('@我 媒體邀訪需求', { mentionSelf: true, mentionText: '@�
 await sendGroup('邀訪：產業趨勢分析', { mentionSelf: false });
 out = await sendGroup('技術呢', { mentionSelf: false });
 check('群組續問視窗內（沒 @）打「技術呢」→ 先問想了解哪一項技術，不會被安靜擋掉',
-  out.length === 1 && out[0]?.kind === 'text' && /想了解工研院哪一項技術/.test(out[0]?.text || ''),
+  out.length === 1 && out[0]?.kind === 'text' && /想找工研院哪方面的技術/.test(out[0]?.text || ''),
   JSON.stringify(out));
 
 // 自然語言直接問（不用先按按鈕）：問句裡明確提到「工研院」，routeIntent() 判成
@@ -1249,8 +1247,8 @@ check('1 對 1 自然語言直接問「工研院在ＸＸ技術上」→ 不用�
 reset(); await freshModule();
 out = await send('工研院半導體有什麼新聞嗎');
 check('自然語言問句帶語助詞 → 送去查／送給 AI 回答的是抽出來的關鍵字，不是整句原話',
-  out.some(o => o.kind === 'answer' && o.question === '半導體'),
-  JSON.stringify(out.map(o => ({ kind: o.kind, question: o.question }))));
+  out.some(o => o.kind === 'text' && /工研院新聞｜「半導體」/.test(o.text)),
+  JSON.stringify(out.map(o => ({ kind: o.kind, text: o.text?.slice(0, 40) }))));
 
 // 已經綁定某場活動時自然語言問技術題——不該被硬塞進當前活動的問答（那場的知識庫
 // 跟機器人技術無關），也不該打亂原本的活動綁定，跟情境 17 產業趨勢那段同一個道理。
@@ -1267,8 +1265,7 @@ check('答完技術題，活動綁定沒有被打亂，下一題還是原本那�
 // 要老實說查不到，不是網站壞了，也不能硬答或裝死。
 reset(); await freshModule();
 state.itriHtml = '';
-await send('想問什麼技術');
-out = await send('這個技術官網完全沒報導過');
+out = await send('新聞關鍵字：這個技術官網完全沒報導過');
 check('查無資料時老實說查不到，不會硬答或裝死',
   out.length === 1 && out[0]?.kind === 'text' && /沒有找到跟「這個技術官網完全沒報導過」直接相關的報導/.test(out[0].text),
   JSON.stringify(out));
@@ -1279,8 +1276,7 @@ check('查無資料時沒有呼叫 Anthropic 硬答（跟「抓取失敗」不�
 // 跟情境 17 IEK 抓取失敗那段同一個原則。
 reset(); await freshModule();
 state.itriFetchFail = true;
-await send('想問什麼技術');
-out = await send('機器人');
+out = await send('新聞關鍵字：機器人');
 check('抓取失敗時誠實告知抓不到資料，不會噴例外讓記者什麼都收不到',
   out.length > 0 && out[0]?.kind === 'text' && /暫時抓不到工研院官網的最新資料/.test(out[0].text), JSON.stringify(out));
 check('抓取失敗時沒有呼叫 Anthropic 硬答',
@@ -1302,21 +1298,20 @@ reset(); await freshModule();
 out = await send('最近工研院有哪些新聞');
 check('1 對 1 問「最近工研院有哪些新聞」→ 不會回成【近期活動】行事曆',
   !out.some(o => o.kind === 'text' && /近期活動/.test(o.text)), JSON.stringify(out));
-check('拿去問 AI 的是工研院官網新聞中心的最新清單，不是空氣',
-  out.some(o => o.sys?.includes('工研院官網新聞中心 最新新聞')
-    && o.sys?.includes('工研院攜AMRA打造足型機器人新標準')),
-  JSON.stringify(out.map(o => o.sys?.slice(0, 60))));
+check('回的是工研院官網新聞中心的最新清單（程式排的），不是空氣',
+  out.some(o => o.kind === 'text' && /近期工研院新聞/.test(o.text) && o.text.includes('工研院攜AMRA打造足型機器人新標準')),
+  JSON.stringify(out.map(o => o.text?.slice(0, 60))));
 
 reset(); await freshModule();
 out = await send('最近發的新聞稿麼');   // ← 記者接著追問的那一句，原字不改
 check('記者追問的「最近發的新聞稿麼」也走到最新新聞清單',
-  out.some(o => o.sys?.includes('工研院官網新聞中心 最新新聞')), JSON.stringify(out));
+  out.some(o => o.kind === 'text' && /近期工研院新聞/.test(o.text)), JSON.stringify(out));
 
 // 群組：回報那則就是在群組裡打的（帶著「米亞」開頭）。
 reset(); await freshModule();
 out = await sendGroup('@我 最近工研院有哪些新聞', { mentionSelf: true, mentionText: '@我 ' });
 check('群組問「最近工研院有哪些新聞」→ 走最新新聞清單，不是行事曆',
-  out.some(o => o.sys?.includes('工研院官網新聞中心 最新新聞'))
+  out.some(o => o.kind === 'text' && /近期工研院新聞/.test(o.text))
     && !out.some(o => o.kind === 'text' && /近期活動/.test(o.text)), JSON.stringify(out));
 
 // ⚠️ 這一條才是這個修法真正的風險所在：**有主題的問題不可以被搶走**。
@@ -1325,19 +1320,19 @@ check('群組問「最近工研院有哪些新聞」→ 走最新新聞清單，
 reset(); await freshModule();
 out = await send('工研院半導體有什麼新聞嗎');
 check('有技術主題的「工研院半導體有什麼新聞嗎」沒有被最新清單搶走，照樣用「半導體」去查',
-  out.some(o => o.kind === 'answer' && o.question === '半導體')
-    && !out.some(o => o.sys?.includes('工研院官網新聞中心 最新新聞')),
-  JSON.stringify(out.map(o => ({ kind: o.kind, question: o.question }))));
+  out.some(o => o.kind === 'text' && /工研院新聞｜「半導體」/.test(o.text))
+    && !out.some(o => o.kind === 'text' && /📰 近期工研院新聞/.test(o.text)),
+  JSON.stringify(out.map(o => ({ kind: o.kind, text: o.text?.slice(0, 40) }))));
 
-// 第二層：按了「想問什麼技術」，記者打的卻是「新聞稿」這種泛稱。以前會拿「新聞稿」
+// 第二層：按了「近期工研院新聞」，記者打的卻是「新聞稿」這種泛稱。以前會拿「新聞稿」
 // 三個字去官網搜尋——官網是字面比對，撈回來的必然是雜訊（NO_DATA_GENERIC 當初就是
 // 為了這個而存在，只是那道守門只擋補查那條路，沒擋到這裡）。現在改成列最新清單，
 // 那才是打這三個字的人真正想要的東西。
 reset(); await freshModule();
-await send('想問什麼技術');
+await send('近期工研院新聞');
 out = await send('新聞稿');
-check('按「想問什麼技術」後打泛稱「新聞稿」→ 給最新新聞清單，不是拿三個字去搜尋撈雜訊',
-  out.some(o => o.sys?.includes('工研院官網新聞中心 最新新聞'))
+check('按「近期工研院新聞」後打泛稱「新聞稿」→ 給最新新聞清單，不是拿三個字去搜尋撈雜訊',
+  out.some(o => o.kind === 'text' && /📰 近期工研院新聞/.test(o.text))
     && !out.some(o => o.kind === 'text' && /沒有找到跟「新聞稿」/.test(o.text)),
   JSON.stringify(out));
 
@@ -1374,7 +1369,7 @@ check('「太空」被接回產業趨勢那條路（送給 AI 的就是這個詞
   out.some(o => o.kind === 'answer' && o.question === '太空' && o.sys?.includes('IEK 產業情報網')),
   JSON.stringify(out.map(o => ({ kind: o.kind, question: o.question }))));
 check('接回趨勢話題後，回覆一樣附上跨到「工研院技術」那條路的按鈕',
-  out.some(o => o.kind === 'text' && JSON.stringify(o.quickReply?.[0]) === JSON.stringify({ label: '工研院的太空技術', text: '工研院 太空' })),
+  out.some(o => o.kind === 'text' && JSON.stringify(o.quickReply?.[0]) === JSON.stringify({ label: '工研院的太空技術', text: '技術關鍵字：太空' })),
   JSON.stringify(out));
 
 // 技術題那條路對稱：答完之後只打一個技術名詞，一樣要接得回來（不用再打一次
@@ -1386,8 +1381,8 @@ check('答完工研院技術題 → 話題記進 H 欄',
   JSON.stringify(state.bindings.get('U_reporter')));
 out = await send('光通訊');
 check('問完技術題再打一個裸技術名詞 → 接回工研院技術那條路，不用重打「工研院」',
-  out.some(o => o.kind === 'answer' && o.sys?.includes('工研院官網新聞中心 搜尋「光通訊」')),
-  JSON.stringify(out.map(o => ({ kind: o.kind, question: o.question }))));
+  out.some(o => o.kind === 'text' && /工研院新聞｜「光通訊」/.test(o.text)),
+  JSON.stringify(out.map(o => ({ kind: o.kind, text: o.text?.slice(0, 40) }))));
 
 // 綁定中一樣要接得回來：趨勢題不動活動綁定（情境 17 已經驗過），所以下一則裸名詞
 // 會同時看到「currentEventId=quad」跟「上一則在聊趨勢」兩個提示——不處理的話會被
@@ -1412,7 +1407,7 @@ check('沒有任何前文、直接打一個主題詞 → 複誦回去問「趨�
 check('兩條路各給一顆按鈕，按下去送出的文字真的路由得到（趨勢／工研院技術）',
   JSON.stringify(out[0]?.quickReply?.slice(0, 2)) === JSON.stringify([
     { label: '太空的產業趨勢', text: '太空產業趨勢' },
-    { label: '工研院的太空技術', text: '工研院 太空' }
+    { label: '工研院的太空技術', text: '技術關鍵字：太空' }
   ]), JSON.stringify(out[0]?.quickReply));
 check('沒有硬猜一條路直接呼叫 AI 答下去（沒有 answer 這個 kind）',
   !out.some(o => o.kind === 'answer'), JSON.stringify(out));
@@ -1422,9 +1417,9 @@ out = await send('太空產業趨勢');
 check('按「太空的產業趨勢」→ 真的走到產業趨勢那條路',
   out.some(o => o.kind === 'answer' && o.sys?.includes('IEK 產業情報網')), JSON.stringify(out.map(o => o.kind)));
 reset(); await freshModule();
-out = await send('工研院 太空');
-check('按「工研院的太空技術」→ 真的走到工研院技術那條路，關鍵字是「太空」',
-  out.some(o => o.kind === 'answer' && o.sys?.includes('工研院官網新聞中心 搜尋「太空」')),
+out = await send('技術關鍵字：太空');
+check('按「工研院的太空技術」→ 真的走到「問技術與洽案」那條路，關鍵字是「太空」（官網產業服務查不到時老實說）',
+  out.some(o => o.kind === 'text' && /產業服務」目前沒有找到跟「太空」相關的技術/.test(o.text)),
   JSON.stringify(out.map(o => o.kind)));
 
 // 招呼語不能被當成主題詞複誦回去——「『你好』這個題目我可以從兩個方向幫您找」
@@ -1502,13 +1497,13 @@ check('話題記憶還在，但明確指著目前這場（「這場」）→ 照
 
 // 技術題那條路對稱：答完工研院技術題之後的完整問句追問，一樣要接得回來。
 reset(); await freshModule();
-state.answerText = '工研院近期在四足機器人與自主移動機器人（AMR）都有發表，重點放在足型機構與導航演算法。';
+// 批次 121：答案不再是模型寫的一段話，而是官網新聞的標題＋導言節錄（見 answerNewsQuery()）——追問改成指著那份節錄裡的東西
 state.bindings.set('U_reporter', { event_id: 'semi', media_name: '', note: '', bound_at: Date.now() });
 await send('工研院在機器人技術上有什麼進展');
-out = await send('有談到導航演算法嗎');
+out = await send('有談到足型機器人新標準嗎');
 check('答完工研院技術題後的完整問句追問 → 接回 tech_query，不是被拉回綁定中的那場活動',
   !out.some(o => o.kind === 'answer' && o.event === 'semi') &&
-  out.some(o => o.kind === 'answer' && o.sys?.includes('工研院官網新聞中心 搜尋')),
+  out.some(o => o.kind === 'text' && /工研院新聞｜「/.test(o.text)),
   JSON.stringify(out.map(o => ({ kind: o.kind, event: o.event }))));
 state.answerText = '';
 
@@ -1542,7 +1537,7 @@ for (const topic of ['太空', '光通訊', '能源', '太陽能', '量子電腦
     out[0]?.kind === 'text' && out[0].text.includes(`「${topic}」`) &&
     JSON.stringify(out[0]?.quickReply?.slice(0, 2)) === JSON.stringify([
       { label: `${topic}的產業趨勢`, text: `${topic}產業趨勢` },
-      { label: `工研院的${topic}技術`, text: `工研院 ${topic}` }
+      { label: `工研院的${topic}技術`, text: `技術關鍵字：${topic}` }
     ]), JSON.stringify(out));
 }
 
@@ -1667,32 +1662,32 @@ console.log('── 群組的一次性旗標要綁「是誰按的」，別人的
 reset(); await freshModule();
 await sendRaw([{
   type: 'message', replyToken: 'rt1', source: { type: 'group', groupId: 'Cgroup1', userId: 'U_alice' },
-  message: { type: 'text', text: '@我 想問什麼技術', mention: { mentionees: [{ index: 0, length: 3, type: 'user', userId: 'Ubot', isSelf: true }] } }
+  message: { type: 'text', text: '@我 問技術與洽案', mention: { mentionees: [{ index: 0, length: 3, type: 'user', userId: 'Ubot', isSelf: true }] } }
 }]);
-check('A 按了「想問什麼技術」→ 機器人反問想了解哪一項技術',
+check('A 按了「問技術與洽案」→ 機器人反問想了解哪一項技術',
   state.bindings.get('Cgroup1')?.note?.startsWith('await_tech_query'), JSON.stringify(state.bindings.get('Cgroup1')?.note));
 check('旗標有記下是誰按的（群組才加這個後綴）',
   state.bindings.get('Cgroup1')?.note === 'await_tech_query#U_alice', state.bindings.get('Cgroup1')?.note);
 
 out = await sendRaw([{
   type: 'message', replyToken: 'rt2', source: { type: 'group', groupId: 'Cgroup1', userId: 'U_bob' },
-  message: { type: 'text', text: '機器人' }
+  message: { type: 'text', text: '電池' }
 }]);
 check('換 B 講話（沒有 @）→ 不會被當成 A 要查的技術名稱，這是最典型的「亂回」',
-  !out.some(o => o.sys?.includes('工研院官網新聞中心 搜尋')), JSON.stringify(out.map(o => o.kind)));
+  !out.some(o => /電池電極奈米塗層技術/.test(o.text || '')), JSON.stringify(out.map(o => o.kind)));
 check('B 那句話也沒有用掉 A 的旗標，A 回來還接得住',
   state.bindings.get('Cgroup1')?.note === 'await_tech_query#U_alice', state.bindings.get('Cgroup1')?.note);
 
 out = await sendRaw([{
   type: 'message', replyToken: 'rt3', source: { type: 'group', groupId: 'Cgroup1', userId: 'U_alice' },
-  message: { type: 'text', text: '機器人' }
+  message: { type: 'text', text: '電池' }
 }]);
 check('A 自己回來打技術名稱 → 照樣查得到，守門沒有把正主也擋掉',
-  out.some(o => o.sys?.includes('工研院官網新聞中心 搜尋「機器人」')), JSON.stringify(out.map(o => o.kind)));
+  out.some(o => /電池電極奈米塗層技術/.test(o.text || '')), JSON.stringify(out.map(o => o.kind)));
 
 // 1 對 1 不加後綴，舊行為完全不變
 reset(); await freshModule();
-await send('想問什麼技術');
+await send('問技術與洽案');
 check('1 對 1 的旗標不加「是誰按的」後綴（targetId 就是本人，多存一份只是雜訊）',
   state.bindings.get('U_reporter')?.note === 'await_tech_query', state.bindings.get('U_reporter')?.note);
 
@@ -2124,7 +2119,7 @@ out = await sendGroup('@我 這場的重點是什麼', { mentionSelf: true, ment
   check('群組答案的按鈕列有「回首頁」（就是回報說找不到的那條路）', texts.includes('回首頁'), JSON.stringify(chips));
   check('也有「最近有哪些活動」，可以不解除綁定直接看清單換場', texts.includes('最近有哪些活動'), JSON.stringify(chips));
   check('另外兩條路（產業趨勢／問技術）也在，跟 1 對 1 圖文選單同一組', 
-    texts.includes('產業趨勢分析') && texts.includes('想問什麼技術'), JSON.stringify(chips));
+    texts.includes('產業趨勢分析') && texts.includes('問技術與洽案'), JSON.stringify(chips));
   check('邀訪窗口沒有被擠掉', texts.includes('媒體邀訪需求'), JSON.stringify(chips));
   check('⚠️ 往外的兩顆排在最前面（藏在自訂提問後面等於沒有，手機一次只看得到兩三顆）',
     texts[0] === '回首頁' && texts[1] === '最近有哪些活動', JSON.stringify(texts));
@@ -2687,9 +2682,12 @@ out = await send('產業趨勢分析');
 check('★ 版面規則有到「產業趨勢」', sysOf(out, ['answer']).includes(LAYOUT_MARK),
   sysOf(out, ['answer']).slice(0, 80));
 
+// 批次 121：「工研院技術」這條路（新聞搜尋）與新的「問技術與洽案」都不再經過模型——內容是程式照官網的字排的，
+// 沒有模型輸出可以套版面規則；改驗它排得乾淨：每項一個連結、沒有 Markdown 符號。
 out = await send('工研院 機器人');
-check('★ 版面規則有到「工研院技術」', sysOf(out, ['answer']).includes(LAYOUT_MARK),
-  sysOf(out, ['answer']).slice(0, 80));
+check('★ 工研院新聞搜尋不經過模型（沒有 answer），回覆是程式排的版、沒有 Markdown 符號',
+  !out.some(o => o.kind === 'answer') && out.some(o => o.kind === 'text' && /🔗 https:\/\//.test(o.text) && !/[*#`]|\*\*/.test(o.text)),
+  JSON.stringify(out.map(o => o.kind)));
 
 // 官網補查（answerFromItriNews）：要先讓這場「答不出來」才會走到那一支。
 reset(); await freshModule();
@@ -2895,13 +2893,13 @@ reset(); await freshModule();
 state.bindings.set('U_reporter', { event_id: 'quad', media_name: '中央社', note: '', bound_at: Date.now() });
 out = await send('工研院最近有哪些新聞');
 check('綁定中問「工研院最近有哪些新聞」→ 照舊是全院最新新聞（不被釘回這一場）',
-  out[0]?.kind === 'answer' && out[0].event === 'unknown' && /工研院最近發了哪些新聞/.test(out[0].sys || ''),
+  out[0]?.kind === 'text' && /近期工研院新聞/.test(out[0].text || ''),
   JSON.stringify(out.map(o => [o.kind, o.event])));
 // 沒綁定時沒有「這一場」可以回答，維持全站新聞
 reset(); await freshModule();
 out = await send('有新聞稿嗎');
 check('沒綁定時問「有新聞稿嗎」→ 維持原本的全站最新新聞',
-  out[0]?.kind === 'answer' && out[0].event === 'unknown', JSON.stringify(out.map(o => [o.kind, o.event])));
+  out[0]?.kind === 'text' && /近期工研院新聞/.test(out[0].text || ''), JSON.stringify(out.map(o => [o.kind, o.event])));
 // 群組綁定中一樣
 reset(); await freshModule();
 state.bindings.set('Cgroup1', { event_id: 'quad', bound_at: Date.now() });
