@@ -52,5 +52,6 @@ GitHub Actions（`.github/workflows/test.yml`）每個 PR 與 main 推送都會�
 - **管理員與編輯碼的比對一律走 `lib/auth.js`**（`requireAdmin()`、`codeMatches()`），不要自己寫 `password !== …`——那樣在密碼沒設定時會放行。
 - **「絕對不能發生」的事擋在程式出口**，不是寫在 prompt：繁體字（`lib/zh-tw.js` 的 `toTraditionalTW()`）、發布閘門（`lib/event-status.js`）、網頁問答一定要有媒體名稱（`api/chat.js`）、管理員驗證（`lib/auth.js`）。
 - 新增後台頁面時，要把它加進 `vercel.json` 的安全標頭規則（`test/test-batch110.mjs` 會逐頁檢查）。
+- **企業場不出現在記者看得到的地方**：活動類型是企業說明會／技術媒合會／客戶參訪／技術交流會的場次，以及報名對象選「企業」的報名，米亞的清單、公開列表、搜尋引擎都看不到（LINE-PLAN.md 第 8 節，`lib/audience.js`）。新增任何「列出活動」的入口，要先想清楚企業場該不該在裡面。
 - **寫入 Sheets 不是每一種都能重送**：`appendRows()`（加一列）與 `batchUpdate()`（刪列、加分頁）逾時或 500 時不重試，免得多一列或刪錯列（批次 117，見 `lib/sheets.js`）。新增會呼叫模型的地方，記得接 `logAiUsage()`（`test-batch117` 會檢查）。
 - 紀錄要寫：改了什麼、為什麼、踩到什麼坑——寫在 `docs/batches/`，不是 commit message（見 CLAUDE.md 第 5 條）。

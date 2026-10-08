@@ -5,7 +5,8 @@
 //   2. 沒帶 → 維持原本一次回傳 { reply } 的 JSON（舊前端／外部呼叫者不會被打斷）
 
 import { appendRows, warmAuth } from '../lib/sheets.js';
-import { buildSystemPrompt, resolveEventContent, formatEventBasics } from '../lib/prompt.js';
+import { systemPromptFor, resolveEventContent, formatEventBasics } from '../lib/prompt.js';
+import { isBusinessEvent, guardBusinessAnswer } from '../lib/audience.js';
 import { toTraditionalTW, createTraditionalStream, ZH_TW_RULE } from '../lib/zh-tw.js';
 import { reportAiFailure } from '../lib/ai-alert.js';
 import { readEventRows } from '../lib/events-table.js';
@@ -51,7 +52,9 @@ async function fetchEventConfig(eventId) {
     knowledge_base: row[3] || '', status: row[4] || 'active', event_date: row[5] || '',
     organizer: row[9] || '工研院', images: row[7] || '', invite_letter: row[16] || '',
     // 時間、地點、新聞聯絡人（批次 72）：記者問「幾點開始／在哪裡」時答得出來，見 formatEventBasics()
-    event_time: row[11] || '', venue: row[12] || '', press_contact: row[14] || ''
+    event_time: row[11] || '', venue: row[12] || '', press_contact: row[14] || '',
+    // 活動類型（批次 118）：企業場換一份 prompt、出口擋報價，見 lib/audience.js
+    event_type: row[13] || ''
   };
 }
 
@@ -204,7 +207,10 @@ export default async function handler(req, res) {
     const event = resolveEventContent(rawEvent);
 
     const eventName = event.name;
-    const systemPrompt = buildSystemPrompt(event);
+    // 企業場（批次 118）：企業版的規則；答案要先整則過出口檢查（背景資料沒有的金額＝報價，整則換掉），
+    // 所以不串流——串流的字一送出去就收不回來。企業場的流量小，慢幾秒換一個不會說錯價的保證。
+    const business = isBusinessEvent(event);
+    const systemPrompt = systemPromptFor(event);
     const basicsBlock = formatEventBasics(event);
     const question = [...trimmed].reverse().find(m => m.role === 'user')?.content || '';
 
@@ -224,7 +230,7 @@ export default async function handler(req, res) {
       body: JSON.stringify({
         model: CHAT_MODEL,
         max_tokens: 4096,
-        stream: !!stream,
+        stream: !!stream && !business,
         // 知識庫在 60 秒快取視窗內逐 byte 穩定，加 ephemeral cache 讓同場記者連續發問時
         // 讀取只收 0.1 倍價（記者會現場正是這種「同一份知識庫、多人連續提問」的場景）。
         // ZH_TW_RULE 是固定字串，放進這塊不影響快取。
@@ -249,12 +255,13 @@ export default async function handler(req, res) {
       return res.status(response.status).json({ error: friendlyApiError(response.status) });
     }
 
-    if (!stream) {
+    if (!stream || business) {
       const data = await response.json();
       logAiUsage('網頁問答', CHAT_MODEL, data.usage); // 批次 117
       // 不能寫死 content[0]：第一塊不保證是文字（見 api/line.js askAnthropic() 的說明）
       const text = (data.content || []).filter(b => b?.type === 'text').map(b => b.text).join('\n').trim();
       reply = toTraditionalTW(text) || '抱歉，無法取得回應。';
+      if (business && text) reply = guardBusinessAnswer(reply, event).text;
       await logQA({ ...logCtx, reply });
       return res.status(200).json({ reply });
     }

@@ -46,11 +46,12 @@
 import { timingSafeEqual } from 'crypto';
 import { toTraditionalTW } from '../lib/zh-tw.js';
 import { readRawBody, verifySignature, replyOrPushMessages, startLoading, isBotMentioned } from '../lib/line.js';
-import { buildCalendarCards, routeIntent } from '../lib/router.js';
+import { buildCalendarCards, buildCalendarCardsFor, routeIntent } from '../lib/router.js';
 import { matchEventByName, buildWelcomeFlex } from '../lib/menu.js';
 import { listOpenCampaigns, parseRegBindText, parseRegBindCheck, welcomeButtonLabel } from '../lib/registration.js';
 import { autoSyncRegistrationMenu } from '../lib/richmenu-sync.js';
 import { isPasscodeMatch, isStaffAuthenticated, authenticateStaff } from '../lib/staff.js';
+import { isBusinessEvent } from '../lib/audience.js';
 import { sanitize } from '../lib/line-format.js';
 import {
   CHITCHAT_FIXED_REPLIES, detectBoundChitchat, looksLikeNameOrSkip, mediaNameOf, nonTextReply
@@ -235,8 +236,12 @@ async function handleEvent(ev) {
     const event = await findEventByCode(code);
     if (isUsable(event)) {
       await upsertBinding(userId, event.id, 'ask_name');
+      // 企業場（批次 118）問公司或單位，不問媒體——對方不是記者
+      const who = isBusinessEvent(event)
+        ? '請問您是哪家公司或單位？（方便活動窗口後續聯繫，打公司名稱即可，或點「略過」）'
+        : '請問您是哪家媒體？（方便新聞聯絡人後續服務，打媒體名稱即可，或點「略過」）';
       await replyOrPush(replyToken, userId,
-        `已為您接上《${event.name}》✅\n\n請問您是哪家媒體？（方便新聞聯絡人後續服務，打媒體名稱即可，或點「略過」）\n\n之後就可以直接問問題了。`,
+        `已為您接上《${event.name}》✅\n\n${who}\n\n之後就可以直接問問題了。`,
         mediaNameChips(event));
       return;
     }
@@ -372,7 +377,7 @@ async function handleEvent(ev) {
   const routed = isFullTextAsk(text)
     ? { intent: 'qa', event_ids: [event.id], confidence: 'high' }
     : pinGenericTechQueryToEvent(
-      await routeIntent(text, buildCalendarCards(await getAllEventRows()),
+      await routeIntent(text, buildCalendarCardsFor(await getAllEventRows(), event.id),
         { currentEventId: event.id, ...(await recentTopicContext(userId)) }),
       text, event.id);
 

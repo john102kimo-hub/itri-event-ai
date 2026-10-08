@@ -28,6 +28,7 @@ import { handleRegistrationRequest } from '../lib/registration-api.js';
 import { publishBlockers, isPublishing, taipeiToday, PUBLIC_STATUSES } from '../lib/event-status.js';
 import { effectiveChips } from '../lib/default-chips.js';
 import { kbHasContent } from '../lib/kb-template.js';
+import { isBusinessEvent } from '../lib/audience.js';
 import { readEventRows, invalidateEventsTable, EVENTS_RANGE } from '../lib/events-table.js';
 import { requireAdmin, passwordFrom, codeMatches, authBlocked, authFailed, tooManyAttempts } from '../lib/auth.js';
 
@@ -190,6 +191,8 @@ export default async function handler(req, res) {
             }).join('\n'),
             images: publicFields.images, greeting: row[8] || '',
             event_time: row[11] || '', venue: row[12] || '', event_type: row[13] || '', press_contact: row[14] || '',
+            // 企業場（批次 118）：活動頁問「公司／單位」不問媒體，字樣不寫記者會，見 lib/audience.js
+            audience: isBusinessEvent(row[13]) ? 'business' : 'media',
             // 「用 LINE 問」的入口（沒設定 LINE_BASIC_ID 時是空字串，前台就不顯示）
             line_url: lineBindUrl(row[0])
           }
@@ -219,7 +222,8 @@ export default async function handler(req, res) {
         // 合辦單位，不能變成一把看所有場次的鑰匙（SETUP.md：同仁看不到其他活動）。
         if (req.query.copy_from) {
           const srcRow = rows.find(r => r[0] === req.query.copy_from);
-          if (srcRow && PUBLIC_STATUSES.includes(srcRow[4] || 'active')) {
+          // 企業場（批次 118）也不給：給客戶看的內容不能被另一場的編輯連結拿走（見 lib/audience.js）
+          if (srcRow && PUBLIC_STATUSES.includes(srcRow[4] || 'active') && !isBusinessEvent(srcRow[13])) {
             const pub = resolveEventContent({
               status: srcRow[4] || 'active', event_date: srcRow[5] || '',
               knowledge_base: srcRow[3] || '', chips: srcRow[6] || '', images: '',
@@ -281,8 +285,9 @@ export default async function handler(req, res) {
       // ⚠️ chips／images 跟 get_public 一樣先過 resolveEventContent()：活動前（邀請函模式）
       // 不給正式照片。以前只有 get_public 擋了，這支沒擋——活動前的正式照片網址打一次
       // /api/events 就全部拿得到，批次 10.1「公開頁面也要擋」等於只擋了一半。
+      // 企業場（批次 118）不列：這是公開、免登入的端點，客戶參訪的活動名稱常常就是客戶的名字（見 lib/audience.js）
       const events = rows
-        .filter(r => r[0] && r[4] !== 'archived' && r[4] !== 'draft')
+        .filter(r => r[0] && r[4] !== 'archived' && r[4] !== 'draft' && !isBusinessEvent(r[13]))
         .map(r => {
           const pub = resolveEventContent({
             status: r[4] || 'active', event_date: r[5] || '',

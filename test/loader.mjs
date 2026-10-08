@@ -12,6 +12,8 @@ function versionOf(url) {
 }
 
 export async function resolve(specifier, context, next) {
+  // 批次 118：api/events.js（公開活動列表）會 import @vercel/blob，node_modules 不一定有裝——換成空殼（同 loader-82）
+  if (specifier === '@vercel/blob' || specifier === '@vercel/blob/client') return { url: 'stub:blob', shortCircuit: true };
   const r = await next(specifier, context);
   const v = versionOf(context.parentURL);
   const bust = u => (v ? u + (u.includes('?') ? '&' : '?') + 'v=' + v : u);
@@ -38,6 +40,9 @@ export function lineStateBust(parentURL, url) {
 }
 
 export async function load(url, context, next) {
+  if (url === 'stub:blob') {
+    return { format: 'module', shortCircuit: true, source: 'export async function del() {}\nexport async function put() { return { url: "" }; }\nexport async function handleUpload() { return {}; }' };
+  }
   if (url.includes('?stub=sheets')) {
     return {
       format: 'module', shortCircuit: true,
@@ -46,7 +51,10 @@ export const readRange = (...a) => sheets.readRange(...a);
 export const readRanges = (rs) => Promise.all(rs.map((r) => sheets.readRange(r)));
 export const appendRows = (...a) => sheets.appendRows(...a);
 export const updateRange = (...a) => sheets.updateRange(...a);
-export const ensureSheets = (...a) => sheets.ensureSheets(...a);`
+export const ensureSheets = (...a) => sheets.ensureSheets(...a);
+export const warmAuth = () => Promise.resolve();
+export const listSheets = async () => [];
+export const batchUpdate = async () => ({});`
     };
   }
   if (url.includes('?stub=photo')) {

@@ -787,7 +787,12 @@ details.adv[open] > summary { border-bottom:1px solid var(--border); margin-bott
             <option value="發表會"></option>
             <option value="論壇"></option>
             <option value="參訪"></option>
+            <option value="企業說明會"></option>
+            <option value="技術媒合會"></option>
+            <option value="客戶參訪"></option>
+            <option value="技術交流會"></option>
           </datalist>
+          <div class="form-hint">選「企業說明會／技術媒合會／客戶參訪／技術交流會」＝企業場：活動頁問公司名稱、AI 不報價，不算進媒體統計，也不在米亞給記者的活動清單裡</div>
         </div>
         <div class="form-group">
           <label><i class="ti ti-building"></i> 主辦單位</label>
@@ -1164,6 +1169,9 @@ const PAST_COLLAPSED_COUNT = 3;
 
 function eventCardHtml(ev, ctx) {
   const { count, today } = ctx;
+  // 企業場（批次 118）：清單跟 lib/audience.js 的 BUSINESS_EVENT_TYPES 同一份（瀏覽器端不能 import lib/，
+  // test-batch118 比對兩邊不准漂開）
+  const business = ['企業說明會', '技術媒合會', '客戶參訪', '技術交流會'].includes(String(ev.event_type || '').trim());
   const meta = eventStatusMeta(ev);
   const color = /^#[0-9A-Fa-f]{6}$/.test(ev.color || '') ? ev.color : '#0F9E7A';
   const id = escHtml(ev.id);
@@ -1220,6 +1228,7 @@ function eventCardHtml(ev, ctx) {
         <div class="event-card-header">
           <div class="event-name">${escHtml(ev.name)}</div>
           <span class="status-badge ${meta.badgeClass}">${meta.badgeText}</span>
+          ${business ? '<span class="status-badge" style="background:#eef2ff;color:#3730a3" title="活動頁問公司名稱、AI 不報價、不算進媒體統計，也不在米亞給記者的活動清單裡（要讓人問，給活動頁網址或 LINE QR）">企業場</span>' : ''}
         </div>
         <div class="event-meta">${metaBits.join('')}</div>
         ${ready}
@@ -1574,7 +1583,7 @@ function renderAnalytics(data, eid) {
     </div>
 
     <div class="qa-box">
-      <div class="section-title"><i class="ti ti-building-newspaper" style="color:var(--primary)"></i> 媒體排行 <span style="font-size:0.74rem;font-weight:400;color:var(--muted)">（同一家併在一起）</span></div>
+      <div class="section-title"><i class="ti ti-building-newspaper" style="color:var(--primary)"></i> ${data.audience === 'business' ? '單位排行' : '媒體排行'} <span style="font-size:0.74rem;font-weight:400;color:var(--muted)">（同一家併在一起${data.business_qa ? `；企業場的 ${data.business_qa} 則不算進來` : ''}）</span></div>
       ${data.top_media?.length ? data.top_media.map(m => `
       <div class="media-bar">
         <div class="media-bar-label" title="${escHtml(m.name)}">${escHtml(m.name)}</div>
@@ -1595,7 +1604,7 @@ function renderAnalytics(data, eid) {
     </div>
     <div class="qa-summary">
       <span>共 <b>${data.total}</b> 則</span>
-      <span>服務 <b>${data.media_total ?? 0}</b> 家媒體</span>
+      <span>服務 <b>${data.media_total ?? 0}</b> 家${data.audience === 'business' ? '單位' : '媒體'}</span>
       <span>疑似答不出來 <b style="color:${unans ? '#c2410c' : 'inherit'}">${unans}</b> 則${unans ? ' <button class="linkbtn" onclick="filterUnanswered()">只看這些</button>' : ''}</span>
     </div>
     <div id="dirty-media-panel" style="display:none;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:14px;margin-bottom:16px"></div>

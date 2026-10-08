@@ -499,6 +499,31 @@ let contactText = '';     // 活動資料裡的新聞聯絡人；AI 答不出來
 let isWaiting = false;
 let conversationStarted = false;
 
+// 企業場（批次 118，見 lib/audience.js）：對象是企業的工程師與主管，不是記者——問「公司／單位」、
+// 字樣不寫記者會與新聞聯絡人。後端 get_public 的 audience 決定用哪一組；預設是記者那組。
+const WORDS_MEDIA = {
+  assistant: 'AI 新聞助理', ended: '記者會已結束', who: '媒體', contact: '新聞聯絡人',
+  modalTitle: '先留下您的媒體與姓名', modalSub: '填寫後即可向 AI 提問，所有資訊隨問隨答。<br>只用來統計服務了哪些媒體，不會公開。',
+  modalLabel: '媒體／單位', modalPlaceholder: '例：經濟日報（貴賓請寫單位）', bannerPlaceholder: '媒體／單位（必填）'
+};
+const WORDS_BUSINESS = {
+  assistant: 'AI 技術說明助理', ended: '活動已結束', who: '單位', contact: '活動窗口',
+  modalTitle: '先留下您的公司與姓名', modalSub: '填寫後即可向 AI 提問，所有資訊隨問隨答。<br>只用來統計服務了哪些單位，不會公開。',
+  modalLabel: '公司／單位', modalPlaceholder: '例：○○科技（請寫公司全名）', bannerPlaceholder: '公司／單位（必填）'
+};
+let WORDS = WORDS_MEDIA;
+function applyAudienceWords(event) {
+  if (event.audience !== 'business') return;
+  WORDS = WORDS_BUSINESS;
+  document.getElementById('media-modal-title').textContent = WORDS.modalTitle;
+  document.getElementById('media-modal-sub').innerHTML = WORDS.modalSub;
+  document.querySelector('label[for="media-modal-input"]').firstChild.textContent = WORDS.modalLabel;
+  document.getElementById('media-modal-input').placeholder = WORDS.modalPlaceholder;
+  document.querySelector('label[for="media-input"]').lastChild.textContent = ` ${WORDS.who}：`;
+  document.getElementById('media-input').placeholder = WORDS.bannerPlaceholder;
+  document.getElementById('header-icon').className = 'ti ti-building';
+}
+
 // 圖示字型（Tabler）是從 CDN 載的：會場網路擋 CDN、或 LINE 內建瀏覽器載入失敗時，沒有文字陪伴的
 // 圖示鈕會變成一個空白方塊——送出鈕就是這樣，記者看不出那是什麼。這幾個沒有文字的圖示改內嵌 SVG，
 // 不靠外部字型（有文字的按鈕與裝飾用的圖示照舊用字型，載不到只是少了小圖示）。
@@ -531,7 +556,7 @@ function lockUntilMedia() {
   const btn = document.getElementById('send-btn');
   inp.disabled = true;
   btn.disabled = true;
-  inp.placeholder = '請先填寫上方「媒體」，再開始提問…';
+  inp.placeholder = `請先填寫上方「${WORDS.who}」，再開始提問…`;
 }
 function unlockChat() {
   const inp = document.getElementById('user-input');
@@ -569,14 +594,15 @@ async function init() {
     // 只剩一篇新聞稿存檔——記者會後才來補問的人（最常見的是隔天交稿前確認數字）反而問不到，
     // 只能去 LINE 或打電話。新聞稿存檔（給搜尋引擎與 AI 爬蟲的那篇，見 api/event-page.js）改成標題列上
     // 的一顆按鈕，點了才整頁展開；伺服器端 api/chat.js 本來就沒擋已結束的活動。
+    applyAudienceWords(event);
     const ended = event.status === 'ended';
     const hasArchive = ended && !!document.getElementById('geo-article');
     if (hasArchive) setupArchive(document.getElementById('geo-article'));
 
     document.getElementById('event-title').textContent = event.name;
-    document.getElementById('event-subtitle').textContent = ended ? '記者會已結束 · 仍可提問' : 'AI 新聞助理 · 無需登入';
+    document.getElementById('event-subtitle').textContent = ended ? `${WORDS.ended} · 仍可提問` : `${WORDS.assistant} · 無需登入`;
     document.getElementById('welcome-name').textContent = event.name;
-    document.title = event.name + ' — AI 新聞助理';
+    document.title = event.name + ' — ' + WORDS.assistant;
     contactText = String(event.press_contact || '').trim();
     const welcomeEl = document.getElementById('welcome');
     if (ended) {
@@ -584,13 +610,13 @@ async function init() {
       note.className = 'welcome-contact';
       note.textContent = hasArchive
         ? '記者會已結束，新聞稿已存檔（右上角「新聞稿存檔」可看全文）；您仍然可以直接提問。'
-        : '記者會已結束；您仍然可以直接提問。';
+        : `${WORDS.ended}；您仍然可以直接提問。`;
       welcomeEl.appendChild(note);
     }
     if (contactText) {
       const c = document.createElement('div');
       c.className = 'welcome-contact';
-      c.appendChild(document.createTextNode('AI 答不出來時，可直接聯絡新聞聯絡人：'));
+      c.appendChild(document.createTextNode(`AI 答不出來時，可直接聯絡${WORDS.contact}：`));
       c.appendChild(contactNode(contactText));
       welcomeEl.appendChild(c);
     }
@@ -846,7 +872,7 @@ function addHumanHelp(wrap) {
   row.className = 'human-help';
   row.innerHTML = ICON.phone;
   const label = document.createElement('span');
-  label.textContent = '需要真人協助？新聞聯絡人：';
+  label.textContent = `需要真人協助？${WORDS.contact}：`;
   row.appendChild(label);
   row.appendChild(contactNode(contactText));
   wrap.appendChild(row);
@@ -917,7 +943,7 @@ function startConversation() {
   if (saved.length) { restoreChat(saved); return; }
   if (_pendingEvent) {
     const greeting = _pendingEvent.greeting
-      || ('您好！我是「' + _pendingEvent.name + '」的 AI 新聞助理。有任何問題歡迎直接提問！');
+      || ('您好！我是「' + _pendingEvent.name + '」的 ' + WORDS.assistant + '。有任何問題歡迎直接提問！');
     addMessage('ai', greeting);
   }
 }
