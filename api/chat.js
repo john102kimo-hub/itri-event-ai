@@ -8,7 +8,7 @@ import { appendRows, warmAuth } from '../lib/sheets.js';
 import { systemPromptFor, resolveEventContent, formatEventBasics } from '../lib/prompt.js';
 import { isBusinessEvent, guardBusinessAnswer } from '../lib/audience.js';
 import { toTraditionalTW, createTraditionalStream, ZH_TW_RULE } from '../lib/zh-tw.js';
-import { reportAiFailure } from '../lib/ai-alert.js';
+import { reportAiFailure, BUSINESS_KEY_NAME } from '../lib/ai-alert.js';
 import { readEventRows } from '../lib/events-table.js';
 import { logAiUsage } from '../lib/ai-usage.js';
 
@@ -210,6 +210,8 @@ export default async function handler(req, res) {
     // 企業場（批次 118）：企業版的規則；答案要先整則過出口檢查（背景資料沒有的金額＝報價，整則換掉），
     // 所以不串流——串流的字一送出去就收不回來。企業場的流量小，慢幾秒換一個不會說錯價的保證。
     const business = isBusinessEvent(event);
+    // 企業場（批次 119）：有設 ANTHROPIC_API_KEY_BUSINESS 就用那一把，費用與每月上限跟記者那邊分開（見 lib/line-runtime.js askAnthropic()）
+    const businessKey = business && !!process.env.ANTHROPIC_API_KEY_BUSINESS;
     const systemPrompt = systemPromptFor(event);
     const basicsBlock = formatEventBasics(event);
     const question = [...trimmed].reverse().find(m => m.role === 'user')?.content || '';
@@ -220,7 +222,7 @@ export default async function handler(req, res) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-api-key': apiKey,
+        'x-api-key': businessKey ? process.env.ANTHROPIC_API_KEY_BUSINESS : apiKey,
         'anthropic-version': '2023-06-01'
       },
       // 涵蓋「等回應」與「讀串流」兩段：時間到，下面的 reader.read() 一樣會丟例外，
@@ -251,13 +253,14 @@ export default async function handler(req, res) {
         detail = j.error?.message || '';
       } catch (e) { /* 回應不是 JSON 就沒有細節可記 */ }
       console.error('Anthropic API 錯誤:', response.status, detail);
-      await reportAiFailure({ status: response.status, message: detail, where: '網頁版記者問答' }); // 批次 85
+      // 批次 85；企業場那一把出事，通知寫明只影響企業場、節流也分開算（批次 119，見 lib/ai-alert.js）
+      await reportAiFailure({ status: response.status, message: detail, where: business ? '網頁版企業場問答' : '網頁版記者問答', keyName: businessKey ? BUSINESS_KEY_NAME : undefined });
       return res.status(response.status).json({ error: friendlyApiError(response.status) });
     }
 
     if (!stream || business) {
       const data = await response.json();
-      logAiUsage('網頁問答', CHAT_MODEL, data.usage); // 批次 117
+      logAiUsage(business ? '網頁問答（企業場）' : '網頁問答', CHAT_MODEL, data.usage); // 批次 117
       // 不能寫死 content[0]：第一塊不保證是文字（見 api/line.js askAnthropic() 的說明）
       const text = (data.content || []).filter(b => b?.type === 'text').map(b => b.text).join('\n').trim();
       reply = toTraditionalTW(text) || '抱歉，無法取得回應。';

@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="referrer" content="no-referrer">
+<meta name="robots" content="noindex,nofollow">
+<title>技術合作洽詢｜工研院</title>
+<!--
+  業發處的合作洽詢單（批次 119）。企業從米亞（「企業合作洽詢」）、業務窗口的信、說明會的投影片點進來填。
+  設計原則跟報名頁一樣：一頁做完、手機優先、不需要登入、不載入任何外部資源。
+  資料進業發處自己的試算表（B2B_SPREADSHEET_ID），不跟記者會那本放在一起；送出後依技術領域自動分給業務窗口，
+  期限內沒聯繫會每天提醒。API 在 api/events.js 的 b2b_ 系列 action（lib/b2b-api.js）。
+-->
+<style>
+  :root {
+    --primary: #0F9E7A; --primary-dark: #0a7a60; --primary-light: rgba(15,158,122,0.09);
+    --text: #1a1a2e; --muted: #6b7280; --bg: #f0f7f5; --card: #ffffff; --border: #dfe5e3;
+    --danger: #dc2626; --radius: 14px;
+    --font: 'PingFang TC','Noto Sans TC','Microsoft JhengHei',sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { -webkit-text-size-adjust: 100%; }
+  body { font-family: var(--font); background: var(--bg); color: var(--text); line-height: 1.6; font-size: 16px; }
+  .wrap { max-width: 620px; margin: 0 auto; padding: 0 16px 60px; }
+  header.hero { background: linear-gradient(135deg, #0a7a60 0%, #0F9E7A 100%); color: #fff; padding: 26px 16px 30px; }
+  header.hero .in { max-width: 620px; margin: 0 auto; }
+  .hero .tag { font-size: .8rem; opacity: .85; letter-spacing: .06em; }
+  .hero h1 { font-size: 1.45rem; line-height: 1.35; margin: 4px 0 8px; }
+  .hero p { font-size: .92rem; opacity: .95; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px 16px; margin-top: 14px; }
+  .field { margin-bottom: 14px; }
+  .field label.lab { display: block; font-size: .9rem; font-weight: 600; margin-bottom: 5px; }
+  .field .req { color: var(--danger); margin-left: 3px; }
+  .field .opt { color: var(--muted); font-weight: 400; font-size: .8rem; margin-left: 4px; }
+  .field input[type=text], .field input[type=email], .field input[type=tel], .field select, .field textarea {
+    width: 100%; padding: 11px 12px; border: 1.5px solid var(--border); border-radius: 10px; font: inherit; font-size: 1rem; background: #fff; color: var(--text); outline: none; }
+  .field textarea { min-height: 130px; resize: vertical; }
+  .field input:focus, .field select:focus, .field textarea:focus { border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-light); }
+  .field.bad input, .field.bad select, .field.bad textarea { border-color: var(--danger); }
+  .hint { font-size: .8rem; color: var(--muted); margin-top: 4px; }
+  .msg { color: var(--danger); font-size: .82rem; margin-top: 4px; display: none; }
+  .field.bad .msg { display: block; }
+  .privacy { font-size: .78rem; color: var(--muted); line-height: 1.7; white-space: pre-line; }
+  .consent { display: flex; gap: 10px; align-items: flex-start; margin-top: 12px; font-size: .92rem; font-weight: 600; }
+  .consent input { width: 22px; height: 22px; accent-color: var(--primary); flex: none; margin-top: 1px; }
+  .btn { font: inherit; font-weight: 700; border: none; border-radius: 12px; padding: 13px 22px; cursor: pointer; background: var(--primary); color: #fff; font-size: 1rem; width: 100%; margin-top: 16px; }
+  .btn:disabled { opacity: .55; cursor: wait; }
+  .banner { border-radius: 10px; padding: 10px 12px; font-size: .88rem; margin-top: 14px; }
+  .banner.err { background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; }
+  .done { text-align: center; padding-top: 26px; }
+  .done .ok { width: 64px; height: 64px; border-radius: 50%; background: var(--primary); color: #fff; font-size: 34px; display: flex; align-items: center; justify-content: center; margin: 0 auto 10px; }
+  .done h2 { font-size: 1.3rem; margin-bottom: 6px; }
+  .done .no { font-size: .82rem; color: var(--muted); margin-top: 10px; }
+  .hp { position: absolute; left: -9999px; width: 1px; height: 1px; overflow: hidden; }
+  .spinner { text-align: center; color: var(--muted); padding: 60px 0; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+
+<header class="hero"><div class="in">
+  <div class="tag">工研院 · 技術合作洽詢</div>
+  <h1>想跟工研院談合作？</h1>
+  <p>留下需求，業務窗口會依技術領域找對的研究團隊跟您聯繫。</p>
+</div></header>
+
+<main class="wrap" id="app"><div class="spinner">載入中…</div></main>
+
+<script>
+'use strict';
+const API = '/api/events';
+const loadedAt = Date.now();
+let CFG = null;
+let submitting = false;
+
+const $ = (sel, root = document) => root.querySelector(sel);
+const el = (tag, attrs = {}, ...kids) => {
+  const n = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (v == null || v === false) continue;
+    if (k === 'class') n.className = v;
+    else if (k === 'text') n.textContent = v;
+    else if (k.startsWith('on')) n.addEventListener(k.slice(2), v);
+    else n.setAttribute(k, v === true ? '' : v);
+  }
+  for (const c of kids.flat()) if (c != null && c !== false) n.append(c.nodeType ? c : document.createTextNode(String(c)));
+  return n;
+};
+
+async function init() {
+  try {
+    const r = await fetch(`${API}?action=b2b_public_config`);
+    CFG = await r.json();
+  } catch { CFG = null; }
+  if (!CFG || !CFG.open) {
+    $('#app').replaceChildren(el('div', { class: 'card done' },
+      el('h2', { text: '目前暫停線上收件' }),
+      el('p', { class: 'hint', text: '如有合作需求，請直接聯絡與您接洽的工研院同仁，或活動現場的聯絡窗口。' })));
+    return;
+  }
+  render();
+}
+
+function field(name, label, input, { required = false, hint = '' } = {}) {
+  input.id = `f-${name}`;
+  input.name = name;
+  input.addEventListener('input', () => setErr(name, ''));
+  return el('div', { class: 'field', 'data-f': name },
+    el('label', { class: 'lab', for: `f-${name}` }, label, required ? el('span', { class: 'req', text: '*' }) : el('span', { class: 'opt', text: '（選填）' })),
+    input, hint ? el('div', { class: 'hint', text: hint }) : null, el('div', { class: 'msg', role: 'alert' }));
+}
+function render() {
+  const topicSel = el('select', {}, el('option', { value: '', text: '請選擇（不確定可以不選）' }),
+    ...(CFG.topics || []).map((t) => el('option', { value: t, text: t })), el('option', { value: '其他', text: '其他' }));
+  const form = el('form', { id: 'f', novalidate: true, onsubmit: onSubmit },
+    el('div', { class: 'hp', 'aria-hidden': 'true' }, el('label', {}, '網站', el('input', { type: 'text', name: 'website', tabindex: '-1', autocomplete: 'off' }))),
+    el('div', { class: 'card' },
+      field('company', '公司／單位', el('input', { type: 'text', maxlength: '60', autocomplete: 'organization', placeholder: '請填公司全名' }), { required: true }),
+      field('name', '姓名', el('input', { type: 'text', maxlength: '40', autocomplete: 'name' }), { required: true }),
+      field('title', '職稱', el('input', { type: 'text', maxlength: '40', autocomplete: 'organization-title' })),
+      field('email', 'Email', el('input', { type: 'email', maxlength: '100', autocomplete: 'email', inputmode: 'email', autocapitalize: 'off', placeholder: 'name@company.com' }), { required: true }),
+      field('phone', '電話', el('input', { type: 'tel', maxlength: '20', autocomplete: 'tel', inputmode: 'tel', placeholder: '03-591-1234 或 0912-345-678' }))),
+    el('div', { class: 'card' },
+      field('topic', '想合作的技術領域', topicSel),
+      field('need', '需求說明', el('textarea', { maxlength: '2000', placeholder: '例如：想導入產線的熱管理技術，目前遇到的問題是…、預計的時程與規模…' }),
+        { required: true, hint: '寫越具體，越快找到對的研究團隊。請勿填寫營業秘密或未公開的技術細節。' })),
+    el('div', { class: 'card', id: 'privacy-card' },
+      el('p', { class: 'privacy', text: CFG.privacy }),
+      el('div', { class: 'field', 'data-f': 'consent' },
+        el('label', { class: 'consent' }, el('input', { type: 'checkbox', id: 'f-consent', onchange: () => setErr('consent', '') }),
+          el('span', { text: '我已閱讀並同意上述個人資料蒐集告知' })),
+        el('div', { class: 'msg', role: 'alert' })),
+      el('button', { class: 'btn', id: 'go', type: 'submit', text: '送出洽詢' })));
+  $('#app').replaceChildren(form);
+}
+
+function setErr(name, msg) {
+  const f = $(`.field[data-f="${name}"]`);
+  if (!f) return;
+  f.classList.toggle('bad', !!msg);
+  $('.msg', f).textContent = msg || '';
+}
+function collect() {
+  const v = (n) => ($(`#f-${n}`).value || '').trim();
+  return { company: v('company'), name: v('name'), title: v('title'), email: v('email'), phone: v('phone'), topic: v('topic'), need: v('need'), consent: $('#f-consent').checked };
+}
+function validate(d) {
+  const e = {};
+  if (!d.company) e.company = '請填寫公司或單位名稱';
+  if (!d.name) e.name = '請填寫姓名';
+  if (!d.email) e.email = '請填寫 Email'; else if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(d.email)) e.email = 'Email 格式好像不對，請再確認';
+  if (d.need.length < 10) e.need = '請簡單說明您的需求（至少 10 個字）';
+  if (!d.consent) e.consent = '請先閱讀並勾選同意「個人資料蒐集告知」';
+  return e;
+}
+async function onSubmit(ev) {
+  ev.preventDefault();
+  if (submitting) return;
+  const d = collect();
+  const errs = validate(d);
+  ['company', 'name', 'email', 'phone', 'need', 'consent'].forEach((n) => setErr(n, errs[n]));
+  const first = ['company', 'name', 'email', 'need', 'consent'].find((n) => errs[n]);
+  if (first) { $(`.field[data-f="${first}"]`).scrollIntoView({ behavior: 'smooth', block: 'center' }); return; }
+  submitting = true;
+  const btn = $('#go');
+  btn.disabled = true; btn.textContent = '送出中…';
+  try {
+    const r = await fetch(API, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'b2b_inquiry_submit', ...d, hp: $('input[name=website]').value, elapsed: Date.now() - loadedAt }) });
+    const data = await r.json().catch(() => ({}));
+    if (r.ok && data.ok) return done(data);
+    (data.errors || []).forEach((x) => setErr(x.field, x.message));
+    showBanner(data.error || '送出失敗，請再試一次。');
+  } catch {
+    showBanner('網路好像不穩，您填的資料都還在，請再按一次送出。');
+  } finally {
+    submitting = false;
+    if ($('#go')) { $('#go').disabled = false; $('#go').textContent = '送出洽詢'; }
+  }
+}
+function showBanner(text) {
+  $('#top-banner')?.remove();
+  const b = el('div', { class: 'banner err', id: 'top-banner', role: 'alert', text });
+  $('#f').before(b);
+  b.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+function done(data) {
+  $('#app').replaceChildren(el('div', { class: 'card done' },
+    el('div', { class: 'ok', text: '✓', 'aria-hidden': 'true' }),
+    el('h2', { text: '已收到您的洽詢' }),
+    el('p', { text: `業務窗口會在 ${data.sla_days || 2} 個工作天內與您聯繫。` }),
+    el('p', { class: 'no', text: `洽詢編號 ${data.id}（聯繫時提供這個編號，可以更快找到您的需求）` })));
+  scrollTo(0, 0);
+}
+
+init();
+</script>
+</body>
+</html>

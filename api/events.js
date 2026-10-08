@@ -17,6 +17,7 @@
 // POST {action:'contacts_directory_save',content} → 整份覆蓋儲存
 // ── 媒體報名（批次 88）：action 一律以 reg_ 開頭，整段交給 lib/registration-api.js ──
 //   （Vercel Hobby 的 Function 上限 12 支已用 11 支，所以搭在這支上，不另開新檔）
+// ── 業發處合作洽詢（批次 119）：action 一律以 b2b_ 開頭，整段交給 lib/b2b-api.js（資料在另一本試算表）──
 
 import { readRange, appendRows, updateRange, ensureSheets, listSheets, batchUpdate } from '../lib/sheets.js';
 import { generateId, generateEditCode } from '../lib/ids.js';
@@ -25,6 +26,7 @@ import { CONTACTS_DIR_RANGE, ensureContactsDirectorySheet } from '../lib/contact
 import { resolveEventContent } from '../lib/prompt.js';
 import { lineBindUrl, lineAddFriendUrl, lineBasicId } from '../lib/line-link.js';
 import { handleRegistrationRequest } from '../lib/registration-api.js';
+import { handleB2BRequest } from '../lib/b2b-api.js';
 import { publishBlockers, isPublishing, taipeiToday, PUBLIC_STATUSES } from '../lib/event-status.js';
 import { effectiveChips } from '../lib/default-chips.js';
 import { kbHasContent } from '../lib/kb-template.js';
@@ -116,7 +118,7 @@ const PUBLIC_CACHE = 'public, max-age=0, s-maxage=15, stale-while-revalidate=30'
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type,X-Admin-Password');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type,X-Admin-Password,X-B2B-Key');
   if (req.method === 'OPTIONS') return res.status(200).end();
 
   const adminPassword = process.env.ADMIN_PASSWORD;
@@ -131,6 +133,8 @@ export default async function handler(req, res) {
     if (typeof action === 'string' && action.startsWith('reg_')) {
       return handleRegistrationRequest(req, res, { adminPassword });
     }
+    // 業發處的合作洽詢（批次 119）：資料在另一本試算表，跟活動表無關，一樣在讀活動表之前交出去。
+    if (typeof action === 'string' && action.startsWith('b2b_')) return handleB2BRequest(req, res);
 
     // 全域技術窗口分工：跟活動表無關，不需要先讀 events，獨立處理完就回傳。
     if (action === 'contacts_directory') {
@@ -319,6 +323,7 @@ export default async function handler(req, res) {
     if (typeof action === 'string' && action.startsWith('reg_')) {
       return handleRegistrationRequest(req, res, { adminPassword });
     }
+    if (typeof action === 'string' && action.startsWith('b2b_')) return handleB2BRequest(req, res);
 
     try {
       // 全域技術窗口分工：整份文字直接覆蓋儲存，跟 events!P 那組窗口分工同一套

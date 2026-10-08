@@ -317,8 +317,10 @@
     <h2>進階設定 <small>多半用不到</small></h2>
     <details class="more" style="margin-top:0"><summary>選填項目（餐盒、同行人數、聯訪意願⋯）</summary>
       <div class="rows" id="e-opt-rows"></div>
-      <div style="margin-top:10px"><button type="button" class="btn outline small" onclick="addOptRow()">＋ 加一項</button></div>
-      <div class="help muted small" style="margin-top:6px">「限定場次」可空（＝任何場次都顯示），要限定就寫場次代碼，例如 A1,A2。「人數」是 0–9 的選單，「勾選」是打勾，「文字」是一行自由填寫（最多 200 字，例如「想了解的技術或合作主題」）。</div>
+      <div style="margin-top:10px"><button type="button" class="btn outline small" onclick="addOptRow()">＋ 加一項</button>
+        <button type="button" class="btn outline small" onclick="addBizOpts()">＋ 企業場常用項目</button></div>
+      <div class="help muted small" style="margin-top:6px">「限定場次」可空（＝任何場次都顯示），要限定就寫場次代碼，例如 A1,A2。「人數」是 0–9 的選單，「勾選」是打勾，「文字」是一行自由填寫（最多 200 字，例如「想了解的技術或合作主題」）。
+        「企業場常用項目」會加上「想了解的技術或合作主題」與「希望業務窗口與我聯繫」（代碼 <code>contact_me</code>）：業發處的合作洽詢有啟用時，勾了的人會自動轉成一筆洽詢、分給業務窗口。</div>
     </details>
     <details class="more" id="privacy-box"><summary>個資告知</summary>
       <div class="fld"><textarea id="e-privacy" style="min-height:90px"></textarea><div class="help" id="e-privacy-help">出現在送出鈕上方。留空＝不顯示（預設不放）。</div>
@@ -746,6 +748,17 @@ function addSessRow() {
   $('e-sess-rows').append(row); row.querySelector('[data-k=time]').focus();
 }
 function addOptRow() { const r = optRowEl(); $('e-opt-rows').append(r); r.querySelector('input').focus(); }
+// 企業場常用的兩項（批次 119）。代碼是約定：topic 帶進洽詢的技術領域，contact_me 勾了的人轉成業發處的合作洽詢
+// （lib/registration-api.js 的 reg_submit、lib/b2b.js 的 inquiryFromRegistration()）。已經有同代碼的不重複加。
+const BIZ_OPTS = [
+  { key: 'topic', label: '想了解的技術或合作主題', only: '', type: 'text' },
+  { key: 'contact_me', label: '希望業務窗口與我聯繫', only: '', type: '' }
+];
+function addBizOpts() {
+  const have = new Set([...$('e-opt-rows').children].map((r) => String(rowVals(r).key || '').trim().toLowerCase()));
+  BIZ_OPTS.filter((o) => !have.has(o.key)).forEach((o) => $('e-opt-rows').append(optRowEl(o)));
+  $('e-opt-rows').closest('details').open = true;
+}
 
 function rowsToText(hostId, cols, map) {
   const lines = []; map.length = 0;
@@ -821,7 +834,7 @@ function openForm(camp, copyId) {
 function audienceHint() {
   const biz = $('e-audience').value === 'business';
   $('e-audience-help').textContent = biz
-    ? '報名頁寫「公司／單位」、要勾同意個資告知才能送出；不比對記者名單。開放報名前一定要填下面的「個資告知」。'
+    ? '報名頁寫「公司／單位」、要勾同意個資告知才能送出；不比對記者名單。開放報名前一定要填下面的「個資告知」；「進階設定 → 選填項目」可以一鍵加上企業場常用項目。'
     : '報名頁寫「服務單位／媒體」，個資告知選填。';
   $('e-privacy-help').textContent = biz
     ? '企業場必填：出現在送出鈕上方，報名者要勾「我已閱讀並同意」才能送出。'

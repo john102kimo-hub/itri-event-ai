@@ -29,6 +29,14 @@
       "destination": "/registrations.html"
     },
     {
+      "source": "/inquiry",
+      "destination": "/inquiry.html"
+    },
+    {
+      "source": "/b2b",
+      "destination": "/b2b.html"
+    },
+    {
       "source": "/geo",
       "destination": "/geo.html"
     },
@@ -56,7 +64,7 @@
       ]
     },
     {
-      "source": "/(admin|geo|report|registrations|edit|training|index\\.html|geo\\.html|report\\.html|registrations\\.html|edit\\.html|training\\.html|media\\.html)",
+      "source": "/(admin|geo|report|registrations|edit|training|b2b|inquiry|index\\.html|geo\\.html|report\\.html|registrations\\.html|edit\\.html|training\\.html|media\\.html|b2b\\.html|inquiry\\.html)",
       "headers": [
         {
           "key": "X-Frame-Options",
@@ -109,6 +117,10 @@
     {
       "path": "/api/line?action=cron_menu",
       "schedule": "0 19 * * *"
+    },
+    {
+      "path": "/api/events?action=b2b_cron",
+      "schedule": "0 1 * * 1-5"
     }
   ]
 }

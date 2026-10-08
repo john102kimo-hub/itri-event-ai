@@ -54,7 +54,8 @@ export const updateRange = (...a) => sheets.updateRange(...a);
 export const ensureSheets = (...a) => sheets.ensureSheets(...a);
 export const warmAuth = () => Promise.resolve();
 export const listSheets = async () => [];
-export const batchUpdate = async () => ({});`
+export const batchUpdate = async () => ({});
+export const sheetsFor = () => { throw new Error('這支測試沒有接業發處的試算表（B2B_SPREADSHEET_ID）'); };`
     };
   }
   if (url.includes('?stub=photo')) {

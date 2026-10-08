@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="referrer" content="no-referrer">
+<meta name="robots" content="noindex,nofollow">
+<title>合作洽詢後台｜業發處</title>
+<!--
+  業發處的合作洽詢後台（批次 119）。資料層在 lib/b2b.js、API 在 lib/b2b-api.js（api/events.js 的 b2b_ 系列）。
+  登入方式：每個人自己的連結（/b2b#k=…，代碼放在 # 後面，不會送到伺服器的存取紀錄或別的網站）；
+  後台管理員密碼也進得來（第一位成員要有人建）。看過哪一筆、改了什麼，都記在稽核紀錄。
+  ⚠️ 頁面上的公司名稱、需求內容都是外部填的：一律跳脫後才放進畫面（esc()）。
+-->
+<style>
+  :root {
+    --primary: #0F9E7A; --primary-dark: #0a7a60; --primary-light: rgba(15,158,122,0.09);
+    --text: #1a1a2e; --muted: #6b7280; --bg: #f3f6f5; --card: #fff; --border: #dfe5e3;
+    --danger: #dc2626; --warn: #c2410c; --radius: 12px;
+    --font: 'PingFang TC','Noto Sans TC','Microsoft JhengHei',sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: var(--font); background: var(--bg); color: var(--text); line-height: 1.55; font-size: 15px; }
+  header { background: linear-gradient(135deg, #0a7a60 0%, #0F9E7A 100%); color: #fff; padding: 14px 16px; }
+  header .in { max-width: 1000px; margin: 0 auto; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  header h1 { font-size: 1.15rem; flex: 1; }
+  header .me { font-size: .85rem; opacity: .95; }
+  header a, header button.link { color: #fff; font-size: .82rem; }
+  .wrap { max-width: 1000px; margin: 0 auto; padding: 14px 16px 60px; }
+  nav.tabs { display: flex; gap: 6px; margin-bottom: 12px; flex-wrap: wrap; }
+  nav.tabs button { font: inherit; border: 1px solid var(--border); background: #fff; border-radius: 999px; padding: 6px 14px; cursor: pointer; }
+  nav.tabs button.on { background: var(--primary); color: #fff; border-color: var(--primary); }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; margin-bottom: 12px; }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .muted { color: var(--muted); } .small { font-size: .82rem; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 8px 6px; border-top: 1px solid var(--border); vertical-align: top; font-size: .9rem; }
+  th { color: var(--muted); font-weight: 600; font-size: .8rem; border-top: none; }
+  tr.click { cursor: pointer; } tr.click:hover { background: var(--primary-light); }
+  .pill { display: inline-block; font-size: .75rem; padding: 1px 8px; border-radius: 999px; background: #eef2f1; color: #374151; white-space: nowrap; }
+  .pill.new { background: #fff7ed; color: var(--warn); } .pill.late { background: #fef2f2; color: var(--danger); font-weight: 700; }
+  .pill.won { background: #ecfdf5; color: #047857; }
+  .btn { font: inherit; font-weight: 600; border: none; border-radius: 10px; padding: 8px 16px; cursor: pointer; background: var(--primary); color: #fff; }
+  .btn.outline { background: #fff; color: var(--text); border: 1.5px solid var(--border); }
+  .btn.small { padding: 4px 10px; font-size: .82rem; }
+  .btn:disabled { opacity: .5; cursor: wait; }
+  label.f { display: block; font-size: .82rem; color: var(--muted); margin: 10px 0 4px; }
+  input[type=text], input[type=email], input[type=password], input[type=number], select, textarea { width: 100%; padding: 8px 10px; border: 1.5px solid var(--border); border-radius: 8px; font: inherit; background: #fff; }
+  textarea { min-height: 80px; resize: vertical; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; }
+  @media (max-width: 640px) { .grid2 { grid-template-columns: 1fr; } th.hide, td.hide { display: none; } }
+  .kv { display: grid; grid-template-columns: 7em 1fr; gap: 4px 10px; font-size: .9rem; }
+  .kv dt { color: var(--muted); } .kv dd { white-space: pre-wrap; word-break: break-word; }
+  .notes { white-space: pre-wrap; background: #f9fafb; border-radius: 8px; padding: 8px 10px; font-size: .85rem; margin-top: 6px; }
+  .linkbox { background: #fffbeb; border: 1px solid #fde68a; border-radius: 10px; padding: 10px 12px; margin-top: 10px; word-break: break-all; font-size: .85rem; }
+  .err { color: var(--danger); font-size: .85rem; margin-top: 8px; }
+  #toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: #111827; color: #fff; padding: 8px 16px; border-radius: 999px; font-size: .88rem; opacity: 0; transition: opacity .2s; pointer-events: none; }
+  #toast.show { opacity: .95; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+
+<header><div class="in">
+  <h1>合作洽詢後台</h1>
+  <span class="me" id="me"></span>
+  <a id="line-bind" hidden target="_blank" rel="noopener">綁定 LINE 通知</a>
+  <button class="link" id="logout" hidden style="background:none;border:none;cursor:pointer;text-decoration:underline">登出</button>
+</div></header>
+
+<main class="wrap">
+  <section id="login" hidden class="card" style="max-width:420px;margin:40px auto">
+    <h2 style="font-size:1.05rem;margin-bottom:8px">請用個人連結登入</h2>
+    <p class="muted small">業發處管理員會給您一條個人連結（/b2b#k=…）。連結就是您的身分，請不要轉傳；外流了請管理員「重發連結」。</p>
+    <p class="muted small">從 LINE 通知點進來卻看到這一頁：請先在這支手機的瀏覽器打開一次您的個人連結，之後點通知就會直接打開那一筆。公用電腦用完請按右上角「登出」。</p>
+    <label class="f" for="pwd">或：後台管理員密碼</label>
+    <input type="password" id="pwd" autocomplete="current-password">
+    <div class="row" style="margin-top:10px"><button class="btn" id="pwd-go">登入</button></div>
+    <div class="err" id="login-err"></div>
+  </section>
+
+  <section id="main" hidden>
+    <nav class="tabs" id="tabs"></nav>
+    <div id="view"></div>
+  </section>
+</main>
+<div id="toast"></div>
+
+<script>
+'use strict';
+const API = '/api/events';
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const day = (iso) => String(iso || '').slice(0, 10);
+const when = (iso) => String(iso || '').replace('T', ' ').replace(/:\d{2}\+08:00$/, '');
+// 管理員密碼跟其他後台頁一樣只放這個分頁（sessionStorage）。個人連結的代碼記在這台裝置（localStorage）：
+// LINE 通知的連結（/b2b#q=…）每點一次都是新的頁面，只放分頁的話，每點一次通知都要重新翻出個人連結。
+// 公用電腦用完請按「登出」；連結外流請管理員「重發連結」，舊的立刻失效。
+const KEY = 'itri_b2b_key';
+const area = (k) => (k === KEY ? localStorage : sessionStorage);
+const store = {
+  get(k) { try { return area(k).getItem(k); } catch { return null; } },
+  set(k, v) { try { area(k).setItem(k, v); } catch {} },
+  del(k) { try { area(k).removeItem(k); } catch {} }
+};
+function toast(t) { const e = $('toast'); e.textContent = t; e.classList.add('show'); setTimeout(() => e.classList.remove('show'), 2200); }
+
+// 個人連結的代碼放在 # 後面：讀出來記住（見上面的 store），馬上從網址列拿掉（不留在瀏覽紀錄與螢幕截圖裡）。
+// ?openExternalBrowser=1 是給 LINE 看的（lib/b2b.js memberLink()），一起拿掉。
+const hash = new URLSearchParams(location.hash.slice(1));
+if (hash.get('k')) { store.set(KEY, hash.get('k')); hash.delete('k'); }
+const OPEN_Q = hash.get('q') || '';
+history.replaceState(null, '', location.pathname);
+
+let ME = null, TAB = 'inbox', FILTER = 'open', INBOX = [];
+function headers() {
+  const h = { 'Content-Type': 'application/json' };
+  const key = store.get('itri_b2b_key');
+  if (key) h['X-B2B-Key'] = key; else if (store.get('itri_pwd')) h['X-Admin-Password'] = store.get('itri_pwd');
+  return h;
+}
+async function call(method, action, body = {}) {
+  const url = method === 'GET' ? `${API}?${new URLSearchParams({ action, ...body })}` : API;
+  const r = await fetch(url, { method, headers: headers(), body: method === 'GET' ? undefined : JSON.stringify({ action, ...body }) });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) { const e = new Error(data.error || `錯誤 ${r.status}`); e.status = r.status; throw e; }
+  return data;
+}
+
+async function boot() {
+  if (!store.get('itri_b2b_key') && !store.get('itri_pwd')) return showLogin('');
+  try { ME = await call('GET', 'b2b_me'); }
+  catch (e) {
+    if (e.status === 401) { store.del('itri_b2b_key'); store.del('itri_pwd'); } // 連結失效或密碼錯：不要每次重新整理都再撞一次
+    return showLogin(e.message);
+  }
+  $('login').hidden = true; $('main').hidden = false; $('logout').hidden = false;
+  $('me').textContent = `${ME.me.name}（${ME.roles[ME.me.role] || ME.me.role}${ME.me.unit ? '・' + ME.me.unit : ''}）`;
+  const lb = $('line-bind');
+  if (ME.me.line_bind_url && !ME.me.line_bound) { lb.href = ME.me.line_bind_url; lb.hidden = false; }
+  const tabs = [['inbox', '收件匣'], ...(ME.admin ? [['members', '成員'], ['settings', '設定'], ['audit', '稽核紀錄']] : [])];
+  $('tabs').innerHTML = tabs.map(([k, t]) => `<button data-t="${k}">${t}</button>`).join('');
+  $('tabs').onclick = (e) => { const t = e.target.closest('button'); if (t) go(t.dataset.t); };
+  await go('inbox');
+  if (OPEN_Q) openInquiry(OPEN_Q);
+}
+function showLogin(msg) {
+  $('main').hidden = true; $('login').hidden = false; $('login-err').textContent = msg || '';
+}
+$('pwd-go').onclick = () => { const p = $('pwd').value.trim(); if (!p) return; store.del('itri_b2b_key'); store.set('itri_pwd', p); boot(); };
+$('logout').onclick = () => { store.del('itri_b2b_key'); store.del('itri_pwd'); location.reload(); };
+
+async function go(tab) {
+  TAB = tab;
+  [...$('tabs').children].forEach((b) => b.classList.toggle('on', b.dataset.t === tab));
+  $('view').innerHTML = '<div class="card muted">載入中…</div>';
+  try {
+    if (tab === 'inbox') await renderInbox();
+    if (tab === 'members') await renderMembers();
+    if (tab === 'settings') await renderSettings();
+    if (tab === 'audit') await renderAudit();
+  } catch (e) { $('view').innerHTML = `<div class="card err">${esc(e.message)}</div>`; }
+}
+
+/* ── 收件匣 ─────────────────────────────────────────── */
+const OPEN_SET = new Set(['new', 'contacted', 'proposing']);
+async function renderInbox() {
+  INBOX = (await call('GET', 'b2b_list')).inquiries;
+  const rows = INBOX.filter((q) => FILTER === 'all' || (FILTER === 'open' ? OPEN_SET.has(q.status) : q.status === FILTER));
+  const late = INBOX.filter((q) => q.overdue).length;
+  const push = ME.push && ME.push.exhausted
+    ? `<div class="card small" style="background:#fff7ed;border-color:#fed7aa;color:#9a3412">本月用米亞推播的 LINE 通知已達上限（${ME.push.used}／${ME.push.limit} 則），新洽詢與期限提醒暫停推播，請直接看收件匣。上限在「設定」可以調整——這個額度跟記者那邊共用，請不要調太高。</div>` : '';
+  $('view').innerHTML = `${push}
+    <div class="card">
+      <div class="row">
+        <select id="flt" style="width:auto">
+          <option value="open">處理中</option><option value="all">全部</option>
+          ${Object.entries(ME.statuses).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join('')}
+        </select>
+        <span class="muted small">${rows.length} 筆${late ? `・<b style="color:var(--danger)">${late} 筆過期未聯繫</b>` : ''}</span>
+      </div>
+      <table style="margin-top:8px"><thead><tr><th>編號</th><th>公司</th><th class="hide">領域</th><th>承辦</th><th>期限</th><th>狀態</th></tr></thead>
+      <tbody>${rows.map((q) => `<tr class="click" data-id="${esc(q.id)}">
+        <td><code>${esc(q.id)}</code><br><span class="muted small">${esc(day(q.created_at))}</span></td>
+        <td>${esc(q.company)}<br><span class="muted small">${esc(q.source)}</span></td>
+        <td class="hide">${esc(q.topic || '—')}</td>
+        <td>${q.owner_name ? esc(q.owner_name) : '<span class="pill late">未分派</span>'}</td>
+        <td>${esc(day(q.due_at))}${q.overdue ? '<br><span class="pill late">過期</span>' : ''}</td>
+        <td><span class="pill ${q.status === 'new' ? 'new' : q.status === 'won' ? 'won' : ''}">${esc(ME.statuses[q.status] || q.status)}</span></td></tr>`).join('')
+        || '<tr><td colspan="6" class="muted">沒有洽詢</td></tr>'}</tbody></table>
+    </div>
+    <div id="detail"></div>`;
+  $('flt').value = FILTER;
+  $('flt').onchange = (e) => { FILTER = e.target.value; renderInbox(); };
+  $('view').querySelector('tbody').onclick = (e) => { const tr = e.target.closest('tr[data-id]'); if (tr) openInquiry(tr.dataset.id); };
+}
+async function openInquiry(id) {
+  let q;
+  try { q = (await call('GET', 'b2b_get', { id })).inquiry; }
+  catch (e) { toast(e.message); return; }
+  const host = $('detail') || $('view');
+  host.innerHTML = `
+    <div class="card" id="q-card">
+      <div class="row"><h2 style="font-size:1.05rem;flex:1">${esc(q.company)} <code class="muted small">${esc(q.id)}</code></h2>
+        ${q.overdue ? '<span class="pill late">過期未聯繫</span>' : ''}</div>
+      <dl class="kv" style="margin-top:8px">
+        <dt>聯絡人</dt><dd>${esc(q.name)}${q.title ? '・' + esc(q.title) : ''}</dd>
+        <dt>Email</dt><dd><a href="mailto:${esc(q.email)}">${esc(q.email)}</a></dd>
+        <dt>電話</dt><dd>${q.phone ? `<a href="tel:${esc(q.phone)}">${esc(q.phone)}</a>` : '—'}</dd>
+        <dt>技術領域</dt><dd>${esc(q.topic || '—')}</dd>
+        <dt>需求</dt><dd>${esc(q.need)}</dd>
+        <dt>來源</dt><dd>${esc(q.source)}・${esc(when(q.created_at))}</dd>
+        <dt>聯繫期限</dt><dd>${esc(when(q.due_at))}${q.first_contact_at ? `（首次聯繫 ${esc(when(q.first_contact_at))}）` : ''}</dd>
+        <dt>個資同意</dt><dd>${esc(when(q.consent_at))}</dd>
+      </dl>
+      ${q.notes ? `<div class="notes">${esc(q.notes)}</div>` : ''}
+      <div class="grid2">
+        <div><label class="f" for="q-status">狀態</label><select id="q-status">${Object.entries(ME.statuses).map(([k, v]) => `<option value="${k}"${k === q.status ? ' selected' : ''}>${esc(v)}</option>`).join('')}</select></div>
+        <div><label class="f" for="q-owner">承辦人（改派會通知新的承辦人）</label><select id="q-owner"><option value="">未分派</option>${ME.members.map((m) => `<option value="${esc(m.id)}"${m.id === q.owner ? ' selected' : ''}>${esc(m.name)}${m.unit ? '（' + esc(m.unit) + '）' : ''}</option>`).join('')}</select></div>
+      </div>
+      <label class="f" for="q-note">加備註（聯繫結果、下一步）</label><textarea id="q-note"></textarea>
+      <div class="row" style="margin-top:10px"><button class="btn" id="q-save">儲存</button><span class="muted small">每次修改都會記在稽核紀錄</span></div>
+    </div>`;
+  $('q-save').onclick = async () => {
+    $('q-save').disabled = true;
+    try {
+      await call('POST', 'b2b_update', { id: q.id, status: $('q-status').value, owner: $('q-owner').value, note: $('q-note').value });
+      toast('已儲存');
+      if (TAB === 'inbox') { await renderInbox(); openInquiry(q.id); }
+    } catch (e) { toast(e.message); $('q-save').disabled = false; }
+  };
+  $('q-card').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+/* ── 成員（管理員）─────────────────────────────────── */
+async function renderMembers() {
+  const { members } = await call('GET', 'b2b_members');
+  $('view').innerHTML = `
+    <div class="card">
+      <h2 style="font-size:1rem;margin-bottom:6px">成員</h2>
+      <p class="muted small">每個人一條自己的連結（不是共用密碼）。「負責的技術領域關鍵字」決定新洽詢自動分給誰：洽詢的領域與需求內容命中最多關鍵字的那位。</p>
+      <table style="margin-top:8px"><thead><tr><th>姓名</th><th class="hide">單位</th><th>角色</th><th class="hide">關鍵字</th><th>LINE</th><th></th></tr></thead>
+      <tbody>${members.map((m) => `<tr${m.status !== 'active' ? ' style="opacity:.5"' : ''}>
+        <td>${esc(m.name)}<br><span class="muted small">${esc(m.email)}</span></td><td class="hide">${esc(m.unit)}</td>
+        <td>${esc(ME.roles[m.role] || m.role)}${m.status !== 'active' ? '<br><span class="pill">停用</span>' : ''}</td>
+        <td class="hide small">${esc(m.topics)}</td><td>${m.line_bound ? '✓' : '—'}</td>
+        <td style="white-space:nowrap"><button class="btn outline small" data-edit="${esc(m.id)}">編輯</button> <button class="btn outline small" data-reset="${esc(m.id)}">重發連結</button></td></tr>`).join('')
+        || '<tr><td colspan="6" class="muted">還沒有成員。先新增一位管理員（通常是您自己）。</td></tr>'}</tbody></table>
+    </div>
+    <div class="card" id="m-form"></div>`;
+  memberForm(null);
+  $('view').querySelector('tbody').onclick = async (e) => {
+    const ed = e.target.closest('[data-edit]'), rs = e.target.closest('[data-reset]');
+    if (ed) memberForm(members.find((m) => m.id === ed.dataset.edit));
+    if (rs && confirm('重發之後舊連結立刻失效，LINE 通知也要重新綁定。確定嗎？')) {
+      try { const r = await call('POST', 'b2b_member_reset', { id: rs.dataset.reset }); showLink(r.link, '新的個人連結'); }
+      catch (err) { toast(err.message); }
+    }
+  };
+}
+function memberForm(m) {
+  const v = m || { name: '', email: '', unit: '', role: 'bd', topics: '', status: 'active' };
+  $('m-form').innerHTML = `
+    <h2 style="font-size:1rem">${m ? '編輯成員' : '新增成員'}</h2>
+    <div class="grid2">
+      <div><label class="f">姓名</label><input type="text" id="m-name" maxlength="40" value="${esc(v.name)}"></div>
+      <div><label class="f">Email（選填）</label><input type="email" id="m-email" maxlength="100" value="${esc(v.email)}"></div>
+      <div><label class="f">單位（所／中心）</label><input type="text" id="m-unit" maxlength="40" value="${esc(v.unit)}"></div>
+      <div><label class="f">角色</label><select id="m-role"><option value="bd">業務窗口（只看分給自己的）</option><option value="admin">管理員（看全部、管成員與設定）</option></select></div>
+    </div>
+    <label class="f">負責的技術領域關鍵字（逗號或換行分隔，例如：半導體, 先進封裝, 晶片散熱）</label><textarea id="m-topics">${esc(v.topics)}</textarea>
+    ${m ? `<label class="f">狀態</label><select id="m-status"><option value="active">使用中</option><option value="disabled">停用（連結立刻失效）</option></select>` : ''}
+    <div class="row" style="margin-top:10px"><button class="btn" id="m-save">${m ? '儲存' : '新增並產生個人連結'}</button>${m ? '<button class="btn outline" id="m-cancel">取消</button>' : ''}</div>
+    <div id="m-link"></div>`;
+  $('m-role').value = v.role;
+  if (m) { $('m-status').value = v.status; $('m-cancel').onclick = () => memberForm(null); }
+  $('m-save').onclick = async () => {
+    try {
+      const r = await call('POST', 'b2b_member_save', { id: m ? m.id : '', name: $('m-name').value, email: $('m-email').value, unit: $('m-unit').value,
+        role: $('m-role').value, topics: $('m-topics').value, status: m ? $('m-status').value : 'active' });
+      toast('已儲存');
+      if (r.link) { await renderMembers(); showLink(r.link, `${r.member.name} 的個人連結`); } else renderMembers();
+    } catch (e) { toast(e.message); }
+  };
+}
+function showLink(link, title) {
+  const box = $('m-link') || $('view');
+  box.innerHTML = `<div class="linkbox"><b>${esc(title)}</b>（只會顯示這一次，請直接傳給本人；之後忘了就「重發連結」）<br><code>${esc(link)}</code>
+    <div style="margin-top:6px"><button class="btn small" id="copy-link">複製</button></div></div>`;
+  $('copy-link').onclick = () => navigator.clipboard?.writeText(link).then(() => toast('已複製'), () => toast('請手動選取複製'));
+}
+
+/* ── 設定（管理員）─────────────────────────────────── */
+async function renderSettings() {
+  const { settings: s, push, privacy_template } = await call('GET', 'b2b_settings');
+  const { members } = await call('GET', 'b2b_members');
+  $('view').innerHTML = `
+    <div class="card">
+      <h2 style="font-size:1rem">洽詢單</h2>
+      <div class="grid2">
+        <div><label class="f">線上收件</label><select id="s-open"><option value="1">收件中</option><option value="0">暫停</option></select></div>
+        <div><label class="f">幾個工作天內要聯繫（逾期每天提醒）</label><input type="number" id="s-sla" min="1" max="10" value="${esc(s.sla_days)}"></div>
+      </div>
+      <label class="f">每月最多用米亞推幾則 LINE 通知（0＝不推播；這個額度跟記者那邊共用，請不要調太高）</label>
+      <input type="number" id="s-push" min="0" max="1000" value="${esc(s.line_push_limit)}">
+      <div class="muted small">本月（${esc(push.month)}）已用 ${push.used}／${push.limit} 則。用完就不推，洽詢照樣進收件匣。</div>
+      <label class="f">沒有命中任何人關鍵字時，分給誰</label>
+      <select id="s-owner"><option value="">不分派（通知所有管理員）</option>${members.filter((m) => m.status === 'active').map((m) => `<option value="${esc(m.id)}">${esc(m.name)}</option>`).join('')}</select>
+      <label class="f">洽詢單上的「技術領域」選項（一行一個；不填就只有「其他」）</label><textarea id="s-topics">${esc(s.topics)}</textarea>
+      <label class="f">個資告知（必填，沒填洽詢單不會收件）</label><textarea id="s-privacy" style="min-height:140px">${esc(s.privacy)}</textarea>
+      <div class="row" style="margin-top:6px"><button class="btn outline small" id="s-tpl">套用範本</button><span class="muted small">範本只是起點，正式對外前請院內法務確認文字。</span></div>
+      <div class="row" style="margin-top:12px"><button class="btn" id="s-save">儲存設定</button></div>
+    </div>
+    <div class="card small muted">洽詢單網址：<code>${esc(location.origin)}/inquiry</code>。米亞收到「企業合作洽詢」這類話，也會回這個網址（不在聊天室收資料）。</div>`;
+  $('s-open').value = s.intake_open === '0' ? '0' : '1';
+  $('s-owner').value = s.default_owner || '';
+  $('s-tpl').onclick = () => { if (!$('s-privacy').value.trim() || confirm('要用範本取代目前的個資告知嗎？')) $('s-privacy').value = privacy_template; };
+  $('s-save').onclick = async () => {
+    try {
+      await call('POST', 'b2b_settings_save', { intake_open: $('s-open').value, sla_days: $('s-sla').value, line_push_limit: $('s-push').value, default_owner: $('s-owner').value, topics: $('s-topics').value, privacy: $('s-privacy').value });
+      toast('已儲存'); renderSettings();
+    } catch (e) { toast(e.message); }
+  };
+}
+
+/* ── 稽核紀錄（管理員）─────────────────────────────── */
+const ACTION_LABEL = { submit: '新洽詢', view: '查看', update: '修改', member_create: '新增成員', member_update: '修改成員', member_reset_link: '重發連結', line_bind: '綁定 LINE', settings: '改設定', sla_remind: '期限提醒', notify_skipped: '通知沒推（額度用完）' };
+async function renderAudit() {
+  const [{ audit }, { members }] = await Promise.all([call('GET', 'b2b_audit'), call('GET', 'b2b_members')]);
+  const nameOf = (id) => (id === 'public' ? '洽詢單' : id === 'system' ? '排程' : id === 'admin' ? '系統管理員' : (members.find((m) => m.id === id)?.name || id));
+  $('view').innerHTML = `<div class="card"><h2 style="font-size:1rem">稽核紀錄（最近 300 筆）</h2>
+    <table style="margin-top:8px"><thead><tr><th>時間</th><th>誰</th><th>做了什麼</th><th>對象</th><th class="hide">細節</th></tr></thead>
+    <tbody>${audit.map((a) => `<tr><td class="small">${esc(when(a.at))}</td><td>${esc(nameOf(a.actor))}</td><td>${esc(ACTION_LABEL[a.action] || a.action)}</td><td><code>${esc(a.target)}</code></td><td class="hide small">${esc(a.detail)}</td></tr>`).join('')
+      || '<tr><td colspan="5" class="muted">還沒有紀錄</td></tr>'}</tbody></table></div>`;
+}
+
+boot();
+</script>
+</body>
+</html>

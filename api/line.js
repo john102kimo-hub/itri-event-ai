@@ -52,6 +52,7 @@ import { listOpenCampaigns, parseRegBindText, parseRegBindCheck, welcomeButtonLa
 import { autoSyncRegistrationMenu } from '../lib/richmenu-sync.js';
 import { isPasscodeMatch, isStaffAuthenticated, authenticateStaff } from '../lib/staff.js';
 import { isBusinessEvent } from '../lib/audience.js';
+import { parseB2BBind, handleB2BBind, isPartnershipAsk, handlePartnershipAsk } from '../lib/b2b-line.js';
 import { sanitize } from '../lib/line-format.js';
 import {
   CHITCHAT_FIXED_REPLIES, detectBoundChitchat, looksLikeNameOrSkip, mediaNameOf, nonTextReply
@@ -224,11 +225,21 @@ async function handleEvent(ev) {
     await handleRegBind(replyToken, userId, regBindCode, parseRegBindCheck(text));
     return;
   }
+  // 業發處（批次 119，見 lib/b2b-line.js）：業務窗口綁 LINE 通知的「#業務 M7K3Q-檢查碼」也是 # 開頭，要排在
+  // 一般「#活動代碼」之前。
+  const b2bBind = parseB2BBind(text);
+  if (b2bBind) {
+    await handleB2BBind(replyToken, userId, b2bBind);
+    return;
+  }
   if (await isStaffAuthenticated(userId)) {
     markStaff();
     await handleStaffMessage(replyToken, userId, text);
     return;
   }
+  // 「企業合作洽詢」只回洽詢單網址（批次 119）。排在職員模式之後：職員怎麼講都照原本的職員模式走，不被業發處攔走；
+  // 業發處沒設定、暫停收件、讀設定失敗，也都照原本的路徑走。
+  if (isPartnershipAsk(text) && await handlePartnershipAsk(replyToken, userId)) return;
 
   // #代碼 綁定（半形／全形井號都收，同仁貼連結時中文輸入法常會打成全形）
   if (text.startsWith('#') || text.startsWith('＃')) {

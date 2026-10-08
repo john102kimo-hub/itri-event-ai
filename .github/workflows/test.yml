@@ -29,3 +29,8 @@ jobs:
       # 把「現在」往後撥 90 天再跑一次：專門抓寫死日期的測試（批次 103 的日期炸彈）。
       - name: 時間往後撥 90 天再跑一次
         run: SHIFT_DAYS=90 npm test
+      # 業發處的功能開著的時候，既有功能（記者、米亞、報名、後台）的測試照樣要全過（批次 119；朱朱 10/8：
+      # 「務必確保不要影響既有的功能與媒體之使用」）。用 test/loader.mjs 的測試（米亞的流程測試都是）沒有接業發處那本
+      # 試算表，記者那邊的任何一條路只要碰到業發處的資料就會直接報錯。
+      - name: 業發處功能開著，既有功能照樣全過
+        run: B2B_SPREADSHEET_ID=ci-b2b-should-stay-untouched ANTHROPIC_API_KEY_BUSINESS=ci-business-key npm test

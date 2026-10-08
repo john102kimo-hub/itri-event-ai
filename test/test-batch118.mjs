@@ -118,6 +118,17 @@ const shown = (out) => out.filter((s) => s.kind === 'text' || s.kind === 'flex')
   state.answerText = '這套模組主要用在 CNC 與射出成型產線的熱管理。';
   out = await say('這個模組用在哪裡？', 'U_b1');
   check('　 正常的答案照給，結尾補上免責句', /CNC 與射出成型/.test(shown(out)) && /不構成報價或合作承諾/.test(shown(out)), shown(out));
+  {
+    // 企業場的 LINE 問答也走另一把金鑰（有設的話）；記者場照舊
+    const stub = globalThis.fetch;
+    const keys = [];
+    globalThis.fetch = async (u, o) => { if (String(u).includes('api.anthropic.com') && /【本次活動背景資料】/.test(o.body)) keys.push(o.headers['x-api-key']); return stub(u, o); };
+    process.env.ANTHROPIC_API_KEY_BUSINESS = 'biz-key';
+    await say('這個模組用在哪裡？', 'U_b1');
+    globalThis.fetch = stub;
+    delete process.env.ANTHROPIC_API_KEY_BUSINESS;
+    check('　 LINE 企業場的答題也用 ANTHROPIC_API_KEY_BUSINESS', keys.length === 1 && keys[0] === 'biz-key', JSON.stringify(keys));
+  }
   state.answerText = '本計畫總經費新台幣 3 億元。';
   out = await say('計畫經費多少？', 'U_b1');
   check('　 背景資料寫明的公開數字照常回答（不是報價）', /3 億元/.test(shown(out)) && !/不能代為報價/.test(shown(out)), shown(out));
@@ -151,8 +162,8 @@ console.log('\n── 五、網頁問答 ──');
 {
   seed();
   const stub = globalThis.fetch;
-  let last = null;
-  globalThis.fetch = async (u, o) => { if (String(u).includes('api.anthropic.com')) last = JSON.parse(o.body); return stub(u, o); };
+  let last = null, lastKey = '';
+  globalThis.fetch = async (u, o) => { if (String(u).includes('api.anthropic.com')) { last = JSON.parse(o.body); lastKey = o.headers['x-api-key']; } return stub(u, o); };
   const chat = (await import('../api/chat.js')).default;
   const mkRes = () => {
     const r = { statusCode: 200, headers: {}, chunks: [] };
@@ -179,6 +190,13 @@ console.log('\n── 五、網頁問答 ──');
   check('　 正常答案補上免責句', /主要用在 CNC 產線/.test(r.body.reply) && /不構成報價或合作承諾/.test(r.body.reply), r.body.reply);
   r = await ask('semi', '重點是什麼？', false, '10.9.0.3');
   check('　 記者場不受影響：記者版規則、沒有企業場的免責句', /AI 新聞助理/.test(last.system[0].text) && !/不構成報價/.test(r.body.reply || ''), r.body && r.body.reply);
+  process.env.ANTHROPIC_API_KEY_BUSINESS = 'biz-key';
+  await ask('biz', '用在哪裡？', true, '10.9.0.4');
+  const bizKey = lastKey;
+  await ask('semi', '重點是什麼？', false, '10.9.0.5');
+  check('★ 設了 ANTHROPIC_API_KEY_BUSINESS：企業場用那一把（費用與每月上限跟記者分開），記者場照舊用原本那把',
+    bizKey === 'biz-key' && lastKey === 'test', `${bizKey} / ${lastKey}`);
+  delete process.env.ANTHROPIC_API_KEY_BUSINESS;
   globalThis.fetch = stub;
   state.answerText = '';
 }
