@@ -62,7 +62,7 @@ import {
   setBindingNote, setMediaName, upsertBinding
 } from '../lib/line-store.js';
 import {
-  HOME_MENU, REQUEST_BUDGET_MS, STAFF_QUICK_REPLIES, askMediaNameLater, eventContentChips, eventQuickChips,
+  HOME_MENU, REQUEST_BUDGET_MS, STAFF_HOME_CHIPS, askMediaNameLater, eventContentChips, eventQuickChips,
   markStaff, mediaNameChips, rateLimited, replyOrPush, requestCtx, staffChips, toQuickReply
 } from '../lib/line-runtime.js';
 import { pinGenericTechQueryToEvent } from '../lib/line-nodata.js';
@@ -208,15 +208,19 @@ async function handleEvent(ev) {
   if (isPasscodeMatch(text)) {
     markStaff();
     if (await isStaffAuthenticated(userId)) {
-      await replyOrPush(replyToken, userId, '您已經是職員模式了，直接問我就可以，不用再輸入一次密語。', staffChips());
+      await replyOrPush(replyToken, userId, '您已經是職員模式了，直接問我就可以，不用再輸入一次密語。', STAFF_HOME_CHIPS);
       return;
     }
     const { displayName } = await authenticateStaff(userId);
     await applyStaffMenu(userId); // 下方選單換成職員版
     console.log(`[line] 新職員登入 user=${userId} name=${displayName || '(無)'}`);
+    // 批次 125：「LINE ID／LINE_ADMIN_USER_ID 環境變數」那段是給管理員設定通知用的，以前每一位同仁登入都看到
+    // 一段工程設定說明。改成只在管理員還沒設定時才出現（設定好之後，這段就沒有人需要了）。
+    const adminSetup = process.env.LINE_ADMIN_USER_ID ? ''
+      : `\n\n（管理員設定用）您的 LINE ID：${userId}\n想在「有新的人用密語登入」時收到通知，把這組 ID 設成 LINE_ADMIN_USER_ID 環境變數即可。`;
     await replyOrPush(replyToken, userId,
-      `職員模式已啟用${displayName ? `，${displayName} 您好` : ''}！\n\n下方選單已換成職員版，也可以直接用講的。\n\n您的 LINE ID：${userId}\n（想在「有新的人用密語登入」時收到通知，把這組 ID 設成 LINE_ADMIN_USER_ID 環境變數即可）`,
-      STAFF_QUICK_REPLIES);
+      `職員模式已啟用${displayName ? `，${displayName} 您好` : ''}！\n\n常用的都在下方選單；也可以直接用講的，例如「智慧醫療那場地點改成南港展覽館」。${adminSetup}`,
+      STAFF_HOME_CHIPS);
     return;
   }
   // 報名頁按「用 LINE 連結我的報名」送來的「#報名 R7K3M」（批次 88）。必須排在職員判斷與一般

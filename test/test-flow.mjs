@@ -280,7 +280,7 @@ reset(); await freshModule();
 state.staff.push(['U_staff', '', '2026-08-27', '', '']);
 out = await send('最近有發什麼新聞稿', 'U_staff');   // ← 回報原話
 check('職員問「最近有發什麼新聞稿」→ 既不是職員功能清單的牆，也不是【近期活動】行事曆',
-  !out.some(o => o.kind === 'text' && /【管理】|職員模式可以做這些事|【近期活動】/.test(o.text)),
+  !out.some(o => o.kind === 'text' && /【管理】|職員模式可以做這些事|職員模式能做的事|【近期活動】/.test(o.text)), // 批次 125 起說明的開頭是「職員模式能做的事」
   JSON.stringify(out));
 check('職員問新聞稿 → 真的去抓工研院官網新聞中心的最新清單',
   out.some(o => o.kind === 'text' && /近期工研院新聞/.test(o.text) && o.text.includes('工研院攜AMRA打造足型機器人新標準')),
@@ -328,8 +328,9 @@ check('「所有場次的後台數據」走的是後台數據，不是被 CALEND
 reset(); await freshModule();
 state.staff.push(['U_staff', '', '2026-08-27', '', '']);
 out = await send('使用說明', 'U_staff');
-check('職員打「使用說明」→ 給職員功能表，不是記者的說明影片',
-  out.some(o => o.kind === 'text' && /【管理】/.test(o.text))
+// 批次 125：說明從四段（【管理】【直接改資料】【教米亞】【離開】）縮成「職員模式能做的事」一件一行
+check('職員打「使用說明」→ 給職員功能說明，不是記者的說明影片',
+  out.some(o => o.kind === 'text' && /職員模式能做的事/.test(o.text))
     && !out.some(o => o.kind === 'video'), JSON.stringify(out.map(o => o.kind)));
 check('職員功能表要寫出【教米亞】（批次 46 做好了，除了這裡沒有別的地方寫著怎麼叫它）',
   out.some(o => o.kind === 'text' && /教米亞/.test(o.text)), JSON.stringify(out));
@@ -342,8 +343,8 @@ check('職員功能表不再列記者端那些功能（趨勢／技術／邀訪�
     !/記者問得到的/.test(o.text) && !/產業趨勢/.test(o.text) && !/媒體邀訪需求/.test(o.text)),
   JSON.stringify(out));
 // 批次 77：「直接打活動名稱」拆成兩條——點名稱看活動卡、帶著問題問才由米亞回答
-check('「點活動名稱／帶著問題問」留著並歸到【管理】——後者帶著「含未發布」，是職員才有的權限',
-  out.some(o => o.kind === 'text' && /點活動名稱/.test(o.text) && /含未發布/.test(o.text)),
+check('「點活動名稱／帶著問題問」留著——後者寫明「還沒發布的場次也問得到」，是職員才有的權限',
+  out.some(o => o.kind === 'text' && /點活動名稱/.test(o.text) && /還沒發布的場次也問得到/.test(o.text)),
   JSON.stringify(out));
 
 // ⚠️⚠️ 拿掉的是**文案**，不是能力：批次 52 修的是 handleStaffMessage() 的路由，不是
@@ -373,18 +374,18 @@ out = await send('使用說明', 'U_staff');
   const more = out.find(o => o.kind === 'text')?.text || '';
   check('職員打「更多功能」→ 寫著媒體訓練、教米亞、退出職員模式三件事',
     /媒體訓練/.test(more) && /【教米亞】/.test(more) && /退出職員模式/.test(more), JSON.stringify(out));
-  check('　 不是整份功能表（沒有【管理】【直接改資料】）',
-    !/【管理】/.test(more) && !/【直接改資料】/.test(more), more);
+  check('　 不是整份功能說明（批次 125 起說明開頭是「職員模式能做的事」）',
+    !/【管理】/.test(more) && !/【直接改資料】/.test(more) && !/職員模式能做的事/.test(more), more);
   check('　 結尾告訴同仁完整說明怎麼叫出來', /使用說明/.test(more), more);
   check('　 不是記者那份說明影片', !out.some(o => o.kind === 'video'), JSON.stringify(out.map(o => o.kind)));
   const chips = (sent[sent.length - 1]?.quickReply || []).map(c => (typeof c === 'string' ? c : (c.text || c.label)));
-  check('　 按鈕列最前面是這一則最相關的三顆，後面照樣是整套入口',
-    JSON.stringify(chips.slice(0, 3)) === JSON.stringify(['要媒體訓練連結', '記憶清單', '退出職員模式'])
-      && STAFF_MENU.buttons.every(b => chips.includes(b.text)) && chips.length <= 13, JSON.stringify(chips));
-  // 「使用說明」仍然是完整功能表，而且現在會列出「更多功能」這一格
+  // 批次 125：按鈕不再每則掛整套入口（12 顆），改成這一則的四件事＋「🏠 職員選單」（一按回到全部功能）
+  check('　 按鈕列是這一則的四件事，最後一顆是「職員選單」（回到全部功能的路）',
+    JSON.stringify(chips) === JSON.stringify(['要媒體訓練連結', '記憶清單', '退出職員模式', '使用說明', '職員選單']), JSON.stringify(chips));
+  // 「使用說明」仍然是完整的功能說明，而且會指到「更多功能」這一格
   out = await send('使用說明', 'U_staff');
-  check('「使用說明」還是完整功能表，並提到「更多功能」',
-    out.some(o => o.kind === 'text' && /【管理】/.test(o.text) && /更多功能/.test(o.text)), JSON.stringify(out));
+  check('「使用說明」還是完整的功能說明，並提到「更多功能」',
+    out.some(o => o.kind === 'text' && /職員模式能做的事/.test(o.text) && /更多功能/.test(o.text)), JSON.stringify(out));
   // 記者打「更多功能」不是職員指令，不能叫出職員內部說明
   reset(); await freshModule();
   out = await send('更多功能', 'U_reporter_more');
@@ -395,8 +396,10 @@ out = await send('使用說明', 'U_staff');
 reset(); await freshModule();
 state.staff.push(['U_staff', '', '2026-08-27', '', '']);
 out = await send('欸你這樣不太行喔', 'U_staff');
+// ⚠️ 批次 125：說明改版後沒有【管理】這三個字了，只比對它的話這條永遠不會紅（批次 55 的教訓）——
+// 一併比對新版說明的開頭「職員模式能做的事」，把 'other' 改回丟說明時照樣會紅。
 check('職員講了聽不懂的話 → 不再丟一面功能清單的牆',
-  !out.some(o => o.kind === 'text' && /【管理】/.test(o.text)), JSON.stringify(out));
+  !out.some(o => o.kind === 'text' && /【管理】|職員模式能做的事/.test(o.text)), JSON.stringify(out));
 check('聽不懂時走記者端的智慧兜底，並標明還在職員模式',
   out.some(o => o.kind === 'fallback') ||
   out.some(o => o.kind === 'text' && /職員模式/.test(o.text)), JSON.stringify(out));
@@ -2461,22 +2464,22 @@ console.log('── 按鈕：走進記憶這條路，入口不可以縮水 ─�
 // 其他八個入口就消失了**。同仁是從九顆裡點進來的，回來只剩一顆。
 //
 // 這跟批次 52（職員模式取代記者模式、能力整批不見）是同一個形狀，只是縮水的是入口。
-// 規則：職員模式每一則回覆都帶整套入口，情境按鈕只排在前面，不取代它。
+// 批次 54 的規則是「每一則都帶整套入口」；批次 125 改成「這一步的下一步＋🏠 職員選單」——
+// 朱朱回報每則掛 12～13 顆「選項有夠多 複雜又難用」。要守的還是同一件事：每一則都回得去
+// 全部功能（最後一顆「職員選單」），而且不會只剩一顆不相干的按鈕。
 {
-  const { STAFF_MENU: SM } = await import('../lib/menu.js');
-  const staffFull = [...SM.buttons.map(b => b.text), '設定圖文選單', '最近有哪些新聞', '記憶清單', '使用說明'];
   const chipsOf = () => (sent[sent.length - 1]?.quickReply || [])
     .map(c => (typeof c === 'string' ? c : (c.text || c.label)));
-  const coversAll = () => staffFull.every(t => chipsOf().includes(t));
+  const homeLast = () => chipsOf()[chipsOf().length - 1] === '職員選單';
 
   // 空清單（回報截圖就是這個狀態）
   reset(); await freshModule();
   state.staff.push(['U_staff', '', '2026-08-27', '', '']);
   await send('記憶清單', 'U_staff');
-  check('★ 記憶清單（空）→ 整套職員入口都還在，不是只剩一顆', coversAll(), JSON.stringify(chipsOf()));
+  check('★ 記憶清單（空）→ 最後一顆是「職員選單」，一按回到全部功能', homeLast(), JSON.stringify(chipsOf()));
   check('★ 不再出現那顆不相干的「最近有哪些活動」當唯一按鈕',
-    chipsOf().length > 1, JSON.stringify(chipsOf()));
-  check('清單是空的時候，第一顆是「使用說明」（裡面有【教米亞】怎麼教）',
+    chipsOf().length > 1 && !chipsOf().includes('最近有哪些活動'), JSON.stringify(chipsOf()));
+  check('清單是空的時候，第一顆是「使用說明」（裡面寫著怎麼教）',
     chipsOf()[0] === '使用說明', JSON.stringify(chipsOf()));
 
   // 有內容的清單
@@ -2484,11 +2487,11 @@ console.log('── 按鈕：走進記憶這條路，入口不可以縮水 ─�
   state.staff.push(['U_staff', '', '2026-08-27', '', '']);
   state.memories.push(['2026-09-10', 'global', 'style', '回答再短一點', 'U_staff', 'on']);
   await send('記憶清單', 'U_staff');
-  check('記憶清單（有內容）→ 一樣帶整套入口', coversAll(), JSON.stringify(chipsOf()));
+  check('記憶清單（有內容）→ 一樣有「職員選單」', homeLast(), JSON.stringify(chipsOf()));
   check('而且「記憶清單」自己也在按鈕裡（想再看一次不用自己打字）',
     chipsOf().includes('記憶清單'), JSON.stringify(chipsOf()));
 
-  // 教完、忘記、編號不存在、沒綁定場次——每一則都要帶整套
+  // 教完、忘記、編號不存在、沒綁定場次——每一則都回得去
   const cases = [
     ['語氣：回答再短一點', '教完一條之後'],
     ['忘記 9',             '編號不存在時'],
@@ -2498,7 +2501,7 @@ console.log('── 按鈕：走進記憶這條路，入口不可以縮水 ─�
     reset(); await freshModule();
     state.staff.push(['U_staff', '', '2026-08-27', '', '']);
     await send(msg, 'U_staff');
-    check(`${label}也帶整套職員入口`, coversAll(), JSON.stringify(chipsOf()));
+    check(`${label}也有「職員選單」`, homeLast(), JSON.stringify(chipsOf()));
   }
 
   // ⚠️ 唯一的例外：確認問句只能有兩顆
@@ -3029,8 +3032,9 @@ check('　 同一視窗內真的在問活動 → 照樣回', out.length > 0, JSO
 // ── 情境 76：職員模式第一批小修（批次 76，盤點實測到的十個問題）──────────────
 {
   const labelsOf = o => (o?.quickReply || []).map(c => (typeof c === 'object' && c ? c.text : c));
-  // 批次 77 起職員選單第一格是「活動與進度」（取代「最近有哪些活動」）
-  const hasStaffEntries = o => ['新增活動', '查活動後台數據', '活動與進度'].every(t => labelsOf(o).includes(t));
+  // 批次 125：「整套職員入口」（每則 12 顆）改成「最後一顆是🏠 職員選單」——一按就是全部功能（見
+  // lib/line-runtime.js staffChips()），要守的「每一則都回得去」沒變
+  const hasStaffEntries = o => labelsOf(o)[labelsOf(o).length - 1] === '職員選單';
 
   // (1) 米亞問名稱之後回「算了」之類 → 不建活動
   for (const phrase of ['算了', '不用了', '取消', '謝謝', '先不要', '等一下', '我還沒想好名字']) {
@@ -3040,7 +3044,7 @@ check('　 同一視窗內真的在問活動 → 照樣回', out.length > 0, JSO
     const n = state.events.length;
     out = await send(phrase, 'U_staff');
     check(`★ 新增活動 → 回「${phrase}」不會建出同名活動`, state.events.length === n, JSON.stringify(state.events.at(-1)));
-    check(`　 回「${phrase}」→ 說先不建立，並帶整套職員入口`, /先不建立/.test(out[0]?.text || '') && hasStaffEntries(out[0]), JSON.stringify(out));
+    check(`　 回「${phrase}」→ 說先不建立，並帶職員選單`, /先不建立/.test(out[0]?.text || '') && hasStaffEntries(out[0]), JSON.stringify(out));
   }
 
   // (2) 「改成下午兩點開始」不能變成全站語氣規則
@@ -3056,7 +3060,7 @@ check('　 同一視窗內真的在問活動 → 照樣回', out.length > 0, JSO
   check('真的在講說話方式 → 照舊先問確認，而且講明會套用到所有場次',
     /以後都照做/.test(out[0]?.text || '') && /所有場次/.test(out[0]?.text || ''), JSON.stringify(out));
 
-  // (3)(4) 問「哪一場」的按鈕：新的在前、封存不列，後面接整套職員入口
+  // (3)(4) 問「哪一場」的按鈕：新的在前、封存不列，最後接職員選單（批次 125）
   reset(); await freshModule();
   const olds = [];
   for (let i = 1; i <= 10; i++) olds.push([`old${i}`, `2025年舊活動第${i}場`, '#0F9E7A', 'kb', i % 3 ? 'ended' : 'archived', `2025-0${(i % 9) + 1}-10`, '', '', '', '工研院', 'c' + i, '', '', '', '', '', '', '']);
@@ -3067,21 +3071,21 @@ check('　 同一視窗內真的在問活動 → 照樣回', out.length > 0, JSO
   check('★ 「哪一場」的按鈕有接下來要辦的場次（不是試算表最上面最舊的 8 場）',
     labels.includes('智慧醫療解決方案記者會') && labels.includes('奈米材料前瞻應用發表會'), JSON.stringify(labels));
   check('　 已封存的不列', !olds.filter(r => r[4] === 'archived').some(r => labels.includes(r[1])), JSON.stringify(labels));
-  check('　 後面接上整套職員入口、不超過 13 顆', hasStaffEntries(out[0]) && labels.length <= 13, JSON.stringify(labels));
+  check('　 最後接職員選單、不超過 13 顆', hasStaffEntries(out[0]) && labels.length <= 13, JSON.stringify(labels));
   out = await send('智慧醫療解決方案記者會', 'U_staff');
-  check('後台數據結果也帶整套職員入口', /後台數據/.test(out[0]?.text || '') && hasStaffEntries(out[0]), JSON.stringify(out));
+  check('後台數據結果也帶職員選單', /後台數據/.test(out[0]?.text || '') && hasStaffEntries(out[0]), JSON.stringify(out));
   out = await send('要媒體訓練連結', 'U_staff');
   out = await send('半導體先進封裝技術發表會', 'U_staff');
-  check('媒體訓練連結結果也帶整套職員入口', /\/training\?id=semi/.test(out[0]?.text || '') && hasStaffEntries(out[0]), JSON.stringify(out));
+  check('媒體訓練連結結果也帶職員選單', /\/training\?id=semi/.test(out[0]?.text || '') && hasStaffEntries(out[0]), JSON.stringify(out));
 
   // (4)(5)(6)(7)(9) 新增 → 說明正確、帶按鈕、馬上查得到、沒日期寫「日期未定」、清單按鈕點得到
   reset(); await freshModule();
   state.staff.push(['U_staff', '', '2026-08-27', '', '']);
   out = await send('新增活動', 'U_staff');
-  check('問新活動名稱時也帶整套職員入口', hasStaffEntries(out[0]), JSON.stringify(out));
+  check('問新活動名稱時也帶職員選單', hasStaffEntries(out[0]), JSON.stringify(out));
   out = await send('眺望2027產業發展趨勢研討會', 'U_staff');
   const created = out[0]?.text || '';
-  check('建立完成帶整套職員入口', hasStaffEntries(out[0]), JSON.stringify(out));
+  check('建立完成帶職員選單', hasStaffEntries(out[0]), JSON.stringify(out));
   check('★ 建立完成不再叫人「到後台按發布」（後台要密碼，編輯頁本來就能發布）',
     !/到後台按/.test(created) && /改成「進行中」/.test(created), created);
   check('　 沒給日期 → 寫「未定」', /日期：未定/.test(created), created);
@@ -3089,7 +3093,7 @@ check('　 同一視窗內真的在問活動 → 照樣回', out.length > 0, JSO
   check('★ 剛建好的活動馬上就在清單上（不用等 60 秒快取過期）', /眺望2027產業發展趨勢研討會/.test(out[0]?.text || ''), out[0]?.text);
   check('★ 沒填日期的活動顯示「日期未定」，不是建立當天', /眺望2027產業發展趨勢研討會　🔒 未發布\n　日期未定/.test(out[0]?.text || ''), out[0]?.text);
   check('★ 清單按鈕列得到還沒有新聞稿的草稿', labelsOf(out[0]).includes('眺望2027產業發展趨勢研討會'), JSON.stringify(labelsOf(out[0])));
-  check('　 清單也帶整套職員入口', hasStaffEntries(out[0]), JSON.stringify(labelsOf(out[0])));
+  check('　 清單也帶職員選單', hasStaffEntries(out[0]), JSON.stringify(labelsOf(out[0])));
   out = await send('眺望2027產業發展趨勢研討會', 'U_staff');
   // 批次 77 起點名稱看到的是活動卡（Flex），卡上有編輯頁按鈕
   check('點那場草稿 → 活動卡（狀態與編輯頁），不是一句「沒有資料」的 AI 回答',
@@ -3159,7 +3163,7 @@ check('　 同一視窗內真的在問活動 → 照樣回', out.length > 0, JSO
   state.staff.push(['U_staff', '', '2026-08-27', '', '']);
   out = await send('活動與進度', 'U_staff');
   check('★ 「活動與進度」→ 總覽，寫出每場還缺什麼', /【活動與進度】/.test(out[0]?.text || '') && /還缺：/.test(out[0]?.text || ''), out[0]?.text);
-  check('　 按鈕是活動名稱＋整套職員入口', labelsOf(out[0]).includes('智慧醫療解決方案記者會') && labelsOf(out[0]).includes('新增活動'), JSON.stringify(labelsOf(out[0])));
+  check('　 按鈕是活動名稱＋職員選單（批次 125 起不再接整套入口）', labelsOf(out[0]).includes('智慧醫療解決方案記者會') && labelsOf(out[0]).at(-1) === '職員選單' && !labelsOf(out[0]).includes('新增活動'), JSON.stringify(labelsOf(out[0])));
   out = await send('最近有哪些活動', 'U_staff');
   check('職員打「最近有哪些活動」也是同一份總覽', /【活動與進度】/.test(out[0]?.text || ''), out[0]?.text);
   out = await send('哪幾場還沒填完', 'U_staff');
@@ -3176,9 +3180,9 @@ check('　 同一視窗內真的在問活動 → 照樣回', out.length > 0, JSO
   check('　 卡上有編輯頁連結（按了直接開，不用複製）', /"type":"uri"[^}]*\/edit\?id=med&code=code3/.test(card), card);
   check('　 卡上寫出還缺新聞聯絡人（這場沒填）', /⬜ 新聞聯絡人/.test(card), card);
   check('　 卡上有「催填訊息」按鈕', card.includes('催填：智慧醫療解決方案記者會'), card);
-  check('　 卡片也帶職員入口，還有「問米亞這場」', (() => {
+  check('　 卡片也帶職員選單，還有「問米亞這場」', (() => {
     const qr = out[0]?.messages?.[0]?.quickReply?.items?.map(i => i.action.text) || [];
-    return qr.includes('新增活動') && qr.includes('智慧醫療解決方案記者會的重點是什麼');
+    return qr[qr.length - 1] === '職員選單' && qr.includes('智慧醫療解決方案記者會的重點是什麼');
   })(), card);
   check('　 活動卡不是 AI 回答（不花模型、不寫進 qa_log）', !out.some(o => o.kind === 'answer'));
 
