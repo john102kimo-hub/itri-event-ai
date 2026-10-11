@@ -202,7 +202,7 @@ AI 不報價（答案裡有背景資料沒有的金額，整則換成固定回�
 | 媒體訓練 | `https://itri-event-ai.vercel.app/training?id=活動ID` | 主管（要先從後台登入過，或用同仁編輯碼；直接開網址無法使用） |
 | 成效報告 | `https://itri-event-ai.vercel.app/report` | **只有你**（需後台密碼，一頁印給主管看） |
 | AI 能見度追蹤 | `https://itri-event-ai.vercel.app/geo` | **只有你**（需後台密碼），選配功能見上方 GEO 環境變數 |
-| 記者名單健檢 | 從後台或同仁共用連結進入 | 你與獲授權同仁 |
+| 記者名單健檢 | `https://itri-event-ai.vercel.app/media.html`（後台側邊欄「記者名單健檢」；同仁用共用連結） | 你與獲授權同仁 |
 
 ---
 

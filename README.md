@@ -13,6 +13,7 @@
 | 同仁（改自己那一場） | `/edit?id=…&code=…` | `public/edit.html`、`api/events.js`（`get_edit`／`update_edit`） |
 | 主管（成效報告） | `/report` | `public/report.html`、`api/exposure.js` |
 | AI 能見度追蹤 | `/geo` | `public/geo.html`、`api/geo.js`、`lib/geo-*.js` |
+| 承辦人與同仁（記者名單健檢） | `/media.html`（後台側邊欄；同仁用共用連結 `?code=`） | `public/media.html`、`api/media.js` |
 | 主管（媒體訓練） | `/training` | `public/training.html`、`api/training.js` |
 | 記者（活動報名）／後台：所有活動與名單 | `/register`／`/registrations` | `public/register.html`、`public/registrations.html`、`lib/registration*.js` |
 | 企業（合作洽詢單） | `/inquiry` | `public/inquiry.html`、`lib/b2b-api.js`（搭在 `api/events.js` 的 `b2b_` 系列） |

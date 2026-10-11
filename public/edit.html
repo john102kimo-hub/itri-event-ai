@@ -3,6 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<!-- 批次 124：後台與帶權杖的頁面（網址上有編輯碼／共用連結碼）不讓搜尋引擎收錄——連結萬一被貼到公開的地方，也不會變成搜尋結果 -->
+<meta name="robots" content="noindex,nofollow">
 <title>更新我的記者會內容 — 工研院活動溝通 AI 平台</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.3.0/dist/tabler-icons.min.css" integrity="sha384-ir0fR0HzKEQ1x1XwqY5+0wIbrIgY45nvWPjIQy7+rjcwW7L0cHDytvEHKS3tIxBZ" crossorigin="anonymous">
 <style>
@@ -119,8 +121,20 @@ textarea.form-control { min-height: 240px; resize: vertical; line-height: 1.65; 
   font-size: 0.9rem; z-index: 200; display: none; box-shadow: 0 8px 24px rgba(0,0,0,0.25);
 }
 
+.topbar-title #topbar-event { opacity: 0.85; font-weight: 600; }
+.lbl-short { display: none; }
+
 @media (max-width: 600px) {
   .action-bar .saved-hint { width: 100%; margin: 0 0 6px; }
+  /* 批次 124：手機上三顆按鈕排成一列。以前「媒體訓練」「預覽記者前台」「儲存內容」擠不下、折成兩列，
+     底部那條半透明的按鈕列佔掉快 150px，正在填的欄位被它蓋住。次要的兩顆改成短字，「儲存內容」佔剩下的寬度。 */
+  .action-bar { flex-wrap: wrap; gap: 8px; padding: 10px 12px calc(10px + env(safe-area-inset-bottom)); }
+  .action-bar .btn { padding: 11px 12px; font-size: 0.88rem; }
+  .action-bar .btn-outline .lbl-full { display: none; }
+  .action-bar .btn-outline .lbl-short { display: inline; }
+  .action-bar #save-btn { flex: 1; }
+  /* 提示框左右各留 12px 撐滿：以前 left:50% 再往回推一半，可用寬度只剩半個螢幕，長一點的說明被擠成細長一條 */
+  #toast { bottom: 76px; left: 12px; right: 12px; transform: none; text-align: center; }
 }
 </style>
 </head>
@@ -129,7 +143,7 @@ textarea.form-control { min-height: 240px; resize: vertical; line-height: 1.65; 
 <div class="topbar">
   <i class="ti ti-edit"></i>
   <div class="topbar-title">更新我的記者會內容
-    <span>工研院活動溝通 AI 平台</span>
+    <span id="topbar-event">工研院活動溝通 AI 平台</span>
   </div>
 </div>
 
@@ -340,10 +354,10 @@ textarea.form-control { min-height: 240px; resize: vertical; line-height: 1.65; 
   <div class="action-bar">
     <span class="saved-hint" id="saved-hint"></span>
     <a class="btn btn-outline" id="training-link" target="_blank" title="AI 扮演犀利記者做問答演練，幫發言人先練習">
-      <i class="ti ti-microphone"></i> 媒體訓練
+      <i class="ti ti-microphone"></i> <span class="lbl-full">媒體訓練</span><span class="lbl-short">訓練</span>
     </a>
     <a class="btn btn-outline" id="preview-link" target="_blank">
-      <i class="ti ti-eye"></i> 預覽記者前台
+      <i class="ti ti-eye"></i> <span class="lbl-full">預覽記者前台</span><span class="lbl-short">預覽</span>
     </a>
     <button class="btn btn-primary" id="save-btn" onclick="save()">
       <i class="ti ti-device-floppy"></i> 儲存內容
@@ -519,6 +533,7 @@ async function load() {
     }
 
     document.getElementById('input-name').value = ev.name || '';
+    showEventName(ev.name);
     document.getElementById('input-organizer').value = ev.organizer || '工研院';
     document.getElementById('input-color').value = ev.color || '#0F9E7A';
     document.getElementById('color-preview').style.background = ev.color || '#0F9E7A';
@@ -551,9 +566,30 @@ async function load() {
     loadExposure();
     populateCopyTemplate();
   } catch (e) {
-    showError('連線失敗', e.message + '，請檢查網路後重新整理。');
+    // 原文（Failed to fetch、Unexpected token…）同仁看不懂也幫不上忙，留在 console 給除錯用（批次 124）
+    console.error('編輯頁載入失敗:', e);
+    showError('連線失敗', '目前連不上資料，請確認網路後重新整理一次；一直開不起來請聯絡活動承辦人。');
   }
 }
+
+// 標題列與分頁標題寫出「正在編哪一場」（批次 124）：同仁手上常常同時開著好幾場的編輯連結，
+// 以前每個分頁都叫「更新我的記者會內容」，切來切去分不出哪個是哪場，改錯場的內容。
+function showEventName(name) {
+  const n = String(name || '').trim();
+  if (!n) return;
+  document.getElementById('topbar-event').textContent = n;
+  document.title = `${n}｜更新記者會內容`;
+}
+
+// 還沒發布的場次，記者前台本來就會顯示「找不到活動」（未發布＝記者看不到）。以前「預覽記者前台」照樣打開那一頁，
+// 同仁以為連結壞了或內容沒存到（批次 124）。改成直接說明：要發布之後才看得到。
+function previewBlocked(e) {
+  if (loadedStatus !== 'draft') return;
+  e.preventDefault();
+  toast('這場還沒發布，記者前台現在會顯示「找不到活動」。把狀態改成「進行中」並儲存後，就能預覽；想先試試 AI 怎麼答，可以用「媒體訓練」。', 9000);
+}
+document.getElementById('preview-link').addEventListener('click', previewBlocked);
+document.getElementById('input-name').addEventListener('change', (e) => showEventName(e.target.value));
 
 function fillTemplate() {
   const kb = document.getElementById('input-kb');
@@ -730,6 +766,47 @@ async function loadExposure() {
   } catch { /* 沒上傳過就不顯示，不擋主流程 */ }
 }
 
+// 上傳大小（批次 124）：Vercel 一個請求最多收約 4.5 MB，檔案轉成 base64 會再大三分之一——原始檔超過約 3 MB，
+// 請求在進到我們的程式之前就被平台退回（413），以前畫面上只看到「上傳失敗：Unexpected token…」。
+// 監測公司的「露出清單.doc」其實是 MHTML（網頁封存檔）：表格在第一段 text/html，後面是圖片。
+// 後端本來就只讀那一段（lib/exposure-parse.js htmlFromMhtml()），所以檔案太大時只送到那一段為止（檔頭＋表格），
+// 後面的圖片不送——圖片再多也傳得上去。
+const EXPOSURE_MAX_BYTES = 3_200_000;
+function exposurePayload(bytes, filename) {
+  if (bytes.length <= EXPOSURE_MAX_BYTES) return { bytes, trimmed: false };
+  const isZip = bytes.length > 4 && bytes[0] === 0x50 && bytes[1] === 0x4b && bytes[2] === 0x03 && bytes[3] === 0x04;
+  let tableTooBig = false;
+  if (!isZip) {
+    // latin1：一個位元組對一個字元，字串位置就是位元組位置
+    const s = new TextDecoder('iso-8859-1').decode(bytes);
+    const start = s.search(/Content-Type:\s*text\/html/i);
+    const bodyAt = start < 0 ? -1 : s.indexOf('\r\n\r\n', start);
+    if (bodyAt > 0) {
+      // 這一段結束在下一條 boundary 線：用檔頭宣告的 boundary，沒宣告就用 Word 的「=_NextPart」（跟後端同一條規則）。
+      // 不能只看「行首是 --」：Word 網頁內容裡的「-->」剛好落在行首是常有的事，會把表格切掉一半。
+      const boundary = (s.slice(0, start).match(/boundary="?([^"\r\n;]+)/i) || [])[1];
+      const body = s.slice(bodyAt + 4);
+      let next = boundary ? body.indexOf('\r\n--' + boundary) : -1;
+      if (next < 0) next = body.search(/\r\n--+=_NextPart/);
+      const end = next < 0 ? bytes.length : bodyAt + 4 + next;
+      const part = bytes.slice(0, end);
+      if (part.length <= EXPOSURE_MAX_BYTES) return { bytes: part, trimmed: true };
+      tableTooBig = true;
+    }
+  }
+  const mb = (bytes.length / 1e6).toFixed(1);
+  throw new Error(/\.pptx$/i.test(filename)
+    ? `簡報檔 ${mb} MB，超過一次能上傳的約 3 MB。請改上傳監測公司給的「露出清單.doc」原始檔（資料也比簡報完整）。`
+    : tableTooBig
+      ? `檔案 ${mb} MB，光是露出表格那一段就超過一次能上傳的約 3 MB。請聯絡活動承辦人協助登錄。`
+      : `檔案 ${mb} MB，超過一次能上傳的約 3 MB，而且不是監測公司的露出清單格式。請確認是「露出清單.doc」原始檔。`);
+}
+function bytesToBase64(bytes) {
+  let bin = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  return btoa(bin);
+}
+
 async function uploadExposure() {
   const f = document.getElementById('exp-file').files[0];
   if (!f) return;
@@ -738,19 +815,18 @@ async function uploadExposure() {
   btn.innerHTML = '<i class="ti ti-loader"></i> 解析中…';
 
   try {
-    const data = await new Promise((resolve, reject) => {
-      const r = new FileReader();
-      r.onload = () => resolve(String(r.result).split(',').pop());
-      r.onerror = () => reject(new Error('讀取檔案失敗'));
-      r.readAsDataURL(f);
-    });
+    const { bytes } = exposurePayload(new Uint8Array(await f.arrayBuffer()), f.name);
+    const data = bytesToBase64(bytes);
 
     const res = await fetch('/api/exposure', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'upload', id: EVENT_ID, code: EDIT_CODE, filename: f.name, data })
     });
-    const d = await res.json();
+    // 平台層的錯誤（例如 413 檔案太大）回的不是 JSON，不要把解析錯誤的英文原文印給同仁看
+    const d = await res.json().catch(() => ({
+      error: res.status === 413 ? '檔案太大，傳不上去（一次最多約 3 MB）。' : `伺服器沒有回應（${res.status}），請稍後再試。`
+    }));
     if (!res.ok || d.error) throw new Error(d.error || '上傳失敗');
 
     renderExposure(d, '');

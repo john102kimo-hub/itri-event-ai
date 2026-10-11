@@ -387,7 +387,20 @@
     z-index: 100;
   }
   #error-screen i { font-size: 48px; color: #ef4444; }
-  #error-screen p { color: var(--muted); font-size: 0.95rem; line-height: 1.6; }
+  #error-screen p { color: var(--muted); font-size: 0.95rem; line-height: 1.7; max-width: 420px; white-space: pre-line; }
+
+  /* ── 電腦（寬螢幕）：內容收成置中的一欄（批次 124）──
+     以前標題、媒體欄、對話、快速提問、輸入框全部撐滿整個螢幕：1440px 寬的螢幕上，記者的問題貼在最右邊、
+     AI 的回答貼在最左邊，中間空一大片；輸入框一千多 px 長，LINE QR 那塊也拉成一整條。
+     用左右 padding 把內容收進中間一欄，不改結構——捲動區照樣是整個寬度（捲軸在螢幕最右邊），
+     標題列的底色照樣滿版；手機（下面 520px 那段）完全不受影響。 */
+  @media (min-width: 900px) {
+    :root { --col: 860px; }
+    #header, #media-banner, #chip-dock, #input-area, #messages {
+      padding-left: calc((100% - var(--col)) / 2);
+      padding-right: calc((100% - var(--col)) / 2);
+    }
+  }
 
   /* ── 手機（窄螢幕）：標題與輸入列少佔空間，字放大一點、點擊區加大 ── */
   @media (max-width: 520px) {
@@ -420,7 +433,7 @@
 <div id="error-screen" hidden>
   <i class="ti ti-alert-circle"></i>
   <h2 style="color:#1a1a2e">找不到活動</h2>
-  <p id="error-msg">此活動不存在或已結束，請確認網址是否正確。</p>
+  <p id="error-msg">這個活動頁目前沒有開放，請確認網址是否完整。</p>
 </div>
 
 <!-- 媒體名稱強制彈窗：媒體必填、姓名選填（批次 105）。後台的「服務媒體家數」只數媒體欄，姓名另存一欄 -->
@@ -576,8 +589,10 @@ async function init() {
     const event = data.event;
 
     if (!event) {
+      // 404 涵蓋三種情況：網址打錯、還沒發布（承辦人先把連結傳出來了）、已經下架。以前一律寫「此活動不存在」，
+      // 拿到「還沒發布」連結的記者會以為連結壞了。三種情況刻意不分開講——分開講等於告訴外人這場草稿存在（批次 124）。
       showError(res.status === 404 || res.ok
-        ? '此活動不存在，請確認網址是否正確。'
+        ? '這個活動頁目前沒有開放。\n可能還沒發布、已經下架，或網址不完整，\n請向提供連結的承辦人確認。'
         : '目前連不上活動資料，請稍後重新整理一次。');
       return;
     }
@@ -848,7 +863,14 @@ function loadChat() {
 
 // 新聞聯絡人：「王小明 03-5911234 分機 8888」——電話那一段做成 tel: 連結，手機上點一下就撥。
 // 一律用 textContent／文字節點組（這欄是同仁自己填的，不信任它是安全的 HTML）。
-const PHONE_RE = /(\+?0\d{1,2}[-\s]?\d{3,4}[-\s]?\d{3,4}|09\d{2}[-\s]?\d{3}[-\s]?\d{3})/;
+// 分機（批次 124）：連結寫成「tel:035911234,8888」——逗號是撥號的「停一下」，接通後自動按分機，
+// 記者不用撥通了再自己按。以前分機留在連結外面，要聽完總機語音再手動輸入。
+// ⚠️ 分機數字絕對不能直接黏在總機號碼後面（035911234 8888 → 0359112348888 是另一支不存在的電話），
+//    報名頁（public/register.html telHref()）以前就是這樣撥錯號；兩邊同一套規則，test-batch124 比對。
+const PHONE_RE = /(\+?0\d{1,2}[-\s]?\d{3,4}[-\s]?\d{3,4}|09\d{2}[-\s]?\d{3}[-\s]?\d{3})(?:\s*(?:分機|轉|#|ext\.?)\s*(\d{1,6}))?/i;
+function telHref(main, ext) {
+  return 'tel:' + String(main || '').replace(/[^\d+]/g, '') + (ext ? ',' + String(ext).replace(/\D/g, '') : '');
+}
 function contactNode(text) {
   const frag = document.createDocumentFragment();
   const t = String(text || '');
@@ -856,7 +878,7 @@ function contactNode(text) {
   if (!m) { frag.appendChild(document.createTextNode(t)); return frag; }
   frag.appendChild(document.createTextNode(t.slice(0, m.index)));
   const a = document.createElement('a');
-  a.href = 'tel:' + m[0].replace(/[^\d+]/g, '');
+  a.href = telHref(m[1], m[2]);
   a.textContent = m[0];
   frag.appendChild(a);
   frag.appendChild(document.createTextNode(t.slice(m.index + m[0].length)));
@@ -944,7 +966,8 @@ function startConversation() {
   if (_pendingEvent) {
     const greeting = _pendingEvent.greeting
       || ('您好！我是「' + _pendingEvent.name + '」的 ' + WORDS.assistant + '。有任何問題歡迎直接提問！');
-    addMessage('ai', greeting);
+    // 開場白不附「複製」：沒有人要引用一句招呼，多一顆按鈕只是讓人以為它是答案（批次 124）
+    addMessage('ai', greeting, { noCopy: true });
   }
 }
 
@@ -1006,7 +1029,8 @@ _mediaInput.addEventListener('input', onBannerEdit);
 _personInput.addEventListener('input', onBannerEdit);
 
 // 訊息處理
-// opts.error：出錯的那一則（淡橘色、沒有「複製」）；opts.quiet：還原舊對話時用，不要每則都捲一次
+// opts.error：出錯的那一則（淡橘色、沒有「複製」）；opts.noCopy：開場白（不附「複製」）；
+// opts.quiet：還原舊對話時用，不要每則都捲一次
 function addMessage(role, text, opts = {}) {
   const msgEl = document.createElement('div');
   msgEl.className = `msg ${role}${opts.error ? ' err' : ''}`;
@@ -1017,7 +1041,7 @@ function addMessage(role, text, opts = {}) {
       <div class="avatar">${icon}</div>
       <div class="bubble-wrap">
         <div class="bubble">${content}</div>
-        ${opts.error ? '' : `<button class="copy-btn" type="button">${ICON.copy} 複製</button>`}
+        ${opts.error || opts.noCopy ? '' : `<button class="copy-btn" type="button">${ICON.copy} 複製</button>`}
       </div>`;
     const btn = msgEl.querySelector('.copy-btn');
     if (btn) btn.addEventListener('click', () => copyText(text, btn));
@@ -1322,6 +1346,10 @@ function closeLightbox(e) {
     document.getElementById('lightbox').classList.remove('open');
   }
 }
+// 電腦上看大圖按 Esc 就能關（批次 124；以前只能找右上角的 ✕）
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && document.getElementById('lightbox').classList.contains('open')) closeLightbox();
+});
 function shadeColor(hex, percent) {
   const num = parseInt(hex.slice(1), 16);
   const amt = Math.round(2.55 * percent);

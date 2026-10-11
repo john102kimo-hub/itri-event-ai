@@ -55,7 +55,7 @@ import { isBusinessEvent } from '../lib/audience.js';
 import { parseB2BBind, handleB2BBind, isPartnershipAsk, handlePartnershipAsk } from '../lib/b2b-line.js';
 import { sanitize } from '../lib/line-format.js';
 import {
-  CHITCHAT_FIXED_REPLIES, detectBoundChitchat, looksLikeNameOrSkip, mediaNameOf, nonTextReply
+  CHITCHAT_FIXED_REPLIES, detectBoundChitchat, looksLikeNameOrSkip, mediaFromGreeting, mediaNameOf, nonTextReply
 } from '../lib/line-chitchat.js';
 import {
   findEventByCode, getAllEventRows, getBinding, getEventById, getStoredMediaName, isUsable, recentTopicContext,
@@ -365,7 +365,10 @@ async function handleEvent(ev) {
   // 不補查官網、不寫 qa_log。
   const boundChitchat = detectBoundChitchat(text);
   if (boundChitchat) {
-    await replyOrPush(replyToken, userId, CHITCHAT_FIXED_REPLIES[boundChitchat], eventQuickChips(event));
+    // 招呼裡自報了媒體（批次 124，同 lib/line-reporter.js sendFallbackGuide()）：記下來、招呼語帶上稱呼
+    const media = boundChitchat === 'greet' ? mediaFromGreeting(text) : '';
+    if (media) await setMediaName(userId, sanitize(media, 40));
+    await replyOrPush(replyToken, userId, media ? media + CHITCHAT_FIXED_REPLIES.greet : CHITCHAT_FIXED_REPLIES[boundChitchat], eventQuickChips(event));
     return;
   }
 

@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex,nofollow">
 <title>記者名單健檢 — 工研院活動溝通 AI 平台</title>
 <style>
   :root{
@@ -24,6 +25,7 @@
   #gate-box button{width:100%;background:var(--primary);color:#fff;border:none;border-radius:12px;padding:13px;font-size:1rem;font-weight:700;font-family:var(--font);cursor:pointer}
   #gate-err{color:var(--danger);font-size:.82rem;margin-top:10px;min-height:18px}
 
+  .back{display:inline-block;font-size:.85rem;color:var(--primary-dark);text-decoration:none;margin-bottom:10px}
   h1.title{font-size:1.4rem;margin-bottom:4px}
   .sub{color:var(--muted);font-size:.86rem;margin-bottom:20px}
 
@@ -87,13 +89,15 @@
   <div id="gate-box">
     <h1>記者名單健檢</h1>
     <p>輸入承辦人給你的連結代碼，或管理員密碼</p>
-    <input id="gate-input" type="text" placeholder="連結代碼 / 管理員密碼">
+    <!-- 批次 124：密碼型輸入框——管理員密碼以前明碼顯示在畫面上（投影、旁邊有人時一覽無遺） -->
+    <input id="gate-input" type="password" autocomplete="off" placeholder="連結代碼 / 管理員密碼">
     <button onclick="unlock()">進入</button>
     <div id="gate-err"></div>
   </div>
 </div>
 
 <div class="wrap" id="app" style="display:none">
+  <a class="back" id="back-admin" href="/" style="display:none">← 回後台</a>
   <h1 class="title">記者名單健檢</h1>
   <p class="sub">路線空白、或太久沒受邀的記者會排在前面。花一分鐘確認幾筆，資料就會愈用愈準。</p>
 
@@ -123,6 +127,10 @@
       <button onclick="genLink(false)">產生連結</button>
       <button onclick="genLink(true)">換一條</button>
     </div>
+
+    <h3>匯出全部名單</h3>
+    <p class="desc">下載整份記者名單（含已離職／轉線、路線、受邀次數），用 Excel 打開即可。</p>
+    <div class="row"><button onclick="doExport()">匯出 CSV</button></div>
 
     <h3>一次性匯入 / 更新資料</h3>
     <p class="desc">
@@ -163,24 +171,36 @@ async function call(action, extra, method){
     body: JSON.stringify({action, ...authPart, ...(extra||{})})}).then(r=>r.json());
 }
 
+// 先當管理員密碼試（走 header），不對才當同仁的連結代碼試（批次 124）。
+// 以前順序相反：管理員輸入的密碼第一步先被當成「連結代碼」放進網址送出（/api/media?code=密碼），
+// 密碼就留在伺服器的存取紀錄裡——批次 110 才把所有管理員密碼搬出網址，這裡漏了。
+// 同仁的連結代碼本來就是設計成放在網址上分享的，第二步走網址沒有問題。
 async function unlock(){
   const v = document.getElementById('gate-input').value.trim();
   const err = document.getElementById('gate-err');
   if(!v){ err.textContent = '請輸入代碼或密碼'; return; }
   err.textContent = '驗證中…';
 
-  // 先當同仁代碼試
-  S.role='staff'; S.code=v;
-  let r = await call('list');
+  S.role='admin'; S.pwd=v; S.code='';
+  let r = await call('list').catch(()=>({error:'連線失敗，請確認網路後再試'}));
   if(r.error){
-    // 再當管理員密碼試
-    S.role='admin'; S.pwd=v; S.code='';
-    r = await call('list');
-    if(r.error){ err.textContent = r.error; S.role='staff'; S.pwd=''; return; }
+    S.role='staff'; S.pwd=''; S.code=v;
+    r = await call('list').catch(()=>({error:'連線失敗，請確認網路後再試'}));
+    if(r.error){
+      err.textContent = /次數太多|連線失敗/.test(r.error) ? r.error : '密碼或連結代碼不正確。管理員請輸入後台密碼；同仁請直接點承辦人給的連結。';
+      S.code=''; return;
+    }
   }
+  if(S.role==='admin'){ try { sessionStorage.setItem('itri_pwd', S.pwd); } catch(e) {} }
+  enterApp(r);
+}
+
+function enterApp(r){
   document.getElementById('gate').style.display='none';
   document.getElementById('app').style.display='block';
-  if(S.role==='admin') document.getElementById('admin-panel').style.display='block';
+  const admin = S.role==='admin';
+  document.getElementById('admin-panel').style.display = admin ? 'block' : 'none';
+  document.getElementById('back-admin').style.display = admin ? 'inline-block' : 'none';
   render(r);
 }
 
@@ -192,6 +212,7 @@ function daysLabel(d){
 }
 
 let recNames = {}; // id → name，供 markLeft 的確認訊息用
+let recBeats = {}; // id → 目前的路線（空字串＝還沒有），confirmRec 用
 
 function render(data){
   document.getElementById('kpi-total').textContent = data.totalActive ?? '–';
@@ -205,9 +226,10 @@ function render(data){
     list.innerHTML = `<div class="empty"><div class="big">✓</div>目前沒有待確認的記者，太好了。</div>`;
     return;
   }
-  recNames = {};
+  recNames = {}; recBeats = {};
   list.innerHTML = data.needsReview.map(r => {
     recNames[r.id] = r.name;
+    recBeats[r.id] = r.beat || '';
     const flags = [];
     if(!r.beat) flags.push('<span class="rec-flag flag-nobeat">沒有路線</span>');
     if(r.daysSince===null || r.daysSince>365) flags.push('<span class="rec-flag flag-stale">太久沒受邀</span>');
@@ -240,6 +262,9 @@ function pickBeat(id, el, beat){
 }
 
 async function confirmRec(id){
+  // 還沒有路線的人，要先點一個路線才能確認（批次 124）——不然按了「資料正確」，路線照樣是空的，
+  // 下次打開又排在待確認最前面，等於白按。
+  if(!recBeats[id] && !pendingBeat[id]){ toast('請先點他現在跑的路線（不確定就選「一般」），再按確認'); return; }
   const r = await call('update', {id, beat: pendingBeat[id]}, 'POST');
   if(r.error){ toast(r.error); return; }
   document.getElementById(`rec-${id}`).classList.add('done');
@@ -301,16 +326,42 @@ async function doSeed(){
   render(list);
 }
 
-// 網址帶 ?code= 直接進場，不用再輸入一次
+// 匯出全部名單（批次 124）：後端早就有 action=export，畫面上一直沒有按鈕。走 header 帶密碼、用 Blob 下載，
+// 不用 window.open（密碼會出現在網址上，見 api/media.js）。
+async function doExport(){
+  try{
+    const res = await fetch('/api/media?action=export', { headers: { 'X-Admin-Password': S.pwd } });
+    if(!res.ok){ const d = await res.json().catch(()=>({})); throw new Error(d.error || `匯出失敗（${res.status}）`); }
+    const blob = await res.blob();
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `記者名單_${new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Taipei' })}.csv`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(a.href), 1000);
+  }catch(e){ toast(e.message); }
+}
+
+// 網址帶 ?code= 直接進場，不用再輸入一次；從後台（同一個分頁）點進來的，用後台登入時記下的密碼直接進場
+// （批次 124；跟成效報告、活動報名、AI 能見度一樣「同分頁導覽免重登」）
 (async function(){
   const code = new URLSearchParams(location.search).get('code');
-  if(!code) return;
-  S.role='staff'; S.code=code;
-  const r = await call('list');
-  if(r.error){ document.getElementById('gate-err').textContent = r.error; return; }
-  document.getElementById('gate').style.display='none';
-  document.getElementById('app').style.display='block';
-  render(r);
+  if(code){
+    S.role='staff'; S.code=code;
+    const r = await call('list').catch(()=>({error:'連線失敗，請確認網路後重新整理'}));
+    if(r.error){ document.getElementById('gate-err').textContent = r.error; return; }
+    return enterApp(r);
+  }
+  let saved = '';
+  try { saved = sessionStorage.getItem('itri_pwd') || ''; } catch(e) {}
+  if(!saved) return;
+  S.role='admin'; S.pwd=saved;
+  const r = await call('list').catch(()=>({error:'連線失敗', offline:true}));
+  if(r.error){
+    S.role='staff'; S.pwd='';
+    if(!r.offline){ try { sessionStorage.removeItem('itri_pwd'); } catch(e) {} } // 密碼已經不對才清，斷線不清
+    return;
+  }
+  enterApp(r);
 })();
 document.getElementById('gate-input').addEventListener('keydown', e=>{ if(e.key==='Enter') unlock(); });
 </script>

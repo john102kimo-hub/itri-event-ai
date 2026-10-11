@@ -194,6 +194,13 @@ async function renderInbox() {
   $('flt').onchange = (e) => { FILTER = e.target.value; renderInbox(); };
   $('view').querySelector('tbody').onclick = (e) => { const tr = e.target.closest('tr[data-id]'); if (tr) openInquiry(tr.dataset.id); };
 }
+// 電話連結（批次 124）：電話是客戶自己填的自由文字（「02-2737-1234 分機 567」），以前原文整串塞進 tel:——
+// 中文與空白撥號程式認不得，「#567」還會被當成網址的片段吃掉。只取號碼；分機用逗號（接通後停一下再按），
+// 跟記者頁、報名頁同一個做法。認不出號碼就只顯示文字、不給連結。
+function phoneHref(raw) {
+  const m = String(raw || '').match(/(\+?\d[\d\s()-]{6,}\d)(?:\s*(?:分機|轉|#|ext\.?)\s*(\d{1,6}))?/i);
+  return m ? 'tel:' + m[1].replace(/[^\d+]/g, '') + (m[2] ? ',' + m[2] : '') : '';
+}
 async function openInquiry(id) {
   let q;
   try { q = (await call('GET', 'b2b_get', { id })).inquiry; }
@@ -206,7 +213,7 @@ async function openInquiry(id) {
       <dl class="kv" style="margin-top:8px">
         <dt>聯絡人</dt><dd>${esc(q.name)}${q.title ? '・' + esc(q.title) : ''}</dd>
         <dt>Email</dt><dd><a href="mailto:${esc(q.email)}">${esc(q.email)}</a></dd>
-        <dt>電話</dt><dd>${q.phone ? `<a href="tel:${esc(q.phone)}">${esc(q.phone)}</a>` : '—'}</dd>
+        <dt>電話</dt><dd>${q.phone ? (phoneHref(q.phone) ? `<a href="${esc(phoneHref(q.phone))}">${esc(q.phone)}</a>` : esc(q.phone)) : '—'}</dd>
         <dt>技術領域</dt><dd>${esc(q.topic || '—')}</dd>
         <dt>需求</dt><dd>${esc(q.need)}</dd>
         <dt>來源</dt><dd>${esc(q.source)}・${esc(when(q.created_at))}</dd>

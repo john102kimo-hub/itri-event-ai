@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex,nofollow">
 <title>工研院活動溝通 AI 平台</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.3.0/dist/tabler-icons.min.css" integrity="sha384-ir0fR0HzKEQ1x1XwqY5+0wIbrIgY45nvWPjIQy7+rjcwW7L0cHDytvEHKS3tIxBZ" crossorigin="anonymous">
 <style>
@@ -294,6 +295,14 @@ textarea.form-control { min-height: 200px; resize: vertical; line-height: 1.6; }
 .form-hint { font-size: 0.76rem; color: var(--muted); margin-top: 4px; }
 .char-count { font-size: 0.76rem; color: var(--muted); text-align: right; margin-top: 4px; }
 .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px; }
+/* 新增／編輯活動的「取消／儲存」固定在視窗底部（批次 124）。表單很長（基本資料、知識庫、進階設定），
+   以前改完最上面的活動名稱，要一路捲過整份知識庫才按得到「儲存」，很多人以為沒有儲存鈕。 */
+#event-modal .modal { padding-bottom: 0; }
+#event-modal .modal-actions {
+  position: sticky; bottom: 0; z-index: 4; background: #fff;
+  margin: 20px -28px 0; padding: 14px 28px 18px; border-top: 1px solid var(--border);
+  box-shadow: 0 -6px 14px rgba(0,0,0,0.05); flex-wrap: wrap;
+}
 
 /* 草稿還原橫幅：上一次沒存到的內容還躺在 localStorage 裡時才出現 */
 .draft-banner {
@@ -471,6 +480,8 @@ details.adv[open] > summary { border-bottom:1px solid var(--border); margin-bott
   .form-row2 { grid-template-columns: 1fr; }
   .top-grid { grid-template-columns: 1fr; }
   .modal { padding: 20px 16px; }
+  #event-modal .modal { padding-bottom: 0; }
+  #event-modal .modal-actions { margin: 16px -16px 0; padding: 12px 16px calc(12px + env(safe-area-inset-bottom)); }
   .search-input { min-width: 0; width: 100%; }
   /* 批次 104：底部選單只留四個最常用的 ＋「更多」，其餘（邀訪窗口分工／彙整媒體訓練／活動報名／登出）收進面板。
      原本八個項目擠不下，「AI 能見度」「成效報告」「登出」被推到畫面外、也沒有任何捲動提示。 */
@@ -541,6 +552,10 @@ details.adv[open] > summary { border-bottom:1px solid var(--border); margin-bott
     </a>
     <a class="nav-item nav-secondary" href="/registrations" style="text-decoration:none;color:rgba(255,255,255,0.7)">
       <i class="ti ti-ticket"></i> 活動報名
+    </a>
+    <!-- 批次 124：記者名單健檢以前在後台找不到入口（SETUP.md 寫「從後台進入」，其實只能自己記網址）。同分頁開，帶得到登入狀態 -->
+    <a class="nav-item nav-secondary" href="/media.html" style="text-decoration:none;color:rgba(255,255,255,0.7)">
+      <i class="ti ti-users"></i> 記者名單健檢
     </a>
     <a class="nav-item" href="/report" style="text-decoration:none;color:rgba(255,255,255,0.7)">
       <i class="ti ti-chart-histogram"></i> 成效報告
@@ -1167,17 +1182,27 @@ function dateMetaHtml(ev, todayIso) {
 let pastExpanded = false;
 const PAST_COLLAPSED_COUNT = 3;
 
+// 企業場（批次 118）：清單跟 lib/audience.js 的 BUSINESS_EVENT_TYPES 同一份（瀏覽器端不能 import lib/，
+// test-batch118 比對兩邊不准漂開）。活動卡與「標為已結束」共用這一支（批次 124）。
+function isBusinessCard(ev) {
+  const business = ['企業說明會', '技術媒合會', '客戶參訪', '技術交流會'].includes(String((ev && ev.event_type) || '').trim());
+  return business;
+}
+
 function eventCardHtml(ev, ctx) {
   const { count, today } = ctx;
-  // 企業場（批次 118）：清單跟 lib/audience.js 的 BUSINESS_EVENT_TYPES 同一份（瀏覽器端不能 import lib/，
-  // test-batch118 比對兩邊不准漂開）
-  const business = ['企業說明會', '技術媒合會', '客戶參訪', '技術交流會'].includes(String(ev.event_type || '').trim());
+  const business = isBusinessCard(ev);
   const meta = eventStatusMeta(ev);
   const color = /^#[0-9A-Fa-f]{6}$/.test(ev.color || '') ? ev.color : '#0F9E7A';
   const id = escHtml(ev.id);
   const metaBits = [dateMetaHtml(ev, today)];
   if (ev.venue) metaBits.push(`<span><i class="ti ti-map-pin"></i> ${escHtml(ev.venue)}</span>`);
   metaBits.push(`<span><i class="ti ti-message-dots"></i> ${count} 則問答</span>`);
+
+  // 日期已過、狀態還是「進行中」（批次 124）：「已結束」只能到編輯視窗最底下的進階設定裡改，很多場辦完了一直掛著
+  // 「進行中」——新聞稿全文要等「已結束」才會開放給搜尋引擎與 AI 收錄（api/event-page.js isConcluded），
+  // AI 能見度追蹤要的正是這件事。卡片上直接提醒，並給一顆「標為已結束」。
+  const pastActive = ev.status === 'active' && !!eventDateIso(ev) && eventDateIso(ev) < today;
 
   // 發布前必填（草稿與進行中才顯示）：缺什麼直接寫在卡片上，不用按了「發布」才被擋
   let ready = '';
@@ -1188,6 +1213,10 @@ function eventCardHtml(ev, ctx) {
         <button class="linkbtn" onclick="showEditModal('${id}')">去補</button></div>`;
     } else if (ev.status === 'draft') {
       ready = `<div class="ready-line ok"><i class="ti ti-circle-check"></i><span>必填都齊了，可以發布</span></div>`;
+    } else if (pastActive) {
+      ready = `<div class="ready-line warn"><i class="ti ti-flag"></i><span>${business
+        ? '活動日期已過，狀態還是「進行中」。辦完了可以按「標為已結束」。'
+        : '活動日期已過，狀態還是「進行中」。新聞稿正式發布後按「標為已結束」，全文才會開放給搜尋引擎與 AI 收錄。'}</span></div>`;
     }
   }
 
@@ -1201,6 +1230,12 @@ function eventCardHtml(ev, ctx) {
   if (ev.status === 'draft') {
     primary = [
       btn('primary', 'send', '發布', `publishEvent('${id}')`, '發布後記者前台與公開列表才看得到這場；必填沒齊會被擋下來'),
+      btn('', 'edit', '編輯', `showEditModal('${id}')`)
+    ];
+  } else if (pastActive) {
+    primary = [
+      btn('primary', 'flag-check', '標為已結束', `markEnded('${id}')`, '辦完了就按這裡；記者網頁與 LINE 照樣可以問'),
+      btn('', 'chart-bar', '分析', `showAnalyticsByEvent('${id}')`),
       btn('', 'edit', '編輯', `showEditModal('${id}')`)
     ];
   } else if (ev.status === 'active') {
@@ -1246,11 +1281,14 @@ function moreMenuItems(ev) {
   const hasLine = !!(state.line && state.line.basic_id);
   if (ev.status !== 'draft') add('external-link', ev.status === 'ended' ? '開啟存檔頁／記者前台' : '開啟記者前台', () => window.open('/event?id=' + encodeURIComponent(id), '_blank'));
   if (ev.status !== 'draft') add('copy', '複製記者連結', () => copyLink(id));
-  if (hasLine && ev.status === 'ended') add('qrcode', 'LINE QR', () => openLineQr(id));
+  // 日期已過還掛「進行中」的卡片，按鈕位置讓給了「標為已結束」，LINE QR 收進這裡（跟已結束一樣，批次 124）
+  const pastActive = ev.status === 'active' && !!eventDateIso(ev) && eventDateIso(ev) < todayTaipeiIso();
+  if (hasLine && (ev.status === 'ended' || pastActive)) add('qrcode', 'LINE QR', () => openLineQr(id));
   add('user-edit', '同仁編輯連結', () => copyEditLink(id));
   if (ev.status !== 'archived') add('microphone', '媒體訓練', () => openTraining(id));
   if (ev.status === 'draft' || ev.status === 'active') add('chart-bar', '問答分析', () => showAnalyticsByEvent(id));
   if (ev.status === 'active' || ev.status === 'ended') add('download', '匯出問答 CSV', () => exportCSV(id));
+  if (ev.status === 'active') add('flag-check', '標為已結束', () => markEnded(id));
   if (ev.status === 'active') add('eye-off', '收回為未發布', () => unpublishEvent(id));
   if (ev.status === 'draft' || ev.status === 'archived') { items.push({ sep: true }); add('trash', '永久刪除', () => deleteEvent(id), true); }
   return items;
@@ -1360,6 +1398,7 @@ function openNavMore(btn) {
     { icon: 'address-book', label: '邀訪窗口分工', run: () => showView('contacts') },
     { icon: 'microphone', label: '彙整媒體訓練', run: () => { location.href = '/training'; } },
     { icon: 'ticket', label: '活動報名', run: () => { location.href = '/registrations'; } },
+    { icon: 'users', label: '記者名單健檢', run: () => { location.href = '/media.html'; } },
     { sep: true },
     { icon: 'logout', label: '登出', run: () => logout() }
   ];
@@ -2014,9 +2053,14 @@ function showCreateModal(prefillDate) {
 }
 
 // 填充「以既有活動為範本」下拉（用已載入的活動清單；新到舊排序，最近一場最常被當範本）
+// 批次 124：照活動日期排（eventDateIso），沒日期的排最後。以前對 created_at 字串直接比——兩種日期格式混著比
+// （「2026/6/18 下午…」與「2026-10-05」），跟批次 103 修過的卡片排序是同一個坑。
 function populateCopyTemplate() {
   const sel = document.getElementById('copy-template-select');
-  const sorted = [...(state.events || [])].sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
+  const sorted = [...(state.events || [])].sort((a, b) => {
+    const x = eventDateIso(a), y = eventDateIso(b);
+    return x && y ? y.localeCompare(x) : x ? -1 : y ? 1 : 0;
+  });
   sel.innerHTML = '<option value="">— 選擇要複製的活動 —</option>' +
     sorted.map(e => `<option value="${escHtml(e.id)}">${escHtml(e.name)}</option>`).join('');
 }
@@ -2306,6 +2350,34 @@ function showPublishBlocked(id, missing) {
 }
 function closePublishBlocked() {
   document.getElementById('publish-blocked-modal').style.display = 'none';
+}
+
+// 標為已結束：active → ended（批次 124）。以前只能開編輯視窗、展開進階設定、改狀態下拉、再捲到最底下儲存。
+// 「已結束」不是裝飾：新聞稿全文會開放給搜尋引擎與 AI 收錄，而且收不回來——所以按之前把後果講清楚
+// （同 STATUS_HINTS.ended）。企業場不會被收錄（api/event-page.js），提醒的字跟著換。
+async function markEnded(id) {
+  const ev = (state.events || []).find(e => e.id === id);
+  if (!ev) return;
+  const business = isBusinessCard(ev);
+  const msg = business
+    ? `確定「${ev.name}」已經辦完了嗎？\n\n標為已結束後，活動頁照樣可以提問；卡片會移到「已辦完」。`
+    : `確定「${ev.name}」已經辦完、新聞稿已經正式發布了嗎？\n\n標為已結束後：\n・記者網頁與 LINE 照樣可以提問\n・新聞稿全文會開放給搜尋引擎與 AI（如 ChatGPT、Perplexity）收錄，而且無法完全收回\n\n新聞稿還在禁發或還要修改，請先不要按。`;
+  if (!confirm(msg)) return;
+  try {
+    const res = await authedFetch('/api/events', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'update', password: state.password, id, status: 'ended' })
+    });
+    const data = await res.json();
+    if (data.code === 'publish_blocked') { showPublishBlocked(id, data.missing || []); return; }
+    if (data.error) throw new Error(data.error);
+    toast('已標為已結束', 'ok');
+    await loadEvents();
+    flashCard(id);
+  } catch (e) {
+    toast('操作失敗：' + e.message, 'error');
+  }
 }
 
 // 收回為未發布：active → draft。跟封存不一樣——封存不能自己復原，這個可以隨時再發布回來。
