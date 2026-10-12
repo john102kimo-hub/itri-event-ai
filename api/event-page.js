@@ -191,7 +191,7 @@ function serveRobots(res) {
     '# 後台與訓練頁不開放；記者問答頁開放，但未結束的場次會另掛 noindex',
     ''
   ];
-  const rules = ['Allow: /event', 'Disallow: /admin', 'Disallow: /training', 'Disallow: /api/', ''];
+  const rules = ['Allow: /event', 'Disallow: /admin', 'Disallow: /training', 'Disallow: /reg-status', 'Disallow: /api/', ''];
   for (const bot of AI_BOTS) lines.push(`User-agent: ${bot}`, ...rules);
   lines.push('User-agent: *', ...rules);
   lines.push(`Sitemap: ${SITE}/sitemap.xml`, '');

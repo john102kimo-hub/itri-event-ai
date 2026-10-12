@@ -239,8 +239,8 @@ const hdrsFor = (p) => {
   for (const rule of rules) if (new RegExp('^' + rule.source + '$').test(p)) for (const h of rule.headers) out[h.key] = h.value;
   return out;
 };
-const ADMIN_PATHS = ['/admin', '/geo', '/report', '/registrations', '/edit', '/training',
-  '/index.html', '/geo.html', '/report.html', '/registrations.html', '/edit.html', '/training.html', '/media.html'];
+const ADMIN_PATHS = ['/admin', '/geo', '/report', '/registrations', '/reg-status', '/edit', '/training',
+  '/index.html', '/geo.html', '/report.html', '/registrations.html', '/reg-status.html', '/edit.html', '/training.html', '/media.html'];
 check('所有路徑都有 nosniff 與 Referrer-Policy', ['/', '/event', '/register', '/api/chat', ...ADMIN_PATHS].every((p) => {
   const h = hdrsFor(p); return h['X-Content-Type-Options'] === 'nosniff' && /origin/.test(h['Referrer-Policy'] || '');
 }));
@@ -253,8 +253,9 @@ check('★ public/ 底下每一頁後台頁面（除了記者公開的三頁）�
   adminPages.every((f) => hdrsFor('/' + f)['X-Frame-Options'] === 'SAMEORIGIN'), adminPages.filter((f) => !hdrsFor('/' + f)['X-Frame-Options']).join(', '));
 check('記者公開頁（/event、/register）維持可被嵌入（沒有擋 iframe）——這是刻意的，要改請連同使用情境一起想', !hdrsFor('/event')['X-Frame-Options'] && !hdrsFor('/register')['X-Frame-Options']);
 // 批次 119 加了 /inquiry、/b2b 兩條 rewrite 與業發處的期限提醒排程（functions 不變：搭在 api/events.js 上）
+// 批次 127 加了 /reg-status（報名狀況唯讀頁，搭在 api/events.js 上，functions 不變）
 // 批次 121 加了 /t/:id、/n/:id（批次 122 再加 /i/:id）三條短網址 rewrite（搭在 api/event-page.js 上，functions 不變）
-check('原有的 rewrites、functions、crons 沒被動到', vercel.rewrites.length === 15 && Object.keys(vercel.functions).length === 6 && vercel.crons.length === 6);
+check('原有的 rewrites、functions、crons 沒被動到', vercel.rewrites.length === 16 && Object.keys(vercel.functions).length === 6 && vercel.crons.length === 6);
 
 /* ───────── 七、CDN 資源的 SRI、.gitignore、CI ───────── */
 console.log('\n── 七、供應鏈與工程衛生 ──');

@@ -605,7 +605,20 @@ function renderRegs() {
 /* 分享連結 */
 function renderShare(camp) {
   const url = DATA.links.form, line = DATA.line;
+  const st = DATA.links.status;
   $('p-share').innerHTML = `
+    <div class="card">
+      <h2>報名狀況（唯讀）<small>分享給同仁看，不用給後台密碼</small></h2>
+      ${st ? `<div class="linkrow"><code id="status-url">${esc(st)}</code>
+        <button class="btn outline small" onclick="copyText($('status-url').textContent)">複製連結</button>
+        <a class="btn outline small" href="${esc(st)}" target="_blank" rel="noopener">開啟看看 ↗</a></div>
+        <div class="muted small" style="line-height:1.7;margin-top:8px">拿到連結的人可以看：報名人數、各場次人數、姓名與單位。<b>看不到</b> Email、手機、備註，也不能修改任何東西。連結外流了就按「重新產生」，舊連結馬上失效。</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
+          <button class="btn outline small" onclick="shareLink('rotate')">重新產生連結</button>
+          <button class="btn danger small" onclick="shareLink('off')">停用連結</button></div>`
+      : `<div class="muted small" style="line-height:1.7;margin-bottom:10px">目前沒有開放。產生之後，把連結傳給同仁就能看這一場的報名狀況（人數、各場次、姓名與單位），看不到聯絡方式，也改不了任何資料。</div>
+        <button class="btn small" onclick="shareLink('create')">產生唯讀連結</button>`}
+    </div>
     <div class="card">
       <h2>報名連結</h2>
       <div class="linkrow"><code id="form-url">${esc(url)}</code>
@@ -631,6 +644,16 @@ function renderShare(camp) {
     drawQr($('qr-form'), url, '掃碼報名', camp.title, '#0F9E7A');
     if (line.basic_id && $('qr-line')) drawQr($('qr-line'), line.add_friend_url, '加米亞 LINE 好友（選用）', '議程、交通、報到時間，隨時問', '#06C755');
   });
+}
+
+async function shareLink(mode) {
+  if (mode === 'rotate' && !confirm('重新產生後，已經分享出去的舊連結會馬上失效，要再把新連結傳給同仁。確定嗎？')) return;
+  if (mode === 'off' && !confirm('停用後，目前分享出去的連結都會打不開（之後想再開放可以重新產生）。確定嗎？')) return;
+  try {
+    await callJson('POST', 'reg_admin_share', { c: CUR, mode });
+    toast({ create: '已產生連結', rotate: '已重新產生，舊連結失效', off: '已停用' }[mode]);
+    await loadCamp(); renderCamp();
+  } catch (e) { if (e.status === 401) return relock(); alert(e.message); }
 }
 
 /* ── 名單操作 ───────────────────────────────────────── */
