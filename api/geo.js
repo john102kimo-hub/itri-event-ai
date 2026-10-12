@@ -203,7 +203,11 @@ async function anthropic(body, timeoutMs = 15_000) {
     signal: AbortSignal.timeout(timeoutMs),
   });
   const data = await res.json();
-  logAiUsage('AI 能見度', body.model, data.usage); // 批次 117
+  // 批次 117：記 token。批次 135：data.usage 整包交出去，裡面的 server_tool_use.web_search_requests
+  // （web_search 工具另外按次數收費，每千次 10 美元）由 lib/ai-usage.js 讀出來，有搜尋的那一行會多 searches=N、
+  // usd≈ 也含搜尋費。所有走 anthropic() 的呼叫（探測、判官）都自然帶出，不用每個呼叫端各記各的。
+  // 看不到的：被這裡的 timeoutMs 中斷的那一次拿不到 usage，伺服器端若已搜尋，那幾次搜尋不會出現在 log（以 Console 為準）。
+  logAiUsage('AI 能見度', body.model, data.usage);
   if (!res.ok) {
     await reportAiFailure({ status: res.status, message: data.error?.message, where: 'GEO 檢查' }); // 批次 85
     throw new Error(data.error?.message || `Anthropic ${res.status}`);
@@ -224,6 +228,11 @@ async function probeClaude(question) {
   const searchResults = [];  // 搜尋引擎回傳的候選結果清單，只用來確認接地有沒有生效，不算引用
 
   // 伺服端工具跑滿內部迴圈會回 pause_turn，把 assistant 回合接回去續跑
+  // 批次 135：續跑的每一回合都是一次獨立的請求、各自走 anthropic()，所以每一回合各留一行 [ai-usage]（含該回合的 searches=N），
+  // 一次探測看到幾行就是跑了幾回合。⚠️ max_uses: 5 是「每一次請求」的上限，不是每次探測的上限——
+  // 續跑最多 3 回合，一次探測理論上最多 15 次搜尋（0.15 美元）；這只是看得到，**沒有**改 max_uses 或迴圈次數，
+  // 動了會讓 GEO 的量尺斷掉（GEO-METHOD.md 第九節）。
+  // 【待核對】續跑回合的 web_search_requests 是否只含該回合（文件沒明講），見 lib/ai-usage.js 檔頭。
   for (let i = 0; i < 3; i++) {
     const data = await anthropic({
       model: PROBE_MODEL,

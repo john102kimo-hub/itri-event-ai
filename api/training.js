@@ -28,6 +28,7 @@ import { isTestMedia } from '../lib/media-name.js';
 import { readEventRows } from '../lib/events-table.js';
 import { readQaRowsWithoutAnswers } from '../lib/qa-log.js';
 import { logAiUsage } from '../lib/ai-usage.js';
+import { isRefusal, logRefusal } from '../lib/ai-refusal.js';
 import { isAdminPassword, codeMatches, passwordFrom, requireAdmin, authBlocked, authFailed, tooManyAttempts } from '../lib/auth.js';
 
 const CACHE_TTL_MS = 60 * 1000; // 60 秒；同仁改完知識庫應該很快能在訓練模式看到新版
@@ -168,6 +169,13 @@ const sanitize = (s, max) => String(s || '').replace(/\s+/g, ' ').trim().slice(0
 export function friendlyModelError(status) {
   if (status === 429 || status === 529 || status === 503) return 'AI 目前比較忙。您剛才的進度都還在，稍等幾秒按「再試一次」就好。';
   return 'AI 這次沒有答成。您剛才的進度都還在，按「再試一次」；如果一直這樣，請通知後台管理員。';
+}
+
+// 批次 134：模型拒答（stop_reason:"refusal"，安全分類器攔下）。HTTP 是 200，所以不會走 friendlyModelError(status)；
+// 它跟「忙碌」「逾時」不同——同一題再送多半還是被攔，所以不只叫他「再試一次」，也講「可能是誤判」和該找誰。
+// 工研院的生醫、資安題材正是分類器可能誤判的領域，主管看到這句話要知道不是自己操作錯了。
+export function friendlyRefusalError() {
+  return 'AI 這次因為安全規範沒有處理這一題（可能是誤判，生醫、資安這類題材偶爾會碰到）。您剛才的進度都還在，可以按「再試一次」；如果一直這樣，請通知後台管理員。';
 }
 
 // 把「原始分數」清成只留 0–10 的有限數字。輸入可以是陣列（log_session 收到的
@@ -905,6 +913,16 @@ export default async function handler(req, res) {
       console.error('training Anthropic API 錯誤:', response.status, data.error?.message || '', event_id, mode);
       await reportAiFailure({ status: response.status, message: data.error?.message, where: '媒體訓練' }); // 批次 85
       return res.status(response.status).json({ error: friendlyModelError(response.status) });
+    }
+
+    // 批次 134：拒答不是成功。以前它會走到最下面：content 是空的就回 200＋reply「無法取得回應。」——
+    // 訓練頁看到 reply 有值，就把這句當成 AI 記者的提問推進對話歷程（見 public/training.html 的註解，
+    // 同一個形狀：錯誤訊息被當成記者的話，之後每一題都帶著它，整場演練從那一刻起就歪了）；
+    // content 只有一半時更糟，半句問題會被當成完整的提問或評分。所以拒答一律回非 2xx 的 error，
+    // 訓練頁會顯示在「再試一次」按鈕上方，對話歷程不動。只記分類，不記內容（見 lib/ai-refusal.js）。
+    if (isRefusal(data)) {
+      logRefusal(`媒體訓練（${mode}）`, 'claude-sonnet-5-5', data, { eventId: event_id });
+      return res.status(422).json({ error: friendlyRefusalError() });
     }
 
     if (data.stop_reason === 'max_tokens') {
