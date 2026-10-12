@@ -108,7 +108,7 @@ const sec = load(INDEX, ['eventDateIso', 'daysBetween', 'shortDateLabel', 'event
 console.log('\n── 二、活動卡片：缺什麼直接寫在卡片上，按鈕不再滿版，危險操作收進「更多」──');
 const escHtml = load(INDEX, ['escHtml'], [], {}).escHtml;
 const cardState = { line: { basic_id: '@abc' } };
-const cardFns = load(INDEX, ['eventCardHtml', 'eventStatusMeta', 'moreMenuItems'], [], {
+const cardFns = load(INDEX, ['eventCardHtml', 'eventStatusMeta', 'moreMenuItems', 'isBusinessCard'], [], { // isBusinessCard：批次 124 抽出來給卡片與「標為已結束」共用
   ...sec, escHtml, state: cardState, WEEKDAYS: ['日', '一', '二', '三', '四', '五', '六'],
   eventDateIso: sec.eventDateIso, dateMetaHtml: sec.dateMetaHtml, window: {}, copyLink() {}, openLineQr() {}, copyEditLink() {}, openTraining() {},
   showAnalyticsByEvent() {}, exportCSV() {}, unpublishEvent() {}, deleteEvent() {}

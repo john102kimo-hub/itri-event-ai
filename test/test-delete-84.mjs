@@ -132,11 +132,16 @@ const html = read('public/index.html');
   const a = html.indexOf('function moreMenuItems(ev)');
   const b = html.indexOf('function renderEvents()');
   let items = null;
-  try { items = a > 0 && b > a ? new Function('state', 'copyLink', 'openLineQr', 'copyEditLink', 'openTraining', 'showAnalyticsByEvent', 'exportCSV', 'unpublishEvent', 'deleteEvent', 'window', html.slice(a, b) + '; return moreMenuItems;') : null; } catch { items = null; }
+  // 批次 124：「更多」會看日期判斷「日期已過還掛進行中」，所以要一併帶 eventDateIso／todayTaipeiIso（用頁面上真的那一份）
+  const d1 = html.indexOf('function eventDateIso(ev)');
+  const d2 = html.indexOf('function daysBetween(');
+  let dateIso = null;
+  try { dateIso = d1 > 0 && d2 > d1 ? new Function(html.slice(d1, d2) + '; return eventDateIso;')() : null; } catch { dateIso = null; }
+  try { items = a > 0 && b > a && dateIso ? new Function('state', 'copyLink', 'openLineQr', 'copyEditLink', 'openTraining', 'showAnalyticsByEvent', 'exportCSV', 'unpublishEvent', 'deleteEvent', 'window', 'eventDateIso', 'todayTaipeiIso', html.slice(a, b) + '; return moreMenuItems;') : null; } catch { items = null; }
   check('抽得出 moreMenuItems()', !!items);
   if (items) {
     const noop = () => {};
-    const menu = items({ line: { basic_id: '@x' } }, noop, noop, noop, noop, noop, noop, noop, noop, { open: noop });
+    const menu = items({ line: { basic_id: '@x' } }, noop, noop, noop, noop, noop, noop, noop, noop, { open: noop }, dateIso, () => '2026-10-11');
     const labels = (status) => menu({ id: 't1', status }).map((i) => i.label);
     check('★ 「永久刪除」只出現在未發布', labels('draft').includes('永久刪除'), JSON.stringify(labels('draft')));
     check('★ 「永久刪除」只出現在已封存', labels('archived').includes('永久刪除'), JSON.stringify(labels('archived')));

@@ -76,10 +76,23 @@ function parseRow(r, i) {
   };
 }
 
+// 最近一次有人確認（按「還在跑，資料正確」、恢復在職）是幾天前。updated_at 是 now() 寫的
+// 「2026/10/11 14:30:00」；讀不出來就當作沒確認過。
+function confirmedDaysAgo(rec) {
+  const m = String(rec.updated_at || '').match(/^(\d{4})[/-](\d{1,2})[/-](\d{1,2})/);
+  if (!m) return null;
+  return Math.floor((Date.now() - Date.UTC(+m[1], +m[2] - 1, +m[3])) / 86400000);
+}
+
 /** 需要人工確認：還在職名單裡、但路線空白或太久沒受邀 */
+// 批次 124：一年內有人確認過的不再列進來。以前只看路線與受邀日期——同仁按了「還在跑，資料正確」，
+// 那一筆只是從畫面上淡出，「太久沒受邀」的條件沒變，下次打開又排在最前面，確認了等於白做，
+// 「資料會愈用愈準」從來不成立。路線還是空的仍然要確認（頁面也要求先點路線才按得了確認）。
 function needsReview(rec) {
   if (rec.status === 'left') return false;
   if (!rec.beat) return true;
+  const c = confirmedDaysAgo(rec);
+  if (c !== null && c <= STALE_DAYS) return false;
   const d = daysSince(rec.last_invited);
   if (d === null) return true;
   return d > STALE_DAYS;

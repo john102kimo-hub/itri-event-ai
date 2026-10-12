@@ -344,11 +344,12 @@ const lineOf = (html, re) => { const m = re.exec(html); if (!m) throw new Error(
   // 新聞聯絡人 → 電話連結
   const mkEl = (tag) => ({ tag, children: [], href: '', textContent: '', appendChild(c) { this.children.push(c); return c; } });
   const document = { createDocumentFragment: () => mkEl('frag'), createTextNode: (t) => ({ text: t }), createElement: (t) => mkEl(t) };
-  const src = [lineOf(EV, /const PHONE_RE = .*;/), fnSource(EV, 'contactNode')].join('\n');
+  const src = [lineOf(EV, /const PHONE_RE = .*;/), fnSource(EV, 'telHref'), fnSource(EV, 'contactNode')].join('\n');
   const contactNode = new Function('document', `${src}; return contactNode;`)(document);
   const a = contactNode('王小明 03-5911234 分機 8888');
   const link = a.children.find((c) => c.tag === 'a');
-  check('新聞聯絡人「王小明 03-5911234 分機 8888」→ 電話那段是 tel: 連結（手機一點就撥），前後文字照舊', link && link.href === 'tel:035911234' && link.textContent === '03-5911234' && a.children[0].text === '王小明 ' && a.children[2].text === ' 分機 8888', JSON.stringify(a.children));
+  // 批次 124：分機也收進連結——tel:總機,分機（逗號＝接通後停一下再按分機），記者不用撥通了再自己按
+  check('新聞聯絡人「王小明 03-5911234 分機 8888」→ 電話那段是 tel: 連結（手機一點就撥、自動按分機），前面的名字照舊', link && link.href === 'tel:035911234,8888' && link.textContent === '03-5911234 分機 8888' && a.children[0].text === '王小明 ', JSON.stringify(a.children));
   check('手機號碼 0912-345-678 也認得', contactNode('林小美 0912-345-678').children.find((c) => c.tag === 'a')?.href === 'tel:0912345678');
   check('沒有電話的聯絡資訊 → 只有文字、沒有連結', !contactNode('請洽現場服務台').children.some((c) => c.tag === 'a'));
 }

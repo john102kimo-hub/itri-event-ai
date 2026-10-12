@@ -662,7 +662,14 @@ async function saveSess() {
 async function quickStatus(v) {
   const c = DATA.campaigns.find((x) => x.id === CUR);
   if (!v || !c || v === c.status) return;
-  try { await callJson('POST', 'reg_admin_save_campaign', { ...c, status: v }); toast(`已改成「${STATUS_LABEL[v]}」`); await loadCamp(); renderCamp(); } catch (e) { alert(e.message); }
+  try { await callJson('POST', 'reg_admin_save_campaign', { ...c, status: v }); toast(`已改成「${STATUS_LABEL[v]}」`); await loadCamp(); renderCamp(); }
+  catch (e) {
+    if (e.status === 401) return relock();
+    alert(e.message);
+    // 批次 124：沒存成功（例如企業場還沒填個資告知就改成開放），下拉選單要回到原本的狀態——
+    // 以前停在剛選的「開放報名」，看起來像改好了，其實活動還是草稿。
+    renderCamp();
+  }
 }
 async function clearTests() {
   if (!confirm(`確定清除 ${DATA.stats.test} 筆測試報名嗎？`)) return;

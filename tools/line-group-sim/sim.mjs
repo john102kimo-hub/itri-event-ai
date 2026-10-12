@@ -38,7 +38,7 @@ async function say(uid, text, opts = {}) {
   if (!sent.length) console.log('> （安靜）');
   for (const s of sent) {
     const body = s.text ?? (s.messages ? s.messages.map(x => x.altText || x.text || x.type).join(' / ') : '');
-    console.log(`> ［${s.kind}${s.via ? '・' + s.via : ''}${s.quoteToken ? '・引用 ' + s.quoteToken : ''}］ ${String(body).replace(/\n+/g, '⏎').slice(0, 160)}`);
+    console.log(`> ［${s.kind}${s.via ? '・' + s.via : ''}${s.quoteToken ? '・引用 ' + s.quoteToken : ''}${s.push && s.to && s.to !== G ? '・私訊 ' + s.to : ''}］ ${String(body).replace(/\n+/g, '⏎').slice(0, 160)}`);
     if (s.quickReply?.length) console.log('>   按鈕：' + chipText(s.quickReply).slice(0, 160));
   }
   return sent.slice();
@@ -63,3 +63,10 @@ await say('U林', 'Is there an English press release?');
 await say('U林', '米亞 謝謝', { note: '用喚醒詞' });
 await say('U陳', '大家中午吃什麼？');
 await say('U王', '找真人');
+// 批次 125：兩位記者在同一個群組各問各的場次，以及同仁把職員密語打在群組
+await say('U王', '@米亞 半導體先進封裝那場的重點是什麼？', { mention: true });
+await say('U李', '@米亞 智慧醫療那場幾點開始？', { mention: true, note: '另一位記者問另一場，群組切過去' });
+await say('U王', '那良率呢？', { note: '王接著問自己那場：要答半導體，不是智慧醫療' });
+await say('U陳', '@米亞 這個帳號會記錄我們的對話嗎？', { mention: true, note: '隱私：寫死的告知' });
+process.env.LINE_STAFF_PASSCODE = 'openseasame';
+await say('U陳', '@米亞 openseasame', { mention: true, note: '同仁把職員密語打在群組：群組不回、私訊提醒' });

@@ -180,15 +180,21 @@ async function api(action, body) {
   return { ok: res.ok, status: res.status, data };
 }
 // 聯絡人文字：換行照舊，Email／電話變成可點的連結
+// 分機（批次 124）：「03-5912345 分機 8888」以前變成 tel:0359123458888——分機數字直接黏在總機號碼後面，
+// 是另一支不存在的電話，報名的人一點就撥錯號。改成 tel:035912345,8888（逗號＝接通後停一下再按分機），
+// 跟記者頁（public/event.html telHref()）同一套規則，test-batch124 比對。
+function telHref(main, ext) {
+  return 'tel:' + String(main || '').replace(/[^\d+]/g, '') + (ext ? ',' + String(ext).replace(/\D/g, '') : '');
+}
 function linkify(text) {
   const frag = document.createDocumentFragment();
-  const re = /([\w.+-]+@[\w-]+(?:\.[\w-]+)+)|(0\d{1,2}-?\d{3,4}-?\d{3,4}(?:\s*(?:分機|#|轉)\s*\d+)?|09\d{2}-?\d{3}-?\d{3})/g;
+  const re = /([\w.+-]+@[\w-]+(?:\.[\w-]+)+)|(0\d{1,2}-?\d{3,4}-?\d{3,4}|09\d{2}-?\d{3}-?\d{3})(?:\s*(?:分機|#|轉)\s*(\d+))?/g;
   let last = 0, m;
   while ((m = re.exec(text))) {
     if (m.index > last) frag.append(text.slice(last, m.index));
     const a = document.createElement('a');
     a.textContent = m[0];
-    a.href = m[1] ? `mailto:${m[1]}` : `tel:${m[2].replace(/[^\d+]/g, '')}`;
+    a.href = m[1] ? `mailto:${m[1]}` : telHref(m[2], m[3]);
     frag.append(a);
     last = m.index + m[0].length;
   }

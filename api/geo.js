@@ -41,7 +41,12 @@ const SHEETS = {
   geo_settings: ['key', 'value'],
 };
 
-const PROBE_MODEL = process.env.GEO_MODEL || 'claude-opus-5';
+// 掃描（Claude 引擎）與判官選 Claude 時用的模型（批次 126）。朱朱 10/12：AI 能見度掃描用 Haiku 5.5。
+// 以前預設是 Opus 5（每百萬 token $5／$25；Haiku 5.5 是 $0.10／$0.50），而正式站沒有設 GEO_MODEL，實際跑的就是 Opus 5。
+// Haiku 5.5 只支援基本版搜尋工具（web_search_20250305，沒有動態過濾），webSearchTool() 會自動退回；
+// effort 與結構化輸出都支援，不送 budget_tokens／temperature（Haiku 5.5 收到會 400），其餘不用動。
+// ⚠️ 換模型＝換量尺：這天前後的 Claude 數字要當成不同基準看（GEO-METHOD.md 第九節）。
+const PROBE_MODEL = process.env.GEO_MODEL || 'claude-haiku-5-5';
 // 3.6 是目前的 GA Flash。3.5-flash 有回報 generateContent 偶爾漏掉 groundingMetadata 的問題，
 // 所以預設不用它。
 const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-3.6-flash';
