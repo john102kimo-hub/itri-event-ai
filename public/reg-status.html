@@ -31,6 +31,12 @@
   .kpi.main { background: var(--primary); border-color: var(--primary); }
   .kpi.main .n, .kpi.main .l { color: #fff; }
 
+  .card.share { margin: 0 0 18px; }
+  .card.share .muted { color: var(--muted); font-size: .82rem; margin-bottom: 8px; }
+  .card.share code { display: block; background: #f9fafb; border: 1px solid var(--border); border-radius: 10px; padding: 9px 11px; font-size: .8rem; overflow-wrap: anywhere; margin-bottom: 10px; }
+  .card.share .acts { display: flex; gap: 8px; flex-wrap: wrap; }
+  .btn.primary { background: var(--primary); border-color: var(--primary); color: #fff; }
+  .btn { text-decoration: none; display: inline-block; }
   .seg { display: flex; background: #e4eaee; border-radius: 12px; padding: 3px; margin-bottom: 14px; }
   .seg button { flex: 1; border: none; background: none; font: inherit; font-weight: 700; font-size: .92rem; color: var(--muted); padding: 9px 6px; border-radius: 10px; cursor: pointer; }
   .seg button.on { background: #fff; color: var(--primary-dark); box-shadow: 0 1px 3px rgba(0,0,0,.12); }
@@ -101,6 +107,13 @@
       <div class="kpi"><div class="n" id="k-week">0</div><div class="l">近 7 天新增</div></div>
     </div>
 
+    <div class="card share" id="share" hidden>
+      <h2>報名連結</h2>
+      <div class="muted">想請人報名，直接把這個連結傳出去（記者、來賓都用同一個）</div>
+      <code id="reg-url"></code>
+      <div class="acts"><button class="btn primary" onclick="copyUrl()">複製連結</button><button class="btn" id="share-btn" onclick="shareUrl()" hidden>分享…</button><a class="btn" id="reg-open" target="_blank" rel="noopener">開啟報名頁 ↗</a></div>
+    </div>
+
     <div class="seg" role="tablist">
       <button id="t-sess" class="on" onclick="setTab('sess')">各場次</button>
       <button id="t-all" onclick="setTab('all')">全部名單</button>
@@ -166,10 +179,22 @@ function render() {
   $('k-people').textContent = st.people; $('k-outlets').textContent = st.outlets;
   $('k-today').textContent = st.today; $('k-week').textContent = st.week;
   $('k-outlets-l').textContent = D.business ? '公司數' : '單位數';
+  const reg = (D.links && D.links.register) || '';
+  $('share').hidden = !reg;
+  if (reg) { $('reg-url').textContent = reg; $('reg-open').href = reg; $('share-btn').hidden = !navigator.share; }
   $('hide-wrap').hidden = !D.sessions.some((s) => s.status === 'ended');
   $('updated').textContent = `資料更新於 ${hm(D.now) || '剛剛'}${st.latest ? `　·　最近一筆報名 ${hm(st.latest)}` : ''}`;
   $('loading').hidden = true; $('err').hidden = true; $('page').hidden = false;
   renderSessions(); renderOptions(); renderPeople();
+}
+
+function copyUrl() {
+  const u = $('reg-url').textContent;
+  const done = () => { const b = document.querySelector('#share .primary'); b.textContent = '已複製 ✓'; setTimeout(() => { b.textContent = '複製連結'; }, 1800); };
+  (navigator.clipboard ? navigator.clipboard.writeText(u).then(done) : Promise.reject()).catch(() => prompt('請手動複製：', u));
+}
+function shareUrl() {
+  navigator.share({ title: D.campaign.title + ' 報名', url: $('reg-url').textContent }).catch(() => {});
 }
 
 function setTab(t) {

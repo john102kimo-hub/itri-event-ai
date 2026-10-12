@@ -138,7 +138,7 @@ console.log('\n── 三、★ 資料界線：沒有聯絡方式 ──');
     .filter((x) => raw.includes(x));
   check('★ 回應裡沒有 Email／手機／備註／報名編號／編輯碼／LINE 識別／文字題答案', leaks.length === 0, `洩漏：${leaks.join('、')}`);
   check('　 每位報名者只有姓名、單位、場次、報名時間四個欄位（白名單）', v.people.length === 3 && v.people.every((p) => Object.keys(p).sort().join() === 'at,name,outlet,sessions'), JSON.stringify(v.people[0]));
-  check('　 頂層欄位也是白名單（之後誰加欄位會被這條攔下來提醒）', Object.keys(v).sort().join() === 'business,campaign,now,options,people,sessions,stats', Object.keys(v).join());
+  check('　 頂層欄位也是白名單（之後誰加欄位會被這條攔下來提醒）', Object.keys(v).sort().join() === 'business,campaign,links,now,options,people,sessions,stats', Object.keys(v).join());
   const src = read('lib/registration.js');
   const body = src.slice(src.indexOf('export async function statusView'), src.indexOf('/** 後台儲存報名活動'));
   check('　 原始碼：statusView 沒有把整個報名物件展開（沒有 ...g）', !/\.\.\.g\b/.test(body) && !/people: regs\b[^.]/.test(body));
@@ -184,6 +184,18 @@ console.log('\n── 四、人數口徑 ──');
   check('★ 草稿活動送出的測試報名不算人數、不在名單', dv.stats.people === 0 && dv.people.length === 0 && dv.campaign.status === 'draft', JSON.stringify(dv.stats));
 }
 
+console.log('\n── 四之二、前台報名連結（批次 128）──');
+{
+  R.resetStatusViewCache(); R.invalidateCampaignCache();
+  const open = (await view('tw2027', TOKEN)).body;
+  check('收報名中的活動：附前台報名連結（公開的那條，不含連結碼與後台資訊）', open.links.register === 'https://example.test/register?c=tw2027' && !open.links.register.includes(TOKEN), open.links.register);
+  const dTok = book.reg_campaigns.find((r) => r[0] === 'draft27')[15];
+  check('草稿活動不附（轉出去的人點進去只會看到測試頁）', (await view('draft27', dTok)).body.links.register === '');
+  await admin({ ...camp, id: 'old27', title: '已截止', status: 'closed' });
+  const oTok = (await admin({ action: 'reg_admin_share', c: 'old27', mode: 'create' })).body.token;
+  check('已截止的活動不附', (await view('old27', oTok)).body.links.register === '');
+}
+
 console.log('\n── 五、頁面與設定 ──');
 {
   const page = read('public/reg-status.html'), vercel = JSON.parse(read('vercel.json')), adminPage = read('public/registrations.html');
@@ -195,6 +207,7 @@ console.log('\n── 五、頁面與設定 ──');
   const interp = page.split('\n').filter((l) => !/document\.title|toLowerCase/.test(l)).flatMap((l) => [...l.matchAll(/\$\{([^}]+)\}/g)].map((m) => m[1]))
     .filter((x) => /\b(p|s|x|c|D)\.(name|outlet|title|room|time|label|dateLabel|venue|date_range|code)\b/.test(x) && !/esc\(/.test(x) && !/\?/.test(x));
   check('頁面上插進 HTML 的姓名／單位／場次文字都過 esc()（報名者自己填的字不能執行）', interp.length === 0, interp.join(' | '));
+  check('頁面有「報名連結」卡片：複製、系統分享、開啟報名頁，沒有連結時整張隱藏', ['id="share"', 'copyUrl()', 'shareUrl()', 'id="reg-open"'].every((x) => page.includes(x)) && /\$\('share'\)\.hidden = !reg/.test(page));
   check('後台「分享連結」分頁有產生／重新產生／停用', ['reg_admin_share', "shareLink('create')", "shareLink('rotate')", "shareLink('off')"].every((x) => adminPage.includes(x)));
   check('文件：批次 127 已記錄', /## 批次 127：/.test(read('docs/batches/10-batch-117.md')) && /\| 127 \|/.test(read('docs/batches/README.md')));
 }
