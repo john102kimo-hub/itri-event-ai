@@ -69,7 +69,7 @@ import { pinGenericTechQueryToEvent } from '../lib/line-nodata.js';
 import { handleRegBind, resolveMetaIntent } from '../lib/line-register.js';
 import {
   answerIndustryTrend, answerNewsQuery, answerQuestion, fullTextPickEvent, handleContactTopicMessage,
-  handleMetaIntent, handleNewsQueryMessage, handleTechNewsPick, handleTechQueryMessage, handleUnbound, isFullTextAsk,
+  handleMetaIntent, handleNewsQueryMessage, handleTechNewsPick, handleTechQueryMessage, handleTrendQueryMessage, handleUnbound, isFullTextAsk,
   sendCalendarReply
 } from '../lib/line-reporter.js';
 import { applyStaffMenu, handleStaffImage, handleStaffMessage } from '../lib/line-staff-mode.js';
@@ -294,6 +294,7 @@ async function handleEvent(ev) {
   if (await handleTechNewsPick(replyToken, userId, text)) return;
   if (await handleTechQueryMessage(replyToken, userId, text)) return;
   if (await handleNewsQueryMessage(replyToken, userId, text)) return;
+  if (await handleTrendQueryMessage(replyToken, userId, text)) return;
 
   if (!binding) {
     await handleUnbound(replyToken, userId, text);

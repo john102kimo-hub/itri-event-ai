@@ -288,7 +288,7 @@ check('職員問新聞稿 → 真的去抓工研院官網新聞中心的最新�
 
 reset(); await freshModule();
 state.staff.push(['U_staff', '', '2026-08-27', '', '']);
-out = await send('產業趨勢分析', 'U_staff');
+out = await send('最近趨勢', 'U_staff');
 check('職員也叫得動產業趨勢（記者端有的能力，職員一樣要有）',
   out.some(o => o.sys?.includes('IEK 產業情報網')), JSON.stringify(out.map(o => o.sys?.slice(0, 40))));
 
@@ -1091,7 +1091,7 @@ out = await send('最近有哪些活動', 'U_staff');
 // 綁定活動、1 對 1 還是群組都答得到。
 
 reset(); await freshModule();
-out = await send('半導體現在有什麼趨勢');
+out = await send('太空現在有什麼趨勢');
 check('沒綁定、1 對 1 問產業趨勢 → 走 industry_trend，不是掉進「不確定您想問哪一場活動」',
   out.length > 0 && !/沒抓到您想問哪一場活動/.test(out.map(o => o.text).join('')), JSON.stringify(out));
 check('system prompt 裡帶了 IEK 清單的標題與摘要，不是空氣',
@@ -1100,12 +1100,14 @@ check('system prompt 裡帶了 IEK 清單的標題與摘要，不是空氣',
 check('最終回覆附上警語＋公關窗口聯絡資訊，用使用者要求的措辭（僅供參考，正式媒體報導引用請聯繫 公關窗口）',
   out.some(o => o.kind === 'text' && /僅供參考，正式媒體報導引用請聯繫 公關窗口 朱則瑋/.test(o.text) && /0934-266-766/.test(o.text)),
   JSON.stringify(out));
+check('★ 模型沒引用任何來源（清單裡沒有直接對應的資料）→ 程式補上 IEK 搜尋連結（帶「太空」）＋免費焦點專區',
+  out.some(o => o.kind === 'text' && (o.text || '').includes('search/default.aspx?keyword=%E5%A4%AA%E7%A9%BA') && (o.text || '').includes('DefaultFree.aspx')), JSON.stringify(out));
 // 批次 24：按鈕列最前面多一顆「跨到另一條路」的入口——IEK 免費焦點只有十來則，
 // 覆蓋不到記者問的領域是常態，「這裡沒有，可以改從工研院自己的技術報導找」本來就
 // 該是預設出口，而不是讓記者自己猜下一步要打什麼（見情境 19 的回報截圖）。
 check('最終回覆附快速回覆按鈕（跨路入口／活動列表／媒體邀訪需求），不是只丟一句話就結束',
-  out.some(o => o.kind === 'text' && o.quickReply?.[0]?.label === '工研院的半導體技術' &&
-    JSON.stringify(qrTexts(o.quickReply)) === JSON.stringify(['技術關鍵字：半導體', '最近有哪些活動', '問技術與洽案', '媒體邀訪需求', '找真人'])),
+  out.some(o => o.kind === 'text' && o.quickReply?.[0]?.label === '工研院的太空技術' &&
+    JSON.stringify(qrTexts(o.quickReply)) === JSON.stringify(['技術關鍵字：太空', '最近有哪些活動', '問技術與洽案', '媒體邀訪需求', '找真人'])),
   JSON.stringify(out));
 
 // 實際回報的問題：點「產業趨勢分析」這顆按鈕，AI 沒有直接摘要最新幾則，反而列了
@@ -1115,7 +1117,7 @@ check('最終回覆附快速回覆按鈕（跨路入口／活動列表／媒體�
 // 名詞短語）直接當「記者的問題」丟給 AI。修法是四個固定觸發詞一律換成一句明確
 // 的請求句——這裡驗證的就是「呼叫端送給 AI 的是這句固定請求句，不是按鈕原始
 // 文字」，不是驗證真的 LLM 會不會反問（那要看真的跑，這支測試模擬不了）。
-for (const trigger of ['產業趨勢分析', '產業趨勢', '最近趨勢', '最新趨勢']) {
+for (const trigger of ['最近趨勢', '最新趨勢']) {
   reset(); await freshModule();
   out = await send(trigger);
   check(`按鈕／固定觸發詞「${trigger}」→ 送給 AI 的是固定的明確請求句，不是按鈕原始文字`,
@@ -1134,7 +1136,7 @@ check('群組 @ 問產業趨勢 → 一樣答得到',
 // 沒有」的那條退路。
 reset(); await freshModule();
 state.contactsDirectory = ['生醫｜生醫所｜丁嘉琳｜03-1111111｜lineid_ding｜智慧醫療、醫材相關技術'].join('\n');
-out = await send('半導體現在有什麼趨勢');
+out = await send('太空現在有什麼趨勢');
 check('後台完全沒設定「產業趨勢分析」窗口時，退回程式內建的預設聯絡人與電話',
   out.some(o => o.kind === 'text' && /僅供參考，正式媒體報導引用請聯繫 公關窗口 朱則瑋　📞 0934-267-766/.test(o.text)),
   JSON.stringify(out));
@@ -1144,7 +1146,7 @@ check('後台完全沒設定「產業趨勢分析」窗口時，退回程式內�
 // 活動綁定：這題答完，下一題沒有新線索的話還是回到原本那場。
 reset(); await freshModule();
 state.bindings.set('U_reporter', { event_id: 'quad', media_name: '', note: '', bound_at: Date.now() });
-out = await send('半導體現在有什麼趨勢');
+out = await send('太空現在有什麼趨勢');
 check('1 對 1 綁定中問產業趨勢 → 不會被塞進目前綁定活動（quad）的問答',
   !out.some(o => o.kind === 'answer' && o.event === 'quad'), JSON.stringify(out));
 check('1 對 1 綁定中問產業趨勢 → 正確答上（附聯絡窗口），不是答非所問',
@@ -1166,7 +1168,7 @@ check('答完產業趨勢題續問視窗有續命',
 // IEK 網站抓不到資料（網路問題／網站改版）——誠實告知，不能整支掛掉或裝死。
 reset(); await freshModule();
 state.iekFetchFail = true;
-out = await send('半導體現在有什麼趨勢');
+out = await send('太空現在有什麼趨勢');
 check('IEK 抓取失敗時誠實告知抓不到資料，不會噴例外讓記者什麼都收不到',
   out.length > 0 && out[0]?.kind === 'text' && /暫時抓不到最新的產業趨勢資料/.test(out[0].text), JSON.stringify(out));
 check('抓取失敗時一樣附上聯絡窗口，不是單純說一句抓不到就結束',
@@ -1177,15 +1179,122 @@ check('抓取失敗時沒有呼叫 Anthropic 硬答（沒有 answer 這個 kind�
 // 批次 129：先抓成功過、快取過期後 IEK 剛好抓不到——沿用過期的舊清單答，不要退成「暫時抓不到」。
 // （IEK 這頁本來就慢，實測 7～9 秒，抓失敗不是罕見事件。）
 reset(); await freshModule();
-await send('半導體現在有什麼趨勢'); // 抓成功、進快取
+await send('太空現在有什麼趨勢'); // 抓成功、進快取
 const realNow = Date.now;
 Date.now = () => realNow() + 7 * 60 * 60 * 1000; // 過了 7 小時，超過 6 小時的快取
 state.iekFetchFail = true;
 try {
-  out = await send('半導體現在有什麼趨勢');
+  out = await send('太空現在有什麼趨勢');
 } finally { Date.now = realNow; }
 check('快取過期後 IEK 抓失敗 → 沿用舊清單照常回答，不退成「暫時抓不到」',
   out.some(o => o.kind === 'answer') && !out.some(o => /暫時抓不到/.test(o.text || '')), JSON.stringify(out));
+
+// ── 批次 130：按「產業趨勢分析」先問領域，打關鍵字由程式篩選（不經過模型）────────────────
+// 朱朱的要求：「打 AI、半導體、材料、能源這些字都要拿到正確答案」。保證放在程式裡：答案是 IEK 原文照排，
+// 篩不到由程式老實說沒有——所以這裡的每個斷言都看「沒有 answer（沒呼叫模型）」。
+const trendRow = (id, title, date, abs) => `<div class="listItem"><article><h2><a href="./rpt_more.aspx?actiontype=rpt&amp;indu_idno=0&amp;domain=28&amp;rpt_idno=${id}" title="${title}">${title}</a></h2><small class="date">${date}</small><p>${abs}</p></article></div>`;
+const TREND_HTML = [
+  trendRow('100000001', 'IEK精華包：AI伺服器重塑記憶體功能分工', '2026/08/05', 'AI 伺服器帶動高頻寬記憶體需求。'),
+  trendRow('100000002', 'IEK精華包：先進製程驅動半導體升級', '2026/05/18', '先進製程與封裝成為半導體競爭焦點。'),
+  trendRow('100000003', 'IEK精華包：AI高速運算推動銅箔材料升級', '2026/06/18', '高頻高速銅箔材料需求升高。'),
+  trendRow('100000004', 'IEK精華包：低碳氫能進入FID競賽階段', '2026/05/21', '氫能與儲能投資邁入決策階段。'),
+  trendRow('100000005', 'IEKView: English Only Report About AI', '2026/07/01', 'This summary has no Chinese characters at all.')
+].join('\n');
+const trendReset = async () => { reset(); await freshModule(); state.iekHtml = TREND_HTML; };
+
+await trendReset();
+out = await send('產業趨勢分析');
+check('按「產業趨勢分析」→ 先問領域（不是直接丟摘要），沒呼叫模型',
+  out.some(o => o.kind === 'text' && /想了解哪個領域/.test(o.text)) && !out.some(o => o.kind === 'answer'), JSON.stringify(out));
+check('　 問領域那則附 AI／半導體／材料／能源按鈕與「最新重點」',
+  (() => { const t = qrTexts(out.find(o => /想了解哪個領域/.test(o.text || ''))?.quickReply || []); return ['趨勢關鍵字：AI', '趨勢關鍵字：半導體', '趨勢關鍵字：材料', '趨勢關鍵字：能源', '趨勢關鍵字：最新'].every(x => t.includes(x)); })(),
+  JSON.stringify(out.map(o => qrTexts(o.quickReply || []))));
+out = await send('材料');
+check('接著打「材料」→ 排出銅箔那篇（標題、日期、IEK 摘要、短網址），沒呼叫模型',
+  out.some(o => o.kind === 'text' && o.text.includes('銅箔材料升級') && o.text.includes('2026/06/18') && /\/i\/28-100000003/.test(o.text)) && !out.some(o => o.kind === 'answer'), JSON.stringify(out));
+check('　 查得到的時候不多附 IEK 搜尋連結（只有查不到才給）', !out.some(o => /search\/default\.aspx/.test(o.text || '')), JSON.stringify(out));
+check('　 只有中文英文版的那篇不出現（避免中文回覆裡夾一整段英文）', !out.some(o => /English Only/.test(o.text || '')), JSON.stringify(out));
+check('　 附公關窗口警語', out.some(o => /僅供參考，正式媒體報導引用請聯繫 公關窗口 朱則瑋/.test(o.text || '')), JSON.stringify(out));
+
+for (const [word, mustHave] of [['AI', '記憶體功能分工'], ['ai', '記憶體功能分工'], ['人工智慧', '記憶體功能分工'], ['半導體', '先進製程驅動半導體升級'], ['晶片', '先進製程驅動半導體升級'], ['能源', '低碳氫能'], ['綠能', '低碳氫能'], ['材料', '銅箔材料升級']]) {
+  await trendReset();
+  await send('產業趨勢分析');
+  out = await send(word);
+  check(`打「${word}」→ 拿到對的那篇（${mustHave}），不經過模型`,
+    out.some(o => o.kind === 'text' && o.text.includes(mustHave)) && !out.some(o => o.kind === 'answer'), JSON.stringify(out));
+}
+
+await trendReset();
+out = await send('趨勢關鍵字：能源'); // 按鈕送出的固定句型：不需要先按「產業趨勢分析」
+check('領域按鈕（固定句型）任何時候都按得動', out.some(o => o.kind === 'text' && o.text.includes('低碳氫能')), JSON.stringify(out));
+check('　 時間順序新到舊、最多 3 則', (() => { const t = out.find(o => o.text?.includes('低碳氫能'))?.text || ''; return (t.match(/🔗/g) || []).length <= 3; })(), JSON.stringify(out));
+
+await trendReset();
+out = await send('半導體現在有什麼趨勢'); // 自然語言問已知領域，也走程式篩選
+check('自然語言問「半導體現在有什麼趨勢」→ 同樣是程式篩選的原文，不呼叫模型',
+  out.some(o => o.kind === 'text' && o.text.includes('先進製程驅動半導體升級')) && !out.some(o => o.kind === 'answer'), JSON.stringify(out));
+
+await trendReset();
+await send('產業趨勢分析');
+out = await send('太空');
+check('清單裡沒有的領域（太空）→ 程式老實說「沒有直接談到」＋給出口，不呼叫模型、不編',
+  out.some(o => o.kind === 'text' && /沒有直接談到「太空」/.test(o.text) && /朱則瑋/.test(o.text)) && !out.some(o => o.kind === 'answer'), JSON.stringify(out));
+check('★ 查不到時直接給 IEK 網頁：帶關鍵字的搜尋連結＋免費焦點專區，讓記者自己去查',
+  out.some(o => (o.text || '').includes('https://ieknet.iek.org.tw/search/default.aspx?keyword=%E5%A4%AA%E7%A9%BA') && (o.text || '').includes('https://ieknet.iek.org.tw/iekrpt/DefaultFree.aspx')), JSON.stringify(out));
+check('　 沒有的時候仍附「換個領域」按鈕與工研院技術入口', out.some(o => qrTexts(o.quickReply || []).some(t => /^趨勢關鍵字：/.test(t)) && qrTexts(o.quickReply || []).includes('技術關鍵字：太空')), JSON.stringify(out.map(o => qrTexts(o.quickReply || []))));
+
+await trendReset();
+await send('產業趨勢分析');
+out = await send('最新重點？'); // 在等領域時打了別的問題：不被吃掉
+check('等領域時打問句（含問號）→ 不被當關鍵字，照一般路由走', !out.some(o => /跟「最新重點？」有關/.test(o.text || '')), JSON.stringify(out));
+
+await trendReset();
+out = await send('趨勢關鍵字：最新'); // 「最新重點」按鈕＝不指定領域，給原本的最新摘要
+check('「最新重點」按鈕 → 走原本的最新摘要（有呼叫模型）', out.some(o => o.kind === 'answer' && o.question === '最近有哪些產業趨勢重點'), JSON.stringify(out));
+
+await trendReset();
+state.iekFetchFail = true;
+out = await send('趨勢關鍵字：半導體');
+check('　 抓不到時也給 IEK 網頁（帶「半導體」的搜尋連結）讓記者自己查', out.some(o => (o.text || '').includes('search/default.aspx?keyword=%E5%8D%8A%E5%B0%8E%E9%AB%94') && (o.text || '').includes('DefaultFree.aspx')), JSON.stringify(out));
+check('IEK 全部抓不到 → 誠實說暫時抓不到＋窗口，不噴例外', out.some(o => o.kind === 'text' && /暫時抓不到最新的產業趨勢資料/.test(o.text) && /朱則瑋/.test(o.text)), JSON.stringify(out));
+
+// 抓成功過、快取過期後剛好抓不到 → 沿用舊清單（按關鍵字查那條路也一樣）
+await trendReset();
+await send('趨勢關鍵字：半導體');
+{
+  const realNow2 = Date.now;
+  Date.now = () => realNow2() + 7 * 60 * 60 * 1000;
+  state.iekFetchFail = true;
+  try { out = await send('趨勢關鍵字：半導體'); } finally { Date.now = realNow2; }
+}
+check('快取過期後 IEK 抓失敗 → 關鍵字查詢沿用舊清單，不退成「暫時抓不到」',
+  out.some(o => o.kind === 'text' && o.text.includes('先進製程驅動半導體升級')), JSON.stringify(out));
+
+// 群組：按鈕是固定句型，任何人按都算數；按了「產業趨勢分析」之後只有按的那個人打的領域會被接住
+await trendReset();
+out = await sendGroup('趨勢關鍵字：半導體', { mentionSelf: false });
+check('群組裡按領域按鈕（沒 @）→ 答得到', out.some(o => o.kind === 'text' && o.text.includes('先進製程驅動半導體升級')), JSON.stringify(out));
+await trendReset();
+out = await sendGroup('@我 產業趨勢分析', { mentionSelf: true, mentionText: '@我 ' });
+check('群組 @ 按「產業趨勢分析」→ 先問領域', out.some(o => o.kind === 'text' && /想了解哪個領域/.test(o.text)), JSON.stringify(out));
+
+console.log('── 批次 130 純函式 ──');
+{
+  const it = await import('../lib/industry-trends.js');
+  { const r = it.filterTrendItems([
+      { title: '歐盟晶片法案', abstract: '帶動晶片、材料、設備與封裝布局', date: '2026/09/07', url: 'u1' },
+      { title: 'AI伺服器材料升級', abstract: '材料是瓶頸', date: '2026/06/18', url: 'u2' }], '材料');
+    check('標題談到的排在「摘要只是順口提到」的前面（即使後者比較新）', r.length === 2 && r[0].title === 'AI伺服器材料升級' && r[0].titleHit && !r[1].titleHit, JSON.stringify(r.map(x => x.title)));
+    const txt = it.formatTrendReply({ keyword: '材料', matched: r, poolSize: 50, since: '2025/12/29' });
+    check('有標題談到的就只列那些，並說明另有幾則只是摘要提到', /談到「材料」的最新 1 則/.test(txt) && !/歐盟晶片法案/.test(txt) && /摘要也有提到/.test(txt), txt); }
+  check('別名：AI／ai／人工智慧 都是 AI 領域', ['AI', 'ai', ' 人工智慧 '].every(w => it.trendTopicFor(w)?.name === 'AI'));
+  check('別名：不是領域的字回 null（退回字面比對）', it.trendTopicFor('太空') === null && it.trendTopicFor('') === null);
+  check('字面比對：未知領域用原字串在標題／摘要裡找', it.filterTrendItems([{ title: '太空產業', abstract: 'x' }, { title: '其他', abstract: 'y' }], '太空').length === 1);
+  check('AI 不誤中英文單字裡的 ai（例如 maintain）', it.filterTrendItems([{ title: 'maintain 中文標題', abstract: '沒有相關內容' }], 'AI').length === 0);
+  check('趨勢關鍵字句型來回', it.parseTrendPick(it.trendPickText('材料')).keyword === '材料' && it.parseTrendPick('趨勢關鍵字：最新').keyword === '' && it.parseTrendPick('材料') === null);
+  const none = it.formatTrendReply({ keyword: '太空', matched: [], poolSize: 58, since: '2025/11/17' });
+  check('查不到的文案：講清楚查了多大範圍', /58 篇/.test(none) && /2025\/11\/17/.test(none) && /沒有直接談到「太空」/.test(none), none);
+}
 
 // ── 情境 18：近期工研院新聞（原「想問什麼技術」那一整套，批次 121 搬到這一格；資料來源見 lib/itri-news.js）───────
 // 記者想直接問工研院自己在某項技術上的研發成果，不是在問某一場記者會、也不是在問
@@ -1373,7 +1482,7 @@ check('官網抓不到時誠實告知，不會硬答',
 //      像主題詞的訊息直接複誦回去，給兩條真的走得通的路
 
 reset(); await freshModule();
-await send('半導體現在有什麼趨勢');
+await send('太空現在有什麼趨勢');
 check('答完產業趨勢題 → 話題記進 line_users H 欄（下一則才接得回來）',
   /^industry_trend@\d+$/.test(state.bindings.get('U_reporter')?.lastTopic || ''),
   JSON.stringify(state.bindings.get('U_reporter')));
@@ -1406,7 +1515,7 @@ check('問完技術題再打一個裸技術名詞 → 接回工研院技術那�
 // 形式的答非所問。
 reset(); await freshModule();
 state.bindings.set('U_reporter', { event_id: 'quad', media_name: '', note: '', bound_at: Date.now() });
-await send('半導體現在有什麼趨勢');
+await send('太空現在有什麼趨勢');
 out = await send('太空');
 check('綁定中問完趨勢、再打裸名詞 → 接回趨勢，不會被硬塞進目前綁定活動（quad）的問答',
   !out.some(o => o.kind === 'answer' && o.event === 'quad') &&
@@ -1454,7 +1563,7 @@ for (const greeting of ['你好', '謝謝', '哈哈', 'ok']) {
 // 打的第一個詞會被接回舊話題（見 api/line.js clearBinding() 的說明）。
 reset(); await freshModule();
 state.bindings.set('U_reporter', { event_id: 'quad', media_name: '', note: '', bound_at: Date.now() });
-await send('半導體現在有什麼趨勢');
+await send('太空現在有什麼趨勢');
 await send('回首頁');
 check('「回首頁」把話題記憶一起清掉',
   !state.bindings.get('U_reporter')?.lastTopic, JSON.stringify(state.bindings.get('U_reporter')));
@@ -1466,7 +1575,7 @@ check('回首頁之後打主題詞 → 走複誦那條路（話題已清），�
 // 誤擋的組合——群組沒被 @ 到時 other 是安靜門檻（silentOnOther），接不回話題的話
 // 記者連一句回覆都收不到，體感是「卡住了」（跟批次 21「技術呢」那次同一種病）。
 reset(); await freshModule();
-await sendGroup('@我 半導體現在有什麼趨勢', { mentionSelf: true, mentionText: '@我 ' });
+await sendGroup('@我 太空現在有什麼趨勢', { mentionSelf: true, mentionText: '@我 ' });
 out = await sendGroup('太空', { mentionSelf: false });
 check('群組續問視窗內打裸名詞 → 接回趨勢話題，不會被安靜門檻擋掉',
   out.some(o => o.kind === 'answer' && o.sys?.includes('IEK 產業情報網')), JSON.stringify(out.map(o => o.kind)));
@@ -1489,7 +1598,7 @@ check('群組續問視窗內打裸名詞 → 接回趨勢話題，不會被安�
 reset(); await freshModule();
 state.answerText = '最新兩則是 9/7 的歐盟晶片法案 2.0，重點從衝產能轉向拉高整個生態系競爭力；另一則是人型機器人的量產瓶頸與供應鏈布局。';
 state.bindings.set('U_reporter', { event_id: 'quad', media_name: '', note: '', bound_at: Date.now() });
-await send('產業趨勢分析');
+await send('最近趨勢');
 check('答完趨勢題 → 連「剛剛實際答了什麼」也記進 line_users I 欄，不是只記一個分類標籤',
   /"e":"#topic:industry_trend"/.test(state.bindings.get('U_reporter')?.lastTurn || '') &&
   /人型機器人/.test(state.bindings.get('U_reporter')?.lastTurn || ''),
@@ -2694,7 +2803,7 @@ out = await send('這場的技術突破是什麼？');
 check('★ 版面規則有到「活動問答」', sysOf(out, ['answer']).includes(LAYOUT_MARK),
   sysOf(out, ['answer']).slice(0, 80));
 
-out = await send('產業趨勢分析');
+out = await send('最近趨勢');
 check('★ 版面規則有到「產業趨勢」', sysOf(out, ['answer']).includes(LAYOUT_MARK),
   sysOf(out, ['answer']).slice(0, 80));
 
