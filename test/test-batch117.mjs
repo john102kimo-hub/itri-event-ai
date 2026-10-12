@@ -180,9 +180,13 @@ const releaseLogs = () => { console.log = realLog; };
 }
 {
   const files = ['api', 'lib'].flatMap((d) => fs.readdirSync(path.join(ROOT, d)).filter((f) => f.endsWith('.js')).map((f) => `${d}/${f}`));
-  const callers = files.filter((f) => src(f).includes('api.anthropic.com'));
+  // 批次 134：呼叫模型的寫法有兩種——自己 fetch('https://api.anthropic.com/…')，或改走 lib/ai-refusal.js 的 postAnthropic()
+  // （那支才有網址字串，呼叫端的檔案裡看不到）。只認網址的話，檔案一改走 postAnthropic() 就從這個守門裡消失，
+  // 之後它忘了記用量也沒人發現。所以兩種都算。
+  // lib/ai-refusal.js 本身排除：它只是通道（送出、備援、自癒），不碰回應內容，用量由呼叫端讀完 usage 才記得了。
+  const callers = files.filter((f) => f !== 'lib/ai-refusal.js' && (src(f).includes('api.anthropic.com') || /\bpostAnthropic\(/.test(src(f))));
   const missing = callers.filter((f) => !/logAiUsage\(/.test(src(f)));
-  check(`★ 每一支會呼叫模型的檔案都有記用量（${callers.length} 支）`, callers.length >= 6 && missing.length === 0, missing.join('、'));
+  check(`★ 每一支會呼叫模型的檔案都有記用量（${callers.length} 支；含改走 postAnthropic() 的）`, callers.length >= 6 && missing.length === 0, missing.join('、'));
 }
 // 網頁問答的串流：token 數分兩次來（message_start 帶輸入與快取、message_delta 帶輸出），要合起來記
 {
