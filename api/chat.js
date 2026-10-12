@@ -11,6 +11,8 @@ import { toTraditionalTW, createTraditionalStream, ZH_TW_RULE } from '../lib/zh-
 import { reportAiFailure, BUSINESS_KEY_NAME } from '../lib/ai-alert.js';
 import { readEventRows } from '../lib/events-table.js';
 import { logAiUsage } from '../lib/ai-usage.js';
+import { isRefusal, logRefusal, refusalReply, postAnthropic, buildSonnetRetryBody, SONNET_RETRY_MODEL } from '../lib/ai-refusal.js';
+import { checkAnswerGrounding } from '../lib/answer-grounding.js';
 
 // 批次 120：Haiku 4.5 → Haiku 5.5。5.5 預設會開 adaptive thinking（4.5 不會），記者要的是聊天速度的回應，
 // 所以下面 body 明確送 thinking:{type:'disabled'}（5.5 在 effort medium 以下接受）。不送 temperature 等取樣參數（5.5 會 400）。
@@ -33,6 +35,86 @@ const STREAM_BROKEN_MSG = '（連線中斷，這一題沒有答完，請再問�
 // 記者只會看到三個點一直跳、最後變成「連線錯誤」。55 秒先自己停下來，還來得及
 // 送出一句說明、把已經答出來的部分寫進 qa_log（跟 api/line.js REQUEST_BUDGET_MS 同一個道理）。
 const REQUEST_BUDGET_MS = 55_000;
+
+// ── 批次 134：模型拒答（HTTP 200 ＋ stop_reason:"refusal"）──────────────────────────────
+// 拒答不是錯誤：不是金鑰、額度出狀況，所以**不要** reportAiFailure()（那是給記者會現場掛掉時叫人用的警報）。
+// 以前這支對拒答零處理：content 是空的，記者看到的是「抱歉，無法取得回應。」，qa_log 還把這句記成答案，
+// 伺服器 log 完全乾淨。現在：記一行 [ai-refusal]、能重答就重答、重答不了就給一句固定句（不經模型）。
+//
+// 串流中的 refusal 事件形狀（官方文件 platform.claude.com/docs/en/build-with-claude/ 的 streaming、
+// handling-stop-reasons、refusals-and-fallback 三頁，2026-10-12 讀原文）：
+//   · 確認的：stop_reason 只出現在 message_delta 事件的 delta.stop_reason（message_start 裡是 null、其他事件都沒有）；
+//     拒答可以在輸出前、也可以在輸出到一半發生，「一半的輸出視為不完整、丟掉」；一半的輸出照算錢。
+//   · 文件沒寫清楚的：串流拒答時 stop_details 放在 message_delta 的哪一層（推測是 delta.stop_details，與非串流
+//     回應 stop_details 跟 stop_reason 同層一致）、拒答前有沒有 content_block_stop、有沒有一個專屬的 SSE 事件類型
+//     （文件只說 server-side fallback 的 fallback 區塊是一般的 content_block_start／stop，沒有特別的事件）。
+//   所以這裡故意寫得寬鬆：delta.stop_reason、事件本身的 stop_reason、message_start 的 message.stop_reason，
+//   任何一個是 'refusal' 都算；stop_details 同理三處都找，只拿來寫 log（category 找不到就是 null，不影響處理）。
+function streamRefusalDetails(evt) {
+  if (!evt || evt.type === 'error') return undefined;
+  if (!(isRefusal(evt.delta) || isRefusal(evt) || isRefusal(evt.message))) return undefined;
+  const d = evt.delta?.stop_details ?? evt.stop_details ?? evt.message?.stop_details ?? null;
+  return { stop_reason: 'refusal', stop_details: d };
+}
+
+// 輸出到一半才被攔下：已經送出去的字收不回來，接著補一句說明，不讓記者把半截答案當成完整答案引用。
+const REFUSAL_MIDWAY_ZH = '（這一題後半段沒辦法回答，建議洽新聞聯絡人。）';
+const REFUSAL_MIDWAY_EN = '(The rest of this answer could not be completed. Please contact the press contact.)';
+const hasChinese = (s) => /[\u4e00-\u9fff]/.test(String(s || ''));
+
+// 非串流從模型回應取文字。不能寫死 content[0]：第一塊不保證是文字（見 api/line.js askAnthropic() 的說明）
+const textOf = (data) => (data?.content || []).filter(b => b?.type === 'text').map(b => b.text).join('\n').trim();
+
+// Haiku 5.5 被攔下時改用 Sonnet 5.5 非串流重答一次（Haiku 沒有伺服器端備援，見 lib/ai-refusal.js）。
+// 回傳重答的文字；逾時、非 2xx、重答也被攔、沒有文字，一律回空字串——呼叫端改給固定句。
+// 永遠不丟例外：重答是「錦上添花」，它壞了不能讓這一題變成 500。
+// 剩餘時間沿用整次請求的 55 秒上限（扣掉已經用掉的），最少給 5 秒。
+async function retryRefusedOnSonnet({ requestBody, key, startedAt, usageWhere, eventId }) {
+  try {
+    const res = await postAnthropic({
+      apiKey: key,
+      body: buildSonnetRetryBody(requestBody),
+      signal: AbortSignal.timeout(Math.max(5_000, REQUEST_BUDGET_MS - (Date.now() - startedAt))),
+      fallbacks: true // Sonnet 5.5 有伺服器端備援（只替 cyber／frontier_llm 重試）；Haiku 沒有，所以才需要這一輪
+    });
+    if (!res.ok) {
+      console.error('拒答改 Sonnet 重答失敗，Anthropic API 狀態:', res.status);
+      return '';
+    }
+    const data = await res.json();
+    // 備援真的發生時，top-level 的 usage 與 model 是實際回答的那個模型
+    const served = typeof data.model === 'string' && data.model ? data.model : SONNET_RETRY_MODEL;
+    logAiUsage(`${usageWhere}（拒答改 Sonnet）`, served, data.usage);
+    if (isRefusal(data)) {
+      logRefusal(`${usageWhere}（改 Sonnet 重答）`, served, data, { eventId });
+      return '';
+    }
+    return textOf(data);
+  } catch (e) {
+    console.error('拒答改 Sonnet 重答失敗:', e?.name, e?.message);
+    return '';
+  }
+}
+
+// 批次 132：答案出口檢查（數字、網址、英文名詞「答案有、模型看到的文字沒有」）。預設影子模式：只記 log，note 是空字串，
+// 這裡就什麼都不接；ANSWER_GROUNDING=on 才會有 note。checkAnswerGrounding() 自己不丟例外，這裡再包一層是因為
+// 它只是附加的提醒，萬一它壞了，不能讓記者的答案跟著變成 500。
+// shownText 傳「這次真的送給模型的字串」：system 區塊（含知識庫、活動基本資料）＋記者自己說的話。
+// ⚠️ 只放 user 輪，不放 assistant 輪——assistant 輪是模型先前自己說的，放進來它編的數字就被洗白成「來源有」。
+function groundingNoteFor(reply, requestBody, eventId, stream) {
+  try {
+    const shownText = [
+      ...requestBody.system.map(b => b.text),
+      ...requestBody.messages.filter(m => m.role === 'user').map(m => m.content)
+    ];
+    const note = checkAnswerGrounding(reply, shownText, { where: stream ? 'web-chat-stream' : 'web-chat', eventId }).note;
+    // 提醒文字是固定句，本來就是繁體；仍然過一次出口，「每一段送出去的字都經過 toTraditionalTW」不留例外
+    return note ? toTraditionalTW(note) : '';
+  } catch (e) {
+    console.error('答案出口檢查失敗，略過這一則:', e?.name, e?.message);
+    return '';
+  }
+}
 
 // 活動設定快取（60 秒；記者會現場臨時改稿也能很快生效）
 const eventCache = new Map();
@@ -220,32 +302,39 @@ export default async function handler(req, res) {
 
     logCtx = { event_id, eventName, media_name, reporter_name, question };
 
+    // 企業場那一把金鑰（批次 119）；拒答改 Sonnet 重答（批次 134）也要用同一把，費用與每月上限才不會混進記者那邊
+    const key = businessKey ? process.env.ANTHROPIC_API_KEY_BUSINESS : apiKey;
+    const usageWhere = business ? '網頁問答（企業場）' : '網頁問答';
+    // 請求內容先組成物件：拒答時要拿它改成 Sonnet 版重送（buildSonnetRetryBody），答案出口檢查也要從它取
+    // 「模型真的看到的字」。欄位順序與 JSON 位元組跟以前直接內嵌 JSON.stringify({…}) 完全相同。
+    const requestBody = {
+      model: CHAT_MODEL,
+      max_tokens: 4096,
+      thinking: { type: 'disabled' },
+      stream: !!stream && !business,
+      // 知識庫在 60 秒快取視窗內逐 byte 穩定，加 ephemeral cache 讓同場記者連續發問時
+      // 讀取只收 0.1 倍價（記者會現場正是這種「同一份知識庫、多人連續提問」的場景）。
+      // ZH_TW_RULE 是固定字串，放進這塊不影響快取。
+      system: [
+        { type: 'text', text: systemPrompt + '\n' + ZH_TW_RULE, cache_control: { type: 'ephemeral' } },
+        // 活動基本資料＋現在時間：每分鐘在變，放在快取區塊之後，不打散上面那塊的快取
+        ...(basicsBlock ? [{ type: 'text', text: basicsBlock }] : [])
+      ],
+      messages: trimmed
+    };
+
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-api-key': businessKey ? process.env.ANTHROPIC_API_KEY_BUSINESS : apiKey,
+        'x-api-key': key,
         'anthropic-version': '2023-06-01'
       },
       // 涵蓋「等回應」與「讀串流」兩段：時間到，下面的 reader.read() 一樣會丟例外，
       // 走進 catch 送出說明，不會等到被 Vercel 砍掉。從請求一進來就起算——前面讀
       // Sheets 若卡在配額重試，花掉的時間也要扣掉（最少留 5 秒給模型）。
       signal: AbortSignal.timeout(Math.max(5_000, REQUEST_BUDGET_MS - (Date.now() - startedAt))),
-      body: JSON.stringify({
-        model: CHAT_MODEL,
-        max_tokens: 4096,
-        thinking: { type: 'disabled' },
-        stream: !!stream && !business,
-        // 知識庫在 60 秒快取視窗內逐 byte 穩定，加 ephemeral cache 讓同場記者連續發問時
-        // 讀取只收 0.1 倍價（記者會現場正是這種「同一份知識庫、多人連續提問」的場景）。
-        // ZH_TW_RULE 是固定字串，放進這塊不影響快取。
-        system: [
-          { type: 'text', text: systemPrompt + '\n' + ZH_TW_RULE, cache_control: { type: 'ephemeral' } },
-          // 活動基本資料＋現在時間：每分鐘在變，放在快取區塊之後，不打散上面那塊的快取
-          ...(basicsBlock ? [{ type: 'text', text: basicsBlock }] : [])
-        ],
-        messages: trimmed
-      })
+      body: JSON.stringify(requestBody)
     });
 
     // 錯誤一律在切換成 SSE 之前處理掉，這樣還能回乾淨的 JSON 錯誤碼給前端
@@ -263,11 +352,28 @@ export default async function handler(req, res) {
 
     if (!stream || business) {
       const data = await response.json();
-      logAiUsage(business ? '網頁問答（企業場）' : '網頁問答', CHAT_MODEL, data.usage); // 批次 117
-      // 不能寫死 content[0]：第一塊不保證是文字（見 api/line.js askAnthropic() 的說明）
-      const text = (data.content || []).filter(b => b?.type === 'text').map(b => b.text).join('\n').trim();
-      reply = toTraditionalTW(text) || '抱歉，無法取得回應。';
-      if (business && text) reply = guardBusinessAnswer(reply, event).text;
+      logAiUsage(usageWhere, CHAT_MODEL, data.usage); // 批次 117
+      let text = textOf(data);
+      // 批次 134：拒答是 HTTP 200，content 是空的或只有一半（一半的視為不完整、丟掉）。Haiku 5.5 沒有伺服器端備援，
+      // 改用 Sonnet 5.5 重答一次；重答不了（也被攔、逾時、非 2xx）就給固定句，不經模型、不會講錯話。
+      let refusedFixed = false;
+      if (isRefusal(data)) {
+        logRefusal(usageWhere, CHAT_MODEL, data, { eventId: event_id });
+        text = await retryRefusedOnSonnet({ requestBody, key, startedAt, usageWhere, eventId: event_id });
+        refusedFixed = !text;
+      }
+      if (refusedFixed) {
+        // 固定句不是答案：不補企業免責句（沒有答案時本來就不補，見下面 `business && text`）、也不做答案出口檢查。
+        reply = toTraditionalTW(refusalReply({ contact: event.press_contact, english: !hasChinese(question) }));
+      } else {
+        reply = toTraditionalTW(text) || '抱歉，無法取得回應。';
+        if (business && text) reply = guardBusinessAnswer(reply, event).text;
+        // 批次 132：企業場不跑（它有 guardBusinessAnswer）；note 排在警語之後。預設影子模式 note 是空字串，一個字都不加
+        if (!business && text) {
+          const note = groundingNoteFor(reply, requestBody, event_id, false);
+          if (note) reply += '\n\n' + note;
+        }
+      }
       await logQA({ ...logCtx, reply });
       return res.status(200).json({ reply });
     }
@@ -294,6 +400,8 @@ export default async function handler(req, res) {
     };
     let buf = '';
     let brokenMidway = false;
+    // 批次 134：串流中看到 stop_reason:"refusal"（形狀見檔案上方的說明）。不立刻處理，讀完整條串流（要拿用量）再決定
+    let refusal = null;
     // 用量（批次 117）：串流的 token 數分兩次來——message_start 帶輸入與快取，message_delta 帶輸出
     const usage = {};
 
@@ -320,15 +428,49 @@ export default async function handler(req, res) {
           console.error('Anthropic 串流錯誤:', evt.error?.type, evt.error?.message);
           brokenMidway = true;
         }
+        if (!refusal) refusal = streamRefusalDetails(evt) || null;
       }
     }
-    send(zh.flush());
+    // 批次 134：被攔下的串流，囤在繁體轉換器裡還沒送出的那一小段也是「被攔下的一半輸出」，丟掉不送。
+    // （連線中途出錯又被攔的極少見情況，維持原本的出錯路徑，照舊把囤的字送完。）
+    const refused = !!refusal && !brokenMidway;
+    if (!refused) send(zh.flush());
     if (Object.keys(usage).length) logAiUsage('網頁問答', CHAT_MODEL, usage);
+
+    // 結尾是固定句／說明（不是模型寫的答案）→ 不做答案出口檢查
+    let fixedTail = false;
+    if (refused) {
+      logRefusal('網頁問答', CHAT_MODEL, refusal, { eventId: event_id });
+      const english = !hasChinese(question);
+      if (!reply) {
+        // 輸出前就被攔下：一個字都還沒送出去，可以換成 Sonnet 非串流重答，成功就照常用串流格式送出
+        const redo = await retryRefusedOnSonnet({ requestBody, key, startedAt, usageWhere: '網頁問答', eventId: event_id });
+        zh = createTraditionalStream(); // 舊的那條還囤著被攔下的半截字，換一條乾淨的
+        if (redo) {
+          send(zh.push(redo));
+          send(zh.flush());
+        } else {
+          send(toTraditionalTW(refusalReply({ contact: event.press_contact, english })));
+          fixedTail = true;
+        }
+      } else {
+        // 已經送出去一部分才被攔下：字收不回來，接著補一句說明，不讓記者把半截答案當成完整答案引用
+        send(toTraditionalTW('\n\n' + (english ? REFUSAL_MIDWAY_EN : REFUSAL_MIDWAY_ZH)));
+        fixedTail = true;
+      }
+    }
 
     if (brokenMidway) {
       res.write(`data: ${JSON.stringify({ error: reply ? STREAM_BROKEN_MSG : friendlyApiError(529) })}\n\n`);
     }
+    const answered = !!reply;
     if (!reply) reply = '抱歉，無法取得回應。';
+    // 批次 132：答案出口檢查。只查模型真的寫出來、而且完整的答案（固定句、半截答案、斷線的都不查）；
+    // 影子模式 note 是空字串，一個位元組都不多送。on 才會在 {done:true} 之前多送一個 {t} 事件，並接進 reply（qa_log 一致）。
+    if (answered && !fixedTail && !brokenMidway) {
+      const note = groundingNoteFor(reply, requestBody, event_id, true);
+      if (note) send('\n\n' + note);
+    }
     // 先告訴前端「講完了」，輸入框立刻解鎖；寫 Sheets 排在這之後，記者不必等它。
     res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
     res.flush?.();
