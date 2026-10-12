@@ -29,6 +29,10 @@
       "destination": "/registrations.html"
     },
     {
+      "source": "/reg-status",
+      "destination": "/reg-status.html"
+    },
+    {
       "source": "/inquiry",
       "destination": "/inquiry.html"
     },
@@ -76,7 +80,20 @@
       ]
     },
     {
-      "source": "/(admin|geo|report|registrations|edit|training|b2b|inquiry|index\\.html|geo\\.html|report\\.html|registrations\\.html|edit\\.html|training\\.html|media\\.html|b2b\\.html|inquiry\\.html)",
+      "source": "/(reg-status|reg-status\\.html)",
+      "headers": [
+        {
+          "key": "X-Robots-Tag",
+          "value": "noindex, nofollow"
+        },
+        {
+          "key": "Cache-Control",
+          "value": "no-store"
+        }
+      ]
+    },
+    {
+      "source": "/(admin|geo|report|registrations|reg-status|edit|training|b2b|inquiry|index\\.html|geo\\.html|report\\.html|registrations\\.html|reg-status\\.html|edit\\.html|training\\.html|media\\.html|b2b\\.html|inquiry\\.html)",
       "headers": [
         {
           "key": "X-Frame-Options",

@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex,nofollow">
+<meta name="referrer" content="no-referrer">
+<title>報名狀況 — 工研院活動溝通 AI 平台</title>
+<!--
+  報名狀況（唯讀）——批次 127。給「要看報名狀況、但不該進後台」的同仁。
+  連結由後台「分享連結」分頁產生：/reg-status?c=活動代碼&k=連結碼。沒有登入、不能改任何東西；
+  資料只有人數、各場次人數、姓名＋單位（Email／手機／備註不會從伺服器送出，見 lib/registration.js statusView()）。
+  版面：手機優先——最上面四個數字，下面「各場次」「全部名單」兩個分頁。
+-->
+<style>
+  :root { --primary:#0F9E7A; --primary-dark:#0a7a60; --primary-light:rgba(15,158,122,0.09); --text:#1a1a2e; --muted:#6b7280; --bg:#f0f4f7; --card:#fff; --border:#e5e7eb; --radius:14px; --warn:#b45309; --font:'PingFang TC','Noto Sans TC','Microsoft JhengHei',sans-serif; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: var(--font); background: var(--bg); color: var(--text); line-height: 1.55; font-size: 15px; -webkit-text-size-adjust: 100%; }
+  [hidden] { display: none !important; }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 22px 16px 60px; }
+  .eyebrow { font-size: .78rem; color: var(--primary-dark); font-weight: 700; letter-spacing: .04em; }
+  h1 { font-size: 1.35rem; line-height: 1.4; margin: 2px 0 4px; }
+  .sub { color: var(--muted); font-size: .88rem; display: flex; gap: 6px 12px; flex-wrap: wrap; align-items: center; }
+  .pill { display: inline-block; font-size: .75rem; font-weight: 700; border-radius: 999px; padding: 2px 10px; white-space: nowrap; }
+  .pill.open { background: #dcfce7; color: #166534; } .pill.closed { background: #e5e7eb; color: #4b5563; } .pill.draft { background: #fef3c7; color: #92400e; }
+
+  .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 18px 0 20px; }
+  .kpi { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 10px; text-align: center; }
+  .kpi .n { font-size: 1.8rem; font-weight: 800; color: var(--primary); line-height: 1.1; font-variant-numeric: tabular-nums; }
+  .kpi .l { font-size: .76rem; color: var(--muted); margin-top: 3px; }
+  .kpi.main { background: var(--primary); border-color: var(--primary); }
+  .kpi.main .n, .kpi.main .l { color: #fff; }
+
+  .seg { display: flex; background: #e4eaee; border-radius: 12px; padding: 3px; margin-bottom: 14px; }
+  .seg button { flex: 1; border: none; background: none; font: inherit; font-weight: 700; font-size: .92rem; color: var(--muted); padding: 9px 6px; border-radius: 10px; cursor: pointer; }
+  .seg button.on { background: #fff; color: var(--primary-dark); box-shadow: 0 1px 3px rgba(0,0,0,.12); }
+
+  .daytitle { font-size: .82rem; font-weight: 700; color: var(--muted); margin: 18px 2px 8px; }
+  .daytitle:first-child { margin-top: 2px; }
+  .sess { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 8px; overflow: hidden; }
+  .sess > summary { list-style: none; cursor: pointer; padding: 12px 14px; display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; align-items: center; }
+  .sess > summary::-webkit-details-marker { display: none; }
+  .sess .t { font-weight: 700; line-height: 1.4; }
+  .sess .t .code { display: inline-block; background: var(--primary-light); color: var(--primary-dark); border-radius: 6px; padding: 0 7px; font-size: .75rem; margin-right: 6px; vertical-align: 1px; }
+  .sess .m { grid-column: 1; color: var(--muted); font-size: .8rem; }
+  .sess .cnt { grid-row: 1 / span 2; grid-column: 2; text-align: right; line-height: 1.1; }
+  .sess .cnt b { font-size: 1.6rem; color: var(--primary); font-variant-numeric: tabular-nums; }
+  .sess .cnt small { display: block; color: var(--muted); font-size: .72rem; }
+  .sess .track { grid-column: 1 / -1; background: #eef2f1; border-radius: 6px; height: 8px; overflow: hidden; margin-top: 6px; }
+  .sess .fill { background: var(--primary); height: 100%; border-radius: 6px; min-width: 0; }
+  .sess[open] > summary { border-bottom: 1px solid var(--border); background: #fafcfb; }
+  .sess.ended { opacity: .62; } .sess.cancelled .t { text-decoration: line-through; color: var(--muted); }
+  .flag { font-size: .72rem; border-radius: 6px; padding: 1px 7px; font-weight: 700; margin-left: 4px; background: #e5e7eb; color: #4b5563; }
+  .flag.full { background: #fef3c7; color: #92400e; }
+  .who { padding: 4px 14px 10px; }
+  .who li { list-style: none; display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: .9rem; }
+  .who li:last-child { border-bottom: none; }
+  .who .o, .row .o { color: var(--muted); font-size: .82rem; text-align: right; }
+  .none { padding: 12px 14px; color: var(--muted); font-size: .86rem; }
+
+  .search { width: 100%; font: inherit; font-size: .95rem; border: 1px solid var(--border); border-radius: 12px; padding: 11px 14px; background: #fff; outline: none; margin-bottom: 10px; }
+  .search:focus { border-color: var(--primary); }
+  .row { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 10px 14px; margin-bottom: 8px; }
+  .row .top { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; }
+  .row .nm { font-weight: 700; }
+  .row .tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+  .tag { background: var(--primary-light); color: var(--primary-dark); border-radius: 6px; padding: 1px 7px; font-size: .75rem; font-weight: 700; }
+  .row .at { color: #9ca3af; font-size: .74rem; margin-top: 4px; }
+  .count { color: var(--muted); font-size: .82rem; margin: 2px 2px 10px; }
+
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; margin-top: 18px; }
+  .card h2 { font-size: .95rem; margin-bottom: 8px; }
+  .opt { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--border); font-size: .9rem; }
+  .opt:last-child { border-bottom: none; }
+  .opt b { color: var(--primary-dark); font-variant-numeric: tabular-nums; }
+
+  .foot .btn { margin-bottom: 12px; }
+  .foot { margin-top: 22px; text-align: center; color: var(--muted); font-size: .78rem; line-height: 1.8; }
+  .btn { border: 1px solid var(--border); background: #fff; color: var(--text); border-radius: 10px; padding: 8px 16px; font: inherit; font-size: .85rem; font-weight: 600; cursor: pointer; }
+  .btn:disabled { opacity: .5; cursor: default; }
+  .msg { text-align: center; padding: 60px 10px; color: var(--muted); }
+  .msg h2 { color: var(--text); font-size: 1.1rem; margin-bottom: 6px; }
+  .check { font-size: .82rem; color: var(--muted); display: inline-flex; gap: 6px; align-items: center; cursor: pointer; margin: 0 2px 10px; }
+  @media (max-width: 420px) { .kpis { gap: 6px; } .kpi { padding: 10px 4px; } .kpi .n { font-size: 1.5rem; } h1 { font-size: 1.2rem; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div id="loading" class="msg">載入中…</div>
+  <div id="err" class="msg" hidden><h2 id="err-t">打不開這個頁面</h2><p id="err-d"></p></div>
+
+  <div id="page" hidden>
+    <div class="eyebrow">報名狀況 · 唯讀</div>
+    <h1 id="title"></h1>
+    <div class="sub" id="sub"></div>
+
+    <div class="kpis">
+      <div class="kpi main"><div class="n" id="k-people">0</div><div class="l">報名人數</div></div>
+      <div class="kpi"><div class="n" id="k-outlets">0</div><div class="l" id="k-outlets-l">單位數</div></div>
+      <div class="kpi"><div class="n" id="k-today">0</div><div class="l">今天新增</div></div>
+      <div class="kpi"><div class="n" id="k-week">0</div><div class="l">近 7 天新增</div></div>
+    </div>
+
+    <div class="seg" role="tablist">
+      <button id="t-sess" class="on" onclick="setTab('sess')">各場次</button>
+      <button id="t-all" onclick="setTab('all')">全部名單</button>
+    </div>
+
+    <div id="v-sess">
+      <label class="check" id="hide-wrap" hidden><input type="checkbox" id="hide-ended" onchange="renderSessions()"> 隱藏已結束的場次</label>
+      <div id="sess-list"></div>
+      <div class="card" id="opts" hidden><h2>其他統計</h2><div id="opts-list"></div></div>
+    </div>
+
+    <div id="v-all" hidden>
+      <input class="search" id="q" type="search" placeholder="搜尋姓名或單位" oninput="renderPeople()" autocomplete="off">
+      <div class="count" id="p-count"></div>
+      <div id="p-list"></div>
+    </div>
+
+    <div class="foot">
+      <button class="btn" id="refresh" onclick="load(true)">重新整理</button>
+      <div id="updated"></div>
+      <div>這個頁面只能查看，不能修改；為保護個資，只顯示姓名與單位。</div>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const qs = new URLSearchParams(location.search);
+const CID = qs.get('c') || '', KEY = qs.get('k') || '';
+let D = null, TAB = 'sess', timer = null;
+
+function fail(title, desc) {
+  $('loading').hidden = true; $('page').hidden = true; $('err').hidden = false;
+  $('err-t').textContent = title; $('err-d').textContent = desc || '';
+}
+const hm = (iso) => { const m = String(iso || '').match(/^\d{4}-(\d\d)-(\d\d)T(\d\d:\d\d)/); return m ? `${+m[1]}/${+m[2]} ${m[3]}` : ''; };
+
+async function load(manual) {
+  if (!CID || !KEY) return fail('連結不完整', '請用分享給您的完整連結開啟。');
+  const btn = $('refresh'); btn.disabled = true;
+  try {
+    const res = await fetch(`/api/events?${new URLSearchParams({ action: 'reg_view', c: CID, k: KEY })}`, { cache: 'no-store' });
+    let data = {}; try { data = await res.json(); } catch {}
+    if (res.status === 404) return fail('這個連結已失效', '連結可能不完整、已被停用或重新產生過，請向分享給您的同仁重新索取。');
+    if (res.status === 429) return fail('稍後再試', data.error || '嘗試的次數太多了，請稍後再試。');
+    if (!res.ok) throw new Error(data.error || `錯誤 ${res.status}`);
+    D = data; render();
+  } catch (e) {
+    // 已經有畫面就保留舊的，只提示；第一次就失敗才整頁換成錯誤
+    if (D) $('updated').textContent = '更新失敗，顯示的是先前的資料（' + e.message + '）';
+    else fail('暫時打不開', '網路或伺服器忙碌中，請稍後按重新整理。');
+  } finally { btn.disabled = false; if (manual) btn.blur(); }
+}
+
+function render() {
+  const c = D.campaign, st = D.stats;
+  document.title = `${c.title} 報名狀況`;
+  $('title').textContent = c.title;
+  const pill = c.status === 'draft' ? '<span class="pill draft">草稿（測試中）</span>'
+    : c.accepting ? '<span class="pill open">開放報名中</span>' : '<span class="pill closed">已截止</span>';
+  $('sub').innerHTML = pill + [c.date_range, c.venue].filter(Boolean).map((x) => `<span>${esc(x)}</span>`).join('');
+  $('k-people').textContent = st.people; $('k-outlets').textContent = st.outlets;
+  $('k-today').textContent = st.today; $('k-week').textContent = st.week;
+  $('k-outlets-l').textContent = D.business ? '公司數' : '單位數';
+  $('hide-wrap').hidden = !D.sessions.some((s) => s.status === 'ended');
+  $('updated').textContent = `資料更新於 ${hm(D.now) || '剛剛'}${st.latest ? `　·　最近一筆報名 ${hm(st.latest)}` : ''}`;
+  $('loading').hidden = true; $('err').hidden = true; $('page').hidden = false;
+  renderSessions(); renderOptions(); renderPeople();
+}
+
+function setTab(t) {
+  TAB = t;
+  $('t-sess').classList.toggle('on', t === 'sess'); $('t-all').classList.toggle('on', t === 'all');
+  $('v-sess').hidden = t !== 'sess'; $('v-all').hidden = t !== 'all';
+}
+
+function peopleOf(code) {
+  return D.people.filter((p) => p.sessions.includes(code))
+    .sort((a, b) => String(a.outlet).localeCompare(String(b.outlet), 'zh-Hant') || String(a.name).localeCompare(String(b.name), 'zh-Hant'));
+}
+function renderSessions() {
+  const hide = $('hide-ended').checked && !$('hide-wrap').hidden;
+  const list = D.sessions.filter((s) => !(hide && s.status === 'ended'));
+  const max = Math.max(1, ...D.sessions.map((s) => s.count));
+  // 展開中的場次在重新整理後要維持展開
+  const open = new Set([...document.querySelectorAll('#sess-list details[open]')].map((d) => d.dataset.code));
+  let html = '', day = null;
+  for (const s of list) {
+    if (s.dateLabel !== day) { day = s.dateLabel; html += `<div class="daytitle">${esc(day)}</div>`; }
+    const who = peopleOf(s.code);
+    const flag = s.status === 'ended' ? '<span class="flag">已結束</span>' : s.status === 'cancelled' ? '<span class="flag">取消</span>'
+      : s.status === 'full' ? '<span class="flag full">額滿</span>' : s.status === 'closed' ? '<span class="flag">截止</span>' : '';
+    html += `<details class="sess ${s.status === 'ended' ? 'ended' : ''} ${s.status === 'cancelled' ? 'cancelled' : ''}" data-code="${esc(s.code)}"${open.has(s.code) ? ' open' : ''}>
+      <summary>
+        <div class="t"><span class="code">${esc(s.code)}</span>${esc(s.title)}${flag}</div>
+        <div class="m">${esc([s.time, s.room].filter(Boolean).join('　'))}</div>
+        <div class="cnt"><b>${s.count}</b><small>人${s.outlets ? `・${s.outlets} ${D.business ? '家' : '個單位'}` : ''}</small></div>
+        <div class="track"><div class="fill" style="width:${Math.round(s.count / max * 100)}%"></div></div>
+      </summary>
+      ${who.length ? `<ul class="who">${who.map((p) => `<li><span>${esc(p.name)}</span><span class="o">${esc(p.outlet)}</span></li>`).join('')}</ul>` : '<div class="none">還沒有人報名這一場</div>'}
+    </details>`;
+  }
+  $('sess-list').innerHTML = html || '<div class="none">沒有場次</div>';
+}
+
+function renderOptions() {
+  const o = D.options;
+  $('opts').hidden = !o.length;
+  $('opts-list').innerHTML = o.map((x) => `<div class="opt"><span>${esc(x.label)}</span><b>${x.total}${x.type === 'number' ? '' : ' 人'}</b></div>`).join('');
+}
+
+function renderPeople() {
+  const q = $('q').value.trim().toLowerCase();
+  const names = D.sessions.reduce((m, s) => (m[s.code] = s, m), {});
+  const list = D.people.filter((p) => !q || `${p.name} ${p.outlet}`.toLowerCase().includes(q));
+  $('p-count').textContent = q ? `找到 ${list.length} 位（共 ${D.people.length} 位）` : `共 ${D.people.length} 位，最新報名的在上面`;
+  $('p-list').innerHTML = list.map((p) => `<div class="row">
+      <div class="top"><span class="nm">${esc(p.name)}</span><span class="o">${esc(p.outlet)}</span></div>
+      <div class="tags">${p.sessions.map((c) => `<span class="tag" title="${esc(names[c] ? names[c].title : '')}">${esc(c)}</span>`).join('')}</div>
+      <div class="at">報名時間 ${esc(hm(p.at))}</div>
+    </div>`).join('') || '<div class="none">沒有符合的人</div>';
+}
+
+load();
+// 開著不動的分頁每 60 秒自己更新一次（分頁在背景時不更新，省 Google 試算表的讀取額度）
+timer = setInterval(() => { if (!document.hidden && !$('page').hidden) load(); }, 60000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden && D) load(); });
+</script>
+</body>
+</html>
