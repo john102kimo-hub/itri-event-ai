@@ -1100,6 +1100,8 @@ check('system prompt 裡帶了 IEK 清單的標題與摘要，不是空氣',
 check('最終回覆附上警語＋公關窗口聯絡資訊，用使用者要求的措辭（僅供參考，正式媒體報導引用請聯繫 公關窗口）',
   out.some(o => o.kind === 'text' && /僅供參考，正式媒體報導引用請聯繫 公關窗口 朱則瑋/.test(o.text) && /0934-266-766/.test(o.text)),
   JSON.stringify(out));
+check('★ 模型沒引用任何來源（清單裡沒有直接對應的資料）→ 程式補上 IEK 搜尋連結（帶「太空」）＋免費焦點專區',
+  out.some(o => o.kind === 'text' && (o.text || '').includes('search/default.aspx?keyword=%E5%A4%AA%E7%A9%BA') && (o.text || '').includes('DefaultFree.aspx')), JSON.stringify(out));
 // 批次 24：按鈕列最前面多一顆「跨到另一條路」的入口——IEK 免費焦點只有十來則，
 // 覆蓋不到記者問的領域是常態，「這裡沒有，可以改從工研院自己的技術報導找」本來就
 // 該是預設出口，而不是讓記者自己猜下一步要打什麼（見情境 19 的回報截圖）。
@@ -1210,6 +1212,7 @@ check('　 問領域那則附 AI／半導體／材料／能源按鈕與「最新
 out = await send('材料');
 check('接著打「材料」→ 排出銅箔那篇（標題、日期、IEK 摘要、短網址），沒呼叫模型',
   out.some(o => o.kind === 'text' && o.text.includes('銅箔材料升級') && o.text.includes('2026/06/18') && /\/i\/28-100000003/.test(o.text)) && !out.some(o => o.kind === 'answer'), JSON.stringify(out));
+check('　 查得到的時候不多附 IEK 搜尋連結（只有查不到才給）', !out.some(o => /search\/default\.aspx/.test(o.text || '')), JSON.stringify(out));
 check('　 只有中文英文版的那篇不出現（避免中文回覆裡夾一整段英文）', !out.some(o => /English Only/.test(o.text || '')), JSON.stringify(out));
 check('　 附公關窗口警語', out.some(o => /僅供參考，正式媒體報導引用請聯繫 公關窗口 朱則瑋/.test(o.text || '')), JSON.stringify(out));
 
@@ -1236,6 +1239,8 @@ await send('產業趨勢分析');
 out = await send('太空');
 check('清單裡沒有的領域（太空）→ 程式老實說「沒有直接談到」＋給出口，不呼叫模型、不編',
   out.some(o => o.kind === 'text' && /沒有直接談到「太空」/.test(o.text) && /朱則瑋/.test(o.text)) && !out.some(o => o.kind === 'answer'), JSON.stringify(out));
+check('★ 查不到時直接給 IEK 網頁：帶關鍵字的搜尋連結＋免費焦點專區，讓記者自己去查',
+  out.some(o => (o.text || '').includes('https://ieknet.iek.org.tw/search/default.aspx?keyword=%E5%A4%AA%E7%A9%BA') && (o.text || '').includes('https://ieknet.iek.org.tw/iekrpt/DefaultFree.aspx')), JSON.stringify(out));
 check('　 沒有的時候仍附「換個領域」按鈕與工研院技術入口', out.some(o => qrTexts(o.quickReply || []).some(t => /^趨勢關鍵字：/.test(t)) && qrTexts(o.quickReply || []).includes('技術關鍵字：太空')), JSON.stringify(out.map(o => qrTexts(o.quickReply || []))));
 
 await trendReset();
@@ -1250,6 +1255,7 @@ check('「最新重點」按鈕 → 走原本的最新摘要（有呼叫模型�
 await trendReset();
 state.iekFetchFail = true;
 out = await send('趨勢關鍵字：半導體');
+check('　 抓不到時也給 IEK 網頁（帶「半導體」的搜尋連結）讓記者自己查', out.some(o => (o.text || '').includes('search/default.aspx?keyword=%E5%8D%8A%E5%B0%8E%E9%AB%94') && (o.text || '').includes('DefaultFree.aspx')), JSON.stringify(out));
 check('IEK 全部抓不到 → 誠實說暫時抓不到＋窗口，不噴例外', out.some(o => o.kind === 'text' && /暫時抓不到最新的產業趨勢資料/.test(o.text) && /朱則瑋/.test(o.text)), JSON.stringify(out));
 
 // 抓成功過、快取過期後剛好抓不到 → 沿用舊清單（按關鍵字查那條路也一樣）
