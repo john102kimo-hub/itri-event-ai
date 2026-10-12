@@ -166,7 +166,7 @@ seed(); await fresh();
   const iek = (await import('../lib/industry-trends.js')).parseDigestHtml(state.iekHtml);
   const first = iek[0]?.url || '';
   state.answerText = 'AI 資料中心帶動電力與儲能需求。\n來源編號：1,2'; // 模擬模型照規定標出引用了第幾則
-  const out = await dm('Utrend', '產業趨勢分析');
+  const out = await dm('Utrend', '最近趨勢');
   state.answerText = '';
   const t = allText(out);
   check('★ 產業趨勢回覆附「原文連結」，而且是 /i/ 短網址（不是 IEK 長網址）', /🔗 原文連結：\nhttps:\/\/itri-event-ai\.vercel\.app\/i\/\d+-\d+/.test(t) && !/ieknet\.iek\.org\.tw/.test(t), t.slice(0, 300));
