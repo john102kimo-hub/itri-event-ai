@@ -1174,6 +1174,19 @@ check('抓取失敗時一樣附上聯絡窗口，不是單純說一句抓不到�
 check('抓取失敗時沒有呼叫 Anthropic 硬答（沒有 answer 這個 kind）',
   !out.some(o => o.kind === 'answer'), JSON.stringify(out));
 
+// 批次 129：先抓成功過、快取過期後 IEK 剛好抓不到——沿用過期的舊清單答，不要退成「暫時抓不到」。
+// （IEK 這頁本來就慢，實測 7～9 秒，抓失敗不是罕見事件。）
+reset(); await freshModule();
+await send('半導體現在有什麼趨勢'); // 抓成功、進快取
+const realNow = Date.now;
+Date.now = () => realNow() + 7 * 60 * 60 * 1000; // 過了 7 小時，超過 6 小時的快取
+state.iekFetchFail = true;
+try {
+  out = await send('半導體現在有什麼趨勢');
+} finally { Date.now = realNow; }
+check('快取過期後 IEK 抓失敗 → 沿用舊清單照常回答，不退成「暫時抓不到」',
+  out.some(o => o.kind === 'answer') && !out.some(o => /暫時抓不到/.test(o.text || '')), JSON.stringify(out));
+
 // ── 情境 18：近期工研院新聞（原「想問什麼技術」那一整套，批次 121 搬到這一格；資料來源見 lib/itri-news.js）───────
 // 記者想直接問工研院自己在某項技術上的研發成果，不是在問某一場記者會、也不是在問
 // 整體產業趨勢（那是 industry_trend／情境 17 的事）——資料來源是工研院官網新聞
