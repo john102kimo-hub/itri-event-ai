@@ -45,6 +45,7 @@ GitHub Actions（`.github/workflows/test.yml`）每個 PR 與 main 推送都會�
 | `tools/geo-ui-check`、`tools/reg-ui-check`、`tools/training-flow-check.mjs`、`tools/training-voice-check.mjs` | 在真的瀏覽器裡把 /geo、/registrations（活動報名後台）、媒體訓練的流程與語音跑一遍 |
 | `tools/sri-check` | 驗證 CDN 資源的 SRI 雜湊（原檔通過、竄改過的被瀏覽器拒絕） |
 | `tools/line-button-audit`、`tools/line-group-sim`、`tools/line-persona-sim` | 把 LINE 的每一步、群組對話、四種角色丟進真的 `api/line.js`，看按鈕與回應（AI 是假的，看的是規則層） |
+| `tools/grounding-backtest` | 把後台匯出的真實問答丟進去，量「答案出口檢查」（`ANSWER_GROUNDING`）的誤報率，決定要不要打開（批次 132；真實問答含個資，別 commit） |
 | `tools/model-ab` | 同一批問題比兩個模型的答案（**會花真的錢**） |
 | `tools/time-travel` | `SHIFT_DAYS` 用的時間位移 |
 | `tools/guide-video` | 使用說明影片與米亞的聲音（見 CLAUDE.md 第 3、4 條） |
@@ -58,4 +59,5 @@ GitHub Actions（`.github/workflows/test.yml`）每個 PR 與 main 推送都會�
 - **企業場不出現在記者看得到的地方**：活動類型是企業說明會／技術媒合會／客戶參訪／技術交流會的場次，以及報名對象選「企業」的報名，米亞的清單、公開列表、搜尋引擎都看不到（LINE-PLAN.md 第 8 節，`lib/audience.js`）。新增任何「列出活動」的入口，要先想清楚企業場該不該在裡面。
 - **寫入 Sheets 不是每一種都能重送**：`appendRows()`（加一列）與 `batchUpdate()`（刪列、加分頁）逾時或 500 時不重試，免得多一列或刪錯列（批次 117，見 `lib/sheets.js`）。新增會呼叫模型的地方，記得接 `logAiUsage()`（`test-batch117` 會檢查）。
 - **業發處的東西不能影響記者與既有功能**（朱朱 10/8：「務必確保不要影響既有的功能與媒體之使用」）：客戶資料只放 `B2B_SPREADSHEET_ID` 那本，沒設定就整套停用、絕不退回記者會那本（`lib/b2b.js` 的 `db()`）；業發處的 LINE 通知有每月上限（跟米亞共用推播額度）；企業場的 AI 可以用另一把金鑰（`ANTHROPIC_API_KEY_BUSINESS`）。測試的 `test/loader.mjs` 沒有接業發處那本，記者那邊的任何一條路碰到業發處的資料就會報錯，CI 的第三輪就是靠這個抓。兩邊共用的每一樣東西（推播額度、Sheets 額度、AI 警報、登入失敗的計數…）都要有一道擋，盤點表在 [批次 119 的紀錄](docs/batches/10-batch-117.md) 第三節；新增共用的東西時照著補一列。
+- **模型的輸出怎麼進到使用者手上，每一個出口都要過四道**（批次 132–135）：① 繁體出口 `toTraditionalTW()`——模型寫的字走完整的字＋用語，**名稱與原文**（活動名稱、記者姓名、官網標題、聯絡人）用 `{ terms:false }` 只轉字，不然會被用語層改壞；② 拒答：新增呼叫模型的地方要處理 `stop_reason:"refusal"`（HTTP 200，不是錯誤，`lib/ai-refusal.js`），不要把它當金鑰／額度問題通知管理員；③ 用量：記 `logAiUsage()`（`test-batch117` 會檢查，走 `postAnthropic()` 的也算）；④ 記者端的答案：數字、網址、英文名詞要過 `checkAnswerGrounding()`（預設影子模式，`ANSWER_GROUNDING`）。
 - 紀錄要寫：改了什麼、為什麼、踩到什麼坑——寫在 `docs/batches/`，不是 commit message（見 CLAUDE.md 第 5 條）。
