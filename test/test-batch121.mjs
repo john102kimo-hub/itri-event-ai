@@ -264,12 +264,12 @@ seed(); await fresh();
   out = await dm('U1', '技術領域：綠能與環境');
   t = allText(out);
   check('★ 其中一項的內容頁抓失敗 → 那一項只留名稱與連結，其他項照常（整頁不能因為一項壞掉就消失）',
-    /竹材多元應用加工技術\n🔗 https:\/\/itri-event-ai\.vercel\.app\/t\/10842/.test(t) && /藻類回收技術\n📝/.test(t), t);
+    /竹材多元應用加工技術\n\n🔗 https:\/\/itri-event-ai\.vercel\.app\/t\/10842/.test(t) && /藻類回收技術\n\n📝/.test(t), t);
   state.techDetailFail = ''; tech.__clearTechCache();
 
   out = await dm('U1', '技術領域：材料與化工');
   t = allText(out);
-  check('簡介欄是 none 的技術 → 改用「技術特色」，不顯示 none', /高效無鹵環保放電劑\n📝 以無鹵配方取代傳統放電劑/.test(t) && !/none/i.test(t), t);
+  check('簡介欄是 none 的技術 → 改用「技術特色」，不顯示 none', /高效無鹵環保放電劑\n\n📝 以無鹵配方取代傳統放電劑/.test(t) && !/none/i.test(t), t);
 
   out = await dm('U1', '技術領域：生醫與醫材');
   check('官網簡介裡的 &ge; &mu; 符號解開', /≥ 300 μm/.test(allText(out)) && !/&\w+;/.test(allText(out)), allText(out));
@@ -281,7 +281,7 @@ seed(); await fresh();
 {
   let out = await dm('U2', '近期工研院新聞');
   let t = allText(out);
-  check('按「近期工研院新聞」→ 標題＋日期導言＋短網址，不經過模型', /📰 近期工研院新聞\n共 \d+ 則/.test(t) && /① 工研院攜AMRA打造足型機器人新標準/.test(t) && /📅 2026\/08\/20\n機器人應用落地/.test(t)
+  check('按「近期工研院新聞」→ 標題＋日期導言＋短網址，不經過模型', /📰 近期工研院新聞\n共 \d+ 則/.test(t) && /① 工研院攜AMRA打造足型機器人新標準/.test(t) && /📅 2026\/08\/20\n\n機器人應用落地/.test(t)
     && /🔗 https:\/\/itri-event-ai\.vercel\.app\/n\/\d+/.test(t) && !hasAnswer(out), t);
   check('　 不含官網長網址', !/ListStyle\.aspx|MmmID/.test(t), t);
   check('　 提示可以打關鍵字，並附範例按鈕（固定句型）', /直接輸入關鍵字/.test(t) && chipTexts(out).includes('新聞關鍵字：半導體'), JSON.stringify(chipTexts(out)));
@@ -468,6 +468,10 @@ console.log('\n── 九、出口：繁體字、長度、按鈕上限 ──');
   check('★ 技術／新聞清單：開頭兩行是「標題」「共 N 項（則）・第 a–b 項（則）」，下面接分隔線', lists.length >= 3 && lists.every((o) => /^(🔬|📰)[^\n]+\n共 \d+ [項則]・第 \d+–\d+ [項則]\n\n──────────\n/.test(o.text)), lists.map((o) => o.text.slice(0, 60)).join(' | '));
   check('　 每一項都以線收尾（5 項就有 5 條收尾線，加上開頭那條）', lists.every((o) => (o.text.match(/──────────/g) || []).length === (o.text.match(/🔗 /g) || []).length + 1));
   check('　 信箱獨立一行（✉️ 開頭），網址獨立一行（🔗 開頭），不跟別的字擠在一起', lists.filter((o) => /^🔬/.test(o.text)).every((o) => o.text.split('\n').filter((l) => /@itri\.org\.tw/.test(l)).every((l) => /^✉️ \S+$/.test(l)) && o.text.split('\n').filter((l) => /https:\/\//.test(l)).every((l) => /^🔗 \S+$/.test(l))));
+  // 批次 136：「都黏在一起」——線的上下一定要空一行，標題、導言／簡介、連結各自成塊（沒有任何一行同時緊貼線與內容）
+  const gapAroundDivider = (text) => text.split('\n').every((l, i, a) => l !== '──────────' || ((i === 0 || a[i - 1] === '') && (i === a.length - 1 || a[i + 1] === '')));
+  check('★ 批次 136：分隔線的上下都空一行，標題不貼著線、連結不貼著線', lists.every((o) => gapAroundDivider(o.text)), lists.map((o) => o.text).find((x) => !gapAroundDivider(x)));
+  check('　 連結自己成塊：🔗 那行的上一行一定是空行', lists.every((o) => o.text.split('\n').every((l, i, a) => !l.startsWith('🔗') || a[i - 1] === '')));
   check('　 項目編號用圈圈數字（①②③…），一眼分得出一項從哪裡開始', lists.every((o) => /^[①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳]/m.test(o.text)));
   check('　 每一行都不超過 90 字（手機上折行不會太碎）', lists.every((o) => o.text.split('\n').filter((l) => !/^[①-⑳]|^🔗/.test(l)).every((l) => l.length <= 90)), lists.flatMap((o) => o.text.split('\n')).find((l) => l.length > 90));
   check('沒有 Markdown 符號（LINE 不會渲染）', all.every((o) => !/\*\*|^#{1,3} |`/m.test(o.text)));

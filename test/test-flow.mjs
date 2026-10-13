@@ -1287,6 +1287,13 @@ console.log('── 批次 130 純函式 ──');
     check('標題談到的排在「摘要只是順口提到」的前面（即使後者比較新）', r.length === 2 && r[0].title === 'AI伺服器材料升級' && r[0].titleHit && !r[1].titleHit, JSON.stringify(r.map(x => x.title)));
     const txt = it.formatTrendReply({ keyword: '材料', matched: r, poolSize: 50, since: '2025/12/29' });
     check('有標題談到的就只列那些，並說明另有幾則只是摘要提到', /談到「材料」的最新 1 則/.test(txt) && !/歐盟晶片法案/.test(txt) && /摘要也有提到/.test(txt), txt); }
+  { // 批次 136：趨勢清單版面同新聞／技術——圈圈編號、日期獨立一行、線與各區塊之間空一行
+    const txt = it.formatTrendReply({ keyword: '材料', poolSize: 50, since: '2025/12/29', matched: [
+      { title: 'AI伺服器材料升級', abstract: '材料是瓶頸', date: '2026/06/18', url: 'https://ieknet.iek.org.tw/iekrpt/rpt_more.aspx?actiontype=rpt&indu_idno=0&domain=28&rpt_idno=1', titleHit: true },
+      { title: '銅箔基板新材料', abstract: '低損耗', date: '2026/05/02', url: 'https://ieknet.iek.org.tw/iekrpt/rpt_more.aspx?actiontype=rpt&indu_idno=0&domain=28&rpt_idno=2', titleHit: true }] });
+    check('趨勢清單版面（批次 136）：圈圈編號、日期自己一行、每則之間有線且線的上下空一行',
+      /① AI伺服器材料升級\n📅 2026\/06\/18\n\n材料是瓶頸\n\n🔗 /.test(txt) && /② 銅箔基板新材料/.test(txt)
+      && txt.split('\n').every((l, i, a) => l !== '──────────' || (a[i - 1] === '' && (a[i + 1] === '' || i === a.length - 1))), txt); }
   check('別名：AI／ai／人工智慧 都是 AI 領域', ['AI', 'ai', ' 人工智慧 '].every(w => it.trendTopicFor(w)?.name === 'AI'));
   check('別名：不是領域的字回 null（退回字面比對）', it.trendTopicFor('太空') === null && it.trendTopicFor('') === null);
   check('字面比對：未知領域用原字串在標題／摘要裡找', it.filterTrendItems([{ title: '太空產業', abstract: 'x' }, { title: '其他', abstract: 'y' }], '太空').length === 1);
