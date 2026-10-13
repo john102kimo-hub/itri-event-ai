@@ -63,7 +63,7 @@ const texts = (out) => chips(out).map((c) => c.text);
 const labels = (out) => chips(out).map((c) => c.label);
 const textOf = (out) => out.filter((s) => s.kind === 'text').map((o) => o.text).join('\n---\n');
 const HOME = '同仁選單';
-const HOME_ALL = ['新增活動', '修改活動', '媒體訓練', '使用說明']; // 首頁、說明、聽不懂：整套入口（跟職員的 STAFF_HOME_CHIPS 同一個做法）
+const HOME_ALL = ['新增活動', '修改活動', '媒體訓練', '使用說明', '退出同仁模式']; // 首頁、說明、聽不懂：整套入口（跟職員的 STAFF_HOME_CHIPS 同一個做法）
 const ENDS_HOME = (out) => texts(out)[texts(out).length - 1] === HOME || JSON.stringify(texts(out)) === JSON.stringify(HOME_ALL);
 
 let pass = 0, fail = 0;
@@ -274,26 +274,28 @@ reset(); state.staff.push(colleagueRow('U_c')); await fresh();
   check('★ 三格送出的字都認得（按了不會得到「幫不上忙」）', bad.length === 0, bad.join('\n   '));
 
   const steps = [['新增活動', 3], ['算了', 3], ['修改活動', 13], ['媒體訓練', 13], ['隨便聊聊', 5], ['使用說明', 5]];
+  // 退出只出現在「選單／說明／聽不懂」，其他回覆（新增、修改、訓練）不掛，避免誤按
+  const hasExit = (m) => ['隨便聊聊', '使用說明'].includes(m);
   const wrong = [];
   for (const [msg, max] of steps) {
     await fresh();
     const out = await dm('U_c', msg);
-    if (!ENDS_HOME(out) || texts(out).length > max || texts(out).some((t) => STAFF_ONLY.test(t))) wrong.push(`${msg}：${JSON.stringify(texts(out))}`);
+    if (!ENDS_HOME(out) || texts(out).length > max || texts(out).some((t) => STAFF_ONLY.test(t)) || (texts(out).includes('退出同仁模式') !== hasExit(msg))) wrong.push(`${msg}：${JSON.stringify(texts(out))}`);
   }
   check('★ 每則回覆：最後一顆都是「🏠 同仁選單」、沒有職員的按鈕', wrong.length === 0, wrong.join('\n   '));
 
   await fresh();
   let out = await dm('U_c', HOME);
-  check('★ 按「🏠 同仁選單」→ 一句話＋三格＋使用說明', texts(out).length === 4 && COLLEAGUE_MENU.buttons.every((b) => texts(out).includes(b.text)) && texts(out).includes('使用說明') && textOf(out).split('\n').length <= 3, JSON.stringify([textOf(out), texts(out)]));
+  check('★ 按「🏠 同仁選單」→ 一句話＋三格＋使用說明＋退出同仁模式', texts(out).length === 5 && COLLEAGUE_MENU.buttons.every((b) => texts(out).includes(b.text)) && texts(out).includes('使用說明') && texts(out).includes('退出同仁模式') && textOf(out).split('\n').length <= 3, JSON.stringify([textOf(out), texts(out)]));
   for (const w of ['選單', '回首頁']) {
     out = await dm('U_c', w);
-    check(`　 打「${w}」也是同仁選單`, texts(out).length === 4 && /要做什麼呢/.test(textOf(out)), JSON.stringify([textOf(out), texts(out)]));
+    check(`　 打「${w}」也是同仁選單`, texts(out).length === 5 && /要做什麼呢/.test(textOf(out)), JSON.stringify([textOf(out), texts(out)]));
   }
   await fresh();
   out = await dm('U_c', '使用說明');
   const help = textOf(out);
   check('★ 使用說明：四件事一件一行，不提 GEO、後台數據、教米亞、設定圖文選單', help.split('\n').filter((l) => l.startsWith('・')).length === 4 && /新增活動/.test(help) && /修改活動/.test(help) && /發布/.test(help) && /媒體訓練/.test(help) && !/GEO|後台數據|記住：|設定圖文選單/.test(help), help);
-  check('　 說明裡寫了怎麼回記者身分（退出同仁模式）', /退出同仁模式/.test(help), help);
+  check('★ 說明有「🚪 退出同仁模式」按鈕（回報：同仁模式沒有退出——以前只有文字寫了，沒有按鈕）；按下去真的退得出去', /退出同仁模式/.test(help) && texts(out).includes('退出同仁模式'), JSON.stringify(texts(out)));
 }
 
 reset(); state.staff.push(colleagueRow('U_c')); state.richMenus.push({ richMenuId: 'rm_col', name: '同仁主選單' }); state.linkedMenus.set('U_c', 'rm_col'); await fresh();
