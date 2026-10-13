@@ -56,6 +56,14 @@ const SAMPLES = [
   '头发与发型之后，皇后与太后；公里、里程碑、邻里；批准、不准、准许。为准的标准。',
   '云计算与云端，其余与剩余；关于采访，将于明天发布。',
   'This is English. 工研院表示，国产化比例达 85%，预计 2027 年量产。\n\n・关节模组\n・步态控制',
+  // 批次 133：用語詞表。詞可能被切在兩段中間（「集成電｜路」），專有名詞保護與兩個詞交界的例外也不能因為切法不同而不同
+  '芯片、软件与信息；集成电路和人工智能。激光视频，默认值与数字化转型。',
+  '中国信息通信研究院指出，某某信息技术有限公司的芯片设计；纳米比亚与纳米材料；长江存储与存储器。',
+  '电视频道与视频会议，演算法与算法，眼光盘算与光盘，攻打印度与打印机。通信息息相关；库存储备与存储能力。',
+  // 批次 133 審查：S2T_WORDS 的第三欄位（ambiguous／before／after）、歧義字的 forcePrev／forceNext、拮据與腌臢的例外
+  '半导体制程与制造业，控制程序与机制作用；选手表现很好，开放松山机场。这块手表，请放松心情，采用新技术。',
+  '苏姿丰与庄志明，接种疫苗与各种品种；丰富的温度数据，高于阈值，几乎没有影响，终于通过测试。',
+  '生长发育与增长发电量，银发族与染发剂；经济拮据，腌制食品与腌臢；合并与并购，并且适合，云端与云计算。',
 ];
 function streamed(text, sizes) {
   const s = createTraditionalStream();
@@ -78,6 +86,25 @@ for (const t of SAMPLES) {
   const s = createTraditionalStream();
   const out = s.push('这'.repeat(100));
   check('一長串沒有標點的字：不會一直囤著不送（畫面不能停住）', out.length > 0 && !/这/.test(out));
+}
+// 批次 133：強制切段（囤到 80 字還沒標點）時留的尾巴要夠長，而且不能把一個詞切成兩半。
+// 詞在切點前後每一個位置都試一遍，逐段轉要跟整篇一次轉逐字相同。
+{
+  // 批次 133 審查（F8）：補 S2T_WORDS 的詞（复杂、肝脏、烟草、制造业、发电）、例外字（拮据、腌臢）、歧義字的專名（苏姿丰）
+  const probes = ['集成电路', '演算法', '中国信息通信研究院', '存储芯片', '数字化转型', '电视频道', '纳米比亚', '光刻胶',
+    '复杂', '肝脏', '烟草', '制造业', '增长发电量', '拮据', '腌臢', '苏姿丰', '接种疫苗'];
+  const bad = [];
+  for (const probe of probes) {
+    for (let n = 40; n <= 100; n++) {
+      const text = '甲'.repeat(n) + probe + '乙'.repeat(60);
+      const whole = toTraditionalTW(text);
+      for (const size of [1, 3, 7]) if (streamed(text, [size]) !== whole) bad.push(`${probe}@${n}/${size}`);
+    }
+  }
+  check(`強制切段：${probes.length} 個詞 × 61 個位置 × 3 種切法，全部跟整篇一次轉相同`, bad.length === 0, bad.slice(0, 6).join('、'));
+  const piecewise = createTraditionalStream();
+  const got = ['集成', '電路與', '激光，'].map((c) => piecewise.push(c)).join('') + piecewise.flush();
+  check('詞被切在兩段中間（集成｜電路）：不會各自轉成半截', got === '積體電路與雷射，', got);
 }
 check('繁體規則句子放在 lib/zh-tw.js，LINE 與網頁共用', /繁體中文/.test(ZH_TW_RULE));
 

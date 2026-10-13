@@ -452,7 +452,9 @@ console.log('\n── 九、出口：繁體字、長度、按鈕上限 ──');
   check('★ 技術清單出口接了繁體防線：官網萬一混進簡體，送出去的是繁體', /機器人關鍵技術/.test(simp) && !SIMPLIFIED_RE.test(simp), simp);
   const simpNews = news.formatNewsReply({ items: [{ id: '115', title: '工研院发布机器人', date: '2026/10/01', abstract: '软件与数据', url: 'x' }], total: 1, page: 1 });
   check('★ 新聞清單出口也接了：簡體 → 繁體', /工研院發布機器人/.test(simpNews) && !SIMPLIFIED_RE.test(simpNews), simpNews);
-  check('專有名詞不被改壞（信箱、網址原樣）', toTraditionalTW(simp) === simp && /a@itri\.org\.tw/.test(simp) && /https:\/\/itri-event-ai\.vercel\.app\/t\/1/.test(simp));
+  // 批次 133：官網原文只轉字、不轉用語（formatTechReply 用 { terms:false }），所以「再轉一次不變」要用同一層比：
+  // 這條要守的是信箱、網址不被改壞，不是用語層。
+  check('專有名詞不被改壞（信箱、網址原樣）', toTraditionalTW(simp, { terms: false }) === simp && /a@itri\.org\.tw/.test(simp) && /https:\/\/itri-event-ai\.vercel\.app\/t\/1/.test(simp));
 
   seed(); await fresh();
   const all = [];

@@ -1,0 +1,112 @@
+{
+  "events": [
+    {
+      "id": "sample-chip",
+      "name": "（範例）AI 邊緣運算晶片發表記者會",
+      "knowledge_base": "【新聞稿】工研院發表「AI 邊緣運算晶片」，鎖定三千億元智慧終端市場\n工研院今（28）日於臺大醫院國際會議中心發表新一代 AI 邊緣運算晶片，採 TSMC 28 奈米製程，運算效能達 12 TOPS，功耗僅 1.5 瓦，較前代效能提升三倍、功耗降低百分之三十。\n院長表示，預計 2027 年第一季量產，首批 5,000 片，三年內帶動產值逾 100 億元，吸引超過 40 家廠商洽談合作，其中包含 NVIDIA 與聯發科。目前團隊約三千人，年度研發經費 1.2 億元。\n技術詳情請見 https://www.itri.org.tw/ListStyle.aspx?DisplayStyle=18_content&SiteID=1&MmmID=1 ，媒體聯絡：公關組 王小明 02-1234-5678 分機 1234，press@example.org。\n講者：A 博士（半導體）、B 教授（AI）、C 執行長（機器人）。聯訪：10/28 09:15。",
+      "event_date": "2026-10-28",
+      "event_time": "09:00-12:00",
+      "venue": "臺大醫院國際會議中心",
+      "press_contact": "公關組 王小明 02-1234-5678 分機 1234"
+    },
+    {
+      "id": "sample-forum",
+      "name": "（範例）智慧製造論壇",
+      "knowledge_base": "【新聞稿】智慧製造論壇 2026：工研院與 12 家企業簽署合作備忘錄\n論壇於 2026 年 11 月 5 日在新竹中興院區舉行，吸引 800 位產業界人士參加。工研院展示機器手臂視覺檢測系統，檢測準確率達 99.2%，已導入 6 條產線。\n主辦單位表示，明年將擴大到 20 條產線，並與 Siemens 合作數位孿生平臺。報名網址 https://example.org/forum2026 。",
+      "event_date": "2026-11-05",
+      "event_time": "13:30-17:00",
+      "venue": "新竹中興院區",
+      "press_contact": ""
+    }
+  ],
+  "answers": [
+    {
+      "event_id": "sample-chip",
+      "question": "活動什麼時候、在哪裡舉行？",
+      "asked_at": "2026-09-30T10:00:00+08:00",
+      "expect": "ok",
+      "note": "正常：日期、地點、時間都在活動基本資料裡",
+      "answer": "活動在 2026 年 10 月 28 日（星期三）上午 9:00 於臺大醫院國際會議中心舉行。\n\n內容僅供參考，以工研院官網新聞稿或發言為準。"
+    },
+    {
+      "event_id": "sample-chip",
+      "question": "這顆晶片的規格？",
+      "asked_at": "2026-09-30T10:00:00+08:00",
+      "expect": "ok",
+      "note": "正常：28 奈米、12 TOPS、1.5 瓦、三倍、百分之三十都能對上知識庫（中文數字與阿拉伯數字互換）",
+      "answer": "這顆晶片採 28 奈米製程，運算效能 12 TOPS，功耗 1.5 瓦。效能比前代提升 3 倍，功耗降低 30%。\n\n內容僅供參考，以工研院官網新聞稿或發言為準。"
+    },
+    {
+      "event_id": "sample-chip",
+      "question": "團隊多大？研發經費多少？",
+      "asked_at": "2026-09-30T10:00:00+08:00",
+      "expect": "ok",
+      "note": "正常，且方向反過來：知識庫寫「三千人」，答案寫 3,000 人；1.2 億元寫成 120,000,000 元",
+      "answer": "團隊約 3,000 人，年度研發經費 120,000,000 元。\n\n內容僅供參考，以工研院官網新聞稿或發言為準。"
+    },
+    {
+      "event_id": "sample-chip",
+      "question": "什麼時候量產？產值預估多少？有多少廠商？",
+      "asked_at": "2026-09-30T10:00:00+08:00",
+      "expect": "flag",
+      "note": "編造數字：2028 年、500 億元、80 家、客服專線都不在知識庫",
+      "answer": "預計 2028 年量產，年產值可達 500 億元，已有約 80 家廠商洽談，客服專線 0800-123-456。\n\n內容僅供參考，以工研院官網新聞稿或發言為準。"
+    },
+    {
+      "event_id": "sample-chip",
+      "question": "哪裡可以看技術細節？怎麼聯絡？",
+      "asked_at": "2026-09-30T10:00:00+08:00",
+      "expect": "flag",
+      "note": "編造網址與 email：知識庫只有另一個網址與 press@example.org",
+      "answer": "技術細節請見 https://www.itri.org.tw/news/2026/ai-chip ，也可寄信到 support@itri-ai.com 詢問。\n\n內容僅供參考，以工研院官網新聞稿或發言為準。"
+    },
+    {
+      "event_id": "sample-chip",
+      "question": "有跟哪些公司合作？",
+      "asked_at": "2026-09-30T10:00:00+08:00",
+      "expect": "flag",
+      "note": "編造英文名詞：Intel、Qualcomm、RISC-V 都不在知識庫（NVIDIA 在）",
+      "answer": "目前洽談對象包含 NVIDIA、Intel 與 Qualcomm，晶片採用 RISC-V 架構。\n\n內容僅供參考，以工研院官網新聞稿或發言為準。"
+    },
+    {
+      "event_id": "sample-chip",
+      "question": "講者有誰？有哪些重點？",
+      "asked_at": "2026-09-30T10:00:00+08:00",
+      "expect": "ok",
+      "note": "正常：條列編號、第 3 項、前 5 名這類序數不查；講者名單沒有數字",
+      "answer": "講者如下：\n1. A 博士（半導體）\n2. B 教授（AI）\n3. C 執行長（機器人）\n\n第 3 項重點是機器人應用，前 5 名的提問會優先回覆。\n\n內容僅供參考，以工研院官網新聞稿或發言為準。"
+    },
+    {
+      "event_id": "sample-chip",
+      "question": "Who will present and how many chips in the first batch?",
+      "asked_at": "2026-09-30T10:00:00+08:00",
+      "expect": "ok",
+      "note": "正常：英文答案（只查縮寫等專有名詞，不查普通英文單字）",
+      "answer": "The speakers are Dr. A (semiconductors), Prof. B (AI) and CEO C (robotics). The first batch is expected to be 5,000 chips, with mass production planned for the first quarter of 2027.\n\nFor reference only; please confirm with ITRI's official press release or spokesperson."
+    },
+    {
+      "event_id": "sample-chip",
+      "question": "這顆晶片的應用？",
+      "asked_at": "2026-09-30T10:00:00+08:00",
+      "expect": "ok",
+      "note": "誤報示範：模型好心補了英文註解（IoT），但知識庫沒有「物聯網」這個詞，所以註解沒有中文錨點、會被標出——人工看過是無害的，所以標註 expect=ok",
+      "answer": "這顆晶片適合物聯網（IoT）場景，採用 TSMC 的 28 奈米製程，運算效能 12 TOPS。\n\n內容僅供參考，以工研院官網新聞稿或發言為準。"
+    },
+    {
+      "event_id": "sample-forum",
+      "question": "論壇什麼時候舉行？有多少人參加？",
+      "asked_at": "2026-09-30T10:00:00+08:00",
+      "expect": "ok",
+      "note": "正常：另一場活動，用它自己的知識庫比對",
+      "answer": "論壇於 2026 年 11 月 5 日在新竹中興院區舉行，約有 800 位產業界人士參加。\n\n內容僅供參考，以工研院官網新聞稿或發言為準。"
+    },
+    {
+      "event_id": "sample-forum",
+      "question": "檢測系統的準確率與產線數？",
+      "asked_at": "2026-09-30T10:00:00+08:00",
+      "expect": "flag",
+      "note": "張冠李戴：28 奈米、12 TOPS 是另一場活動（晶片）的資料，這一場的知識庫沒有",
+      "answer": "機器手臂視覺檢測準確率達 99.2%，已導入 6 條產線；背後的 28 奈米晶片效能為 12 TOPS。\n\n內容僅供參考，以工研院官網新聞稿或發言為準。"
+    }
+  ]
+}

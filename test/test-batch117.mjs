@@ -168,8 +168,39 @@ const releaseLogs = () => { console.log = realLog; };
     estimateUsd('claude-haiku-4-5-20251001', { input_tokens: M }) === 1 && estimateUsd('claude-haiku-4-5-20251001', { output_tokens: M }) === 5);
   check('價目：Haiku 5.5 輸入 1 百萬 = $0.10、輸出 1 百萬 = $0.50（100K 以內那一檔）',
     Math.abs(estimateUsd('claude-haiku-5-5', { input_tokens: M }) - 0.1) < 1e-9 && Math.abs(estimateUsd('claude-haiku-5-5', { output_tokens: M }) - 0.5) < 1e-9);
-  check('　 快取讀取打一折、快取寫入 1.25 倍（Sonnet 5.5：$2／百萬）',
-    Math.abs(estimateUsd('claude-sonnet-5-5', { cache_read_input_tokens: M }) - 0.2) < 1e-9 && Math.abs(estimateUsd('claude-sonnet-5-5', { cache_creation_input_tokens: M }) - 2.5) < 1e-9);
+  // 批次 135 審查：快取單價每個模型各自一格，逐格對官方定價頁（platform.claude.com/docs/en/about-claude/pricing，2026-10-13 核對）。
+  // 以前讀取一律 ×0.1，但 Sonnet 5.5 與 Opus 5.5 是 0.05x（定價頁註腳 2）：Sonnet 5.5 讀取 $0.10、Opus 5.5 讀取 $0.20。
+  const near = (a, b) => typeof a === 'number' && Math.abs(a - b) < 1e-9;
+  const OFFICIAL = {                       // 美元／百萬 tokens：[輸入, 5 分鐘寫入, 1 小時寫入, 快取讀取, 輸出]
+    'claude-haiku-5-5': [0.1, 0.125, 0.2, 0.01, 0.5],
+    'claude-haiku-4-5': [1, 1.25, 2, 0.1, 5],
+    'claude-haiku-4-5-20251001': [1, 1.25, 2, 0.1, 5],
+    'claude-sonnet-5-5': [2, 2.5, 4, 0.1, 10],
+    'claude-sonnet-5': [2, 2.5, 4, 0.2, 10],
+    'claude-opus-5-5': [4, 5, 8, 0.2, 20],
+    'claude-opus-5': [5, 6.25, 10, 0.5, 25],
+    'claude-opus-4-8': [5, 6.25, 10, 0.5, 25],
+  };
+  const rows = Object.entries(OFFICIAL).map(([m, [inp, w5, w1, rd, outp]]) => ({
+    m,
+    ok: near(estimateUsd(m, { input_tokens: M }), inp)
+      && near(estimateUsd(m, { cache_creation_input_tokens: M }), w5)
+      && near(estimateUsd(m, { cache_creation_input_tokens: M, cache_creation: { ephemeral_5m_input_tokens: 0, ephemeral_1h_input_tokens: M } }), w1)
+      && near(estimateUsd(m, { cache_read_input_tokens: M }), rd)
+      && near(estimateUsd(m, { output_tokens: M }), outp)
+  }));
+  check('★ 每個模型各自的單價逐格對官方定價頁：輸入、5 分鐘寫入、1 小時寫入、快取讀取、輸出（8 個模型）', rows.every((r) => r.ok), JSON.stringify(rows.filter((r) => !r.ok)));
+  check('★ Sonnet 5.5 快取讀取 $0.10（0.05x，不是共用的 0.1x＝$0.20）；Opus 5.5 讀取 $0.20（0.05x）；Sonnet 5 仍是 $0.20（0.1x）',
+    near(estimateUsd('claude-sonnet-5-5', { cache_read_input_tokens: M }), 0.1) && near(estimateUsd('claude-opus-5-5', { cache_read_input_tokens: M }), 0.2) && near(estimateUsd('claude-sonnet-5', { cache_read_input_tokens: M }), 0.2));
+  check('　 典型 LINE 問答（Sonnet 5.5：新輸入 300、快取讀取 30000、輸出 400）= $0.00760，不是以前虛高的 $0.01060',
+    near(estimateUsd('claude-sonnet-5-5', { input_tokens: 300, cache_read_input_tokens: 30000, output_tokens: 400 }), 0.0076));
+  check('　 快取寫入 5 分鐘與 1 小時混用：各照各的單價（Sonnet 5.5：40 萬 × $2.5 ＋ 60 萬 × $4 = $3.40）',
+    near(estimateUsd('claude-sonnet-5-5', { cache_creation_input_tokens: M, cache_creation: { ephemeral_5m_input_tokens: 4e5, ephemeral_1h_input_tokens: 6e5 } }), 3.4));
+  check('　 usage.cache_creation 是怪值（null、字串、1 小時比總數還大）：不丟例外、不算出負數',
+    [null, 'x', { ephemeral_1h_input_tokens: 'abc' }, { ephemeral_1h_input_tokens: NaN }, { ephemeral_1h_input_tokens: 9e9 }].every((cc) => {
+      const v = estimateUsd('claude-sonnet-5-5', { cache_creation_input_tokens: M, cache_creation: cc });
+      return typeof v === 'number' && v >= 2.5 - 1e-9 && v <= 4 + 1e-9;
+    }));
   check('　 不認得的模型不亂估（回 null，log 照記 token 數）', estimateUsd('claude-unknown', { input_tokens: 10 }) === null);
   captureLogs();
   logAiUsage('測試', 'claude-opus-5', { input_tokens: 1000, cache_read_input_tokens: 9000, output_tokens: 200 });
@@ -180,9 +211,13 @@ const releaseLogs = () => { console.log = realLog; };
 }
 {
   const files = ['api', 'lib'].flatMap((d) => fs.readdirSync(path.join(ROOT, d)).filter((f) => f.endsWith('.js')).map((f) => `${d}/${f}`));
-  const callers = files.filter((f) => src(f).includes('api.anthropic.com'));
+  // 批次 134：呼叫模型的寫法有兩種——自己 fetch('https://api.anthropic.com/…')，或改走 lib/ai-refusal.js 的 postAnthropic()
+  // （那支才有網址字串，呼叫端的檔案裡看不到）。只認網址的話，檔案一改走 postAnthropic() 就從這個守門裡消失，
+  // 之後它忘了記用量也沒人發現。所以兩種都算。
+  // lib/ai-refusal.js 本身排除：它只是通道（送出、備援、自癒），不碰回應內容，用量由呼叫端讀完 usage 才記得了。
+  const callers = files.filter((f) => f !== 'lib/ai-refusal.js' && (src(f).includes('api.anthropic.com') || /\bpostAnthropic\(/.test(src(f))));
   const missing = callers.filter((f) => !/logAiUsage\(/.test(src(f)));
-  check(`★ 每一支會呼叫模型的檔案都有記用量（${callers.length} 支）`, callers.length >= 6 && missing.length === 0, missing.join('、'));
+  check(`★ 每一支會呼叫模型的檔案都有記用量（${callers.length} 支；含改走 postAnthropic() 的）`, callers.length >= 6 && missing.length === 0, missing.join('、'));
 }
 // 網頁問答的串流：token 數分兩次來（message_start 帶輸入與快取、message_delta 帶輸出），要合起來記
 {

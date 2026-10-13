@@ -21,6 +21,13 @@
 | `GEO_MODEL` / `GEMINI_MODEL` / `OPENAI_MODEL` / `PERPLEXITY_MODEL` | 想指定特定模型版本才需要填，留空用系統預設 |
 | `OPENAI_STT_MODEL` | 媒體訓練「語音作答」伺服器端轉逐字稿用的模型，預設 `gpt-4o-transcribe`（需要 `OPENAI_API_KEY`；沒設就退回瀏覽器自己的語音辨識，品質看裝置） |
 
+### 選填 —— 模型輸出的出口檢查與拒答備援（批次 132、134）
+
+| 變數名 | 說明 |
+|---|---|
+| `ANSWER_GROUNDING` | 記者端答案的「數字、網址、英文名詞」出口檢查。**沒設＝`shadow`（預設）：只在 Vercel Logs 記 `[grounding]`，絕不改任何回覆。** `on`＝答案後面多附一行「這幾處在新聞稿原文裡查不到，請向新聞聯絡人確認」；`on:urls,terms`＝只提醒網址與英文名詞（建議的第一步）；`off`＝關掉。寫錯一律當 `shadow`。要先用 `tools/grounding-backtest/` 拿真實問答量過誤報率再開，見 [批次 132](docs/batches/10-batch-117.md)。 |
+| `AI_REFUSAL_FALLBACKS` | 設 `off` 可關掉 LINE 問答的伺服器端備援（Sonnet 5.5 被安全分類器拒答時由 Anthropic 換模型重答）。**沒設＝開著。** 備援的請求形狀沒對真的 API 驗證過，萬一上線後 LINE 問答變成「無法取得回應」、Logs 又沒看到 `[ai-refusal] 伺服器端備援被 API 以 400 退回`（那代表程式已自己改成不帶備援重送），先設這個再重新部署。 |
+
 ### 選填 —— 給「LINE 官方帳號問答」（/api/line）用，不設定則該功能停用
 
 完整申請步驟見 [LINE-PLAN.md](LINE-PLAN.md) 第 3 節。三個都要設定，缺一個 webhook 就無法運作（會回 500 或簽章一律驗證失敗）：
