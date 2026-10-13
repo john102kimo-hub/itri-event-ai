@@ -6,20 +6,21 @@
 // 用途：影子模式（ANSWER_GROUNDING 未設）上線前後，用誤報率決定要不要改成 on。
 //
 // ⚠️ 只讀檔，不呼叫任何 API、不連 Sheets、不寫任何檔案；`npm test` 不會跑它。
-// ⚠️ 這裡組的 shownText 是「知識庫＋活動基本資料＋該題問題」（加 --with-prompt 再加整份 system prompt）。
+// ⚠️ 這裡組的 shownText 是「知識庫＋照片清單＋活動基本資料＋該題問題」（加 --with-prompt 再加整份 system prompt）。
 //    線上實際組法見 README；差別只在 system prompt 的規則文字與對話歷史，會讓線上的標出數略少於這裡（更寬鬆）。
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { findUngrounded } from '../../lib/answer-grounding.js';
-import { formatEventBasics, systemPromptFor } from '../../lib/prompt.js';
+import { formatEventBasics, formatImages, systemPromptFor } from '../../lib/prompt.js';
 
 const KINDS = [['numbers', '數字'], ['urls', '網址'], ['terms', '英文名詞']];
 const USAGE = `用法：node tools/grounding-backtest/backtest.mjs <輸入.json> [選項]
 
 輸入.json 的格式：
-  { "events":  [{ "id", "name", "knowledge_base", "event_date", "event_time", "venue", "press_contact" }],
+  { "events":  [{ "id", "name", "knowledge_base", "event_date", "event_time", "venue", "press_contact", "images" }],
     "answers": [{ "event_id", "question", "answer" }] }
+  events 可選填 "images"（後台「圖片」欄的原文，每行「網址」或「網址|圖說」；線上模型看得到照片清單，回測才不會把照片網址當成編造）。
   answers 可選填 "asked_at"（問的時間，ISO 格式，讓「現在時間」那一行跟當時一樣）與
   "expect"（"ok"＝這則答案沒問題、"flag"＝這則答案有問題，人工標註用，最後會算誤報／漏報）。
 
@@ -96,7 +97,11 @@ export function runBacktest({ events = [], answers = [], withPrompt = false } = 
     skipped: { noEvent: 0, blankAnswer: 0, noSource: 0 }, missingEvents: [],
     kinds: Object.fromEntries(KINDS.map(([k]) => [k, { answers: 0, items: 0 }])),
     top: [], details: [],
-    labeled: { total: 0, falseAlarm: 0, miss: 0, falseAlarmIndexes: [], missIndexes: [] }
+    flaggedUrlsTerms: 0,
+    labeled: {
+      total: 0, okTotal: 0, flagTotal: 0, falseAlarm: 0, miss: 0, falseAlarmIndexes: [], missIndexes: [],
+      falseAlarmByKind: Object.fromEntries(KINDS.map(([k]) => [k, 0])), falseAlarmUrlsTerms: 0, falseAlarmRate: null, missRate: null
+    }
   };
   const tally = new Map();
   (Array.isArray(answers) ? answers : []).forEach((a, i) => {
@@ -112,6 +117,9 @@ export function runBacktest({ events = [], answers = [], withPrompt = false } = 
     const parts = [
       withPrompt ? systemPromptFor({ organizer: '工研院', ...event }) : '',
       event.knowledge_base,
+      // 批次 132 品質審查：線上模型看得到【本次活動照片】清單（網址＋圖說，systemPromptFor() 會接在知識庫後面）。
+      // --with-prompt 時上面那份 system prompt 已經含了；沒帶時要自己補，不然答案裡列出的照片網址與圖說會整批被標出。
+      withPrompt ? '' : formatImages(event.images),
       formatEventBasics(event, asDate(a.asked_at)),
       a.question
     ];
@@ -128,6 +136,8 @@ export function runBacktest({ events = [], answers = [], withPrompt = false } = 
         tally.set(key, (tally.get(key) || 0) + 1);
       }
     }
+    const hitUrlsTerms = r.urls.length > 0 || r.terms.length > 0;
+    if (hitUrlsTerms) out.flaggedUrlsTerms++;
     if (hit) {
       out.flagged++;
       out.details.push({
@@ -137,10 +147,24 @@ export function runBacktest({ events = [], answers = [], withPrompt = false } = 
     }
     if (a.expect === 'ok' || a.expect === 'flag') {
       out.labeled.total++;
-      if (a.expect === 'ok' && hit) { out.labeled.falseAlarm++; out.labeled.falseAlarmIndexes.push(i + 1); }
-      if (a.expect === 'flag' && !hit) { out.labeled.miss++; out.labeled.missIndexes.push(i + 1); }
+      if (a.expect === 'ok') {
+        out.labeled.okTotal++;
+        if (hit) {
+          out.labeled.falseAlarm++; out.labeled.falseAlarmIndexes.push(i + 1);
+          for (const [k] of KINDS) if (r[k].length) out.labeled.falseAlarmByKind[k]++;
+          if (hitUrlsTerms) out.labeled.falseAlarmUrlsTerms++;
+        }
+      } else {
+        out.labeled.flagTotal++;
+        if (!hit) { out.labeled.miss++; out.labeled.missIndexes.push(i + 1); }
+      }
     }
   });
+  // 批次 132 品質審查：誤報率的分母是「標 ok 的答案」，不是「被標出的答案」。後者取決於編造答案占多少，真實流量裡編造一定很少，
+  // 「被標出的答案多半是真的」這個判準在真實資料上不成立（見 README 第四節）。
+  const lb = out.labeled;
+  lb.falseAlarmRate = lb.okTotal ? lb.falseAlarm / lb.okTotal : null;
+  lb.missRate = lb.flagTotal ? lb.miss / lb.flagTotal : null;
   out.top = [...tally.entries()]
     .map(([key, count]) => { const [kind, item] = key.split('\t'); return { kind, item, count }; })
     .sort((x, y) => y.count - x.count || x.item.localeCompare(y.item));
@@ -148,6 +172,7 @@ export function runBacktest({ events = [], answers = [], withPrompt = false } = 
 }
 
 const pct = (n, d) => (d ? ((n / d) * 100).toFixed(1) : '0.0') + '%';
+const per100 = (n, d) => (d ? ((n / d) * 100).toFixed(1) : '0.0');
 
 export function renderReport(r, { top = 20, maxDetail = Infinity } = {}) {
   const label = Object.fromEntries(KINDS);
@@ -158,7 +183,9 @@ export function renderReport(r, { top = 20, maxDetail = Infinity } = {}) {
   if (sk.noEvent || sk.blankAnswer || sk.noSource) {
     L.push(`略過：找不到活動 ${sk.noEvent} 則${r.missingEvents.length ? `（活動 ID：${r.missingEvents.slice(0, 10).join('、')}）` : ''}、答案是空的 ${sk.blankAnswer} 則、活動沒有知識庫 ${sk.noSource} 則`);
   }
-  L.push('', `總則數：${r.checked}`, `被標出：${r.flagged} 則（${pct(r.flagged, r.checked)}）`, '', '各類別（被標出的則數／項目筆數）：');
+  L.push('', `總則數：${r.checked}`, `被標出：${r.flagged} 則（${pct(r.flagged, r.checked)}）；打開 on 之後，每 100 則答案會多 ${per100(r.flagged, r.checked)} 則提醒`,
+    `　其中只看網址＋英文名詞（on:urls,terms 會提醒的）：${r.flaggedUrlsTerms} 則（${pct(r.flaggedUrlsTerms, r.checked)}），每 100 則 ${per100(r.flaggedUrlsTerms, r.checked)} 則`,
+    '', '各類別（被標出的則數／項目筆數）：');
   for (const [k, name] of KINDS) L.push(`  ${name}：${r.kinds[k].answers} 則／${r.kinds[k].items} 筆`);
 
   L.push('', `最常被標出的項目 Top ${top}：`);
@@ -166,9 +193,15 @@ export function renderReport(r, { top = 20, maxDetail = Infinity } = {}) {
   r.top.slice(0, top).forEach((t, i) => L.push(`  ${String(i + 1).padStart(2)}. [${label[t.kind]}] ${t.item}　×${t.count}`));
 
   if (r.labeled.total) {
-    L.push('', `人工標註對照（共 ${r.labeled.total} 則有 expect）：`,
-      `  誤報（標註沒問題、卻被標出）：${r.labeled.falseAlarm} 則${r.labeled.falseAlarmIndexes.length ? `（第 ${r.labeled.falseAlarmIndexes.join('、')} 則）` : ''}`,
-      `  漏報（標註有問題、卻沒被標出）：${r.labeled.miss} 則${r.labeled.missIndexes.length ? `（第 ${r.labeled.missIndexes.join('、')} 則）` : ''}`);
+    const lb = r.labeled;
+    L.push('', `人工標註對照（共 ${lb.total} 則有 expect：標 ok ${lb.okTotal} 則、標 flag ${lb.flagTotal} 則）：`,
+      `  誤報（標註沒問題、卻被標出）：${lb.falseAlarm} 則${lb.falseAlarmIndexes.length ? `（第 ${lb.falseAlarmIndexes.join('、')} 則）` : ''}`,
+      `  漏報（標註有問題、卻沒被標出）：${lb.miss} 則${lb.missIndexes.length ? `（第 ${lb.missIndexes.join('、')} 則）` : ''}`);
+    if (lb.okTotal) {
+      L.push(`  ★ 誤報率（標 ok 的答案被標出的比例）：${lb.falseAlarm}／${lb.okTotal}＝${pct(lb.falseAlarm, lb.okTotal)}`
+        + `（數字 ${lb.falseAlarmByKind.numbers}、網址 ${lb.falseAlarmByKind.urls}、英文名詞 ${lb.falseAlarmByKind.terms}；只看網址＋英文名詞 ${lb.falseAlarmUrlsTerms}／${lb.okTotal}＝${pct(lb.falseAlarmUrlsTerms, lb.okTotal)}）`);
+    }
+    if (lb.flagTotal) L.push(`  漏報率（標 flag 的答案沒被標出的比例）：${lb.miss}／${lb.flagTotal}＝${pct(lb.miss, lb.flagTotal)}`);
   }
 
   L.push('', `被標出的答案（供人工判斷是不是誤報${r.details.length > maxDetail ? `，只列前 ${maxDetail} 則` : ''}）：`);

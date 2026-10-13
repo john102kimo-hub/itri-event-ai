@@ -6,11 +6,13 @@
 //   ② **正確的答案不能被標出來**——這種檢查最大的風險不是漏抓，是誤報：中文數字與阿拉伯數字互換、
 //      千分位、全形、日期寫法不同、條列編號、警語，只要有一種誤報，記者每天都會看到「查不到」的提醒。
 //   ③ 影子模式：不改任何回覆（note 一律空字串）、log 不含答案全文，檢查自己壞掉也不能害記者收不到答案。
+//   ④ 品質審查的調整（第十四節）：括號英文註解、模型自己算的數字、複合量級、幣別、季別、網址協定、on:urls,terms…
+//      每一項都是「誤報的案例變綠」加「編造的案例照樣被標出」成對寫；標「已知代價」的是調整後仍抓不到的情形，斷言它抓不到。
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import {
-  checkAnswerGrounding, findUngrounded, groundingMode, normalizeForGrounding, cnIntToDecimal,
+  checkAnswerGrounding, findUngrounded, groundingMode, groundingNoteKinds, normalizeForGrounding, cnIntToDecimal,
   extractNumbers, extractUrls, extractTerms, stripDisclaimer, buildGroundingNote, SMALL_COUNT_MAX
 } from '../lib/answer-grounding.js';
 import { toTraditionalTW } from '../lib/zh-tw.js';
@@ -478,6 +480,171 @@ console.log('\n── 十三、真實問答含記者姓名、媒體、提問與�
   const fixtures = src('tools/grounding-backtest/sample.json') + src('test/test-batch132.mjs');
   const left = REAL.filter((x) => fixtures.includes(x));
   check('★ 範例與測試裡沒有真人的暱稱、電話、信箱：電話用 02-1234-5678、信箱用 example.org', left.length === 0, `還有殘留：${left.join('、')}`);
+}
+
+
+/* ───────── 十四、批次 132 品質審查：降低誤報的調整（每一項都附「不能放水」的對照）───────── */
+// 品質審查拿 322 則自擬的模型答案量過（tools/grounding-backtest/README.md「規則調整之後的數字」）：沒編造的答案被標出 33.0% → 7.6%，
+// 有編造的答案漏掉 39.5% → 31.4%。下面每一組都是「誤報的案例變綠」加「編造的案例照樣被標出」——只有前者沒有後者，
+// 等於把檢查拆掉。標「已知代價」的是調整之後仍然抓不到的情形，測試斷言它抓不到，免得有人以為已經處理。
+console.log('\n── 十四、品質審查的調整：誤報要降，編造照樣要抓 ──');
+const urlsOf = (a, s) => g(a, s).urls;
+{
+  console.log('  ▸ 括號裡的英文註解（最大宗誤報：英文名詞誤報的 69%）');
+  check('中文（English）：來源有「邊緣運算」，答案補「（Edge Computing）」不算編造', terms('邊緣運算（Edge Computing）是在裝置端處理資料。', '採用邊緣運算架構').length === 0);
+  check('　 公司名與全形半形括號：矽品（SPIL）、艾克爾(Amkor)（來源只有中文名）', terms('合作的有矽品（SPIL）與艾克爾(Amkor)。', '合作夥伴：矽品、艾克爾').length === 0);
+  check('　 縮寫（全名，中文）：RAG（Retrieval-Augmented Generation，檢索增強生成），來源有 RAG', terms('RAG（Retrieval-Augmented Generation，檢索增強生成）是先查再答。', '搭配 RAG 後幻覺率降低').length === 0);
+  check('　 反過來：Edge Computing（邊緣運算），括號裡的中文在來源裡', terms('Edge Computing（邊緣運算）讓資料就近處理。', '採用邊緣運算架構').length === 0);
+  check('　 小寫的概念註解：晶片（chip）、封裝（packaging）', terms('這顆晶片（chip）採先進封裝（packaging）。', '晶片採先進封裝').length === 0);
+  check('★ 不能放水：來源沒有那個中文詞，括號英文照樣標出（矽品不在來源 → SPIL 標出）', J(terms('合作的有矽品（SPIL）。', '合作夥伴包括日月光')) === J(['SPIL']));
+  check('★ 不能放水：括號裡是清單就不放過：（Intel、AMD）、（Intel, AMD）', terms('合作廠商（Intel、AMD）也來了。', '合作廠商包括日月光').length >= 2 && terms('合作對象（Intel, AMD）也來了。', '合作對象包括日月光').length >= 2);
+  check('★ 不能放水：泛稱不能當錨點：「合作夥伴（Intel）」「國外廠商（Boston Dynamics）」照樣標出',
+    J(terms('合作夥伴（Intel）也在洽談中。', '合作夥伴：日月光、欣興')) === J(['Intel']) && terms('國外廠商（Boston Dynamics）提供授權。', '國內廠商：研華').length >= 2);
+  check('★ 不能放水：括號外面編造的英文名照樣標出', J(terms('目前洽談對象包含 NVIDIA、Intel（英特爾）。', 'NVIDIA 洽談中')) === J(['Intel']));
+  check('★ 不能放水：括號裡的中文不在來源 → 左邊的英文照樣標出：Intel（英特爾）', J(terms('合作對象是 Intel（英特爾）。', '合作對象是 NVIDIA')) === J(['Intel']));
+  check('　 沒有中文錨點的註解仍會標出（sample.json 第 9 則的誤報示範）：知識庫沒有「物聯網」，「物聯網（IoT）」標出 IoT', J(terms('適合物聯網（IoT）場景。', '採邊緣運算架構')) === J(['IoT']));
+  check('　 [已知代價] 括號左邊是來源裡的具體名詞時，編造的括號英文名會被放過：「感測節點（Bosch）」', terms('感測節點（Bosch）由國外大廠供應。', '感測節點電池續航 3 年').length === 0);
+  // 上限是故意的：括號最多看 100 個、整則答案最多在來源裡找 200 次字串，用完就當「找不到」（寧可多標出，不放過）。
+  // 每個括號左邊 8 個來源沒有的字加「邊緣運算」，要找 10 次才找到錨點：5 個括號（50 次）全放過，25 個（250 次）超過上限的部分照樣標出。
+  const filler = '填填填填填填填填';
+  const manyParens = (n) => Array.from({ length: n }, () => `${filler}邊緣運算（Edge Computing）`).join('，');
+  check('★ 括號註解有查找上限：5 個括號全放過；25 個括號超過上限的部分照樣標出 Edge、Computing（失敗的方向是多標出，不是放過）',
+    terms(manyParens(5), '採用邊緣運算架構').length === 0 && J(terms(manyParens(25), '採用邊緣運算架構')) === J(['Edge', 'Computing']), J(terms(manyParens(25), '採用邊緣運算架構')));
+  const t0 = performance.now();
+  g('合作'.repeat(30_000) + '(Intel)', '合作夥伴'); g('a '.repeat(30_000) + '(邊緣運算)', '邊緣運算'); g('(a'.repeat(30_000), '無'); g('邊緣運算('.repeat(10_000), '邊緣運算');
+  const glossMs = performance.now() - t0;
+  check(`★ 病態輸入（6 萬字中文／英文後接「(」、3 萬個沒閉合的左括號）不退化成平方時間：${glossMs.toFixed(0)} ms（要 < 800）`, glossMs < 800, glossMs);
+}
+{
+  console.log('  ▸ 中英名稱對照表（NAME_ALIASES）');
+  check('來源有「台積電」、答案寫 TSMC 不標；英文答案也一樣', terms('採用 TSMC 製程。', '採用台積電製程').length === 0
+    && terms('The chip is manufactured with the TSMC process and ships next year to partners in the industry.', '採用台積電製程').length === 0);
+  check('★ 不能放水：來源沒有台積電，TSMC 照樣標出', J(terms('採用 TSMC 製程。', '採用日月光製程')) === J(['TSMC']));
+  check('　 對照表只放過那一個名字：來源有台積電，答案的 Intel 照樣標出', J(terms('採用 TSMC 與 Intel 的製程。', '採用台積電製程')) === J(['Intel']));
+}
+{
+  console.log('  ▸ 複合量級：1 億 2,000 萬 ⇄ 1.2 億、2萬5千 ⇄ 25,000');
+  check('來源「1 億 2,000 萬元」、答案「1.2 億元」', nums('累計投入約 1.2 億元', '累計投入 1 億 2,000 萬元').length === 0);
+  check('　 來源「12 萬 8,000 張」、答案「128,000 張」「12.8 萬張」；來源「2萬5千顆」、答案「25,000 顆」',
+    nums('共 128,000 張', '使用 12 萬 8,000 張影像').length === 0 && nums('約 12.8 萬張', '使用 12 萬 8,000 張影像').length === 0 && nums('月產能 25,000 顆', '月產能 2萬5千顆').length === 0);
+  check('　 反方向：來源「1.2 億元」、答案「1 億 2,000 萬元」；來源「1 兆 2,000 億元」、答案「1.2 兆元」',
+    nums('投入 1 億 2,000 萬元', '投入 1.2 億元').length === 0 && nums('受影響產值約 1.2 兆元', '受影響產值約 1 兆 2,000 億元').length === 0);
+  check('★ 不能放水：數值不同照樣標出（1 億 2,000 萬 vs 1.3 億）', nums('累計投入約 1.3 億元', '累計投入 1 億 2,000 萬元').length === 1);
+  check('★ 不能放水：合成後的值要拿來判斷「值不值得查」——「3 萬 3,000 次」不能因為開頭的 3 被當成小整數而整個不查', nums('下載 3 萬 3,000 次', '下載 3 萬 2,000 次').length === 1 && nums('投入 1 億 3,000 萬元', '投入 1 億 2,000 萬元').length === 1);
+  check('　 兩段原本各自的寫法來源仍收：來源「1 億 2,000 萬元」，答案「2,000 萬元」', nums('其中 2,000 萬元為補助', '累計投入 1 億 2,000 萬元').length === 0);
+}
+{
+  console.log('  ▸ 幣別：美元 ≠ 歐元 ≠ 新台幣，只寫「元」的兩邊都相容');
+  check('來源 800 億美元，答案寫「800 億元」不標；寫「新台幣 800 億元」「800 億歐元」標出',
+    nums('市場規模 800 億元', '市場規模 800 億美元').length === 0 && nums('市場規模新台幣 800 億元', '市場規模 800 億美元').length === 1 && nums('市場規模 800 億歐元', '市場規模 800 億美元').length === 1);
+  check('　 來源 1,800 萬歐元，答案 1,800 萬美元 → 標出', nums('預算 1,800 萬美元', '預算 1,800 萬歐元').length === 1);
+  check('★ 不能放水（不誤報）：同幣別、新台幣↔元、美金↔美元', nums('預算 1,800 萬歐元', '預算 1,800 萬歐元').length === 0 && nums('售價新台幣 120 萬元', '售價 120 萬元').length === 0
+    && nums('售價 120 萬元', '售價新台幣 120 萬元').length === 0 && nums('預算 500 萬美金', '預算 500 萬美元').length === 0);
+  check('　 [已知代價] 答案只寫「元」、沒指幣別時對任何幣別都算：來源 120 萬美元、答案「120 萬元」抓不到', nums('售價 120 萬元', '售價 120 萬美元').length === 0);
+}
+{
+  console.log('  ▸ 季別獨立成一組、單位詞彙補「戶」「量子位元」');
+  const KQ = '預計 2027 年第一季量產';
+  check('來源 2027 年第一季，答案 2027 年第四季、2027 Q3 → 標出（以前「第」被當序數、年份在來源裡就整個過關）', J(nums('預計 2027 年第四季量產', KQ)) === J(['2027 年第四季']) && nums('預計 2027 Q3 量產', KQ).length === 1);
+  check('★ 不能放水（不誤報）：同一季不同寫法——2027 Q1、2027 年第 1 季、Q1 2027、民國 116 年第一季', ['2027 Q1', '2027 年第 1 季', 'Q1 2027', '民國 116 年第一季'].every((a) => nums(`預計 ${a} 量產`, KQ).length === 0));
+  check('　 來源只寫「明年第一季」沒寫年份，答案寫 2027 年第一季（年份在來源裡）不標；年份不在來源裡才標', nums('預計 2027 年第一季量產', '預計明年第一季量產，2027 年啟動').length === 0 && nums('預計 2029 年第一季量產', '預計明年第一季量產，2027 年啟動').length >= 1);
+  check('　 單獨的「Q3」「第三季」仍然不查；年份本身已被標出就不再重複提醒季別（只標 2028 年，不再多一筆 2028 年第一季）', nums('Q3 公布財報、第三季公布', '無數字').length === 0 && J(nums('預計 2028 年第一季量產', '預計 2027 年第一季量產')) === J(['2028 年']));
+  check('「64 量子位元」「86 戶農民」要查（以前不在單位表，2 位整數沒單位不查）；一致時不標', nums('2028 年將達 64 量子位元', '目標 16 量子位元').length >= 1 && nums('共 86 戶農民參與', '共 12 戶農民參與').length >= 1 && nums('共 16 量子位元', '目標 16 量子位元').length === 0);
+}
+{
+  console.log('  ▸ 倍數 ⇄ 百分比、民國年度、量詞 billion');
+  check('來源「提升 2.4 倍」、答案「增加約 140%」不標；反向「成長 200%」↔「3 倍」；2.07 倍 ⇄ 107%（不能被浮點數吃掉）',
+    nums('頻寬增加約 140%', '頻寬較傳統封裝提升約 2.4 倍').length === 0 && nums('效能是 3 倍', '效能成長 200%').length === 0 && nums('效能增加 107%', '效能提升 2.07 倍').length === 0 && nums('效能是 2.07 倍', '效能成長 107%').length === 0);
+  check('★ 不能放水：數值不對照樣標出（來源 2.4 倍，答案「增加 150%」）', nums('頻寬增加約 150%', '頻寬較傳統封裝提升約 2.4 倍').length === 1);
+  check('民國年度：來源「115 年度」、答案「2026 年度」不標；差一年標出', nums('2026 年度預算', '115 年度預算').length === 0 && nums('2027 年度預算', '115 年度預算').length === 1);
+  check('中文答案裡夾「US$10 billion」，billion 不當英文名詞（數字仍照查）', terms('市場規模約 US$10 billion。', '市場規模約 100 億美元').length === 0 && nums('市場規模約 US$20 billion。', '市場規模約 100 億美元').length === 1);
+}
+{
+  console.log('  ▸ 網址：來源沒寫協定，模型補上 https:// 不算不同');
+  check('來源「www.itri.org.tw/qc」（沒寫協定），答案「https://www.itri.org.tw/qc」不標', urlsOf('可至 https://www.itri.org.tw/qc 申請', '試用申請：www.itri.org.tw/qc（免註冊）').length === 0);
+  check('★ 不能放水：來源 http、答案 https（或反過來）照舊算不同——既有決定', urlsOf('下載：https://www.itri.org.tw/media/a', '下載：http://www.itri.org.tw/media/a').length === 1 && urlsOf('下載：http://www.itri.org.tw/media/a', '下載：https://www.itri.org.tw/media/a').length === 1);
+  check('★ 不能放水：路徑不同、網域不同、前面多一段網域都照樣標出', urlsOf('下載：https://www.itri.org.tw/media/b', '下載：www.itri.org.tw/media/a').length === 1
+    && urlsOf('下載：https://www.itri.com.tw/media/a', '下載：www.itri.org.tw/media/a').length === 1 && urlsOf('可至 https://evil-www.itri.org.tw/qc', '申請：www.itri.org.tw/qc').length === 1);
+}
+{
+  console.log('  ▸ 模型自己算的數字（合計、平均、倍數、取整）');
+  const KB = '三年內帶動產值逾 100 億元；政府投入 120 億元，帶動民間投資 600 億元；23 所大專院校、9 家企業申請。';
+  check('「平均每年約 33 億元」（100 億÷三年）、「合計約 720 億元」（120＋600）、「共 32 個單位」（23＋9）不標',
+    nums('三年內帶動產值逾 100 億元，平均每年約 33 億元。', KB).length === 0 && nums('合計約 720 億元', KB).length === 0 && nums('共 32 個單位', KB).length === 0);
+  check('　 倍數與比例：「民間投資相當於政府投入的 5 倍」（600÷120）、「政府投入相當於民間投資的 20%」（120÷600）不標', nums('民間投資相當於政府投入的 5 倍', KB).length === 0 && nums('政府投入相當於民間投資的 20%', KB).length === 0);
+  check('　 取整只在答案寫了「約」且是同一個單位類別時才算：來源 36 位講者，「講者共 40 位」標出、「約 40 位」不標；「約 40 公里」標出（類別不同）',
+    nums('講者共 40 位', '共 36 位講者').length === 1 && nums('講者約 40 位', '共 36 位講者').length === 0 && nums('講者約 40 公里', '共 36 位講者').length === 1);
+  check('　 答案自己寫的其他數字也能當運算元：來源只有「總經費 100 億元」，「共 5 家，平均每家 20 億元」不標；「平均每家 30 億元」標出',
+    nums('共 5 家，平均每家 20 億元', '總經費 100 億元').length === 0 && J(nums('共 5 家，平均每家 30 億元', '總經費 100 億元')) === J(['30 億元']));
+  check('　 [已知代價] 要外部常數的換算仍會標出：匯率（100 億美元 → 「以 1 美元兌 32 元計算，約 3,200 億元」）', nums('以 1 美元兌 32 元計算，約 3,200 億元', '市場規模 100 億美元').length >= 1);
+  check('★ 不能放水：沒有推算用語的編造數字照樣標出：「產值逾 720 億元」', nums('產值逾 720 億元', KB).length === 1);
+  check('★ 不能放水：有推算用語但湊不出來、或單位對不上的照樣標出：「合計約 730 億元」「共 720 個單位」', nums('合計約 730 億元', KB).length === 1 && nums('共 720 個單位', KB).length === 1);
+  const KBT = '計畫從 2024 年開始，2026 年完成第一階段，2028 年達到量產規模。';
+  check('★ 不能放水：時間類不做算術放行——年份兩兩相減什麼天數都湊得出來：「整個計畫共 4 年」「相差 6 年」照樣標出', nums('整個計畫共 4 年', KBT).length === 1 && nums('相差 6 年', KBT).length === 1);
+  const FAR = '政府投入 100 億元推動淨零。' + '（中間隔了很多很多的字）'.repeat(40) + '民間投資 20 億元。';
+  check('★ 不能放水：兩個運算元在來源裡相隔幾百字不算推算——「合計約 120 億元」標出；同一句的才不標', nums('合計約 120 億元', FAR).length === 1 && nums('合計約 120 億元', '政府投入 100 億元，民間投資 20 億元。').length === 0);
+  {
+    const kb = Array.from({ length: 160 }, (_, i) => `項目${i} 的值為 ${i * 3 + 2} 億元`).join('；');
+    const ans = Array.from({ length: 3000 }, (_, i) => `共 ${1000 + i * 7} 家`).join('，');
+    const t = performance.now(); g(ans, kb); const ms = performance.now() - t;
+    check(`★ 效能保險：3,000 個「共 N 家」不超過 1.5 秒（每則答案最多試 12 個數字；沒設上限時實測 7～11 秒）：${ms.toFixed(0)} ms`, ms < 1500, ms);
+  }
+}
+{
+  console.log('  ▸ ANSWER_GROUNDING=on:urls,terms（只提醒網址與英文名詞，數字留在影子模式）');
+  const ans = '預計 2028 年量產，詳見 https://fake.example.com/x ，合作對象是 Intel。\n\n內容僅供參考，以工研院官網新聞稿或發言為準。';
+  const src = '預計 2027 年量產，合作對象是 NVIDIA。';
+  const run = (mode) => captureLogs(() => withMode(mode, () => checkAnswerGrounding(ans, src, {}))).value;
+  const all = run('on'), ut = run('on:urls,terms'), only = run('on:numbers');
+  check('★ =on 三類都進提醒（沒指定時跟以前一樣）；=on:urls,terms 提醒只有網址與英文名詞、沒有數字', /2028/.test(all.note) && /fake\.example/.test(all.note) && /Intel/.test(all.note)
+    && ut.mode === 'on' && !/2028/.test(ut.note) && /fake\.example/.test(ut.note) && /Intel/.test(ut.note), J({ all: all.note, ut: ut.note }));
+  check('　 只影響提醒：回傳的 numbers 陣列與 log 照舊有數字（回測與影子期的 log 不受影響）', ut.numbers.length === 1 && ut.urls.length === 1 && ut.terms.length === 1
+    && /numbers=\["2028 年"\]/.test(captureLogs(() => withMode('on:urls,terms', () => checkAnswerGrounding(ans, src, {}))).logs[0] || ''));
+  const termsOnly = run('on:terms'), urlsOnly = run('on:urls');
+  check('　 =on:numbers 只有數字、=on:urls 只有網址、=on:terms 只有英文名詞；大小寫與空白不影響（" ON: URLS , Terms "）',
+    /2028/.test(only.note) && !/Intel/.test(only.note) && !/fake\.example/.test(only.note)
+    && /fake\.example/.test(urlsOnly.note) && !/2028/.test(urlsOnly.note) && !/Intel/.test(urlsOnly.note)
+    && /Intel/.test(termsOnly.note) && !/2028/.test(termsOnly.note) && !/fake\.example/.test(termsOnly.note)
+    && !/2028/.test(run(' ON: URLS , Terms ').note) && /Intel/.test(run(' ON: URLS , Terms ').note) && /fake\.example/.test(run(' ON: URLS , Terms ').note), J({ only: only.note, urlsOnly: urlsOnly.note, termsOnly: termsOnly.note }));
+  check('★ 寫錯的 on:… 一律當影子模式（note 空字串）：on:url、on:、on:urls,、on:urls;terms、on:nope、on :urls、on:urls,nope',
+    ['on:url', 'on:', 'on:urls,', 'on:urls;terms', 'on:nope', 'on :urls', 'on:urls,nope'].every((v) => run(v).mode === 'shadow' && run(v).note === ''));
+  check('★ 舊寫法完全不變：未設／shadow／ON!／true／yes／1 → 影子；off → 什麼都不做', ['ON!', 'true', 'yes', '1', '', 'shadow'].every((v) => run(v).mode === 'shadow' && run(v).note === '') && run('off').mode === 'off' && run('off').numbers.length === 0 && run(undefined).mode === 'shadow' && run(undefined).note === '');
+  const onlyNum = captureLogs(() => withMode('on:urls', () => checkAnswerGrounding('預計 2028 年量產。', src, {}))).value;
+  check('　 只挑 urls、而被標出的只有數字：沒有提醒（note 空字串），numbers 陣列照有', onlyNum.note === '' && onlyNum.numbers.length === 1);
+  check('　 groundingMode(env)／groundingNoteKinds(env) 直接傳物件也行', groundingMode({ ANSWER_GROUNDING: 'on:terms' }) === 'on' && groundingMode({ ANSWER_GROUNDING: 'on:x' }) === 'shadow'
+    && J([...groundingNoteKinds({ ANSWER_GROUNDING: 'on:urls,terms' })]) === J(['urls', 'terms']) && J([...groundingNoteKinds({})]) === J(['numbers', 'urls', 'terms']));
+}
+{
+  console.log('  ▸ 不改的決定：SMALL_COUNT_MAX 維持 10');
+  check('★ 模型照清單數出來的 6～10 項計數（公布了 6 項規格、點名了 7 家業者）不能被標出——降到 5 會讓審查補的那組正確計數 5／8 誤報',
+    nums('新聞稿公布了 6 項規格：甲、乙、丙、丁、戊、己。', '甲 乙 丙 丁 戊 己').length === 0 && nums('新聞稿點名了 7 家業者。', '甲 乙 丙 丁 戊 己 庚').length === 0 && nums('共列出 9 個重點。', '一二三四五六七八九').length === 0);
+  check('　 [已知代價] 編造的小計數抓不到：「目前已有 7 家客戶下單」；11 以上照查：「已有 12 家客戶下單」', nums('目前已有 7 家客戶下單', '三年內帶動產值，吸引超過 40 家廠商').length === 0 && nums('目前已有 12 家客戶下單', '三年內帶動產值，吸引超過 40 家廠商').length === 1);
+}
+
+{
+  console.log('  ▸ 回測工具：照片清單算模型看過的字、誤報率的分母是「標 ok 的答案」');
+  const { runBacktest, renderReport } = await import('../tools/grounding-backtest/backtest.mjs');
+  const photoEv = [{ id: 'p1', name: 'P', knowledge_base: '預計 2027 年量產。', event_date: '', event_time: '', venue: '', press_contact: '',
+    images: 'https://www.itri.org.tw/media/p1/a.jpg|所長展示晶圓\nhttps://www.itri.org.tw/media/p1/b.jpg｜平台全景' }];
+  const photoAns = [{ event_id: 'p1', question: '有照片嗎？', answer: '有 2 張照片：\n1. 所長展示晶圓：https://www.itri.org.tw/media/p1/a.jpg\n2. 平台全景：https://www.itri.org.tw/media/p1/b.jpg', expect: 'ok' },
+    { event_id: 'p1', question: '有照片嗎？', answer: '照片在 https://www.itri.org.tw/media/p1/c.jpg', expect: 'flag' }];
+  const withImages = runBacktest({ events: photoEv, answers: photoAns });
+  const noImages = runBacktest({ events: photoEv.map(({ images, ...e }) => e), answers: photoAns });
+  check('★ 活動有照片清單：答案列出照片網址不算編造（線上模型看得到【本次活動照片】；回測沒帶就會整批誤報）；清單外的網址照樣標出',
+    withImages.flagged === 1 && withImages.details[0].index === 2 && noImages.flagged === 2, J({ w: withImages.flagged, n: noImages.flagged }));
+  const withPrompt = runBacktest({ events: photoEv, answers: photoAns, withPrompt: true });
+  check('　 --with-prompt 時（system prompt 已含照片清單）結果相同，不會重複計算', withPrompt.flagged === 1);
+  const sampleJ = JSON.parse(src('tools/grounding-backtest/sample.json'));
+  const rs = runBacktest({ events: sampleJ.events, answers: sampleJ.answers });
+  const lb = rs.labeled;
+  check('★ 誤報率＝誤報 ÷ 標 ok 的答案（不是 ÷ 被標出的答案）：sample.json 標 ok 7 則、標 flag 4 則，誤報 1 則＝1／7，漏報 0／4',
+    lb.okTotal === 7 && lb.flagTotal === 4 && lb.falseAlarm === 1 && Math.abs(lb.falseAlarmRate - 1 / 7) < 1e-9 && lb.miss === 0 && lb.missRate === 0, J(lb));
+  check('　 誤報也分類別，並單獨算「只看網址＋英文名詞」（第一步只打開 on:urls,terms 時的誤報率）；每 100 則的提醒數',
+    lb.falseAlarmByKind.terms === 1 && lb.falseAlarmByKind.numbers === 0 && lb.falseAlarmByKind.urls === 0 && lb.falseAlarmUrlsTerms === 1 && rs.flaggedUrlsTerms === 3);
+  const txt2 = renderReport(rs, { maxDetail: 0 });
+  check('　 文字報告印出誤報率、漏報率、每 100 則的提醒數', ['誤報率（標 ok 的答案被標出的比例）：1／7＝14.3%', '漏報率（標 flag 的答案沒被標出的比例）：0／4＝0.0%', '每 100 則答案會多 45.5 則提醒', '只看網址＋英文名詞（on:urls,terms 會提醒的）：3 則（27.3%）'].every((t) => txt2.includes(t)), txt2.slice(0, 600));
+  const noLabel = runBacktest({ events: sampleJ.events, answers: sampleJ.answers.map(({ expect, ...a }) => a) });
+  check('　 沒標 expect：不算誤報率（null），報告不印人工標註那一段', noLabel.labeled.falseAlarmRate === null && noLabel.labeled.missRate === null && !renderReport(noLabel).includes('人工標註對照'));
 }
 
 console.log(`\n${fail ? '❌' : '✅'} 批次 132（答案出口檢查：數字、網址、英文名詞，影子模式）測試：${pass} 通過，${fail} 失敗`);
