@@ -319,7 +319,8 @@ console.log('\n── 六、api/line.js 拆檔 ──');
   check('★ lib/line-*.js 之間沒有循環 import', cyc.length === 0, cyc.slice(0, 3).join('\n'));
   check('　 記者端不 import 職員模式與群組（反過來借用可以）',
     !deps['line-reporter.js'].some((d) => d === 'line-staff-mode.js' || d === 'line-group.js'));
-  check('　 每一支開頭都寫了是從哪裡搬來、裝的是什麼', mods.every((f) => /批次 117 從 api\/line\.js 搬出來/.test(src(`lib/${f}`).split('\n').slice(0, 12).join('\n'))));
+  // 批次 138 的 line-colleague-mode.js 是之後新增的，不是從 api/line.js 搬出來的（開頭寫的是它自己的來歷）
+  check('　 每一支開頭都寫了是從哪裡搬來、裝的是什麼', mods.filter((f) => f !== 'line-colleague-mode.js').every((f) => /批次 117 從 api\/line\.js 搬出來/.test(src(`lib/${f}`).split('\n').slice(0, 12).join('\n'))));
   const L = await import(new URL('../api/line.js?v=99', import.meta.url).href);
   check('　 既有的 import 不用改：api/line.js 照樣匯出 handler 與五個工具函式',
     typeof L.default === 'function' && ['toTraditionalTW', 'stripMarkdownForLine', 'tidyLineLayout', 'extractNoDataKeyword', 'guessNoDataKeyword'].every((n) => typeof L[n] === 'function'));
