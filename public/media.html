@@ -73,6 +73,33 @@
   .admin-panel button{border:1px solid var(--border);background:#fff;border-radius:9px;padding:8px 14px;font-family:var(--font);font-size:.82rem;cursor:pointer}
   .admin-panel button.primary{background:var(--primary);color:#fff;border-color:var(--primary)}
   .link-box{background:#f9fafb;border:1px solid var(--border);border-radius:8px;padding:8px 10px;font-family:monospace;font-size:.78rem;word-break:break-all;flex:1}
+
+  /* 批次 137：新增記者、挑收件人 */
+  .card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:18px}
+  .card h2{font-size:1rem;margin-bottom:4px}
+  .card .desc{font-size:.8rem;color:var(--muted);margin-bottom:12px}
+  .form-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px}
+  .form-grid .full{grid-column:1/-1}
+  .form-grid input,.form-grid select,.pick-form input[type=text],.pick-form input[type=number],.pick-form select{width:100%;border:1px solid var(--border);border-radius:10px;padding:10px 12px;font-family:var(--font);font-size:.9rem;background:#fff}
+  .card button.primary,.pick-batch button.primary{background:var(--primary);color:#fff;border:none;border-radius:10px;padding:10px 18px;font-family:var(--font);font-size:.86rem;font-weight:700;cursor:pointer}
+  .card button.ghost{background:#fff;border:1px solid var(--border);border-radius:10px;padding:10px 16px;font-family:var(--font);font-size:.86rem;cursor:pointer}
+  .form-msg{font-size:.82rem;margin-top:8px;min-height:18px;color:var(--muted)}
+  .form-msg.err{color:var(--danger)}
+  .pick-form{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px}
+  .pick-form label{font-size:.78rem;color:var(--muted);display:block;margin-bottom:3px}
+  .pick-form .full{grid-column:1/-1}
+  .pick-check{display:flex;align-items:center;gap:8px;font-size:.86rem}
+  .pick-sum{font-size:.86rem;background:var(--primary-light);border-radius:10px;padding:10px 12px;margin:12px 0;line-height:1.7}
+  .pick-sum .warn{color:#92400e}
+  .pick-batch{display:flex;justify-content:space-between;align-items:center;gap:10px;border:1px solid var(--border);border-radius:10px;padding:10px 12px;margin-bottom:8px;background:#fff}
+  .pick-batch .t{font-size:.86rem}
+  .pick-batch .t small{color:var(--muted)}
+  #pick-result{margin-bottom:22px}
+  .pick-people{font-size:.8rem;margin-top:10px}
+  .pick-people summary{cursor:pointer;color:var(--primary-dark)}
+  .pick-people table{width:100%;border-collapse:collapse;margin-top:8px}
+  .pick-people td{border-top:1px solid var(--border);padding:5px 4px;vertical-align:top;word-break:break-all}
+  .pick-tip{font-size:.78rem;color:var(--muted);margin-top:8px;line-height:1.6}
   .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--text);color:#fff;padding:10px 20px;border-radius:10px;font-size:.85rem;opacity:0;transition:opacity .2s;pointer-events:none;z-index:60}
   .toast.show{opacity:1}
 
@@ -113,6 +140,20 @@
   </div>
   <div id="search-results"></div>
 
+  <!-- 批次 137：新增一位記者，不用編 id、不用貼 CSV -->
+  <div class="card" id="add-card">
+    <h2>新增記者</h2>
+    <p class="desc">認識了新記者，填姓名、媒體、mail 就能存進名單。路線可以先不選，之後在待確認名單補。</p>
+    <div class="form-grid">
+      <input id="add-name" type="text" placeholder="姓名" maxlength="40" autocomplete="off">
+      <input id="add-outlet" type="text" placeholder="媒體（例如：經濟日報）" maxlength="60" autocomplete="off">
+      <input id="add-email" type="text" placeholder="電子郵件" class="full" inputmode="email" autocomplete="off">
+      <select id="add-beat" class="full"><option value="">路線（選填）</option></select>
+    </div>
+    <button class="primary" id="add-btn" onclick="addReporter()">新增</button>
+    <div class="form-msg" id="add-msg"></div>
+  </div>
+
   <div class="list-head">
     <h2>待確認名單</h2>
     <div class="note" id="showing-note"></div>
@@ -120,6 +161,20 @@
   <div id="list"></div>
 
   <div class="admin-panel" id="admin-panel" style="display:none">
+    <h3>挑收件人（貼進 Outlook 寄邀請函）</h3>
+    <p class="desc">平台不代寄信。這裡幫你挑好該寄的人、把 mail 排成 Outlook 收件人欄的格式，你複製貼進去再寄。已離職／轉線的人不會被挑到。</p>
+    <div class="pick-form">
+      <div><label for="pick-beat">路線</label><select id="pick-beat"><option value="">不限</option></select></div>
+      <div><label for="pick-outlet">媒體名稱包含</label><input id="pick-outlet" type="text" placeholder="例如：聯合" maxlength="30" autocomplete="off"></div>
+      <div><label for="pick-size">每批幾人</label><input id="pick-size" type="number" min="1" max="500" value="50"></div>
+      <div style="display:flex;align-items:flex-end"><label class="pick-check"><input id="pick-recent" type="checkbox"> 只挑最近一年受邀過的</label></div>
+    </div>
+    <div class="row">
+      <button class="primary" onclick="runPick()">挑出名單</button>
+      <button onclick="downloadOutlookCsv()">下載 Outlook 通訊錄 CSV</button>
+    </div>
+    <div id="pick-result"></div>
+
     <h3>同仁共用連結</h3>
     <p class="desc">把這條連結傳給同仁，他們不需要密碼就能確認／更新名單。連結外流就按「換一條」，舊連結立刻失效。</p>
     <div class="row">
@@ -215,6 +270,7 @@ let recNames = {}; // id → name，供 markLeft 的確認訊息用
 let recBeats = {}; // id → 目前的路線（空字串＝還沒有），confirmRec 用
 
 function render(data){
+  if(data.beats && data.beats.length){ beatsList = data.beats; fillBeatSelects(); }
   document.getElementById('kpi-total').textContent = data.totalActive ?? '–';
   document.getElementById('kpi-beat').textContent = data.totalWithBeat ?? '–';
   document.getElementById('kpi-review').textContent = data.totalNeedsReview ?? '–';
@@ -336,6 +392,107 @@ async function doExport(){
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
     a.download = `記者名單_${new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Taipei' })}.csv`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(a.href), 1000);
+  }catch(e){ toast(e.message); }
+}
+
+// ── 批次 137：新增記者 ───────────────────────────────────────────────────────
+let beatsList = [];
+function fillBeatSelects(){
+  ['add-beat','pick-beat'].forEach(id => {
+    const el = document.getElementById(id);
+    if(!el || el.options.length > 1) return; // 已經填過就不重填（選到一半不要被洗掉）
+    beatsList.forEach(b => { const o = document.createElement('option'); o.value = b; o.textContent = b; el.appendChild(o); });
+  });
+}
+
+async function addReporter(){
+  const val = id => document.getElementById(id).value.trim();
+  const msg = document.getElementById('add-msg');
+  const btn = document.getElementById('add-btn');
+  const name = val('add-name'), outlet = val('add-outlet'), email = val('add-email'), beat = val('add-beat');
+  msg.className = 'form-msg';
+  if(!name || !outlet || !email){ msg.className = 'form-msg err'; msg.textContent = '姓名、媒體、電子郵件都要填'; return; }
+  btn.disabled = true; msg.textContent = '新增中…';
+  try{
+    const r = await call('add', {name, outlet, email, beat}, 'POST');
+    if(r.error){ msg.className = 'form-msg err'; msg.textContent = r.error; return; }
+    msg.textContent = `已新增：${name}（${outlet}）`;
+    ['add-name','add-outlet','add-email','add-beat'].forEach(id => { document.getElementById(id).value = ''; });
+    toast('已新增');
+    render(await call('list')); // 在職人數、待確認會跟著變
+  }catch(e){ msg.className = 'form-msg err'; msg.textContent = '連線失敗，請稍後再試'; }
+  finally{ btn.disabled = false; }
+}
+
+// ── 批次 137：挑收件人（貼進 Outlook）────────────────────────────────────────
+let pickBatches = [];
+function pickParams(){
+  const p = {
+    beat: document.getElementById('pick-beat').value,
+    outlet: document.getElementById('pick-outlet').value.trim(),
+    size: document.getElementById('pick-size').value || '50',
+  };
+  if(document.getElementById('pick-recent').checked) p.recent = '1';
+  return p;
+}
+
+async function runPick(){
+  const box = document.getElementById('pick-result');
+  box.innerHTML = '<div class="pick-tip">挑選中…</div>';
+  let r;
+  try{ r = await call('pick', pickParams()); }catch(e){ r = {error:'連線失敗，請稍後再試'}; }
+  if(r.error){ box.innerHTML = `<div class="pick-tip" style="color:var(--danger)">${esc(r.error)}</div>`; return; }
+  pickBatches = r.batches || [];
+  const lines = [`符合條件的在職記者 <b>${r.matched}</b> 位，可以寄的有 <b>${r.total}</b> 位`];
+  if(r.withoutEmail) lines.push(`<span class="warn">⚠️ 另有 ${r.withoutEmail} 位沒有 mail（或 mail 格式不對），已略過</span>`);
+  if(r.duplicates) lines.push(`有 ${r.duplicates} 筆 mail 重複，已合併成一筆`);
+  let html = `<div class="pick-sum">${lines.join('<br>')}</div>`;
+  if(!r.total){
+    html += '<div class="pick-tip">這個條件下沒有可以寄的人。可以放寬條件再試一次。</div>';
+  }else{
+    html += pickBatches.map((b, i) => `
+      <div class="pick-batch"><div class="t">第 ${i+1} 批・${b.count} 人${pickBatches.length>1 ? `<br><small>共 ${pickBatches.length} 批，一批寄完再複製下一批</small>` : ''}</div>
+      <button class="primary" onclick="copyBatch(${i})">複製收件人</button></div>`).join('');
+    html += '<div class="pick-tip">貼到 Outlook 新郵件的<b>「密件副本」</b>欄，收件人之間就看不到彼此的 mail。每批人數請依公司信箱的單封收件人上限調整。</div>';
+    html += `<details class="pick-people"><summary>看這 ${r.total} 位是誰</summary><table>${(r.people||[]).map(p =>
+      `<tr><td>${esc(p.name)}</td><td>${esc(p.outlet)}</td><td>${esc(p.email)}</td></tr>`).join('')}</table></details>`;
+  }
+  box.innerHTML = html;
+}
+
+// 複製到剪貼簿。navigator.clipboard 只在 https／使用者剛按過按鈕時給用；不行就退回隱藏 textarea＋execCommand。
+async function copyText(text){
+  try{
+    if(navigator.clipboard && navigator.clipboard.writeText){ await navigator.clipboard.writeText(text); return true; }
+  }catch(e){}
+  try{
+    const ta = document.createElement('textarea');
+    ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select();
+    const ok = document.execCommand('copy');
+    ta.remove();
+    return !!ok;
+  }catch(e){ return false; }
+}
+
+async function copyBatch(i){
+  const b = pickBatches[i];
+  if(!b){ toast('請先按「挑出名單」'); return; }
+  const ok = await copyText(b.text);
+  toast(ok ? `已複製第 ${i+1} 批（${b.count} 人），到 Outlook「密件副本」貼上` : '複製失敗，請改用「下載 Outlook 通訊錄 CSV」');
+}
+
+async function downloadOutlookCsv(){
+  try{
+    const qs = new URLSearchParams({action:'export_outlook', ...pickParams()});
+    const res = await fetch('/api/media?'+qs.toString(), { headers: { 'X-Admin-Password': S.pwd } });
+    if(!res.ok){ const d = await res.json().catch(()=>({})); throw new Error(d.error || `下載失敗（${res.status}）`); }
+    const blob = await res.blob();
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `Outlook通訊錄_${new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Taipei' })}.csv`;
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(()=>URL.revokeObjectURL(a.href), 1000);
   }catch(e){ toast(e.message); }
