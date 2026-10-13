@@ -101,7 +101,7 @@ export const state = {
       '', '【邀請函】誠摯邀請貴媒體蒞臨採訪本次記者會…', '邀請函內容是什麼？\n採訪申請方式？']
   ],
   bindings: new Map(),
-  staff: [],                 // line_staff!A2:D 的列：userId | name | authorized_at | note
+  staff: [],                 // line_staff!A2:F 的列：userId | name | authorized_at | note | pending | role
   richMenus: [],             // listRichMenus() 回傳的 [{richMenuId, name}]
   linkedMenus: new Map(),    // userId → richMenuId（per-user 連結）
   // 全域技術窗口分工（contacts_directory!A2，見 lib/contacts-directory.js）。
@@ -245,7 +245,7 @@ export const sheets = {
       if (row) row[memM[1].charCodeAt(0) - 65] = values[0][0];
       return;
     }
-    const staffM = range.match(/^line_staff!([A-E])(\d+)(?::([A-E])(\d+))?$/);
+    const staffM = range.match(/^line_staff!([A-F])(\d+)(?::([A-F])(\d+))?$/);
     if (staffM) {
       const row = state.staff[Number(staffM[2]) - 2];
       if (row) values[0].forEach((v, i) => { row[staffM[1].charCodeAt(0) - 65 + i] = v; });

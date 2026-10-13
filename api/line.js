@@ -40,6 +40,7 @@
 //   lib/line-reporter.js    記者端：活動問答、邀訪窗口、產業趨勢、技術查詢、找真人、近期活動、兜底
 //   lib/line-register.js    活動報名（我要報名、#報名 綁定）
 //   lib/line-staff-mode.js  職員模式（活動卡、在 LINE 改資料、教米亞、圖文選單）
+//   lib/line-colleague-mode.js  同仁模式（批次 138：新增、修改＋發布、媒體訓練，給一般同事用）
 //   lib/line-group.js       群組（守門、喚醒詞、免 @ 續問視窗）
 // 依賴只往下走：store／format／chitchat → runtime → nodata／register → reporter → staff-mode／group → 這支。
 
@@ -50,7 +51,9 @@ import { buildCalendarCards, buildCalendarCardsFor, routeIntent } from '../lib/r
 import { matchEventByName, buildWelcomeFlex } from '../lib/menu.js';
 import { listOpenCampaigns, parseRegBindText, parseRegBindCheck, welcomeButtonLabel } from '../lib/registration.js';
 import { autoSyncRegistrationMenu } from '../lib/richmenu-sync.js';
-import { isPasscodeMatch, isStaffAuthenticated, authenticateStaff } from '../lib/staff.js';
+import {
+  isPasscodeMatch, isColleaguePasscodeMatch, isStaffAuthenticated, isColleagueAuthenticated, authenticateStaff, COLLEAGUE
+} from '../lib/staff.js';
 import { isBusinessEvent } from '../lib/audience.js';
 import { parseB2BBind, handleB2BBind, isPartnershipAsk, handlePartnershipAsk } from '../lib/b2b-line.js';
 import { sanitize } from '../lib/line-format.js';
@@ -63,7 +66,7 @@ import {
 } from '../lib/line-store.js';
 import {
   HOME_MENU, REQUEST_BUDGET_MS, STAFF_HOME_CHIPS, askMediaNameLater, eventContentChips, eventQuickChips,
-  markStaff, mediaNameChips, rateLimited, replyOrPush, requestCtx, staffChips, toQuickReply
+  markStaff, markColleague, COLLEAGUE_HOME_CHIPS, mediaNameChips, rateLimited, replyOrPush, requestCtx, staffChips, toQuickReply
 } from '../lib/line-runtime.js';
 import { pinGenericTechQueryToEvent } from '../lib/line-nodata.js';
 import { handleRegBind, resolveMetaIntent } from '../lib/line-register.js';
@@ -72,7 +75,8 @@ import {
   handleMetaIntent, handleNewsQueryMessage, handleTechNewsPick, handleTechQueryMessage, handleTrendQueryMessage, handleUnbound, isFullTextAsk,
   sendCalendarReply
 } from '../lib/line-reporter.js';
-import { applyStaffMenu, handleStaffImage, handleStaffMessage } from '../lib/line-staff-mode.js';
+import { applyStaffMenu, applyColleagueMenu, handleStaffImage, handleStaffMessage } from '../lib/line-staff-mode.js';
+import { handleColleagueMessage } from '../lib/line-colleague-mode.js';
 import { WAKE_WORD_RE, handleGroupEvent, handleGroupJoin } from '../lib/line-group.js';
 
 // ── 簡體字防線（批次 45）─────────────────────────────────────────────────
@@ -161,6 +165,14 @@ async function handleEvent(ev) {
       }
       return;
     }
+    // 批次 138：同仁傳照片——同仁模式沒有「LINE 加照片」，照片請到編輯頁。不能落到記者那句「我看不到圖片」。
+    if ((ev.message?.type === 'image' || ev.message?.type === 'file') && await isColleagueAuthenticated(userId)) {
+      markColleague();
+      await replyOrPush(replyToken, userId,
+        '照片、新聞稿、邀請函請到編輯頁上傳 🙏 點「修改活動」選一場，活動卡上有編輯頁連結。',
+        COLLEAGUE_HOME_CHIPS);
+      return;
+    }
     await replyOrPush(replyToken, userId, nonTextReply(ev.message?.type));
     return;
   }
@@ -223,6 +235,29 @@ async function handleEvent(ev) {
       STAFF_HOME_CHIPS);
     return;
   }
+  // 同仁模式（批次 138）：另一組密語，給一般同事。排在職員密語之後——兩組設成同一個字時職員優先，
+  // 不會有人因為設定重複被降成同仁。已經是職員的人打同仁密語：不降級、也不另外寫一列。
+  if (isColleaguePasscodeMatch(text)) {
+    markStaff();
+    if (await isStaffAuthenticated(userId)) {
+      await replyOrPush(replyToken, userId, '您已經是職員模式了，功能比同仁模式完整，不用再輸入同仁密語。', STAFF_HOME_CHIPS);
+      return;
+    }
+    markColleague();
+    if (await isColleagueAuthenticated(userId)) {
+      await replyOrPush(replyToken, userId, '您已經是同仁模式了，直接用下方選單就可以，不用再輸入一次密語。', COLLEAGUE_HOME_CHIPS);
+      return;
+    }
+    const { displayName } = await authenticateStaff(userId, { role: COLLEAGUE });
+    await applyColleagueMenu(userId); // 下方選單換成同仁版（三格）
+    console.log(`[line] 新同仁登入 user=${userId} name=${displayName || '(無)'}`);
+    const adminSetup = process.env.LINE_ADMIN_USER_ID ? ''
+      : `\n\n（管理員設定用）您的 LINE ID：${userId}\n想在「有新的人用密語登入」時收到通知，把這組 ID 設成 LINE_ADMIN_USER_ID 環境變數即可。`;
+    await replyOrPush(replyToken, userId,
+      `同仁模式已啟用${displayName ? `，${displayName} 您好` : ''}！\n\n可以新增活動、修改活動（含發布）、拿媒體訓練連結。點下方選單，或直接用講的，例如「智慧醫療那場地點改成南港展覽館」。${adminSetup}`,
+      COLLEAGUE_HOME_CHIPS);
+    return;
+  }
   // 報名頁按「用 LINE 連結我的報名」送來的「#報名 R7K3M」（批次 88）。必須排在職員判斷與一般
   // 「#活動代碼」之前：它也是 # 開頭，晚一步就會被當成活動代碼、回一句「找不到活動」。
   const regBindCode = parseRegBindText(text);
@@ -240,6 +275,12 @@ async function handleEvent(ev) {
   if (await isStaffAuthenticated(userId)) {
     markStaff();
     await handleStaffMessage(replyToken, userId, text);
+    return;
+  }
+  // 同仁模式（批次 138）：整段接管，只走 lib/line-colleague-mode.js 那份白名單
+  if (await isColleagueAuthenticated(userId)) {
+    markColleague();
+    await handleColleagueMessage(replyToken, userId, text);
     return;
   }
   // 「企業合作洽詢」只回洽詢單網址（批次 119）。排在職員模式之後：職員怎麼講都照原本的職員模式走，不被業發處攔走；

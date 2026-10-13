@@ -148,16 +148,18 @@ for (const t of btnTexts) eq(detectMetaIntent(t) !== null, true, `歡迎卡按�
 console.log('── 圖文選單定義 ──');
 for (const m of ALL_MENUS) {
   const menu = buildRichMenuDefinition(m);
-  eq(menu.size, { width: 2500, height: 1686 }, `${m.name}：尺寸符合 LINE 大版規格`);
-  eq(menu.areas.length, 6, `${m.name}：六個可點區域`);
+  // 批次 138：同仁選單是 3 欄 1 列的小尺寸（2500×843）；其餘照舊 3 欄 2 列的大版（2500×1686）
+  const W = 2500, H = m.size ? m.size.height : 1686, N = (m.cols || 3) * (m.rows || 2);
+  eq(menu.size, { width: W, height: H }, `${m.name}：尺寸符合 LINE 規格（大版 2500×1686 或小版 2500×843）`);
+  eq(menu.areas.length, N, `${m.name}：${N} 個可點區域`);
   eq(menu.chatBarText.length <= 14, true, `${m.name}：chatBarText 在 14 字上限內`);
   eq(menu.areas[0].bounds, { x: 0, y: 0, width: 833, height: 843 }, `${m.name}：左上格`);
 
   // 六格必須無縫鋪滿整張圖：有縫隙就是點了沒反應，有重疊就是按到隔壁那格
   const covered = menu.areas.reduce((sum, a) => sum + a.bounds.width * a.bounds.height, 0);
-  eq(covered, 2500 * 1686, `${m.name}：六格剛好鋪滿 2500x1686，沒有縫隙也沒有重疊`);
+  eq(covered, W * H, `${m.name}：格子剛好鋪滿整張圖，沒有縫隙也沒有重疊`);
   eq(Math.max(...menu.areas.map(a => a.bounds.x + a.bounds.width)), 2500, `${m.name}：右緣補滿`);
-  eq(Math.max(...menu.areas.map(a => a.bounds.y + a.bounds.height)), 1686, `${m.name}：下緣補滿`);
+  eq(Math.max(...menu.areas.map(a => a.bounds.y + a.bounds.height)), H, `${m.name}：下緣補滿`);
 
   for (const b of m.buttons) {
     eq(b.label.length <= 20, true, `${m.name}：label「${b.label}」在 20 字上限內`);

@@ -1,4 +1,4 @@
-// 產生 public/richmenu-reporter.png 與 public/richmenu-staff.png。
+// 產生 public/richmenu-*.png（記者、報名版、職員、同仁，四張）。
 //
 // 為什麼是腳本、不是手寫兩份 HTML：底圖上的字必須跟 lib/menu.js 的 REPORTER_MENU／
 // STAFF_MENU 逐格對齊。手維護兩份 HTML 的話，改了定義忘了改圖（或反過來）就會變成
@@ -18,19 +18,24 @@ import { execFileSync } from 'child_process';
 import { tmpdir } from 'os';
 import { join, resolve, dirname } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
-import { ALL_MENUS, RICH_MENU_SIZE, buildRichMenuDefinition } from '../lib/menu.js';
+import { ALL_MENUS, buildRichMenuDefinition } from '../lib/menu.js';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const { width, height } = RICH_MENU_SIZE;
 const BRAND = '#0F9E7A';
 
-// 格線寬高直接從 buildRichMenuDefinition() 產出的可點區域反推，不在這裡重算一次。
+// 圖的尺寸與格線寬高直接從 buildRichMenuDefinition() 產出的可點區域反推，不在這裡重算一次。
 // 這兩組數字只要差一個像素，圖上的格線就會跟 LINE 那邊的可點區域錯開，使用者會
 // 按到隔壁那格；而重算就是它們會錯開的原因。同一個來源就不可能錯開。
-const AREAS = buildRichMenuDefinition(ALL_MENUS[0]).areas.map(a => a.bounds);
-const COL_W = AREAS.filter(b => b.y === 0).map(b => b.width);
-const ROW_H = [...new Set(AREAS.map(b => b.y))].sort((a, b) => a - b)
-  .map(y => AREAS.find(b => b.y === y).height);
+// 批次 138：每張選單各算各的（同仁選單是 3 欄 1 列的小尺寸，不是 3×2）。
+function layoutOf(menu) {
+  const def = buildRichMenuDefinition(menu);
+  const areas = def.areas.map(a => a.bounds);
+  return {
+    width: def.size.width, height: def.size.height,
+    COL_W: areas.filter(b => b.y === 0).map(b => b.width),
+    ROW_H: [...new Set(areas.map(b => b.y))].sort((a, b) => a - b).map(y => areas.find(b => b.y === y).height)
+  };
+}
 
 const CHROME_CANDIDATES = [
   process.env.CHROME,
@@ -45,7 +50,8 @@ const CHROME_CANDIDATES = [
 ].filter(Boolean);
 
 function html(menu) {
-  const cells = menu.buttons.slice(0, 6).map(b => `
+  const { width, height, COL_W, ROW_H } = layoutOf(menu);
+  const cells = menu.buttons.slice(0, COL_W.length * ROW_H.length).map(b => `
     <div class="cell">
       <div class="icon">${b.icon}</div>
       <div class="label">${b.label}</div>
@@ -106,6 +112,7 @@ for (const menu of ALL_MENUS) {
   if (only.length && !only.includes(menu.key)) continue;
   const src = join(tmp, `${menu.key}.html`);
   const out = join(ROOT, 'public', `richmenu-${menu.key}.png`);
+  const { width, height } = layoutOf(menu);
   writeFileSync(src, html(menu));
   execFileSync(chrome, [
     '--headless', '--no-sandbox', '--disable-gpu', '--hide-scrollbars',
