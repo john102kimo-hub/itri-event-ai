@@ -7,11 +7,15 @@
 // GET  ?action=list&code=xxx           → 待確認名單（依重要性排序，每次給一批）
 // GET  ?action=search&code=xxx&q=xxx   → 搜尋特定記者（辦活動前先查）
 // POST {action:'update',code,id,...}   → 一鍵更新：補路線／標記離職／標記仍在職
+// POST {action:'add',code,name,outlet,email,beat?} → 新增一位記者（批次 137，不用編 id、不用貼 CSV）
 //
 // ── 管理員（需 ADMIN_PASSWORD）───────────────────────────────────────
 // POST {action:'seed',password,csv}    → 貼上 CSV 一次性匯入／更新（用 id 對應，重覆貼不會炸掉）
 // POST {action:'settings_save',password,revoke?,regenerate?} → 產生／收回同仁連結的 code
 // GET  ?action=export                  → 匯出全部名單 CSV（管理員，header X-Admin-Password）
+// GET  ?action=pick&beat=&outlet=&recent=1&size=50 → 挑收件人：照路線／媒體／最近受邀篩出有 mail 的在職記者，
+//                                        mail 串成 Outlook 收件人欄的格式並分批（管理員，批次 137）
+// GET  ?action=export_outlook&…(同 pick) → 挑出來的人匯成 Outlook 通訊錄／合併郵件用的 CSV（管理員，批次 137）
 //
 // 誠實邊界：這裡不猜記者現在跑什麼路線，只把「太久沒受邀」「從沒填過路線」的人
 // 排到前面讓人判斷，是否還在職、路線是什麼，一律由人工按一下確認。
@@ -19,6 +23,7 @@
 import { readRange, appendRows, updateRange, ensureSheets } from '../lib/sheets.js';
 import { adminAttempt, requireAdmin, passwordFrom, codeMatches, authFailed } from '../lib/auth.js';
 import { generateShareCode } from '../lib/ids.js';
+import { pickRecipients, toBatches, clampBatchSize, buildOutlookCsv, csvCell, normalizeEmail, nextRosterId } from '../lib/media-pick.js';
 
 const SHEETS = {
   media_roster: [
@@ -124,13 +129,7 @@ async function authorize({ code, password }, req) {
   return { ok: true, who: 'staff' };
 }
 
-// CSV 公式注入防護（批次 116，跟 api/export.js 同一套）：路線、更新者是拿共用連結的人寫的，
-// 寫「=HYPERLINK(…)」進去，管理員匯出用 Excel 一開就變成公式。開頭是 = + - @ Tab 歸位字元的補一個單引號。
-const csvCell = (v) => {
-  let s = String(v ?? '');
-  if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
-  return `"${s.replace(/"/g, '""')}"`;
-};
+// CSV 公式注入防護（批次 116）住在 lib/media-pick.js 的 csvCell()（批次 137 搬過去，匯出名單與 Outlook CSV 共用同一支）。
 
 /** 極簡 CSV 解析：逗號分隔、雙引號括住可含逗號的欄位。給管理員一次性貼資料用，不追求處理所有 Excel 怪狀況。 */
 function parseCsv(text) {
@@ -214,6 +213,28 @@ export default async function handler(req, res) {
         res.setHeader('Content-Type', 'text/csv; charset=utf-8');
         res.setHeader('Content-Disposition', `attachment; filename="media_roster_${today()}.csv"`);
         return res.status(200).send('﻿' + csv);
+      }
+
+      // 挑收件人（批次 137）：mail 是個資，只給管理員；同仁共用連結看不到（連結外流也撈不走整份 mail）。
+      if (action === 'pick' || action === 'export_outlook') {
+        if (!requireAdmin(req, res, password)) return;
+        const rows = (await readRange('media_roster!A2:N')).map(parseRow); // 讀失敗要報錯，不能當成「沒有人」
+        const picked = pickRecipients(rows, {
+          beat: String(req.query.beat || ''), outlet: String(req.query.outlet || '').slice(0, 30),
+          recentOnly: req.query.recent === '1',
+        });
+        if (action === 'export_outlook') {
+          res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+          res.setHeader('Content-Disposition', `attachment; filename="outlook_contacts_${today()}.csv"`);
+          return res.status(200).send(buildOutlookCsv(picked.people));
+        }
+        const size = clampBatchSize(req.query.size);
+        return res.status(200).json({
+          matched: picked.matched, withoutEmail: picked.withoutEmail, duplicates: picked.duplicates,
+          total: picked.people.length, batchSize: size,
+          batches: toBatches(picked.people.map((p) => p.email), size),
+          people: picked.people,
+        });
       }
 
       return res.status(400).json({ error: '不支援的操作' });
@@ -314,6 +335,34 @@ export default async function handler(req, res) {
       // ── 以下需要同仁 code 或管理員密碼 ──
       const auth = await authorize({ code, password }, req);
       if (!auth.ok) return res.status(auth.status).json({ error: auth.msg });
+
+      // 新增一位記者（批次 137）：姓名、媒體、mail 必填，路線選填。id 由系統編（N0001…），不用自己想。
+      if (action === 'add') {
+        const name = String(body.name || '').trim().slice(0, 40);
+        const outlet = String(body.outlet || '').trim().slice(0, 60);
+        const beat = String(body.beat || '').trim();
+        const rawEmail = String(body.email || '').trim();
+        if (!name) return res.status(400).json({ error: '請填記者姓名' });
+        if (!outlet) return res.status(400).json({ error: '請填媒體名稱' });
+        const email = normalizeEmail(rawEmail);
+        if (!email) return res.status(400).json({ error: 'mail 格式看起來不對，請再確認（例如 name@example.com）' });
+        if (beat && !BEATS.includes(beat)) return res.status(400).json({ error: '路線請從選項裡挑' });
+        await ensureSheets(SHEETS);
+        // 用 readRange、不用 safeRead：讀失敗時 safeRead 回空陣列，會以為名單是空的而編出重複的 id、也查不到重複的 mail
+        const existing = (await readRange('media_roster!A2:N')).map(parseRow);
+        const dup = existing.find((r) => normalizeEmail(r.email) === email);
+        if (dup) {
+          return res.status(409).json({
+            error: `這個 mail 已經在名單裡了：${dup.name}（${dup.outlet}）${dup.status === 'left' ? '，目前標記為已離職，可以用上面的搜尋找到他再按「恢復在職」' : ''}`,
+            duplicate: { id: dup.id, name: dup.name, outlet: dup.outlet, status: dup.status },
+          });
+        }
+        const id = nextRosterId(existing.map((r) => r.id));
+        await appendRows('media_roster!A:N', [[
+          id, name, outlet, beat, email, '', 0, 0, 0, '', 'active', '', now(), String(body.updated_by || '').slice(0, 20),
+        ]]);
+        return res.status(200).json({ success: true, id });
+      }
 
       if (action === 'update') {
         const { id, beat, mark, updated_by } = body;
