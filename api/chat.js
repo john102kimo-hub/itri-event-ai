@@ -11,8 +11,8 @@ import { toTraditionalTW, createTraditionalStream, ZH_TW_RULE } from '../lib/zh-
 import { reportAiFailure, BUSINESS_KEY_NAME } from '../lib/ai-alert.js';
 import { readEventRows } from '../lib/events-table.js';
 import { logAiUsage } from '../lib/ai-usage.js';
-import { isRefusal, logRefusal, refusalReply, postAnthropic, buildSonnetRetryBody, SONNET_RETRY_MODEL } from '../lib/ai-refusal.js';
-import { checkAnswerGrounding } from '../lib/answer-grounding.js';
+import { isRefusal, logRefusal, refusalReply, postAnthropic, buildSonnetRetryBody, SONNET_RETRY_MODEL, dropRefusedTurns, looksEnglish, REFUSAL_MIDWAY_ZH, REFUSAL_MIDWAY_EN } from '../lib/ai-refusal.js';
+import { checkAnswerGrounding, stripDisclaimer } from '../lib/answer-grounding.js';
 
 // 批次 120：Haiku 4.5 → Haiku 5.5。5.5 預設會開 adaptive thinking（4.5 不會），記者要的是聊天速度的回應，
 // 所以下面 body 明確送 thinking:{type:'disabled'}（5.5 在 effort medium 以下接受）。不送 temperature 等取樣參數（5.5 會 400）。
@@ -58,9 +58,12 @@ function streamRefusalDetails(evt) {
 }
 
 // 輸出到一半才被攔下：已經送出去的字收不回來，接著補一句說明，不讓記者把半截答案當成完整答案引用。
-const REFUSAL_MIDWAY_ZH = '（這一題後半段沒辦法回答，建議洽新聞聯絡人。）';
-const REFUSAL_MIDWAY_EN = '(The rest of this answer could not be completed. Please contact the press contact.)';
-const hasChinese = (s) => /[\u4e00-\u9fff]/.test(String(s || ''));
+// （說明句本身 REFUSAL_MIDWAY_ZH／EN 住在 lib/ai-refusal.js：下一題要認得「這一輪被拒答過」，跟固定句放一起。）
+
+// 拒答固定句裡的新聞聯絡人是同仁在後台打的單位、姓名與電話，是**名稱**，跟 LINE（lib/line-runtime.js askAnthropic()）一致：
+// 只轉字（簡→繁）、不轉用語（{ terms:false }）。不然同一場活動、同一個聯絡人，網頁把「光伏事業部」顯示成「太陽光電事業部」，
+// LINE 卻是原樣，記者拿網頁看到的單位名稱去找會對不上（批次 134 審查）。
+const toTraditionalName = (s) => toTraditionalTW(s, { terms: false });
 
 // 非串流從模型回應取文字。不能寫死 content[0]：第一塊不保證是文字（見 api/line.js askAnthropic() 的說明）
 const textOf = (data) => (data?.content || []).filter(b => b?.type === 'text').map(b => b.text).join('\n').trim();
@@ -107,7 +110,10 @@ function groundingNoteFor(reply, requestBody, eventId, stream) {
       ...requestBody.system.map(b => b.text),
       ...requestBody.messages.filter(m => m.role === 'user').map(m => m.content)
     ];
-    const note = checkAnswerGrounding(reply, shownText, { where: stream ? 'web-chat-stream' : 'web-chat', eventId }).note;
+    // 英文答案後面接英文版提醒（外國記者看不懂中文提醒）；先拿掉結尾警語再判斷語言，見 buildGroundingNote()
+    const note = checkAnswerGrounding(reply, shownText, {
+      where: stream ? 'web-chat-stream' : 'web-chat', eventId, english: looksEnglish(stripDisclaimer(reply))
+    }).note;
     // 提醒文字是固定句，本來就是繁體；仍然過一次出口，「每一段送出去的字都經過 toTraditionalTW」不留例外
     return note ? toTraditionalTW(note) : '';
   } catch (e) {
@@ -262,9 +268,13 @@ export default async function handler(req, res) {
   // ⚠️ 批次 116：只收字串。以前 content 不是字串就原樣轉給模型——傳一個 [{type:'text', text:…}]
   // 陣列，8000 字的上限就整個失效（實測 60 萬字照送），還能夾帶圖片、PDF 區塊。前台本來就只送字串，
   // 跟 api/training.js normalizeMessages() 同一個做法。
-  const trimmed = messages
+  // 批次 134：被拒答的那一輪（問題＋我們的固定句）不再帶進下一題，見 dropRefusedTurns() 的說明；
+  // 放在「第一則必須是 user」的整理之前，拿掉成對的兩則之後開頭若變成 assistant，下面那行會接著處理。
+  // ⚠️ 要在截 8000 字**之前**判斷：輸出到一半被攔下的那一輪，結尾是補上去的說明句，半截答案夠長的話
+  // 先截斷就會把說明句截掉、認不出它。
+  const trimmed = dropRefusedTurns(messages
     .slice(-12)
-    .filter(m => m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string' && m.content.trim())
+    .filter(m => m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string' && m.content.trim()))
     .map(m => ({ role: m.role, content: m.content.slice(0, 8000) }));
   // 模型 API 要求第一則一定是使用者的話。「只留最近 12 則」會把一輪問答從中間切開：前端每一題都是
   // 「問、答、問、答…最後一個是問」，總數是奇數，往回數 12 則剛好從 AI 的回答開始——
@@ -364,7 +374,7 @@ export default async function handler(req, res) {
       }
       if (refusedFixed) {
         // 固定句不是答案：不補企業免責句（沒有答案時本來就不補，見下面 `business && text`）、也不做答案出口檢查。
-        reply = toTraditionalTW(refusalReply({ contact: event.press_contact, english: !hasChinese(question) }));
+        reply = toTraditionalName(refusalReply({ contact: event.press_contact, english: looksEnglish(question) }));
       } else {
         reply = toTraditionalTW(text) || '抱歉，無法取得回應。';
         if (business && text) reply = guardBusinessAnswer(reply, event).text;
@@ -441,7 +451,7 @@ export default async function handler(req, res) {
     let fixedTail = false;
     if (refused) {
       logRefusal('網頁問答', CHAT_MODEL, refusal, { eventId: event_id });
-      const english = !hasChinese(question);
+      const english = looksEnglish(question);
       if (!reply) {
         // 輸出前就被攔下：一個字都還沒送出去，可以換成 Sonnet 非串流重答，成功就照常用串流格式送出
         const redo = await retryRefusedOnSonnet({ requestBody, key, startedAt, usageWhere: '網頁問答', eventId: event_id });
@@ -450,7 +460,7 @@ export default async function handler(req, res) {
           send(zh.push(redo));
           send(zh.flush());
         } else {
-          send(toTraditionalTW(refusalReply({ contact: event.press_contact, english })));
+          send(toTraditionalName(refusalReply({ contact: event.press_contact, english })));
           fixedTail = true;
         }
       } else {

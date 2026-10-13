@@ -409,7 +409,94 @@ async function answerOnce(model, plan1, { q = Q1, mode } = {}) {
   const r2 = await dm('U_b2', '模組的量產時間？', [on(isQa, refusalRes())]);
   setMode(undefined);
   const t2 = textOf(r2);
-  check('　 企業場被拒答：回的是帶新聞聯絡人的固定句（業務窗口）＋照舊的企業免責句，不寫歷史', t2.startsWith(refusalReply({ contact: '業務窗口 林小姐 03-5912345' })) && /不構成報價或合作承諾/.test(t2) && turnOf('U_b2') === null, t2);
+  check('★ 企業場被拒答：回的就是帶新聞聯絡人的固定句（業務窗口），一個字都不多——不補企業免責句（網頁版本來就不補，兩邊一致），也不寫歷史',
+    t2 === refusalReply({ contact: '業務窗口 林小姐 03-5912345' }) && !/不構成報價或合作承諾/.test(t2) && turnOf('U_b2') === null, t2);
+
+  // 聯絡人欄位若帶金額樣式（「業發處 NT$5000 起」），整句不能被企業場出口換成「牽涉到費用、報價」的封鎖句
+  state.events.length = 0; bizRow(); state.events[state.events.length - 1][14] = '業發處 NT$5000 起 03-5912345';
+  await fresh(); bind('U_b3', 'biz');
+  const r3 = await dm('U_b3', '模組的量產時間？', [on(isQa, refusalRes())]);
+  const t3 = textOf(r3);
+  check('　 聯絡人字串帶金額樣式：固定句照樣原樣送出，不會被企業場的金額封鎖整句換掉', t3 === refusalReply({ contact: '業發處 NT$5000 起 03-5912345' }) && !/費用、報價/.test(t3), t3);
+  // 對照：模型真的答了（沒被拒答）的企業場，免責句照舊要補
+  bizRow(); await fresh(); bind('U_b4', 'biz');
+  const r4 = await dm('U_b4', '模組的量產時間？', [on(isQa, okRes(`適用 CNC 與射出成型產線。`))]);
+  check('　 （對照）企業場沒被拒答時，企業免責句照舊要補', /不構成報價或合作承諾/.test(textOf(r4)), textOf(r4));
+}
+
+out('\n── 四之一、批次 134 審查補強：語氣偏好算進來源、英文提醒、提醒過繁體出口、正常答案不被誤判成拒答 ──');
+{
+  // 同仁教的語氣偏好（bot_memory 的 style）askAnthropic() 會接進 system prompt 送給模型；出口檢查也要把它當成「模型看到的字」，
+  // 不然模型照做的署名（含英文名詞與數字）會被當成「新聞稿查不到」，誤報率灌高、on 模式還會對記者亂標。
+  const SIGNED = `良率達 92%。\n\n— Mia-2000 助理\n\n${W}`;
+  const addStyle = () => state.memories.push(['2026-10-01', 'global', 'style', '語氣：回答結尾固定署名「Mia-2000 助理」', 'Ux', 'on']);
+
+  setMode('on'); seedSemi(); await fresh(); bind('U_m0');
+  const without = await dm('U_m0', Q1, [on(isQa, okRes(SIGNED))]);
+  check('（對照）沒有這條語氣偏好時，署名裡的 Mia-2000 是模型沒看過的東西，on 模式會被標出——證明下面那題的「沒被標出」不是檢查本身壞了',
+    /（.*Mia-2000.*）在新聞稿原文裡查不到/.test(textOf(without)) || /Mia-2000/.test(textOf(without).split('⚠️')[1] || ''), textOf(without));
+
+  seedSemi(); addStyle(); await fresh(); bind('U_m1');
+  const withStyle = await dm('U_m1', Q1, [on(isQa, okRes(SIGNED))]);
+  setMode(undefined);
+  const sentSys = withStyle.calls.find(isQa)?.sysAll || '';
+  check('（前提）語氣偏好真的有送給模型（system prompt 裡有「署名」那條）', /Mia-2000 助理/.test(sentSys), sentSys.slice(-300));
+  check('★ 語氣偏好算進來源：模型照做的署名 Mia-2000 不被標出（on 模式沒有提醒、沒有 [grounding] log）',
+    textOf(withStyle) === SIGNED && !hasGrounding(withStyle), textOf(withStyle));
+  check('　 沒有多打 Sheets：記憶是同一份 60 秒快取（answerQuestion 取一次，askAnthropic 讀同一份快取）',
+    withStyle.calls.filter(isQa).length === 1);
+  // 語氣偏好以外的編造照樣標出（沒有因為多收了來源而放水）
+  setMode('on'); seedSemi(); addStyle(); await fresh(); bind('U_m2');
+  const stillFlag = await dm('U_m2', Q1, [on(isQa, okRes(`預計 2028 年量產。\n\n— Mia-2000 助理\n\n${W}`))]);
+  setMode(undefined);
+  const noteLine = textOf(stillFlag).split('⚠️')[1] || '';
+  check('　 語氣偏好以外的編造數字（2028 年）照樣被標出，署名不在提醒裡', /2028 年/.test(noteLine) && !/Mia-2000/.test(noteLine), textOf(stillFlag));
+  state.memories.length = 0;
+}
+{
+  // 英文答案（記者用英文問）：on 模式附英文版提醒；結尾警語仍是中文也一樣；提醒不進歷史、排在補查結果之前
+  const EN_FAB = 'The mass production target is 2028 with an investment of 800 billion NT dollars.';
+  setMode('on'); seedSemi(); await fresh(); bind('U_en');
+  const r = await dm('U_en', 'When is mass production planned?', [on(isQa, okRes(`${EN_FAB}\n\n${W}`))]);
+  const t = textOf(r);
+  const note = t.split('\n\n').pop();
+  check('★ 英文答案（結尾警語仍是中文）：附的是英文版提醒，沒有中文字、沒有 Markdown，點名編造的 2028',
+    /^⚠️ Some items above \(.*2028.*\) could not be found in the press release\. Please confirm with the press contact before citing\.$/.test(note) && !/[一-鿿]/.test(note) && !/[*_`#]/.test(note), t);
+  check('　 英文答案本身一個字沒動，提醒接在警語之後', t.startsWith(`${EN_FAB}\n\n${W}\n\n⚠️ Some items above`), t);
+  const turn = turnOf('U_en');
+  check('　 英文版提醒也不進對話歷史', !!turn && !/Some items above|⚠️/.test(turn.a) && turn.a.includes('2028'), J(turn));
+  seedSemi(); await fresh(); bind('U_zh');
+  const zh = await dm('U_zh', Q1, [on(isQa, okRes(FAB))]);
+  setMode(undefined);
+  check('★ （對照）中文答案仍是中文版提醒，一個字沒變', textOf(zh).startsWith(FAB + NOTE_START) && textOf(zh).endsWith(NOTE_END), textOf(zh));
+}
+{
+  // 提醒過繁體出口（跟網頁版同一個承諾）。提醒是固定句加答案片段，沒有辦法從外面餵進簡體，所以這裡是靜態守門 + 變異測試守住
+  const lr = src('lib/line-reporter.js');
+  check('　 LINE 的提醒（groundingNote）過 toTraditionalTW(…, { terms:false })：只轉字不轉用語，簡體防線連固定句也不留例外',
+    /groundingNote = grounding\?\.note \? `\\n\\n\$\{toTraditionalTW\(grounding\.note, \{ terms: false \}\)\}` : ''/.test(lr));
+}
+{
+  // 回歸 F2：模型自己寫出以「這一題我這邊沒辦法回答」開頭的正常答案，不能被當成拒答
+  const LOOK = `這一題我這邊沒辦法回答得很精確，不過預計 2028 年量產。\n[[NO_DATA:院士]]\n\n${W}`;
+  setMode('on'); seedSemi(); await fresh(); bind('U_lk');
+  const r = await dm('U_lk', '今年院士有誰', [on(isQa, okRes(LOOK)), on(isDigest, okRes('官網新聞中心報導今年有三位院士受證。'))]);
+  setMode(undefined);
+  const t = textOf(r);
+  check('★ 正常答案剛好以「這一題我這邊沒辦法回答」開頭：照樣補查官網（標記優先）', /我在工研院官網新聞中心找到了：/.test(t) && r.calls.some(isDigest), t);
+  check('★ 　 照樣做答案出口檢查（on 模式標出編造的 2028 年）', /（2028 年）在新聞稿原文裡查不到/.test(t), t);
+  const turn = turnOf('U_lk');
+  check('★ 　 照樣記進對話歷史（追問才接得上）；而且 log 看得到補查', !!turn && turn.q === '今年院士有誰' && /沒辦法回答得很精確/.test(turn.a) && r.logs.some((l) => l.startsWith('[line] 補查官網')), J(turn));
+}
+{
+  // 規範 F6：固定句的語言——只打縮寫或數字的短問題當中文
+  const sys = '系統提示 SP';
+  const langs = [];
+  for (const [q, english] of [['TSMC?', false], ['HBM4？', false], ['5G', false], ['2026', false], ['TSMC capacity?', true], ['When is mass production planned?', true], ['良率多少？', false]]) {
+    const r = await ask({ q, system: sys, plan: [any(refusalRes())], contact: '王小明 03-1111111' });
+    if (r.reply !== refusalReply({ contact: '王小明 03-1111111', english })) langs.push(`${q} → ${r.reply}`);
+  }
+  check('★ askAnthropic 拒答固定句的語言：「TSMC?」「HBM4？」「5G」「2026」收到中文；夠像一句英文的才收到英文', langs.length === 0, langs.join('\n'));
 }
 
 out('\n── 四之二、answerQuestion()：拒答（批次 134）──');

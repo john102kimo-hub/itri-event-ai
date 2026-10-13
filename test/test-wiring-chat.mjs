@@ -124,6 +124,7 @@ book.events = [['id'],
   row('ev', '四足機器人發表會', KB, { 14: '王小明 03-1111111' }),
   row('plain', '無基本資料場', KB, { 5: '' }),               // 沒日期、時間、地點、聯絡人 → 沒有「活動基本資料」那一塊
   row('simp', '簡體聯絡人場', KB, { 14: '王小明（发言人）03-1111111' }),
+  row('pv', '光伏聯絡人場', KB, { 14: '光伏事業部 林經理 0912-345-678' }),   // 單位名稱含大陸用語詞：名稱要原樣，不能被用語層改掉
   row('biz', '智慧製造技術說明會', KB_BIZ, { 13: '企業說明會', 14: '業務窗口 林小姐 03-5912345' }),
   row('draft', '草稿', KB, { 4: 'draft' })
 ];
@@ -159,6 +160,7 @@ async function run({ plan: p = [], q = '產能多少？', stream = false, event 
   };
 }
 const setMode = (v) => { if (v === undefined) delete process.env.ANSWER_GROUNDING; else process.env.ANSWER_GROUNDING = v; };
+const J = JSON.stringify;
 const hasGrounding = (r) => r.logs.some((l) => l.startsWith('[grounding]'));
 const noError = (r) => !r.events.some((e) => 'error' in e);
 const lastIsDone = (r) => r.events.length > 0 && r.events[r.events.length - 1].done === true;
@@ -503,6 +505,103 @@ const SONNET_TEXT = '预计 2027 年第二季量产，年产能 500 台。\n内�
     Date.now = realNow;
     AbortSignal.timeout = realTimeout;
   }
+}
+
+/* ═════════ 四之二、批次 134 審查補強：對話歷史、聯絡人名稱、提醒語言、固定句語言 ═════════ */
+out('\n── 四之二、被拒答的那一輪不再帶進下一題（回歸 F1）──');
+{
+  const Q_BAD = '被誤判的生醫題';
+  const hist = [
+    { role: 'user', content: '產能多少？' },
+    { role: 'assistant', content: CLEAN },
+    { role: 'user', content: Q_BAD },
+    { role: 'assistant', content: FIXED_EV },
+    { role: 'user', content: '量產時間？' }
+  ];
+  const r = await run({ messages: hist, plan: [okJson(CLEAN)] });
+  const sent = r.calls[0]?.body.messages || [];
+  check('★ 之前被拒答的那一輪（問題＋固定句）不帶進這一題的請求，其餘原樣、最後一題留著',
+    J(sent.map((m) => m.content)) === J(['產能多少？', CLEAN, '量產時間？']) && sent[0].role === 'user' && sent[sent.length - 1].content === '量產時間？', J(sent.map((m) => m.content.slice(0, 10))));
+  check('　 記者看到的答案、qa_log 照常（沒有因為過濾而變）', r.body.reply === CLEAN && r.qa === CLEAN && r.res.statusCode === 200);
+
+  const sr = await run({ stream: true, messages: hist, plan: [okStream(['預計 2027 年第二季量產，', '年產能 500 台。\n', W])] });
+  check('　 串流請求一樣過濾', J((sr.calls[0]?.body.messages || []).map((m) => m.content)) === J(['產能多少？', CLEAN, '量產時間？']), J((sr.calls[0]?.body.messages || []).map((m) => m.content.slice(0, 10))));
+
+  // 輸出到一半被攔下的那一輪（半截答案＋說明句）也一樣；英文版說明句也是
+  const midHist = [
+    { role: 'user', content: '前一題' }, { role: 'assistant', content: '根據新聞稿，\n\n' + MIDWAY },
+    { role: 'user', content: 'English one' }, { role: 'assistant', content: 'The target is 2027, \n\n(The rest of this answer could not be completed. Please contact the press contact.)' },
+    { role: 'user', content: '產能多少？' }
+  ];
+  const mr = await run({ messages: midHist, plan: [okJson(CLEAN)] });
+  check('★ 半截答案加說明句的那一輪（中英文兩種說明）也整輪拿掉', J((mr.calls[0]?.body.messages || []).map((m) => m.content)) === J(['產能多少？']), J((mr.calls[0]?.body.messages || []).map((m) => m.content.slice(0, 10))));
+
+  // 半截答案很長（超過 8000 字上限）：說明句在結尾，要在截斷之前判斷，不然說明句被截掉就認不出這一輪被拒答過
+  const longMid = await run({ messages: [{ role: 'user', content: '前一題' }, { role: 'assistant', content: '長'.repeat(8500) + '。\n\n' + MIDWAY }, { role: 'user', content: '產能多少？' }], plan: [okJson(CLEAN)] });
+  check('　 半截答案超過 8000 字、說明句在結尾：照樣認得是被拒答的一輪、整輪拿掉', J((longMid.calls[0]?.body.messages || []).map((m) => m.content)) === J(['產能多少？']), J((longMid.calls[0]?.body.messages || []).map((m) => m.content.length)));
+
+  // 拿掉之後仍然以 user 開頭、不會把唯一的一題拿光
+  const only = await run({ messages: [{ role: 'user', content: Q_BAD }, { role: 'assistant', content: FIXED_EV }, { role: 'user', content: '產能多少？' }], plan: [okJson(CLEAN)] });
+  check('★ 整段歷史只有那一輪被拒答：拿掉之後只剩現在這一題，仍以 user 開頭，照常回答', only.res.statusCode === 200 && J(only.calls[0].body.messages) === J([{ role: 'user', content: '產能多少？' }]), J(only.calls[0]?.body.messages));
+  const lastAssistant = await run({ messages: [{ role: 'user', content: Q_BAD }, { role: 'assistant', content: FIXED_EV }], plan: [okJson(CLEAN)] });
+  check('　 最後一則是 assistant 的固定句（怪請求）：不動它，不把使用者這一題拿光（照舊交給模型 API 決定，不是我們變出 400）', lastAssistant.calls.length === 1 && lastAssistant.calls[0].body.messages.length === 2, J(lastAssistant.calls[0]?.body.messages));
+  const normal = await run({ messages: [{ role: 'user', content: '產能多少？' }, { role: 'assistant', content: CLEAN }, { role: 'user', content: '再說一次' }], plan: [okJson(CLEAN)] });
+  check('★ 沒有拒答的歷史：請求內容跟以前一模一樣（三則原樣送出）', J(normal.calls[0].body.messages.map((m) => m.content)) === J(['產能多少？', CLEAN, '再說一次']));
+  // 模型自己寫出同開頭的正常答案，不能被當成拒答而被拿掉
+  const lookalike = '這一題我這邊沒辦法回答，因為新聞稿沒有提到。';
+  const keep = await run({ messages: [{ role: 'user', content: '有沒有得獎名單？' }, { role: 'assistant', content: lookalike }, { role: 'user', content: '再說一次' }], plan: [okJson(CLEAN)] });
+  check('　 正常答案剛好以「這一題我這邊沒辦法回答」開頭（整句不是固定句）：不當成拒答，照樣留在歷史裡', keep.calls[0].body.messages.length === 3, J(keep.calls[0]?.body.messages));
+  // 端到端：拒答之後再問一題，前端把整串送回來
+  const t1 = await run({ plan: [refusalJson(), refusalJson()] });
+  const t2 = await run({ messages: [{ role: 'user', content: '產能多少？' }, { role: 'assistant', content: t1.body.reply }, { role: 'user', content: '量產時間？' }], plan: [okJson(CLEAN)] });
+  check('★ 端到端：伺服器真的送出去的拒答固定句，下一題就被認得、不再帶上去', t2.calls[0].body.messages.length === 1 && t2.calls[0].body.messages[0].content === '量產時間？', J(t2.calls[0]?.body.messages));
+}
+
+out('\n── 四之二之二、拒答固定句裡的聯絡人是名稱：只轉字、不轉用語，跟 LINE 一致（回歸 F4／規範 F3）──');
+{
+  const FIXED_PV = refusalReply({ contact: '光伏事業部 林經理 0912-345-678' });
+  const r = await run({ event: 'pv', plan: [refusalJson(), refusalJson()] });
+  check('★ 非串流：後台打的單位名稱「光伏事業部」原樣顯示，沒有被用語層改成「太陽光電事業部」', r.body.reply === FIXED_PV && r.body.reply.includes('光伏事業部') && !r.body.reply.includes('太陽光電') && r.qa === FIXED_PV, r.body.reply);
+  const rs = await run({ event: 'pv', stream: true, plan: [sse([ME, mdelta('refusal', REFUSAL_DETAILS('bio')), MSTOP]), refusalJson({ model: 'claude-sonnet-5-5' })] });
+  check('★ 串流（輸出前被攔、重答也被攔）：同樣原樣顯示', rs.text === FIXED_PV && rs.qa === FIXED_PV, rs.text);
+  const en = await run({ event: 'pv', q: 'What is the annual capacity?', plan: [refusalJson(), refusalJson()] });
+  check('　 英文版固定句裡的聯絡人也一樣原樣', en.body.reply === refusalReply({ contact: '光伏事業部 林經理 0912-345-678', english: true }), en.body.reply);
+  const simp = await run({ event: 'simp', plan: [refusalJson(), refusalJson()] });
+  check('　 簡體字照轉（发言人 → 發言人）：只是不轉用語，簡體防線還在', simp.body.reply.includes('發言人') && !simp.body.reply.includes('发'), simp.body.reply);
+}
+
+out('\n── 四之二之三、固定句的語言：只打縮寫或數字的短問題當中文（規範 F6）──');
+{
+  const cases = [['TSMC?', false], ['HBM4？', false], ['5G', false], ['2026', false], ['TSMC capacity?', true], ['What is the annual capacity?', true], ['產能多少？', false]];
+  const bad = [];
+  for (const [q, english] of cases) {
+    const r = await run({ q, plan: [refusalJson(), refusalJson()] });
+    if (r.body.reply !== refusalReply({ contact: '王小明 03-1111111', english })) bad.push(`${q} → ${r.body.reply}`);
+    const rs = await run({ q, stream: true, plan: [sse([ME, mdelta('refusal', REFUSAL_DETAILS('bio')), MSTOP]), refusalJson({ model: 'claude-sonnet-5-5' })] });
+    if (rs.text !== refusalReply({ contact: '王小明 03-1111111', english })) bad.push(`串流 ${q} → ${rs.text}`);
+  }
+  check('★ 非串流與串流：「TSMC?」「HBM4？」「5G」「2026」收到中文固定句；夠像一句英文的才收到英文', bad.length === 0, bad.join('\n'));
+  const mid = await run({ q: 'TSMC?', stream: true, plan: [sse([ME, BLOCK_START, delta('台積電，'), mdelta('refusal', REFUSAL_DETAILS('cyber')), MSTOP])] });
+  check('　 輸出到一半被攔：說明句也跟著問題的語言（縮寫提問 → 中文說明）', mid.text === '台積電，\n\n' + MIDWAY, mid.text);
+}
+
+out('\n── 四之二之四、ANSWER_GROUNDING=on：英文答案附英文版提醒（規範 F4）──');
+{
+  const FAB_EN = 'The target is 2028 with an investment of 800 billion NT dollars.';
+  const WE = 'For reference only; please rely on the official ITRI press release.';
+  setMode('on');
+  const r = await run({ q: 'What is the target year?', plan: [okJson(`${FAB_EN}\n${WE}`)] });
+  const note = r.body.reply.split('\n\n').pop();
+  check('★ 非串流 on：英文答案後面接英文版提醒（沒有中文字、沒有 Markdown），點名編造的數字', /^⚠️ Some items above \(.*2028.*\) could not be found in the press release\. Please confirm with the press contact before citing\.$/.test(note) && !/[一-鿿]/.test(note) && !/[*_`#]/.test(note), r.body.reply);
+  check('　 提醒排在警語之後；qa_log 一致', r.body.reply.indexOf(WE) < r.body.reply.indexOf('⚠️') && r.qa === r.body.reply);
+  const zhWarn = await run({ q: 'What is the target year?', plan: [okJson(`${FAB_EN}\n內容僅供參考，以工研院官網新聞稿或發言為準。`)] });
+  check('★ 英文答案結尾的警語仍是中文：照樣判成英文（先拿掉警語再判斷語言），提醒是英文版', /Some items above/.test(zhWarn.body.reply) && !/以上內容有幾處/.test(zhWarn.body.reply), zhWarn.body.reply);
+  const rs = await run({ stream: true, q: 'What is the target year?', plan: [okStream([FAB_EN.slice(0, 30), FAB_EN.slice(30) + '\n', WE])] });
+  const sn = rs.events.filter((e) => typeof e.t === 'string').map((e) => e.t).pop() || '';
+  check('　 串流 on：多送的那個 {t} 事件是英文版提醒；qa_log 一致', sn.startsWith('\n\n⚠️ Some items above (') && lastIsDone(rs) && rs.qa.endsWith(sn), JSON.stringify(rs.events.slice(-3)));
+  const zh = await run({ plan: [okJson(FAB)] });
+  check('★ （對照）中文答案仍然是中文版提醒，一個字都沒變', zh.body.reply.startsWith(FAB + NOTE_START) && zh.body.reply.endsWith(NOTE_END), zh.body.reply);
+  setMode(undefined);
 }
 
 /* ═════════ 五、企業場 ═════════ */

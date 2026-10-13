@@ -6,6 +6,21 @@
 
 只讀檔、不呼叫任何 API、不連 Google 試算表、不寫檔案；`npm test` 不會跑它。
 
+## ⚠️ 先看這裡：真實問答含個資與未發布的稿件
+
+回測要用的資料**不是公開資料**：
+
+- 後台匯出的問答含**記者姓名、媒體名稱、提問原文**（個人資料）。
+- 活動的 `knowledge_base` 可能是**還沒發布的新聞稿全文**（解禁前外流就是事故）。
+- 回測**報告**會把每則被標出的答案的問題與答案前 80 字印在終端機——報告本身也含真實提問。
+
+所以：
+
+1. **不要 commit、不要上傳、不要貼到對話或工單。** 資料檔放在 repo 外面（例如桌面）最安全；一定要放在 repo 裡的話，檔名一律用 `*.local.json`（或 `*.real.json`）、CSV 用 `*.local.csv`，例如 `my-qa.local.json`、`qa-2026-10-12.local.csv`。`.gitignore` 已經擋掉這些檔名，以及後台匯出 CSV 的預設檔名（`all-events-qa-日期.csv`、`<活動ID>-qa-日期.csv`），避免 `git add -A` 一不小心就帶走。
+2. **跑完就刪**：輸入檔、匯出的 CSV、`--json` 輸出存的檔，用完都刪掉。
+3. **要分享報告給別人看，先遮掉提問原文**（或只貼各類別數字與 Top 項目那幾段，不貼「被標出的答案」那一段）。
+4. `sample.json` 是**虛構**的範例（人名、電話、信箱都是假的），可以放心留在 repo 裡；用它練習時不會碰到任何真資料。
+
 ## 一、準備資料
 
 輸入是一個 JSON 檔（範例見 `sample.json`）：
@@ -32,7 +47,8 @@
 **直接用後台匯出的問答**：後台「匯出 CSV」下載的檔案（欄位：時間、活動ID、活動名稱、媒體名稱、姓名、記者問題、AI回答）可以直接餵給 `--answers-csv`，這時輸入 JSON 只要有 `events`，`answers` 可以是空陣列（CSV 的「時間」欄會自動當成問的時間 `asked_at`）：
 
 ```bash
-node tools/grounding-backtest/backtest.mjs events.json --answers-csv all-events-qa-2026-10-12.csv
+# 檔名用 .local，並且放在 repo 外面或確定被 .gitignore 擋住（見上面的提醒）
+node tools/grounding-backtest/backtest.mjs events.local.json --answers-csv qa-2026-10-12.local.csv
 ```
 
 ## 二、執行
@@ -41,8 +57,8 @@ node tools/grounding-backtest/backtest.mjs events.json --answers-csv all-events-
 # 先用範例跑一次，看報告長什麼樣子
 node tools/grounding-backtest/backtest.mjs tools/grounding-backtest/sample.json
 
-# 用自己的資料
-node tools/grounding-backtest/backtest.mjs my-qa.json
+# 用自己的資料（真實資料，檔名用 .local.json；用完刪掉）
+node tools/grounding-backtest/backtest.mjs my-qa.local.json
 
 # 常用選項
 #   --top 30          最常被標出的項目列前 30 名（預設 20）

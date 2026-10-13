@@ -3,11 +3,11 @@
     {
       "id": "sample-chip",
       "name": "（範例）AI 邊緣運算晶片發表記者會",
-      "knowledge_base": "【新聞稿】工研院發表「AI 邊緣運算晶片」，鎖定三千億元智慧終端市場\n工研院今（28）日於臺大醫院國際會議中心發表新一代 AI 邊緣運算晶片，採 TSMC 28 奈米製程，運算效能達 12 TOPS，功耗僅 1.5 瓦，較前代效能提升三倍、功耗降低百分之三十。\n院長表示，預計 2027 年第一季量產，首批 5,000 片，三年內帶動產值逾 100 億元，吸引超過 40 家廠商洽談合作，其中包含 NVIDIA 與聯發科。目前團隊約三千人，年度研發經費 1.2 億元。\n技術詳情請見 https://www.itri.org.tw/ListStyle.aspx?DisplayStyle=18_content&SiteID=1&MmmID=1 ，媒體聯絡：行銷傳播處 朱朱 02-2777-3111 分機 31234，chuchu@itri.org.tw。\n講者：A 博士（半導體）、B 教授（AI）、C 執行長（機器人）。聯訪：10/28 09:15。",
+      "knowledge_base": "【新聞稿】工研院發表「AI 邊緣運算晶片」，鎖定三千億元智慧終端市場\n工研院今（28）日於臺大醫院國際會議中心發表新一代 AI 邊緣運算晶片，採 TSMC 28 奈米製程，運算效能達 12 TOPS，功耗僅 1.5 瓦，較前代效能提升三倍、功耗降低百分之三十。\n院長表示，預計 2027 年第一季量產，首批 5,000 片，三年內帶動產值逾 100 億元，吸引超過 40 家廠商洽談合作，其中包含 NVIDIA 與聯發科。目前團隊約三千人，年度研發經費 1.2 億元。\n技術詳情請見 https://www.itri.org.tw/ListStyle.aspx?DisplayStyle=18_content&SiteID=1&MmmID=1 ，媒體聯絡：公關組 王小明 02-1234-5678 分機 1234，press@example.org。\n講者：A 博士（半導體）、B 教授（AI）、C 執行長（機器人）。聯訪：10/28 09:15。",
       "event_date": "2026-10-28",
       "event_time": "09:00-12:00",
       "venue": "臺大醫院國際會議中心",
-      "press_contact": "行銷傳播處 朱朱 02-2777-3111 分機 31234"
+      "press_contact": "公關組 王小明 02-1234-5678 分機 1234"
     },
     {
       "id": "sample-forum",
@@ -57,7 +57,7 @@
       "question": "哪裡可以看技術細節？怎麼聯絡？",
       "asked_at": "2026-09-30T10:00:00+08:00",
       "expect": "flag",
-      "note": "編造網址與 email：知識庫只有另一個網址與 chuchu@itri.org.tw",
+      "note": "編造網址與 email：知識庫只有另一個網址與 press@example.org",
       "answer": "技術細節請見 https://www.itri.org.tw/news/2026/ai-chip ，也可寄信到 support@itri-ai.com 詢問。\n\n內容僅供參考，以工研院官網新聞稿或發言為準。"
     },
     {

@@ -11,3 +11,15 @@ node_modules/
 test-results/
 playwright-report/
 coverage/
+
+# 答案出口檢查回測用的資料（批次 132 審查）：真實問答含記者姓名、媒體、提問原文，活動的 knowledge_base 可能是尚未發布的新聞稿。
+# 絕對不能 commit。回測資料請命名成 *.local.json／*.real.json（CSV 同理），或放在 repo 外面；
+# 後台「匯出 CSV」下載的預設檔名（<活動ID>-qa-日期.csv、all-events-qa-日期.csv）也一併擋掉，放錯資料夾也不會被 `git add -A` 帶走。
+# 範例檔 tools/grounding-backtest/sample.json 是虛構的資料，不在這裡面。
+tools/grounding-backtest/*.local.json
+tools/grounding-backtest/*.real.json
+tools/grounding-backtest/*.local.csv
+tools/grounding-backtest/*.real.csv
+*.local.csv
+*-qa-????-??-??.csv
+qa-export-????-??-??.csv

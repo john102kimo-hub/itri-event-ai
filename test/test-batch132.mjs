@@ -86,7 +86,7 @@ check('　 繼承讓前一個數字也被查：來源只有「30 家」，答案
   J(nums('20-30 家', '共 30 家')) === J(['20 家']) && J(nums('3-5 億', '預估 5 億')) === J(['3 億']), J([nums('20-30 家', '共 30 家'), nums('3-5 億', '預估 5 億')]));
 check('　 來源的範圍也繼承：來源「30–50 億」，答案「30 億」「50 億」都對得上', clean('30 億', '成長 30–50 億') && clean('50 億', '成長 30–50 億'));
 check('小數整串比：來源有「5.5」，答案「5.5」', clean('版本 5.5', '版本 5.5 發布'));
-check('分機、電話：來源有就過', clean('分機 31234，電話 02-2777-3111', '聯絡 02-2777-3111 分機 31234'));
+check('分機、電話：來源有就過', clean('分機 1234，電話 02-1234-5678', '聯絡 02-1234-5678 分機 1234'));
 check('條列編號 1. 2. 3.、時刻 14:30、Q3 不查', clean('1. 甲\n2. 乙\n3. 丙\n14:30 開始，Q3 公布', '無數字'));
 check('序數與編號：第 3 項、前 5 名、第 12 名、第 100 名、No.1、Top 10 不查', nums('第 3 項、前 5 名、第 12 名、第 100 名、No.1、Top 10', '無').length === 0);
 check('中文裡「某一個」與慣用語不是數量：統一、四足、二氧化碳、一項、一家、第一、數十家、幾千人', clean('統一規格、四足機器人、二氧化碳、一項技術、一家公司、第一名、數十家、幾千人、三星', '無'));
@@ -103,7 +103,7 @@ console.log('\n── 三之二、數字：編造的要標出來 ──');
 check('編造的年份、金額、家數、電話都被標出', J(nums('預計 2028 年量產，年產值 500 億元，約 80 家廠商，專線 0800-123-456。', '預計 2027 年量產，產值 100 億元，超過 40 家廠商洽談。'))
   === J(['2028 年', '500 億元', '80 家', '0800-123-456']), J(nums('預計 2028 年量產，年產值 500 億元，約 80 家廠商，專線 0800-123-456。', '預計 2027 年量產，產值 100 億元，超過 40 家廠商洽談。')));
 check('11 位以上的計數要查；「共」開頭的小計也只放過 ≤ 20 的：11 位、共 25 家', J(nums('有 11 位講者，共 25 家', '無')) === J(['11 位', '25 家']), J(nums('有 11 位講者，共 25 家', '無')));
-check('分機錯一碼就標出', J(nums('分機 31235', '分機 31234')) === J(['31235']));
+check('分機錯一碼就標出', J(nums('分機 1235', '分機 1234')) === J(['1235']));
 check('小數、版本號整串比：來源只有「5 個」「5 月」，答案「5.5」要標出，不會拆成 5 就放過', J(nums('版本 5.5', '共有 5 個，5 月')) === J(['5.5']));
 check('版本號 1.2.3 對 1.2.4 要標出', J(nums('版本 1.2.3', '版本 1.2.4')) === J(['1.2.3']));
 check('範圍的上限編造：來源 3 倍與 5 倍，答案 3-9 倍 → 標出 9 倍', J(nums('3-9 倍', '成長 3 倍與 5 倍')) === J(['9 倍']));
@@ -118,7 +118,7 @@ check('問題裡的數字也算「模型看到的」：來源是陣列時合併'
 
 /* ───────── 四、網址與 email ───────── */
 console.log('\n── 四、網址與 email ──');
-const urlSrc = '詳見 https://www.itri.org.tw/ListStyle.aspx?DisplayStyle=18&SiteID=1 ，聯絡 chuchu@itri.org.tw';
+const urlSrc = '詳見 https://www.itri.org.tw/ListStyle.aspx?DisplayStyle=18&SiteID=1 ，聯絡 press@example.org';
 const urls = (a, s = urlSrc) => g(a, s).urls;
 check('原樣出現就過；結尾標點（句號、逗號、括號、全形）不影響', urls('請看 https://www.itri.org.tw/ListStyle.aspx?DisplayStyle=18&SiteID=1。').length === 0
   && urls('(https://www.itri.org.tw/ListStyle.aspx?DisplayStyle=18&SiteID=1)').length === 0
@@ -131,7 +131,7 @@ check('只有 http／https 不同也算不同（原樣出現）', J(urls('http:/
 check('網址被截短不能靠「是來源網址的前綴」過關，但上層路徑（斜線處切齊）可以',
   J(g('https://x.com/ab', '網址 https://x.com/abc 。').urls) === J(['https://x.com/ab']) && g('https://x.com/a', '網址 https://x.com/a/b/c 。').urls.length === 0);
 check('www. 開頭沒有 http 的網址也要查', J(g('見 www.fake-itri.com/x', '無').urls) === J(['www.fake-itri.com/x']) && g('見 www.itri.org.tw', '官網 https://www.itri.org.tw/ 。').urls.length === 0);
-check('email：一樣要原樣出現；多一段前綴（chu@ 對 chuchu@）不算', urls('chuchu@itri.org.tw').length === 0 && J(urls('support@itri-ai.com')) === J(['support@itri-ai.com']) && J(urls('chu@itri.org.tw')) === J(['chu@itri.org.tw']));
+check('email：一樣要原樣出現；多一段前綴（ess@ 對 press@）不算', urls('press@example.org').length === 0 && J(urls('support@itri-ai.com')) === J(['support@itri-ai.com']) && J(urls('ess@example.org')) === J(['ess@example.org']));
 check('extractUrls 單獨可用：去掉結尾標點、網址與 email 分開、重複只留一個', J(extractUrls('A https://a.com/x. B https://a.com/x, C a@b.co').map((u) => u.raw)) === J(['https://a.com/x', 'a@b.co']));
 check('網址裡的英文不當英文名詞、數字不當數字查（只在網址那一關被標出一次）', J(extractTerms('見 https://www.itri.org.tw/news/2026').map((t) => t.raw)) === J([]) && extractNumbers('見 https://www.itri.org.tw/news/2026').length === 0
   && J(g('見 https://a.com/news/20261028/12345', '無').numbers) === J([]) && g('見 https://a.com/news/20261028/12345', '無').urls.length === 1);
@@ -183,6 +183,16 @@ check('groundingMode：未設／shadow／空字串／亂打 → shadow；on／ON
   const { value: r, logs } = captureLogs(() => withMode('on', () => checkAnswerGrounding(BAD, SRC, { where: 'web-chat', eventId: 'e1' })));
   check('★ on：另外回 note（要附在答案後面的一行提醒），內容跟 shadow 抓到的一樣', r.mode === 'on' && /^⚠️ 以上內容有幾處（.+）在新聞稿原文裡查不到，引用前請向新聞聯絡人確認。$/.test(r.note)
     && r.numbers.length === 2 && r.urls.length === 1 && r.terms.length === 1 && logs.length === 1, J({ r, logs }));
+}
+{
+  // 語言由呼叫端判斷、用 opts.english 傳進來（這支維持沒有 import 的純函式）；沒傳就是中文版，shadow 模式不受影響
+  const en = captureLogs(() => withMode('on', () => checkAnswerGrounding(BAD, SRC, { english: true }))).value;
+  const zh = captureLogs(() => withMode('on', () => checkAnswerGrounding(BAD, SRC, { english: false }))).value;
+  const none = captureLogs(() => withMode('on', () => checkAnswerGrounding(BAD, SRC))).value;
+  const shadow = captureLogs(() => withMode('shadow', () => checkAnswerGrounding(BAD, SRC, { english: true }))).value;
+  check('★ on＋opts.english:true → 英文版 note；false 或沒傳 → 中文版；shadow 不管怎樣都沒有 note',
+    /^⚠️ Some items above \(.+\) could not be found in the press release\. Please confirm with the press contact before citing\.$/.test(en.note)
+      && zh.note.startsWith('⚠️ 以上內容有幾處') && none.note === zh.note && shadow.note === '', J({ en: en.note, zh: zh.note, shadow: shadow.note }));
 }
 {
   const { value: r, logs } = captureLogs(() => withMode('off', () => checkAnswerGrounding(BAD, SRC, { where: 'web-chat', eventId: 'e1' })));
@@ -243,6 +253,18 @@ console.log('\n── 九、提醒文案 buildGroundingNote ──');
   const md = buildGroundingNote(['https://example.com/a_b_c?x=*y*', '`code`', '# 標題', '[連結](http://x)', '**粗**']);
   check('★ 不含 Markdown：項目裡的 * _ ` # [ ] 都清掉，過 stripMarkdownForLine() 不變', !/[*_`#\[\]]/.test(md) && stripMarkdownForLine(md) === md && !/\n/.test(md), md);
   check('過長的項目截斷成 40 字加「…」', buildGroundingNote(['x'.repeat(100)]).includes(`${'x'.repeat(40)}…`));
+
+  // 批次 132 審查（規範 F4）：英文答案不能接一句只有中文的提醒
+  const en1 = buildGroundingNote(['2028'], { english: true });
+  const en3 = buildGroundingNote(['14 nm', '25 TOPS', '2028'], { english: true });
+  const en5 = buildGroundingNote(['2028', '500 billion', 'Intel', 'https://a.com/x', 'RISC-V'], { english: true });
+  check('★ 英文版提醒：固定句、沒有中文字', en1 === '⚠️ Some items above (2028) could not be found in the press release. Please confirm with the press contact before citing.' && !/[一-鿿]/.test(en1), en1);
+  check('　 三項以內全列；超過三項只列前三項再說還有幾項（"and N more"）', en3.includes('(14 nm, 25 TOPS, 2028)') && en5.includes('(2028, 500 billion, Intel, and 2 more)') && !en5.includes('RISC-V'), en3 + '\n' + en5);
+  const enMd = buildGroundingNote(['https://example.com/a_b_c?x=*y*', '`code`', '# title', '[link](http://x)', '**bold**'], { english: true });
+  check('　 英文版也不含 Markdown 的符號（項目清理方式跟中文版相同）', !/[*_`#\[\]<>|~\\]/.test(enMd.replace(/^⚠️/, '')), enMd);
+  check('　 沒有項目、english 不是 true（沒傳、false、字串 "true"）→ 空字串／中文版，中文版一個字沒變',
+    buildGroundingNote([], { english: true }) === '' && buildGroundingNote(['A']) === buildGroundingNote(['A'], { english: false }) && buildGroundingNote(['A'], { english: 'true' }).startsWith('⚠️ 以上內容有幾處')
+      && buildGroundingNote(['2028 年', '500 億元', 'Intel', 'https://a.com/x', 'RISC-V']) === five);
 }
 
 /* ───────── 十、強健性：檢查自己壞了，記者照樣收到答案 ───────── */
@@ -293,8 +315,53 @@ console.log('\n── 十、強健性：null、空字串、超長、自己出錯
   check(`超長英數字串的 email／網址比對不會退化成平方時間（${(performance.now() - t2).toFixed(0)} ms）`, performance.now() - t2 < 3000);
 }
 {
+  // 批次 132 審查（規範 F1）：網址結尾標點的 regex（/[.,;:!?'"*)\]}>]+$/ 與 /\/+$/）沒有對開頭定錨，遇到
+  // 「一長串標點後面接一個英數字」時是平方時間：8000 字一則的訊息 × 6 則就能讓每次回答多卡約 0.8 秒；32000 字約 2 秒。
+  // URL_RE 的字元集剛好包含這些標點，整串會被吃成一個網址。改成從尾端逐字修剪（線性）。
+  // 門檻抓得很鬆（4 萬字 < 200 ms；平方版 4 萬字每個要約 3 秒、六個要十幾秒），只擋量級，不怕 CI 偶發變慢；
+  // 刻意不用更大的輸入——壞掉的時候要幾秒內就紅，不是跑好幾分鐘。
+  const patho = {
+    '句點串': 'https://a' + '.'.repeat(40_000) + 'a',
+    '斜線串': 'https://a' + '/'.repeat(40_000) + 'a',
+    '右括號串': 'https://a' + ')'.repeat(40_000) + 'a',
+    '混合標點串': 'https://a' + '!?.,;:'.repeat(7_000) + 'a',
+    '結尾標點串': 'https://a.com/' + '.'.repeat(40_000),
+    'www 開頭': 'www.a' + '.'.repeat(40_000) + 'a',
+  };
+  const slow = [];
+  for (const [name, text] of Object.entries(patho)) {
+    const t = performance.now();
+    extractUrls(text);
+    const ms = performance.now() - t;
+    if (ms > 200) slow.push(`${name} ${ms.toFixed(0)}ms`);
+  }
+  check('★ 病態輸入（4 萬字的標點串夾在網址裡）extractUrls 都在 200 ms 內（平方版每個要約 3 秒）', slow.length === 0, slow.join(', '));
+  const t3 = performance.now();
+  const { value: whole } = captureLogs(() => checkAnswerGrounding(`詳見 ${patho['句點串']} 。`, `網址 https://www.itri.org.tw/ ${patho['斜線串']}`));
+  const ms3 = performance.now() - t3;
+  check(`★ 端到端：答案與來源都是病態網址，checkAnswerGrounding 也在 200 ms 內（${ms3.toFixed(0)} ms），不丟例外`, ms3 < 200 && Array.isArray(whole.numbers), ms3);
+  // 逆向修剪的結果必須跟原本的 regex 完全一樣：隨機字串對照（舊寫法逐字抄來當對照）
+  const OLD_TRAIL = /[.,;:!?'"*)\]}>]+$/;
+  const oldKey = (raw) => String(raw).replace(OLD_TRAIL, '').toLowerCase().replace(/\/+$/, '');
+  const alphabet = ['a', 'B', '.', ',', ';', ':', '!', '?', "'", '"', '*', ')', ']', '}', '>', '/', '(', '-', '_', '9', '#'];
+  let seed = 20261013, diffs = [];
+  const rnd = () => (seed = (seed * 1664525 + 1013904223) % 4294967296) / 4294967296;
+  for (let i = 0; i < 20000 && diffs.length < 3; i++) {
+    let body = ''; const L = 1 + Math.floor(rnd() * 14);
+    for (let j = 0; j < L; j++) body += alphabet[Math.floor(rnd() * alphabet.length)];
+    const url = 'https://x.com/' + body;
+    const got = extractUrls(`看 ${url} 吧`);
+    const m = (`看 ${url} 吧`).match(/(?:https?:\/\/|www\.)[A-Za-z0-9][A-Za-z0-9\-._~:/?#@!$&'()*+,;=%]*/i);
+    const want = m ? oldKey(m[0]) : '';
+    if ((got[0]?.key ?? '') !== want) diffs.push(`${url} → ${got[0]?.key} / 舊 ${want}`);
+  }
+  check('★ 逆向修剪與原本的 regex 結果完全相同（兩萬組隨機網址尾巴：key 逐字比對）', diffs.length === 0, diffs.join('\n'));
+  check('　 結尾標點照舊被修掉、斜線照舊不影響：https://a.com/x.) → https://a.com/x；HTTPS://A.COM/X/ 與 https://a.com/x 同一個 key',
+    extractUrls('(https://a.com/x.)')[0]?.raw === 'https://a.com/x' && extractUrls('HTTPS://A.COM/X/')[0]?.key === extractUrls('https://a.com/x')[0]?.key);
+}
+{
   // 知識庫上限 45,000 字（api/events.js KB_MAX_LEN）。一次檢查要在個位數毫秒～十幾毫秒；測試放寬到 80ms 免得 CI 偶發變慢就紅
-  const para = '工研院今（28）日發表新一代 AI 邊緣運算晶片，採 TSMC 28 奈米製程，效能 12 TOPS，功耗 1.5 瓦，預計 2027 年第一季量產，首批 5,000 片，吸引超過 40 家廠商洽談，包含 NVIDIA 與聯發科。詳見 https://www.itri.org.tw/ListStyle.aspx?MGID=1 ，聯絡 02-2777-3111。\n';
+  const para = '工研院今（28）日發表新一代 AI 邊緣運算晶片，採 TSMC 28 奈米製程，效能 12 TOPS，功耗 1.5 瓦，預計 2027 年第一季量產，首批 5,000 片，吸引超過 40 家廠商洽談，包含 NVIDIA 與聯發科。詳見 https://www.itri.org.tw/ListStyle.aspx?MGID=1 ，聯絡 02-1234-5678。\n';
   const kb = para.repeat(Math.ceil(45_000 / para.length)).slice(0, 45_000);
   const answer = '採 28 奈米製程，效能 12 TOPS，功耗 1.5 瓦；預計 2027 年第一季量產，首批 5,000 片。與 NVIDIA 合作。\n\n內容僅供參考，以工研院官網新聞稿或發言為準。';
   const times = [];
@@ -381,6 +448,36 @@ console.log('\n── 十二、紀律：純函式、不碰網路、不碰 Sheets
   const noSimplified = (t) => captureLogs(() => toTraditionalTW(scrub(t))).value === scrub(t);
   check('回測工具、README、lib、測試都沒有簡體字（CLAUDE.md 第 1 條；用 toTraditionalTW() 驗證）',
     [tool, src('tools/grounding-backtest/README.md'), lib, src('test/test-batch132.mjs'), src('tools/grounding-backtest/sample.json')].every(noSimplified));
+}
+
+/* ───────── 十三、回測資料含個資與未發布稿件：README 要講、.gitignore 要擋（批次 132 審查，規範 F2）───────── */
+console.log('\n── 十三、真實問答含記者姓名、媒體、提問與未發布稿件：不能被 commit ──');
+{
+  const readme = src('tools/grounding-backtest/README.md');
+  const head = readme.slice(0, readme.indexOf('## 一、準備資料'));
+  check('★ README 在「準備資料」之前就有醒目的個資與未發布稿件提醒（記者姓名／媒體／提問、未發布新聞稿）',
+    /^## ⚠️/m.test(head) && /個人資料/.test(head) && /記者姓名/.test(head) && /還沒發布|未發布/.test(head) && /不要 commit/.test(head), head.slice(0, 300));
+  check('　 提醒講了三件事：資料檔放 repo 外或用 .local 命名、跑完刪掉、分享報告前遮掉提問原文', /\.local\.json/.test(head) && /跑完就刪/.test(head) && /遮掉提問原文/.test(head));
+  check('　 README 的範例指令教人用 .local 命名（不再示範 my-qa.json／all-events-qa-….csv 這種會被 git add -A 帶走的檔名）',
+    /backtest\.mjs my-qa\.local\.json/.test(readme) && /--answers-csv qa-2026-10-12\.local\.csv/.test(readme) && !/backtest\.mjs my-qa\.json/.test(readme) && !/--answers-csv all-events-qa/.test(readme));
+  const gi = src('.gitignore');
+  check('★ .gitignore 擋回測用資料的檔名樣式：*.local.json、*.real.json（CSV 同理）', /^tools\/grounding-backtest\/\*\.local\.json$/m.test(gi) && /^tools\/grounding-backtest\/\*\.real\.json$/m.test(gi)
+    && /^tools\/grounding-backtest\/\*\.local\.csv$/m.test(gi) && /^tools\/grounding-backtest\/\*\.real\.csv$/m.test(gi), gi.slice(-600));
+  // 用 git 自己判斷：真的被忽略；範例檔 sample.json 沒有被誤擋
+  const ignored = (f) => spawnSync('git', ['check-ignore', '-q', f], { cwd: ROOT }).status === 0;
+  const gitOk = spawnSync('git', ['rev-parse', '--git-dir'], { cwd: ROOT }).status === 0;
+  if (gitOk) {
+    check('★ git check-ignore：回測資料的檔名被忽略（my-qa.local.json、x.real.json、後台匯出的預設檔名 all-events-qa-日期.csv 與 <活動ID>-qa-日期.csv）',
+      ['tools/grounding-backtest/my-qa.local.json', 'tools/grounding-backtest/x.real.json', 'tools/grounding-backtest/qa.local.csv', 'all-events-qa-2026-10-12.csv', 'ev123-qa-2026-10-12.csv', 'qa-2026-10-12.local.csv'].every(ignored),
+      ['tools/grounding-backtest/my-qa.local.json', 'tools/grounding-backtest/x.real.json', 'tools/grounding-backtest/qa.local.csv', 'all-events-qa-2026-10-12.csv', 'ev123-qa-2026-10-12.csv', 'qa-2026-10-12.local.csv'].filter((f) => !ignored(f)).join(', '));
+    check('　 範例 sample.json 與 README、backtest.mjs 沒被誤擋（它們要留在 repo 裡）', !ignored('tools/grounding-backtest/sample.json') && !ignored('tools/grounding-backtest/README.md') && !ignored('tools/grounding-backtest/backtest.mjs'));
+  }
+  // sample.json 與測試裡的聯絡資料必須是明顯的假值：README 敢說「人名、電話、信箱都是假的」，就不能夾真人的暱稱與電話。
+  // 樣式用字串相加拼出來，這支測試檔自己才不會因為寫了樣式而掃到自己。
+  const REAL = ['朱' + '朱', '2777' + '-3111', 'chu' + 'chu@', '312' + '34'];
+  const fixtures = src('tools/grounding-backtest/sample.json') + src('test/test-batch132.mjs');
+  const left = REAL.filter((x) => fixtures.includes(x));
+  check('★ 範例與測試裡沒有真人的暱稱、電話、信箱：電話用 02-1234-5678、信箱用 example.org', left.length === 0, `還有殘留：${left.join('、')}`);
 }
 
 console.log(`\n${fail ? '❌' : '✅'} 批次 132（答案出口檢查：數字、網址、英文名詞，影子模式）測試：${pass} 通過，${fail} 失敗`);

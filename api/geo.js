@@ -32,6 +32,7 @@ import { reportAiFailure } from '../lib/ai-alert.js';
 import { safeEqual, isAdminPassword, codeMatches, passwordFrom, authBlocked, authFailed, tooManyAttempts } from '../lib/auth.js';
 import { generateShareCode } from '../lib/ids.js';
 import { logAiUsage } from '../lib/ai-usage.js';
+import { isRefusal, logRefusal } from '../lib/ai-refusal.js';
 
 const SHEETS = {
   geo_prompts: ['id', 'topic', 'prompt', 'keyword', 'brand', 'competitors', 'active', 'created_at'],
@@ -211,6 +212,18 @@ async function anthropic(body, timeoutMs = 15_000) {
   if (!res.ok) {
     await reportAiFailure({ status: res.status, message: data.error?.message, where: 'GEO 檢查' }); // 批次 85
     throw new Error(data.error?.message || `Anthropic ${res.status}`);
+  }
+  // 批次 134 審查：模型拒答（HTTP 200 ＋ stop_reason:"refusal"，安全分類器攔下）不是正常的觀察結果，要丟錯誤。
+  // 以前這裡零處理：探測被攔下時 content 是空的或只有半截，pause_turn 續跑到第二回合以後才被攔、前面已經累積了前導句的，
+  // 搜尋來源檢查（searchResults 非空）照樣通過，於是這一題被當成「正常回答了，只是沒提到」寫進 geo_runs：
+  // mentioned=FALSE、score=0，沒有錯誤、看起來完全正常，悄悄拉低能見度趨勢線（CLAUDE.md 第 2 條的形狀：「送出成功」不等於「資料可信」）。
+  // 丟例外之後：探測走 runOne 既有的錯誤列路徑（寫進 geo_runs 的錯誤欄，不計分，pause_turn 續跑中途被攔也整題作廢）；
+  // 判官走 askJSON 的 isSwitchable()，有另一家判官就換一家。工研院的 AI、生醫、資安題材正是分類器容易誤判的領域。
+  // 訊息裡的 refusal 讓錯誤列與 isSwitchable() 認得出是拒答；用量上面已經記了（被攔下的輸入照樣可能計費）。
+  // 不是 reportAiFailure：那是金鑰失效／額度用完的警報，拒答不是。
+  if (isRefusal(data)) {
+    logRefusal('AI 能見度', body.model, data);
+    throw new Error('模型拒答（refusal，安全分類器攔下這一題），此筆不計分');
   }
   return data;
 }
@@ -495,9 +508,9 @@ async function askGemini(prompt, maxTokens, model = judgeModel(), thinkingLevel 
   return parseJudge(text);
 }
 
-/** 這類錯誤換一家就有機會成功（額度用完、金鑰失效、服務暫時掛掉） */
+/** 這類錯誤換一家就有機會成功（額度用完、金鑰失效、服務暫時掛掉、這一家的安全分類器拒答——批次 134 審查） */
 const isSwitchable = (m) =>
-  /RESOURCE_EXHAUSTED|quota|credit|429|401|403|UNAUTHENTICATED|permission|5\d\d/i.test(String(m));
+  /RESOURCE_EXHAUSTED|quota|credit|429|401|403|UNAUTHENTICATED|permission|5\d\d|refusal/i.test(String(m));
 
 /**
  * 要 JSON 的內部呼叫都走這裡。

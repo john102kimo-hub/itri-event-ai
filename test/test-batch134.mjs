@@ -109,7 +109,60 @@ console.log('\n── 二、refusalReply：給使用者的固定句 ──');
   check('★ isRefusalReply() 認得五種寫法的固定句（次要路線的守門靠它辨認「這次沒答成」，見 lib/ai-refusal.js 的說明）', variants.every((v) => R.isRefusalReply(v)), JSON.stringify(variants.filter((v) => !R.isRefusalReply(v))));
   check('　 前後有空白也認得；正常答案、askAnthropic() 的失敗訊息、空值都不誤認',
     R.isRefusalReply(`  ${variants[1]}\n`) && !R.isRefusalReply('四足機器人預計 2027 年量產。') && !R.isRefusalReply('抱歉，目前無法取得回應，請稍後再試。') && !R.isRefusalReply('') && !R.isRefusalReply(null) && !R.isRefusalReply(undefined));
-  check('　 句子中間才出現同樣的字不算（只認開頭，避免正常答案裡引用到這句就被誤擋）', !R.isRefusalReply('記者問：這一題我這邊沒辦法回答嗎？'));
+  check('　 句子中間才出現同樣的字不算（避免正常答案裡引用到這句就被誤擋）', !R.isRefusalReply('記者問：這一題我這邊沒辦法回答嗎？'));
+
+  // 批次 134 審查（回歸 F2）：以前只比對開頭（startsWith），模型自己寫出同一個開頭的正常答案會被誤判成拒答——
+  // 米亞的人設本來就愛說「我這邊…」。誤判的後果：不補查官網、不接出口檢查提醒、不記進對話歷史，而且 log 看不出來。
+  const looksSimilar = [
+    '這一題我這邊沒辦法回答，因為新聞稿沒有提到。\n內容僅供參考，以工研院官網新聞稿或發言為準。',
+    '這一題我這邊沒辦法回答得很精確，不過新聞稿提到年產能 500 台。',
+    '這一題我這邊沒辦法回答，建議洽新聞聯絡人。但新聞稿有提到預計 2027 年量產。',
+    "I'm unable to answer this one. Because the press release does not mention it.",
+    "I'm unable to answer this one. Please contact the press contact directly. The press release says 500 units.",
+    '這一題我這邊沒辦法回答，建議直接洽新聞聯絡人：' + '字'.repeat(300) + '。'
+  ];
+  check('★ 開頭一樣、但後面是模型自己寫的話（正常答案）→ 不是拒答固定句（整句比對，不是只比開頭）', looksSimilar.every((t) => !R.isRefusalReply(t)), JSON.stringify(looksSimilar.filter((t) => R.isRefusalReply(t))));
+  check('　 固定句後面多接任何一段字（企業免責句、官網連結、提醒）就不是「整句」了——所以呼叫端必須在接上那些之前判斷',
+    !R.isRefusalReply(R.refusalReply() + '\n\n內容僅供參考，不構成報價或合作承諾。') && !R.isRefusalReply(R.refusalReply({ english: true }) + ' Thanks.'));
+  check('　 聯絡人欄位什麼寫法（含冒號、括號、句號、換行）都還是認得；長度上限內的最長聯絡人也認得',
+    ['王小明（發言人）：03-1111111', 'a。b、c', '業發處\n林小姐', '字'.repeat(500)].every((c) => R.isRefusalReply(R.refusalReply({ contact: c })) && R.isRefusalReply(R.refusalReply({ contact: c, english: true }))));
+}
+
+/* ───────── 二之二、網頁問答的對話歷史：被拒答的那一輪不再帶進下一題（批次 134 審查，回歸 F1）───────── */
+console.log('\n── 二之二、dropRefusedTurns／isRefusedTurnText／looksEnglish：純函式 ──');
+{
+  const J = JSON.stringify;
+  const U = (c) => ({ role: 'user', content: c });
+  const A = (c) => ({ role: 'assistant', content: c });
+  const FIXED = R.refusalReply({ contact: '王小明 03-1111111' });
+  const MID = '預計 2027 年第二季\n\n' + R.REFUSAL_MIDWAY_ZH;
+  const names = (list) => list.map((m) => m.content);
+  check('★ 被拒答的一輪（user 問題＋assistant 固定句）整輪拿掉，其餘原樣、順序不變',
+    J(names(R.dropRefusedTurns([U('Q1'), A('A1'), U('Q2'), A(FIXED), U('Q3'), A('A3'), U('Q4')]))) === J(['Q1', 'A1', 'Q3', 'A3', 'Q4']));
+  check('★ 輸出到一半被攔下的那一輪（半截答案＋後半段說明）也整輪拿掉；英文說明也是',
+    J(names(R.dropRefusedTurns([U('Q1'), A(MID), U('Q2'), A('x\n\n' + R.REFUSAL_MIDWAY_EN), U('Q3')]))) === J(['Q3']));
+  check('　 連續好幾輪都被拒答：全部拿掉，最後這一題留著', J(names(R.dropRefusedTurns([U('Q1'), A(FIXED), U('Q2'), A(FIXED), U('Q3')]))) === J(['Q3']));
+  check('　 沒有拒答的歷史：內容完全不變（回傳新陣列，不是同一個）', (() => { const h = [U('Q1'), A('A1'), U('Q2')]; const o = R.dropRefusedTurns(h); return J(o) === J(h) && o !== h; })());
+  check('★ 最後一則永遠留著：就算最後一則是 assistant 的固定句也不動（不把使用者這一題拿光）',
+    J(names(R.dropRefusedTurns([U('Q1'), A(FIXED)]))) === J(['Q1', FIXED]) && J(names(R.dropRefusedTurns([A(FIXED)]))) === J([FIXED]));
+  check('　 前面不是 user 的孤兒 assistant 固定句：不亂拿掉前一則 assistant（交給呼叫端「第一則必須是 user」處理）',
+    J(names(R.dropRefusedTurns([A('A0'), A(FIXED), U('Q')]))) === J(['A0', FIXED, 'Q']));
+  check('　 assistant 內容只是「提到」固定句、或固定句後面還有別的字：不當成被拒答（整句比對）',
+    J(names(R.dropRefusedTurns([U('Q1'), A('我剛剛說：' + FIXED), U('Q2'), A(FIXED + ' 但是新聞稿有提到'), U('Q3')]))) === J(['Q1', '我剛剛說：' + FIXED, 'Q2', FIXED + ' 但是新聞稿有提到', 'Q3']));
+  check('　 不是陣列／空陣列／含 null 的怪輸入：不丟例外', [null, undefined, 'x', [], [null], [U('Q'), null, A('A')]].every((v) => Array.isArray(R.dropRefusedTurns(v))));
+  check('　 isRefusedTurnText：固定句、半截答案＋說明為真；正常答案與空值為假',
+    R.isRefusedTurnText(FIXED) && R.isRefusedTurnText(MID) && R.isRefusedTurnText('  ' + MID + '\n') && !R.isRefusedTurnText('年產能 500 台。') && !R.isRefusedTurnText('') && !R.isRefusedTurnText(null)
+      && !R.isRefusedTurnText(R.REFUSAL_MIDWAY_ZH + '\n\n後面還有別的字'));
+
+  // 固定句語言：只有縮寫、數字的短問題當中文（台灣記者），夠像一句英文才給英文
+  const en = (t) => R.looksEnglish(t);
+  check('★ looksEnglish：有中文字 → 中文（false）；英文問句 → 英文（true）',
+    !en('產能多少？') && !en('TSMC 的產能多少？') && en('What is the annual capacity?') && en('Is the chip mass produced in 2027?'));
+  check('★ 只打縮寫、型號、數字、表情符號的短問題 → 中文（以前「沒有中文字就當英文」會收到整句英文拒答）',
+    ['TSMC?', 'HBM4？', '5G', '2026', '👍', 'TSMC 28nm', '？', ''].every((t) => !en(t)), J(['TSMC?', 'HBM4？', '5G', '2026', '👍', 'TSMC 28nm', '？', ''].filter(en)));
+  check('　 兩個英文字但夠長（英文字母合計 12 個以上）算英文；日文假名、韓文字 → 外語，給英文版',
+    en('TSMC capacity?') && en('こんにちは') && en('안녕하세요'));
+  check('　 null／undefined／數字不丟例外', [null, undefined, 42, {}].every((v) => typeof R.looksEnglish(v) === 'boolean'));
 }
 
 /* ───────── 三、withRefusalFallbacks／buildSonnetRetryBody ───────── */

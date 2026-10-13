@@ -35,12 +35,18 @@ const searchCount = (u) => attempt(() => AU.searchCount(u));
 const estimateUsd = (m, u) => attempt(() => AU.estimateUsd(m, u));
 
 // 批次 135 以前的寫法，逐字抄來當對照：沒有搜尋的呼叫，新舊兩版要一字不差
+// 批次 135 審查：快取讀取的倍率改成每個模型各自的單價（Sonnet 5.5 與 Opus 5.5 是 0.05x，見 lib/ai-usage.js PRICE 的說明），
+// 所以對照用的舊公式也要帶「這個模型的讀取倍率」：只有 claude-sonnet-5-5 是 0.05，其餘是 0.1。
+// 又因為單價改成直接的美元數（cacheRead／write5m），不再是「輸入單價 × 倍率」，浮點數的最後幾位可能跟舊公式不同——
+// 所以估價用相對誤差 1e-12 比對（見 sameUsd），log 那行 toFixed(5) 之後仍要逐字相同。
+const OLD_READ_MULT = { 'claude-sonnet-5-5': 0.05 };
 const oldEstimate = (PRICE, model, usage) => {
   const p = PRICE[model];
   if (!p || !usage) return null;
-  const input = (usage.input_tokens || 0) + (usage.cache_read_input_tokens || 0) * 0.1 + (usage.cache_creation_input_tokens || 0) * 1.25;
+  const input = (usage.input_tokens || 0) + (usage.cache_read_input_tokens || 0) * (OLD_READ_MULT[model] ?? 0.1) + (usage.cache_creation_input_tokens || 0) * 1.25;
   return (input * p.in + (usage.output_tokens || 0) * p.out) / 1e6;
 };
+const sameUsd = (a, b) => (a === null || b === null ? a === b : Math.abs(a - b) <= Math.abs(b) * 1e-12);
 const OLD_PRICE = { 'claude-haiku-5-5': { in: 0.1, out: 0.5 }, 'claude-haiku-4-5': { in: 1, out: 5 }, 'claude-sonnet-5-5': { in: 2, out: 10 }, 'claude-opus-5': { in: 5, out: 25 } };
 const oldLine = (where, model, usage) => {
   if (!usage) return null;
@@ -85,8 +91,8 @@ console.log('\n── 二、estimateUsd：搜尋費與 token 費相加；沒有�
     estimateUsd('claude-haiku-5-5', S(5, { input_tokens: 100000, output_tokens: 10000 })));
   check('★ 搜尋費跟模型的 token 單價無關：Opus 5、Haiku 4.5、Haiku 5.5 五次搜尋都是 0.05（換便宜模型省不到這一塊）',
     ['claude-opus-5', 'claude-haiku-4-5', 'claude-haiku-5-5', 'claude-sonnet-5-5'].every((m) => near(estimateUsd(m, S(5)), 0.05)));
-  check('　 快取讀取／寫入照舊算，再加搜尋費（Sonnet 5.5：讀取 100 萬 = 0.2、5 次搜尋 = 0.05 → 0.25）',
-    near(estimateUsd('claude-sonnet-5-5', S(5, { cache_read_input_tokens: 1e6 })), 0.25, 1e-9));
+  check('　 快取讀取／寫入照常算，再加搜尋費（Sonnet 5.5：讀取 100 萬 = 0.10、5 次搜尋 = 0.05 → 0.15；讀取單價見批次 135 審查）',
+    near(estimateUsd('claude-sonnet-5-5', S(5, { cache_read_input_tokens: 1e6 })), 0.15, 1e-9));
   check('　 不認得的模型不亂估：有搜尋也回 null（少了 token 那一半的總額是假數字）', estimateUsd('claude-unknown', S(5, { input_tokens: 10 })) === null);
   check('　 沒有 usage → null', estimateUsd('claude-haiku-5-5', null) === null && estimateUsd('claude-haiku-5-5', undefined) === null);
 
@@ -101,9 +107,9 @@ console.log('\n── 二、estimateUsd：搜尋費與 token 費相加；沒有�
   let same = true, detail = '';
   for (const m of Object.keys(OLD_PRICE)) for (const s of samples) for (const [i, f] of withoutSearch.entries()) {
     const a = estimateUsd(m, f(s)), b = oldEstimate(OLD_PRICE, m, s);
-    if (a !== b) { same = false; detail = `${m} ${JSON.stringify(f(s))} 變體${i}：新 ${a} 舊 ${b}`; }
+    if (!sameUsd(a, b)) { same = false; detail = `${m} ${JSON.stringify(f(s))} 變體${i}：新 ${a} 舊 ${b}`; }
   }
-  check(`★ 沒有搜尋時估價與批次 135 以前「嚴格相等」（${Object.keys(OLD_PRICE).length} 個模型 × ${samples.length} 種 usage × ${withoutSearch.length} 種寫法）`, same, detail);
+  check(`★ 沒有搜尋時估價與批次 135 以前相同（相對誤差 1e-12 內；Sonnet 5.5 的快取讀取倍率已更正為 0.05）（${Object.keys(OLD_PRICE).length} 個模型 × ${samples.length} 種 usage × ${withoutSearch.length} 種寫法）`, same, detail);
 }
 
 /* ───────── 三、logAiUsage 的格式 ───────── */
@@ -244,6 +250,37 @@ const usd5 = (inTok, outTok, searches) => ((inTok * 0.1 + outTok * 0.5) / 1e6 + 
   check('API 回錯誤（沒有 usage）：不記 log、掃描把錯誤寫進該筆，整批不炸', logs.length === 0 && r.statusCode === 200 && r.body?.failed === 1, `${logs.length} ${JSON.stringify(r.body)}`);
 }
 
+/* ───────── 四之二、備援發生時，被拒的那幾個回合也要算進帳（批次 135 審查 API-2）───────── */
+console.log('\n── 四之二、usage.iterations：伺服器端備援時，被拒的回合另外計費，頂層 usage 只含答的那一回合 ──');
+{
+  // 形狀照官方 refusals-and-fallback 頁（Billing and rate limits 一節）的範例：被拒的是 type:'message'，答的是 type:'fallback_message'
+  const served = { input_tokens: 412, output_tokens: 264, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 };
+  const withIt = (iterations) => ({ ...served, iterations });
+  const declinedBig = { type: 'message', model: 'claude-sonnet-5-5', input_tokens: 5000, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 };
+  const servedIt = { type: 'fallback_message', model: 'claude-sonnet-5', ...served };
+  const U = AU;
+  const d1 = U.declinedAttempts(withIt([declinedBig, servedIt]));
+  check('★ declinedAttempts：被拒的 message 回合算進來（5000 輸入 × $2／百萬 = 0.01），答的 fallback_message 不重複算', d1.count === 1 && near(d1.usd, 0.01, 1e-12), JSON.stringify(d1));
+  check('★ logAiUsage：備援時 usd≈ 是所有回合合計（答的 Sonnet 5：412×2＋264×10 → 0.003464；加被拒的 0.01 → 0.01346），行尾多 attempts=2',
+    lineOf('LINE 問答', 'claude-sonnet-5', withIt([declinedBig, servedIt])) === '[ai-usage] LINE 問答 model=claude-sonnet-5 in=412 cache_read=0 cache_write=0 out=264 usd≈0.01346 attempts=2',
+    lineOf('LINE 問答', 'claude-sonnet-5', withIt([declinedBig, servedIt])));
+  check('　 estimateUsd 本身仍只算頂層（答的那一回合），不偷偷變成合計——兩個數字各有各的意思', near(estimateUsd('claude-sonnet-5', withIt([declinedBig, servedIt])), 0.003464, 1e-9), estimateUsd('claude-sonnet-5', withIt([declinedBig, servedIt])));
+  check('★ 中途被拒（有輸出）的回合一定計費：輸出 800 × $10／百萬 = 0.008 也算進來',
+    near(U.declinedAttempts(withIt([{ ...declinedBig, output_tokens: 800 }, servedIt])).usd, 0.01 + 0.008, 1e-12));
+  check('★ 沒有 fallback_message 就不是備援：iterations 只有一個 message（一般回應）→ 不加、不出 attempts=',
+    U.declinedAttempts(withIt([{ ...declinedBig, model: 'claude-sonnet-5' }])).count === 0
+      && lineOf('LINE 問答', 'claude-sonnet-5', withIt([{ ...declinedBig, model: 'claude-sonnet-5' }])) === lineOf('LINE 問答', 'claude-sonnet-5', served));
+  check('　 黏著路由（sticky）：只有 fallback_message、沒有被拒的回合 → 不加、不出 attempts=',
+    lineOf('LINE 問答', 'claude-sonnet-5', withIt([servedIt])) === lineOf('LINE 問答', 'claude-sonnet-5', served));
+  check('　 被拒的回合用它自己的模型估價（Haiku 5.5 的 5000 輸入 = 0.0005，不是 Sonnet 的 0.01）', near(U.declinedAttempts(withIt([{ ...declinedBig, model: 'claude-haiku-5-5' }, servedIt])).usd, 0.0005, 1e-12));
+  check('★ 被拒的模型不在價目表：usd≈ 整個拿掉（不湊一個少了一塊的假總額），attempts=2 與 token 數仍看得到',
+    lineOf('LINE 問答', 'claude-sonnet-5', withIt([{ ...declinedBig, model: 'claude-mystery-9' }, servedIt])) === '[ai-usage] LINE 問答 model=claude-sonnet-5 in=412 cache_read=0 cache_write=0 out=264 attempts=2',
+    lineOf('LINE 問答', 'claude-sonnet-5', withIt([{ ...declinedBig, model: 'claude-mystery-9' }, servedIt])));
+  check('　 iterations 是怪東西（null、字串、物件、裡面有 null 或沒有 type）：不丟例外、當作沒有',
+    [null, 'x', {}, [null], [{}], [{ type: 'fallback_message' }, null, 5]].every((it) => { const l = lineOf('測試', 'claude-sonnet-5', withIt(it)); return typeof l === 'string' && l.startsWith('[ai-usage] '); }));
+  check('　 沒有 iterations 的一般回應：整行跟以前一字不差（沒有 attempts=）', !/attempts=/.test(lineOf('LINE 問答', 'claude-sonnet-5-5', { input_tokens: 300, cache_read_input_tokens: 30000, output_tokens: 400 })));
+}
+
 /* ───────── 五、不能動的東西 ───────── */
 console.log('\n── 五、「只做看得到」：掃描行為的旋鈕沒有被動到 ──');
 {
@@ -258,6 +295,84 @@ console.log('\n── 五、「只做看得到」：掃描行為的旋鈕沒有�
   const usage = src('lib/ai-usage.js');
   check('　 lib/ai-usage.js 檔頭寫了官方來源網址與「待核對」的兩件事',
     /platform\.claude\.com\/docs\/en\/agents-and-tools\/tool-use\/web-search-tool/.test(usage) && /【待核對】/.test(usage) && /pause_turn/.test(usage));
+}
+
+/* ───────── 五之二、api/geo.js：模型拒答不是「沒被提到」（批次 134 審查 API-3）───────── */
+console.log('\n── 五之二、api/geo.js 遇到 stop_reason:"refusal"：記成錯誤列、不計分（以前被當成正常的「沒被提到」）──');
+{
+  process.env.LINE_ADMIN_USER_ID = 'Uadmin';
+  process.env.LINE_CHANNEL_ACCESS_TOKEN = 'tok';
+  const U0 = { input_tokens: 1000, output_tokens: 50 };
+  const REF = (category = 'general_harms', content = []) => ({ stop_reason: 'refusal', stop_details: category === null ? null : { type: 'refusal', category, explanation: '測試' }, content, usage: U0 });
+  const linePushes = [];
+  // 判官請求（沒帶 tools）固定回「沒被提到」，若真的被呼叫就能從 judges 看出來（拒答時不該呼叫）
+  const run = async (probeScript, { judgeRes } = {}) => {
+    seedScan();
+    linePushes.length = 0;
+    const seen = { probes: 0, judges: 0, gemini: 0 };
+    globalThis.fetch = async (url, opts = {}) => {
+      const u = String(url);
+      if (u.startsWith('https://api.line.me/')) { linePushes.push(JSON.parse(opts.body)); return new Response('{}', { status: 200 }); }
+      if (u.startsWith('https://generativelanguage.googleapis.com/')) {
+        seen.gemini++;
+        return jsonRes({ candidates: [{ content: { parts: [{ text: JSON.stringify(JUDGE) }] }, finishReason: 'STOP' }] });
+      }
+      if (!u.startsWith('https://api.anthropic.com')) throw new Error('不該打外部服務：' + u);
+      const body = JSON.parse(opts.body);
+      if (body.tools) return jsonRes(probeScript[Math.min(seen.probes++, probeScript.length - 1)]);
+      seen.judges++;
+      return jsonRes(judgeRes || { content: [{ type: 'text', text: JSON.stringify({ mentioned: false, rank: 0, specifics: false, competitors_found: [], evidence: '' }) }], stop_reason: 'end_turn', usage: { input_tokens: 800, output_tokens: 60 } });
+    };
+    captureLogs();
+    const origWarn = console.warn; const warns = [];
+    console.warn = (...a) => { warns.push(a.map(String).join(' ')); };
+    let r;
+    try { r = await post({ action: 'scan' }); } finally { releaseLogs(); console.warn = origWarn; }
+    return { r, seen, row: S.book.geo_runs[1] || [], warns };
+  };
+  const isErrorRow = (row) => !!row[14] && row[6] === '' && row[11] === '';
+
+  const g1 = await run([REF('frontier_llm')]);
+  check('★ 輸出前被攔下（content 是空的）：寫成錯誤列、不計分，錯誤訊息講明是拒答（refusal）', g1.r.body?.failed === 1 && isErrorRow(g1.row) && /refusal/.test(g1.row[14]) && /拒答/.test(g1.row[14]), JSON.stringify(g1.row));
+  check('　 沒有呼叫判官（拒答的探測不該再花一次判官的錢）', g1.seen.judges === 0, g1.seen.judges);
+  check('★ 記一行 [ai-refusal]：哪一條路、哪個模型、分類、（沒有場次）', g1.warns.some((l) => l === '[ai-refusal] where=AI 能見度 model=claude-haiku-5-5 category=frontier_llm event=-'), g1.warns.join('|'));
+  check('★ 拒答不是金鑰／額度問題：沒有 LINE 通知給管理員', linePushes.length === 0, JSON.stringify(linePushes));
+
+  const g2 = await run([REF('general_harms', [{ type: 'text', text: '我先查一下。' }, ...searchBlocks('s1'), { type: 'text', text: '根據搜尋結果，台灣的固態電池研發單位' }])]);
+  check('★ 搜尋之後、帶著半截文字被攔下：整題作廢，不是「mentioned=FALSE、score=0」的正常觀察（審查重現過：processed=1 failed=0）',
+    g2.r.body?.failed === 1 && isErrorRow(g2.row) && g2.row[13] === '' && g2.seen.judges === 0, JSON.stringify(g2.row));
+
+  const g3 = await run([
+    { stop_reason: 'pause_turn', content: [{ type: 'text', text: '先查一下。' }, ...searchBlocks('s1')], usage: U0 },
+    REF(null)
+  ]);
+  check('★ pause_turn 續跑到第二回合才被攔（category 是 null 也一樣）：前面累積的前導句不能拿來當答案，整題作廢',
+    g3.seen.probes === 2 && g3.r.body?.failed === 1 && isErrorRow(g3.row) && g3.row[13] === '' && g3.seen.judges === 0, `${g3.seen.probes} ${JSON.stringify(g3.row)}`);
+  check('　 category 是 null 照樣記 log（category=null）', g3.warns.some((l) => /^\[ai-refusal\] where=AI 能見度 .*category=null/.test(l)), g3.warns.join('|'));
+
+  const ctl = await run([{ stop_reason: 'end_turn', content: [cited('工研院有成果。')], usage: U0 }]);
+  check('　 （對照）沒被攔的探測照常計分、沒有錯誤、沒有 [ai-refusal]', ctl.r.body?.failed === 0 && !ctl.row[14] && ctl.warns.every((l) => !l.startsWith('[ai-refusal]')), JSON.stringify(ctl.row));
+
+  // 判官被攔：只有 Anthropic 一家 → 錯誤列（訊息含 refusal）；另一家判官（Gemini）有金鑰 → isSwitchable 認得，換 Gemini 判
+  const judgeRef = { stop_reason: 'refusal', stop_details: { type: 'refusal', category: 'general_harms', explanation: '測試' }, content: [], usage: { input_tokens: 800, output_tokens: 0 } };
+  const okProbe = [{ stop_reason: 'end_turn', content: [cited('工研院有成果。')], usage: U0 }];
+  const j1 = await run(okProbe, { judgeRes: judgeRef });
+  check('★ 判官被攔下、沒有別家可換：這一題記成錯誤列（訊息含 refusal），不是算出一個分數', j1.r.body?.failed === 1 && isErrorRow(j1.row) && /refusal/.test(j1.row[14]), JSON.stringify(j1.row));
+  check('　 判官被攔也記 [ai-refusal]', j1.warns.some((l) => /^\[ai-refusal\] where=AI 能見度 model=claude-haiku-5-5 category=general_harms/.test(l)), j1.warns.join('|'));
+
+  process.env.GEMINI_API_KEY = 'g-key';
+  seedScan();
+  await post({ action: 'settings_save', engines: ['claude'], judge: 'anthropic' });   // 只掃 Claude，判官指定 Anthropic，Gemini 金鑰只當替補判官
+  const j2 = await run(okProbe, { judgeRes: judgeRef });
+  check('★ isSwitchable 認得拒答：Anthropic 判官被攔 → 換 Gemini 判官，這一題照常計分（提到、排第 1）',
+    j2.seen.gemini === 1 && j2.r.body?.failed === 0 && j2.row[6] === 'TRUE' && Number(j2.row[7]) === 1 && !j2.row[14], `${j2.seen.gemini} ${JSON.stringify(j2.row)}`);
+  await post({ action: 'settings_save', engines: [], judge: '' });
+  delete process.env.GEMINI_API_KEY;
+  delete process.env.LINE_ADMIN_USER_ID;
+  delete process.env.LINE_CHANNEL_ACCESS_TOKEN;
+  const src134 = src('api/geo.js');
+  check('　 isSwitchable 的比對式寫明 refusal；anthropic() 在 !res.ok 之後才看拒答（金鑰警報不被吃掉）',
+    /const isSwitchable[\s\S]{0,200}refusal/.test(src134) && src134.indexOf('reportAiFailure({ status: res.status') < src134.indexOf('if (isRefusal(data))'));
 }
 
 console.log(`\n${fail === 0 ? '✅' : '❌'} 批次 135 測試：${pass} 通過，${fail} 失敗`);
