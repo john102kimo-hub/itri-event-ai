@@ -148,6 +148,10 @@
       "schedule": "0 19 * * *"
     },
     {
+      "path": "/api/line?action=cron_teach",
+      "schedule": "10 2 * * *"
+    },
+    {
       "path": "/api/events?action=b2b_cron",
       "schedule": "0 1 * * 1-5"
     }
