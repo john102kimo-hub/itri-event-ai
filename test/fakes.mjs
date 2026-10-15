@@ -168,6 +168,8 @@ export function reset() {
   state.newsDigestText = ''; // 非空＝模擬「官網補查那支模型」吐出這段話（批次 44）
   state.memories = [];       // bot_memory 的列（批次 46）：[時間, 範圍, 類型, 內容, 建立者, 狀態]
   state.changes = [];
+  state.qaLog = [];          // 批次 139：qa_log!A2:I 的列
+  state.teachQueue = [];     // 批次 139：teach_queue!A2:J 的列
   state.sheetLatencyMs = 0;  // 批次 80：>0 時每次讀寫都延遲，讓同時進來的兩個請求真的交錯（測競態用）
   state.photoInbox = [];     // 批次 80：line_photo_inbox 的列 [LINE ID, messageId, 時戳, 已用]
   state.photoUploads = [];   // 批次 79：saveEventPhoto() 被呼叫的紀錄 [eventId, messageId]
@@ -202,6 +204,8 @@ export const sheets = {
     if (range.startsWith('line_staff!')) return state.staff.map(r => [...r]);
     if (range.startsWith('contacts_directory!')) return state.contactsDirectory ? [[state.contactsDirectory]] : [];
     if (range.startsWith('bot_memory!')) return state.memories.map(r => [...r]);
+    if (range.startsWith('qa_log!')) return (state.qaLog || []).map(r => [...r]);          // 批次 139：待教清單掃的問答紀錄
+    if (range.startsWith('teach_queue!')) return (state.teachQueue || []).map(r => [...r]); // 批次 139
     if (range.startsWith('event_changes!')) return (state.changes || []).map(r => [...r]);
     if (range.startsWith('line_photo_inbox!')) return (state.photoInbox || []).map(r => [...r]);
     return [];
@@ -219,6 +223,7 @@ export const sheets = {
     }
     if (range.startsWith('line_staff!')) state.staff.push(...rows.map(r => [...r]));
     if (range.startsWith('bot_memory!')) state.memories.push(...rows.map(r => [...r]));
+    if (range.startsWith('teach_queue!')) (state.teachQueue ||= []).push(...rows.map(r => [...r]));
     if (range.startsWith('events!')) state.events.push(...rows.map(r => [...r]));
     if (range.startsWith('event_changes!')) (state.changes ||= []).push(...rows.map(r => [...r]));
     if (range.startsWith('line_photo_inbox!')) (state.photoInbox ||= []).push(...rows.map(r => [...r]));
@@ -237,6 +242,12 @@ export const sheets = {
     if (inM) {
       const row = (state.photoInbox || [])[Number(inM[2]) - 2];
       if (row) row[inM[1].charCodeAt(0) - 65] = values[0][0];
+      return;
+    }
+    const tqM = range.match(/^teach_queue!([A-J])(\d+)$/);
+    if (tqM) {
+      const row = (state.teachQueue || [])[Number(tqM[2]) - 2];
+      if (row) row[tqM[1].charCodeAt(0) - 65] = values[0][0];
       return;
     }
     const memM = range.match(/^bot_memory!([A-F])(\d+)$/);

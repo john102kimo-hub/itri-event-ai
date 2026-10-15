@@ -252,8 +252,8 @@ const lineOf = (html, re) => { const m = re.exec(html); if (!m) throw new Error(
 
   // 「找真人」那句判斷與後台標「疑似答不出來」同一條規則
   const evRe = lineOf(EV, /const UNANSWERED_RE = .*;/).replace(/^const UNANSWERED_RE = /, '').replace(/;$/, '');
-  const anRe = lineOf(read('api/analytics.js'), /const UNANSWERED_RE = .*;/).replace(/^const UNANSWERED_RE = /, '').replace(/;$/, '');
-  check('★ UNANSWERED_RE：記者頁（找真人）與後台（疑似答不出來）逐字相同', evRe === anRe, evRe + '\n' + anRe);
+  const anRe = lineOf(read('lib/teach-queue.js'), /export const UNANSWERED_RE = .*;/).replace(/^export const UNANSWERED_RE = /, '').replace(/;$/, '');
+  check('★ UNANSWERED_RE：記者頁（找真人）與後台（疑似答不出來，規則住在 lib/teach-queue.js，批次 139）逐字相同', evRe === anRe, evRe + '\n' + anRe);
 }
 {
   // 對話紀錄的存取

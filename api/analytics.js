@@ -25,11 +25,10 @@ import { requireAdmin } from '../lib/auth.js';
 import { readQaRowsWithoutAnswers } from '../lib/qa-log.js';
 import { readEventRows } from '../lib/events-table.js';
 import { isBusinessEvent } from '../lib/audience.js';
+import { UNANSWERED_RE } from '../lib/teach-queue.js';
 
-// 「AI 這題疑似沒答到」：提示詞規定答不出來時要說「這部分我沒有資料，建議洽現場新聞聯絡人」
-// （lib/prompt.js），所以這句話的出現是個可靠的線索。只是**線索**——模型偶爾會換個說法，
-// 漏標沒關係，後台標的是「疑似」，目的是讓承辦人一眼找出知識庫補哪裡（批次 104）。
-const UNANSWERED_RE = /這部分我沒有資料|背景資料(?:中|裡)?(?:並)?沒有(?:提到|提供|記載)|沒有(?:相關|這方面的)資料|查無相關資料/;
+// 「AI 這題疑似沒答到」的判斷（UNANSWERED_RE）住在 lib/teach-queue.js：待教清單（批次 139）要用同一條規則，
+// 兩邊各寫一份遲早會判得不一樣。
 const previewOf = (a, n = 140) => String(a || '').replace(/\s+/g, ' ').trim().slice(0, n);
 
 // 判斷「已經存進媒體名稱欄的值」其實比較像一句問題，不是真的媒體/記者名稱——

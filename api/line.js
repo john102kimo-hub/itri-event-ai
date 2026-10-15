@@ -51,6 +51,7 @@ import { buildCalendarCards, buildCalendarCardsFor, routeIntent } from '../lib/r
 import { matchEventByName, buildWelcomeFlex } from '../lib/menu.js';
 import { listOpenCampaigns, parseRegBindText, parseRegBindCheck, welcomeButtonLabel } from '../lib/registration.js';
 import { autoSyncRegistrationMenu } from '../lib/richmenu-sync.js';
+import { runTeachQueueCron } from '../lib/teach-queue.js';
 import {
   isPasscodeMatch, isColleaguePasscodeMatch, isStaffAuthenticated, isColleagueAuthenticated, authenticateStaff, COLLEAGUE
 } from '../lib/staff.js';
@@ -551,17 +552,20 @@ async function apologise(ev, cause) {
 }
 
 export default async function handler(req, res) {
-  // Vercel Cron（GET）：報名結束後把圖文選單換回原本那套（批次 88）。一定要帶 CRON_SECRET，
-  // 沒設定就一律拒絕——這個入口會動到 LINE 帳號的選單。
-  if (req.method === 'GET' && req.query?.action === 'cron_menu') {
+  // Vercel Cron（GET）：一定要帶 CRON_SECRET，沒設定就一律拒絕——這兩個入口會動到 LINE 帳號的選單、
+  // 或對管理員推播（批次 88、139）。
+  const cronAction = req.method === 'GET' ? req.query?.action : '';
+  if (cronAction === 'cron_menu' || cronAction === 'cron_teach') {
     const secret = process.env.CRON_SECRET;
     const bearer = String(req.headers?.authorization || '').replace(/^Bearer\s+/i, '');
     const a = Buffer.from(bearer), b = Buffer.from(secret || '');
     if (!secret || a.length !== b.length || !timingSafeEqual(a, b)) return res.status(401).json({ error: 'unauthorized' });
     try {
-      return res.status(200).json(await autoSyncRegistrationMenu());
+      // cron_menu：報名結束後把圖文選單換回原本那套（批次 88）
+      // cron_teach：掃昨天以來的問答，把疑似沒答好的題目推給朱朱（批次 139，見 lib/teach-queue.js）
+      return res.status(200).json(cronAction === 'cron_menu' ? await autoSyncRegistrationMenu() : await runTeachQueueCron());
     } catch (e) {
-      console.error('自動換回圖文選單失敗:', e.message);
+      console.error(`排程 ${cronAction} 失敗:`, e.message);
       return res.status(500).json({ error: e.message });
     }
   }
