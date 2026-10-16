@@ -88,7 +88,7 @@ check('同步邏輯只有一份（lib/richmenu-sync.js），api/line.js 與 lib/
   check('字型檔放在 public/fonts/（Function 去網站抓），旁邊附授權（SIL OFL）', fs.existsSync(path.join(ROOT, 'public/fonts/NotoSansTC-Bold.ttf')) && /SIL Open Font License/.test(read('public/fonts/OFL.txt')) && /fonts\/NotoSansTC-Bold\.ttf/.test(syncSrc));
   check('字型檔是原封不動的 Noto Sans TC Bold（OFL 的保留字型名稱規則：不修改、不改名）', fs.statSync(path.join(ROOT, 'public/fonts/NotoSansTC-Bold.ttf')).size === 7104212);
   const v = JSON.parse(read('vercel.json'));
-  check('api/events.js 的最長執行時間拉到 60 秒（同步選單要畫圖、建兩份選單、綁職員）；沒有多開 Function', v.functions['api/events.js'].maxDuration === 60 && Object.keys(v.functions).length === 6);
+  check('api/events.js 的最長執行時間拉到 60 秒（同步選單要畫圖、建兩份選單、綁職員）；沒有多開 Function', v.functions['api/events.js'].maxDuration === 60 && Object.keys(v.functions).length === 7); // 批次 140：+ api/media.js（名片辨識），只是時限設定，不是多開一支 Function
   check('後台頁有「放到 LINE 圖文選單並同步」與「換回一般選單」，並呼叫三個 reg_admin_menu_ 動作', /reg_admin_menu_status/.test(read('public/registrations.html')) && /reg_admin_menu_sync/.test(read('public/registrations.html')) && /reg_admin_menu_reset/.test(read('public/registrations.html')) && /放到 LINE 圖文選單並同步/.test(read('public/registrations.html')));
 }
 
