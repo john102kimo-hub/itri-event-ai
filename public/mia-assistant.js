@@ -119,11 +119,31 @@
     render();
     syncVisible();
     setInterval(syncVisible, 1500); // 登入／登出後按鈕跟著出現或消失
+    window.addEventListener('resize', function () { if (fab.style.display !== 'none') placeFab(); });
+  }
+
+  // 頁面底部有固定的導覽列（後台首頁手機版的 #sidebar）時，按鈕與對話框往上讓開（批次 144 走查）：
+  // 以前手機上米亞剛好蓋住底部選單最右邊的「更多」，而記者名單、活動報名、登出都只能從「更多」進去。
+  function bottomInset() {
+    var sb = document.getElementById('sidebar');
+    if (!sb) return 0;
+    try {
+      var r = sb.getBoundingClientRect(), h = window.innerHeight || 0;
+      if (getComputedStyle(sb).position !== 'fixed' || !r.height || r.height > 160 || r.top < h / 2) return 0;
+      return Math.max(0, Math.ceil(h - r.top));
+    } catch (e) { return 0; }
+  }
+  function placeFab() {
+    var inset = bottomInset();
+    fab.style.bottom = inset ? (inset + 10) + 'px' : '';
+    panel.style.bottom = inset ? (inset + 84) + 'px' : '';
+    panel.style.maxHeight = inset ? 'calc(100vh - ' + (inset + 108) + 'px)' : '';
   }
 
   function syncVisible() {
     var on = !!pwd();
     fab.style.display = on ? 'block' : 'none';
+    if (on) placeFab();
     if (!on && state.open) { state.open = false; panel.classList.remove('open'); }
   }
 

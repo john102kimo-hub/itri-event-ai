@@ -44,6 +44,7 @@ GitHub Actions（`.github/workflows/test.yml`）每個 PR 與 main 推送都會�
 |---|---|
 | `tools/geo-ui-check`、`tools/reg-ui-check`、`tools/training-flow-check.mjs`、`tools/training-voice-check.mjs` | 在真的瀏覽器裡把 /geo、/registrations（活動報名後台）、媒體訓練的流程與語音跑一遍 |
 | `tools/sri-check` | 驗證 CDN 資源的 SRI 雜湊（原檔通過、竄改過的被瀏覽器拒絕） |
+| `tools/persona-check`（`line.mjs`、`web.mjs`） | 四種角色（同事、記者、主管、洽案廠商）把 LINE 與網頁前後台實際走一遍，帶斷言；網頁那支用 Chromium、後端是真的 `api/*.js`（試算表與 AI 是假的）。改了權限、選單、後台助理、名單、洽詢單之後跑一次（批次 144） |
 | `tools/line-button-audit`、`tools/line-group-sim`、`tools/line-persona-sim` | 把 LINE 的每一步、群組對話、四種角色丟進真的 `api/line.js`，看按鈕與回應（AI 是假的，看的是規則層） |
 | `tools/grounding-backtest` | 把後台匯出的真實問答丟進去，量「答案出口檢查」（`ANSWER_GROUNDING`）的誤報率，決定要不要打開（批次 132；真實問答含個資，別 commit） |
 | `tools/model-ab` | 同一批問題比兩個模型的答案（**會花真的錢**） |
