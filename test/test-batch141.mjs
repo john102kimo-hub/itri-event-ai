@@ -240,6 +240,11 @@ console.log('\n── 四、頁面 ──');
     check(`${f}.html 引入 /mia-assistant.js`, read(`public/${f}.html`).includes('<script src="/mia-assistant.js" defer></script>'));
   }
   check('頭像檔存在且是 PNG（含透明）', fs.existsSync(path.join(ROOT, 'public/mia-avatar.png')) && fs.readFileSync(path.join(ROOT, 'public/mia-avatar.png')).subarray(1, 4).toString() === 'PNG');
+  const isWebp = (f) => { const b = fs.readFileSync(path.join(ROOT, 'public', f)); return b.subarray(0, 4).toString() === 'RIFF' && b.subarray(8, 12).toString() === 'WEBP'; };
+  check('動態頭像（批次 143）：待機動畫與查資料動畫都是 WebP、各小於 400 KB（只有後台會載入，但仍要輕）',
+    isWebp('mia-avatar-idle.webp') && isWebp('mia-avatar-busy.webp') && ['mia-avatar-idle.webp', 'mia-avatar-busy.webp'].every((f) => fs.statSync(path.join(ROOT, 'public', f)).size < 400_000));
+  check('　 右下角用待機動畫、查資料時用放大鏡動畫、標題用靜態圖；「減少動態效果」的人一律用靜態圖；動態圖載入失敗退回靜態圖',
+    /avatar\(IDLE/.test(js) && /avatar\(BUSY/.test(js) && /himg\.src = STILL/.test(js) && /prefers-reduced-motion: reduce/.test(js) && /img\.onerror = function \(\) \{ img\.onerror = null; img\.src = STILL/.test(js));
   check('★ 確認卡執行前再擋一次：只允許 /api/media（add、update）與 /api/events（create、記住、忘掉）', /var ALLOWED = \[/.test(js) && /actions: \['add', 'update'\]/.test(js) && /actions: \['create', 'assistant_remember', 'assistant_forget'\]/.test(js) && /if \(!allowed\(req\)\)/.test(js)
     && !/delete|publish|settings_save/.test(js.slice(js.indexOf('var ALLOWED'), js.indexOf('var CHIPS'))));
   check('★ 顯示一律用 textContent，沒有 innerHTML／insertAdjacentHTML（模型回的字不會被當成 HTML）', !/innerHTML|insertAdjacentHTML|document\.write/.test(js));
