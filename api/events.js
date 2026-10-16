@@ -34,6 +34,7 @@ import { isBusinessEvent } from '../lib/audience.js';
 import { readEventRows, invalidateEventsTable, EVENTS_RANGE } from '../lib/events-table.js';
 import { requireAdmin, passwordFrom, codeMatches, authBlocked, authFailed, tooManyAttempts } from '../lib/auth.js';
 import { runAssistant } from '../lib/assistant.js';
+import { addMemory, forgetMemory } from '../lib/assistant-memory.js';
 import { createLimiter, clientIp } from '../lib/rate-limit.js';
 
 // 跟 events 的 knowledge_base 同一個上限理由：Google Sheets 單一儲存格上限約 5 萬字元，
@@ -338,6 +339,15 @@ export default async function handler(req, res) {
       const r = await runAssistant(body.messages);
       if (r.error) return res.status(r.status || 500).json({ error: r.error });
       return res.status(200).json({ reply: r.reply, proposals: r.proposals });
+    }
+
+    // 後台助理的記憶（批次 142）：只有使用者在確認卡上按了「確認執行」才會打到這裡。
+    if (action === 'assistant_remember' || action === 'assistant_forget') {
+      if (!requireAdmin(req, res)) return;
+      try {
+        const r = action === 'assistant_remember' ? await addMemory(body.content) : await forgetMemory(body.id);
+        return res.status(r.status).json(r.error ? { error: r.error } : { success: true, id: r.id });
+      } catch (err) { return res.status(500).json({ error: err.message }); }
     }
 
     try {

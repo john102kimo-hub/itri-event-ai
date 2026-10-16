@@ -3,7 +3,7 @@
 // 它只做三件事：把使用者的話送到 /api/events（action=assistant_chat）、把回答顯示出來、
 // 顯示「確認卡」並在使用者按下「確認」後執行。
 //
-// ⚠️ 確認卡要執行的請求，這裡再擋一次（ALLOWED）：只允許新增記者、修改記者、新增活動草稿三種，
+// ⚠️ 確認卡要執行的請求，這裡再擋一次（ALLOWED）：只允許新增記者、修改記者、新增活動草稿、記住／忘掉一件事這幾種，
 // 打的網址與 action 都要在白名單裡。伺服器端的 propose_action 本來就只會產生這三種，這裡是第二道門——
 // 回應被竄改或以後有人改壞伺服器端時，頁面也不會去打刪除、發布、改設定之類的 API。
 // 要擴充提議的種類，請伺服器端（lib/assistant.js）與這裡的 ALLOWED 一起改。
@@ -18,7 +18,7 @@
   var STORE_KEY = 'mia_assist_v1';
   var ALLOWED = [
     { url: '/api/media', actions: ['add', 'update'] },
-    { url: '/api/events', actions: ['create'] }
+    { url: '/api/events', actions: ['create', 'assistant_remember', 'assistant_forget'] }
   ];
   var CHIPS = ['這幾天記者問了什麼？', '最近有哪些活動？', '報名狀況怎麼樣？', 'AI 追蹤最近表現如何？'];
 
@@ -87,7 +87,7 @@
     panel = el('div'); panel.id = 'mia-panel';
     var head = el('div'); head.id = 'mia-head';
     var himg = document.createElement('img'); himg.src = '/mia-avatar.png'; himg.alt = '';
-    var t = el('div', 't', '米亞・後台小幫手'); t.appendChild(el('small', '', '可以問活動、報名、記者名單、問答與 AI 追蹤'));
+    var t = el('div', 't', '米亞・後台小幫手'); t.appendChild(el('small', '', '可以問活動、報名、記者名單、問答與 AI 追蹤；也能教我記事情'));
     var clear = el('button', '', '清除'); clear.type = 'button'; clear.onclick = function () { state.log = []; save(); render(); };
     var close = el('button', '', '✕'); close.type = 'button'; close.setAttribute('aria-label', '關閉'); close.onclick = toggle;
     head.appendChild(himg); head.appendChild(t); head.appendChild(clear); head.appendChild(close);

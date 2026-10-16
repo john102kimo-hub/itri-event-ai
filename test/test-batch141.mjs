@@ -98,7 +98,7 @@ const toolResult = (i) => JSON.parse(seen[i].messages.at(-1).content[0].content)
   check('一問一答：模型呼叫 questions → 工具結果送回模型 → 最後的回答出來', r.reply && seen.length === 2 && seen[1].messages.at(-1).content[0].type === 'tool_result', JSON.stringify(r));
   const q = toolResult(1);
   check('★ questions 工具：排除測試媒體與太舊的題目；算出疑似沒答到', q.total === 2 && q.unanswered === 1 && q.latest.length === 2 && !JSON.stringify(q).includes('測試題') && !JSON.stringify(q).includes('很舊'), JSON.stringify(q));
-  check('　 請求：Sonnet 5.5、thinking 用 between_tools（不是 disabled）、有工具清單、帶 system', seen[0].model === 'claude-sonnet-5-5' && seen[0].thinking.type === 'between_tools' && seen[0].tools.length === 8 && /米亞/.test(seen[0].system));
+  check('　 請求：Haiku 5.5、thinking 關掉、有工具清單、帶 system', seen[0].model === 'claude-haiku-5-5' && seen[0].thinking.type === 'disabled' && seen[0].tools.length === 8 && /米亞/.test(seen[0].system));
   check('　 第二輪原樣帶回模型的 thinking 區塊（不帶回去 API 會 400）', seen[1].messages.at(-2).content.some((b) => b.type === 'thinking'));
   check('★ 出口：Markdown 的 ** 被拿掉', r.reply === '最近 7 天有 2 題。其中 1 題疑似沒答到。', r.reply);
 
@@ -151,6 +151,60 @@ const toolResult = (i) => JSON.parse(seen[i].messages.at(-1).content[0].content)
   check('　 沒有問題 → 400；沒有金鑰 → 503', r.status === 400 && (await A.runAssistant([{ role: 'user', content: 'q' }], { apiKey: '' })).status === 503);
 }
 
+
+// ── 批次 142：記憶 ──
+console.log('\n── 二之二、記憶（教她記事情）──');
+{
+  const M = await import('../lib/assistant-memory.js');
+  const events = (await import('../api/events.js')).default;
+  const callEv = async (body, headers = { 'x-admin-password': 'pw' }) => {
+    let code = 200, out;
+    const res = { setHeader() {}, status(c) { code = c; return res; }, json(o) { out = o; return res; }, end() { return res; } };
+    await events({ method: 'POST', query: {}, headers, body, socket: { remoteAddress: '5.5.5.5' } }, res);
+    return { code, out };
+  };
+  M.invalidateMemory();
+  let r = await A.buildProposal({ kind: 'remember', content: ' 「四足」指的是  e1 那场 ' });
+  check('記住：產生確認卡；內容整理過（空白縮成一格、簡體轉繁體）；請求是 assistant_remember；產生卡時沒有寫入',
+    r.ok && r.proposal.request.body.action === 'assistant_remember' && r.proposal.request.body.content === '「四足」指的是 e1 那場' && !book.assistant_memory, JSON.stringify(r));
+  check('　 空的、超過 200 字 → 不產生卡並說明', !(await A.buildProposal({ kind: 'remember', content: '  ' })).ok && /太長/.test((await A.buildProposal({ kind: 'remember', content: 'x'.repeat(201) })).error));
+  check('★ 沒有確認就沒有寫入：整個助理對話流程跑完，記憶表還是空的', !book.assistant_memory);
+
+  let w = await callEv({ action: 'assistant_remember', content: '「四足」指的是 e1 那場' });
+  check('確認後（頁面打 assistant_remember）：寫進 assistant_memory，編號 1、狀態 on', w.code === 200 && w.out.id === 1 && book.assistant_memory.at(-1)[2] === '「四足」指的是 e1 那場' && book.assistant_memory.at(-1)[3] === 'on', JSON.stringify(w));
+  w = await callEv({ action: 'assistant_remember', content: '「四足」指的是 e1 那場' });
+  check('　 同一件事不重複記（409）', w.code === 409);
+  check('★ 沒帶密碼 → 401，沒寫入', (await callEv({ action: 'assistant_remember', content: '偷偷記' }, {})).code === 401 && !book.assistant_memory.some((x) => x[2] === '偷偷記'));
+  r = await A.buildProposal({ kind: 'remember', content: '「四足」指的是 e1 那場' });
+  check('　 已經記過的不再產生卡', !r.ok && /已經記過/.test(r.error));
+
+  const sp = A.systemPrompt(new Date(), await M.readMemories({ fresh: true }));
+  check('★ 記憶進系統提示（帶編號），並講明「資料以工具為準、備忘不一致時相信工具」', /\[1\] 「四足」指的是 e1 那場/.test(sp) && /以工具查到的為準/.test(sp));
+  check('　 沒有記憶時不會出現那一段', !/你記得的事/.test(A.systemPrompt(new Date(), [])));
+  check('　 系統提示講明：自己不會學、不能說已經記住、答不出來要邀請使用者教', /你自己不會學/.test(sp) && /我可以記起來/.test(sp));
+
+  script = [text('ok')]; seen.length = 0;
+  await A.runAssistant([{ role: 'user', content: 'hi' }]);
+  check('　 對話時真的帶上記憶', /\[1\] 「四足」/.test(seen[0].system));
+
+  r = await A.buildProposal({ kind: 'forget', id: 1 });
+  check('忘掉：卡上寫出要忘掉的內容；請求是 assistant_forget', r.ok && r.proposal.fields[0].value.includes('四足') && r.proposal.request.body.action === 'assistant_forget' && r.proposal.request.body.id === 1);
+  check('　 編號不存在 → 不產生卡', !(await A.buildProposal({ kind: 'forget', id: 99 })).ok);
+  w = await callEv({ action: 'assistant_forget', id: 1 });
+  check('　 確認後標成 off（留著紀錄，不刪列），之後不再帶進提示', w.code === 200 && book.assistant_memory.at(-1)[3] === 'off' && !(await M.readMemories({ fresh: true })).length);
+  check('　 再忘一次 → 404', (await callEv({ action: 'assistant_forget', id: 1 })).code === 404);
+
+  for (let i = 0; i < 30; i++) await M.addMemory('第 ' + (i + 100) + ' 條');
+  w = await callEv({ action: 'assistant_remember', content: '第 31 條' });
+  check('★ 記憶滿 30 條 → 擋下並請先忘掉幾條（系統提示不能無限長）', w.code === 409 && /滿了/.test(w.out.error), JSON.stringify(w));
+  ctl.failReads.add('assistant_memory');
+  M.invalidateMemory();
+  const rd = await M.readMemories({ fresh: true });
+  w = await callEv({ action: 'assistant_remember', content: '讀失敗時' });
+  ctl.failReads.delete('assistant_memory');
+  check('★ 記憶表讀不到：助理照常回答（記憶是加分項）；但不會在讀不到時亂寫（避免重複編號）', Array.isArray(rd) && w.code === 500 && !book.assistant_memory.some((x) => x[2] === '讀失敗時'));
+}
+
 // ═══ 三、入口 ═════════════════════════════════════════════════════════════════
 console.log('\n── 三、入口（api/events.js assistant_chat）──');
 {
@@ -185,7 +239,7 @@ console.log('\n── 四、頁面 ──');
     check(`${f}.html 引入 /mia-assistant.js`, read(`public/${f}.html`).includes('<script src="/mia-assistant.js" defer></script>'));
   }
   check('頭像檔存在且是 PNG（含透明）', fs.existsSync(path.join(ROOT, 'public/mia-avatar.png')) && fs.readFileSync(path.join(ROOT, 'public/mia-avatar.png')).subarray(1, 4).toString() === 'PNG');
-  check('★ 確認卡執行前再擋一次：只允許 /api/media（add、update）與 /api/events（create）', /var ALLOWED = \[/.test(js) && /actions: \['add', 'update'\]/.test(js) && /actions: \['create'\]/.test(js) && /if \(!allowed\(req\)\)/.test(js)
+  check('★ 確認卡執行前再擋一次：只允許 /api/media（add、update）與 /api/events（create、記住、忘掉）', /var ALLOWED = \[/.test(js) && /actions: \['add', 'update'\]/.test(js) && /actions: \['create', 'assistant_remember', 'assistant_forget'\]/.test(js) && /if \(!allowed\(req\)\)/.test(js)
     && !/delete|publish|settings_save/.test(js.slice(js.indexOf('var ALLOWED'), js.indexOf('var CHIPS'))));
   check('★ 顯示一律用 textContent，沒有 innerHTML／insertAdjacentHTML（模型回的字不會被當成 HTML）', !/innerHTML|insertAdjacentHTML|document\.write/.test(js));
   check('　 沒登入（sessionStorage 沒有 itri_pwd）就不顯示按鈕', /syncVisible/.test(js) && /fab\.style\.display = on \? 'block' : 'none'/.test(js));
