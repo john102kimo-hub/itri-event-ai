@@ -7,7 +7,10 @@
 // GET  ?action=list&code=xxx           → 待確認名單（依重要性排序，每次給一批）
 // GET  ?action=search&code=xxx&q=xxx   → 搜尋特定記者（辦活動前先查）
 // POST {action:'update',code,id,...}   → 一鍵更新：補路線／標記離職／標記仍在職
-// POST {action:'add',code,name,outlet,email,beat?} → 新增一位記者（批次 137，不用編 id、不用貼 CSV）
+// POST {action:'add',code,name,outlet,email,beat?,phone?,title?} → 新增一位記者（批次 137，不用編 id、不用貼 CSV）
+// POST {action:'card_scan',code,image}  → 名片翻拍：AI 讀出姓名／媒體／mail／電話，並比對名單裡是不是已經有這個人（批次 140）
+// POST card_match（不呼叫 AI）           → 同仁改過讀出來的欄位後，重新比對一次
+// POST {action:'update_contact',code,id,name?,outlet?,email?,phone?,title?,mark?} → 用名片上的新資料更新既有記者（批次 140）
 //
 // ── 管理員（需 ADMIN_PASSWORD）───────────────────────────────────────
 // POST {action:'seed',password,csv}    → 貼上 CSV 一次性匯入／更新（用 id 對應，重覆貼不會炸掉）
@@ -23,7 +26,9 @@
 import { readRange, appendRows, updateRange, ensureSheets } from '../lib/sheets.js';
 import { adminAttempt, requireAdmin, passwordFrom, codeMatches, authFailed } from '../lib/auth.js';
 import { generateShareCode } from '../lib/ids.js';
-import { pickRecipients, toBatches, clampBatchSize, buildOutlookCsv, csvCell, normalizeEmail, nextRosterId } from '../lib/media-pick.js';
+import { pickRecipients, toBatches, clampBatchSize, buildOutlookCsv, csvCell, normalizeEmail, nextRosterId, BEATS } from '../lib/media-pick.js';
+import { parseImageInput, scanCard, matchRoster, diffCard, cleanPhone, maskEmail, maskPhone } from '../lib/card-scan.js';
+import { createLimiter, clientIp } from '../lib/rate-limit.js';
 
 const SHEETS = {
   media_roster: [
@@ -36,7 +41,6 @@ const SHEETS = {
 
 const STALE_DAYS = 365;
 const BATCH_SIZE = 25;
-const BEATS = ['半導體', '生醫', 'AI／資通訊', '淨零／能源', '機器人／智慧製造', '材料化學', '財經／產業', '一般'];
 
 const now = () => new Date().toLocaleString('zh-TW', { timeZone: 'Asia/Taipei', hour12: false });
 const today = () => new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Taipei' });
@@ -66,6 +70,24 @@ async function saveSetting(key, value) {
   const idx = rows.findIndex((r) => r[0] === key);
   if (idx >= 0) await updateRange(`media_settings!A${idx + 2}:B${idx + 2}`, [[key, value]]);
   else await appendRows('media_settings!A:B', [[key, value]]);
+}
+
+// 名片辨識每次都是一次付費的 AI 呼叫，而同仁共用連結是設計成會外流的（見 authorize()）。
+// 跟其他限流一樣是 best-effort（單一 instance 的記憶體）；真正的上限是 Anthropic Console 的月花費上限。
+const scanLimiter = createLimiter({ windowMs: 10 * 60_000, max: 40 });
+
+// 名片比對結果。同仁（共用連結）看到的「名單裡已有的 mail／電話」遮一半：認得出是不是同一個人，但抄不走
+// （批次 137：mail 是個資，連結外流不能撈走整份名單）。管理員看全部。
+function describeMatches(rows, card, isAdmin) {
+  return matchRoster(rows, card).map(({ rec, reason }) => {
+    const m = (field, v) => (isAdmin ? v : field === 'email' ? maskEmail(v) : field === 'phone' ? maskPhone(v) : v);
+    return {
+      id: rec.id, reason, status: rec.status,
+      name: rec.name, outlet: rec.outlet, beat: rec.beat,
+      email: m('email', rec.email), phone: m('phone', rec.phone),
+      changes: diffCard(rec, card).map((c) => ({ field: c.field, from: m(c.field, c.from), to: c.to })),
+    };
+  });
 }
 
 const daysSince = (d) => (d ? Math.floor((Date.now() - new Date(d).getTime()) / 86400000) : null);
@@ -342,6 +364,10 @@ export default async function handler(req, res) {
         const outlet = String(body.outlet || '').trim().slice(0, 60);
         const beat = String(body.beat || '').trim();
         const rawEmail = String(body.email || '').trim();
+        const rawPhone = String(body.phone || '').trim();
+        const phone = rawPhone ? cleanPhone(rawPhone) : '';
+        const title = String(body.title || '').replace(/\s+/g, ' ').trim().slice(0, 60);
+        if (rawPhone && !phone) return res.status(400).json({ error: '電話格式看起來不對，請再確認（至少要有 6 碼數字）' });
         if (!name) return res.status(400).json({ error: '請填記者姓名' });
         if (!outlet) return res.status(400).json({ error: '請填媒體名稱' });
         const email = normalizeEmail(rawEmail);
@@ -359,9 +385,72 @@ export default async function handler(req, res) {
         }
         const id = nextRosterId(existing.map((r) => r.id));
         await appendRows('media_roster!A:N', [[
-          id, name, outlet, beat, email, '', 0, 0, 0, '', 'active', '', now(), String(body.updated_by || '').slice(0, 20),
+          id, name, outlet, beat, email, phone, 0, 0, 0, '', 'active', title ? `職稱：${title}` : '', now(), String(body.updated_by || '').slice(0, 20),
         ]]);
         return res.status(200).json({ success: true, id });
+      }
+
+      // 名片翻拍（批次 140）：照片 → AI 讀出欄位 → 比對名單。這一步**不寫任何東西**，讀出來的只是草稿，
+      // 人看過、按了「新增」或「更新」才會走 add／update_contact（那兩條有自己的格式與重複檢查）。
+      if (action === 'card_scan') {
+        if (scanLimiter.hit(clientIp(req))) return res.status(429).json({ error: '短時間內辨識太多張了，請 10 分鐘後再試，或先手動填寫' });
+        const img = parseImageInput(body.image);
+        if (img.error) return res.status(400).json({ error: img.error });
+        const r = await scanCard(img);
+        if (r.error) return res.status(r.status || 422).json({ error: r.error });
+        // 比對失敗（Sheets 讀不到）不該讓辨識結果跟著報廢：照片已經花了一次 AI 呼叫，先把草稿給人，比對標成沒做
+        let matches = [], matchError = '';
+        try { matches = describeMatches((await readRange('media_roster!A2:N')).map(parseRow), r.card, auth.who === 'admin'); }
+        catch { matchError = '暫時查不到名單，無法比對是否已經有這位，請稍後按「重新比對」'; }
+        return res.status(200).json({ card: r.card, matches, matchError });
+      }
+
+      if (action === 'card_match') {
+        const card = {
+          name: String(body.name || '').trim().slice(0, 40), outlet: String(body.outlet || '').trim().slice(0, 60),
+          email: normalizeEmail(body.email), phone: cleanPhone(body.phone),
+        };
+        const rows = (await readRange('media_roster!A2:N')).map(parseRow); // 讀失敗要報錯，不能當成「名單裡沒有這個人」
+        return res.status(200).json({ matches: describeMatches(rows, card, auth.who === 'admin') });
+      }
+
+      // 用名片上的新資料更新既有記者。只動有帶值的欄位（名片上沒有的欄位不會把名單原有的值洗掉）。
+      if (action === 'update_contact') {
+        const { id, mark } = body;
+        if (!id) return res.status(400).json({ error: '缺少記者 ID' });
+        const name = String(body.name || '').replace(/\s+/g, ' ').trim().slice(0, 40);
+        const outlet = String(body.outlet || '').replace(/\s+/g, ' ').trim().slice(0, 60);
+        const rawEmail = String(body.email || '').trim();
+        const rawPhone = String(body.phone || '').trim();
+        const title = String(body.title || '').replace(/\s+/g, ' ').trim().slice(0, 60);
+        const email = rawEmail ? normalizeEmail(rawEmail) : '';
+        const phone = rawPhone ? cleanPhone(rawPhone) : '';
+        if (rawEmail && !email) return res.status(400).json({ error: 'mail 格式看起來不對，請再確認（例如 name@example.com）' });
+        if (rawPhone && !phone) return res.status(400).json({ error: '電話格式看起來不對，請再確認（至少要有 6 碼數字）' });
+        if (!name && !outlet && !email && !phone && !title && mark !== 'active') return res.status(400).json({ error: '沒有要更新的內容' });
+        await ensureSheets(SHEETS);
+        // 用 readRange、不用 safeRead：讀失敗時 safeRead 回空陣列，會變成「找不到這筆」或查不到別人已經用了這個 mail
+        const rows = (await readRange('media_roster!A2:N')).map(parseRow);
+        const rec = rows.find((r) => r.id === id);
+        if (!rec) return res.status(404).json({ error: '找不到這筆記者資料' });
+        if (email) {
+          const dup = rows.find((r) => r.id !== id && normalizeEmail(r.email) === email);
+          if (dup) return res.status(409).json({ error: `這個 mail 已經是另一位的了：${dup.name}（${dup.outlet}），請先確認是不是重複建了兩筆`, duplicate: { id: dup.id, name: dup.name, outlet: dup.outlet, status: dup.status } });
+        }
+        if (name) rec.name = name;
+        if (outlet) rec.outlet = outlet;
+        if (email) rec.email = email;
+        if (phone) rec.phone = phone;
+        if (title && !rec.note) rec.note = `職稱：${title}`; // note 是人工填的，已經有內容就不蓋
+        if (mark === 'active') rec.status = 'active';
+        rec.updated_at = now();
+        rec.updated_by = String(body.updated_by || '').slice(0, 20);
+        await updateRange(`media_roster!A${rec.rowNum}:N${rec.rowNum}`, [[
+          rec.id, rec.name, rec.outlet, rec.beat, rec.email, rec.phone,
+          rec.invited_count, rec.confirmed_count, rec.declined_count, rec.last_invited,
+          rec.status, rec.note, rec.updated_at, rec.updated_by,
+        ]]);
+        return res.status(200).json({ success: true });
       }
 
       if (action === 'update') {

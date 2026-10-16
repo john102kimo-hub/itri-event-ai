@@ -100,6 +100,20 @@
   .pick-people table{width:100%;border-collapse:collapse;margin-top:8px}
   .pick-people td{border-top:1px solid var(--border);padding:5px 4px;vertical-align:top;word-break:break-all}
   .pick-tip{font-size:.78rem;color:var(--muted);margin-top:8px;line-height:1.6}
+
+  /* 批次 140：名片翻拍 */
+  .card-pick{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:6px}
+  .card-pick label.filebtn{display:inline-block;background:var(--primary);color:#fff;border-radius:10px;padding:10px 18px;font-size:.86rem;font-weight:700;cursor:pointer}
+  .card-pick label.filebtn.busy{opacity:.5;pointer-events:none}
+  .card-pick input[type=file]{display:none}
+  #card-preview{max-width:100%;max-height:150px;border-radius:10px;border:1px solid var(--border);margin:6px 0 10px;display:none}
+  .match{border:1px solid var(--border);border-radius:10px;padding:12px;margin-top:10px;background:#fff}
+  .match .mt{font-size:.9rem;font-weight:700}
+  .match .why{font-size:.76rem;color:var(--muted);margin:2px 0 8px}
+  .match .chg{font-size:.82rem;line-height:1.7;margin-bottom:8px}
+  .match .chg s{color:var(--muted)}
+  .match .none{font-size:.82rem;color:var(--muted);margin-bottom:8px}
+  .match .tag{font-size:.7rem;font-weight:700;padding:2px 8px;border-radius:20px;background:#fef2f2;color:var(--danger);margin-left:6px}
   .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--text);color:#fff;padding:10px 20px;border-radius:10px;font-size:.85rem;opacity:0;transition:opacity .2s;pointer-events:none;z-index:60}
   .toast.show{opacity:1}
 
@@ -139,6 +153,32 @@
     <button onclick="doSearch()">查詢</button>
   </div>
   <div id="search-results"></div>
+
+  <!-- 批次 140：名片翻拍 -->
+  <div class="card" id="card-card">
+    <h2>名片翻拍</h2>
+    <p class="desc">拍一張記者的名片，米亞幫你讀出姓名、媒體、mail、電話，並比對名單裡是不是已經有這位。讀出來的是草稿，你確認過、按了才會存進名單。</p>
+    <div class="card-pick">
+      <label class="filebtn" id="card-filebtn">📷 拍名片／選照片<input id="card-file" type="file" accept="image/*" onchange="onCardFile(this)"></label>
+    </div>
+    <img id="card-preview" alt="名片照片預覽">
+    <div class="form-msg" id="card-msg"></div>
+    <div id="card-result" style="display:none">
+      <div class="form-grid">
+        <input id="card-name" type="text" placeholder="姓名" maxlength="40" autocomplete="off" onchange="rematchCard()">
+        <input id="card-outlet" type="text" placeholder="媒體" maxlength="60" autocomplete="off" onchange="rematchCard()">
+        <input id="card-title" type="text" placeholder="職稱（存進備註）" maxlength="60" autocomplete="off">
+        <input id="card-phone" type="text" placeholder="電話" maxlength="30" inputmode="tel" autocomplete="off">
+        <input id="card-email" type="text" placeholder="電子郵件" class="full" inputmode="email" autocomplete="off" onchange="rematchCard()">
+      </div>
+      <div class="pick-tip" style="margin:0 0 6px">請對著照片檢查一次，特別是 mail——字母 l 和數字 1、o 和 0 最容易讀錯。</div>
+      <div id="card-matches"></div>
+      <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
+        <button class="primary" id="card-add-btn" onclick="submitCardAdd()">新增為新記者</button>
+        <button class="ghost" onclick="clearCard()">取消</button>
+      </div>
+    </div>
+  </div>
 
   <!-- 批次 137：新增一位記者，不用編 id、不用貼 CSV -->
   <div class="card" id="add-card">
@@ -426,6 +466,130 @@ async function addReporter(){
   finally{ btn.disabled = false; }
 }
 
+// ── 批次 140：名片翻拍 ───────────────────────────────────────────────────────
+let cardMatches = [];
+const CARD_REASON = {
+  email: 'mail 完全相同，幾乎確定是同一位',
+  name_outlet: '同名、同一家媒體，很可能是同一位',
+  name: '同名，但媒體不一樣——可能轉職了，也可能只是同名同姓，請你判斷',
+};
+const CARD_FIELD = { name:'姓名', outlet:'媒體', email:'電子郵件', phone:'電話' };
+
+// 手機拍的原圖常是 4000px、5 MB 以上，超過伺服器的請求上限；先縮到長邊 1600px 轉成 JPEG（名片字夠清楚，通常 300～600 KB）。
+function shrinkImage(file){
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const k = Math.min(1, 1600 / Math.max(img.naturalWidth, img.naturalHeight));
+      const c = document.createElement('canvas');
+      c.width = Math.max(1, Math.round(img.naturalWidth * k)); c.height = Math.max(1, Math.round(img.naturalHeight * k));
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      resolve(c.toDataURL('image/jpeg', 0.85));
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('這個檔案打不開，請選一張照片（JPG、PNG）')); };
+    img.src = url;
+  });
+}
+
+async function onCardFile(inp){
+  const file = inp.files && inp.files[0];
+  inp.value = ''; // 選同一張照片第二次也要觸發 change
+  if(!file) return;
+  const msg = document.getElementById('card-msg'), btn = document.getElementById('card-filebtn'), prev = document.getElementById('card-preview');
+  msg.className = 'form-msg'; msg.textContent = '米亞正在看名片…'; btn.classList.add('busy');
+  document.getElementById('card-result').style.display = 'none';
+  try{
+    const image = await shrinkImage(file);
+    prev.src = image; prev.style.display = 'block';
+    const r = await call('card_scan', {image}, 'POST');
+    if(r.error){ msg.className = 'form-msg err'; msg.textContent = r.error; return; }
+    const c = r.card || {};
+    document.getElementById('card-name').value = c.name || '';
+    document.getElementById('card-outlet').value = c.outlet || '';
+    document.getElementById('card-title').value = c.title || '';
+    document.getElementById('card-phone').value = c.phone || '';
+    document.getElementById('card-email').value = c.email || '';
+    document.getElementById('card-result').style.display = 'block';
+    msg.textContent = '讀好了，請對著照片檢查：';
+    renderCardMatches(r.matches || [], r.matchError);
+  }catch(e){ msg.className = 'form-msg err'; msg.textContent = e.message || '連線失敗，請稍後再試'; }
+  finally{ btn.classList.remove('busy'); }
+}
+
+function cardForm(){
+  const v = id => document.getElementById(id).value.trim();
+  return { name:v('card-name'), outlet:v('card-outlet'), title:v('card-title'), phone:v('card-phone'), email:v('card-email') };
+}
+
+function renderCardMatches(matches, matchError){
+  cardMatches = matches || [];
+  const box = document.getElementById('card-matches');
+  if(matchError){ box.innerHTML = `<div class="pick-tip warn" style="color:#92400e">${esc(matchError)}</div>`; return; }
+  if(!cardMatches.length){
+    box.innerHTML = '<div class="pick-tip">名單裡沒有這位，可以直接新增。</div>';
+    return;
+  }
+  box.innerHTML = cardMatches.map((m, i) => {
+    const chg = (m.changes||[]).map(c =>
+      `${CARD_FIELD[c.field]||esc(c.field)}：${c.from ? `<s>${esc(c.from)}</s> → ` : '（原本沒有）→ '}<b>${esc(c.to)}</b>`).join('<br>');
+    const left = m.status === 'left';
+    const needs = (m.changes||[]).length || left;
+    return `<div class="match">
+      <div class="mt">名單裡已有：${esc(m.name)}（${esc(m.outlet)}）${left ? '<span class="tag">已離職／轉線</span>' : ''}</div>
+      <div class="why">${esc(CARD_REASON[m.reason]||'')}</div>
+      ${(m.changes||[]).length ? `<div class="chg">名片上的資料和名單不一樣：<br>${chg}</div>` : '<div class="none">姓名、媒體、mail、電話都和名單一樣，不用更新。</div>'}
+      ${needs ? `<button class="primary" onclick="applyCardUpdate(${i})">${left ? '更新並恢復在職' : '用名片更新這位'}</button>` : ''}
+    </div>`;
+  }).join('');
+}
+
+async function rematchCard(){
+  const f = cardForm();
+  if(!f.name && !f.email){ renderCardMatches([]); return; }
+  try{
+    const r = await call('card_match', {name:f.name, outlet:f.outlet, email:f.email, phone:f.phone}, 'POST');
+    renderCardMatches(r.matches || [], r.error);
+  }catch(e){ renderCardMatches([], '連線失敗，無法比對，請稍後按一下上面欄位再試'); }
+}
+
+async function applyCardUpdate(i){
+  const m = cardMatches[i];
+  if(!m) return;
+  if(m.reason === 'name' && !confirm(`${m.name}（${m.outlet}）和名片上的人只有名字相同，確定是同一位、要把資料改成名片上的嗎？`)) return;
+  const f = cardForm();
+  const r = await call('update_contact', {id:m.id, name:f.name, outlet:f.outlet, email:f.email, phone:f.phone, title:f.title, mark: m.status==='left' ? 'active' : undefined}, 'POST');
+  if(r.error){ toast(r.error); return; }
+  toast(`已更新：${f.name || m.name}`);
+  clearCard();
+  render(await call('list'));
+}
+
+async function submitCardAdd(){
+  const f = cardForm(), msg = document.getElementById('card-msg'), btn = document.getElementById('card-add-btn');
+  msg.className = 'form-msg';
+  if(!f.name || !f.outlet || !f.email){ msg.className = 'form-msg err'; msg.textContent = '姓名、媒體、電子郵件都要有才能新增（名片上沒有的請自己補上）'; return; }
+  btn.disabled = true;
+  try{
+    const r = await call('add', {name:f.name, outlet:f.outlet, email:f.email, phone:f.phone, title:f.title}, 'POST');
+    if(r.error){ msg.className = 'form-msg err'; msg.textContent = r.error; return; }
+    toast(`已新增：${f.name}（${f.outlet}）`);
+    clearCard();
+    render(await call('list'));
+  }catch(e){ msg.className = 'form-msg err'; msg.textContent = '連線失敗，請稍後再試'; }
+  finally{ btn.disabled = false; }
+}
+
+function clearCard(){
+  cardMatches = [];
+  document.getElementById('card-result').style.display = 'none';
+  document.getElementById('card-preview').style.display = 'none';
+  document.getElementById('card-preview').removeAttribute('src');
+  document.getElementById('card-msg').textContent = '';
+  document.getElementById('card-matches').innerHTML = '';
+}
+
 // ── 批次 137：挑收件人（貼進 Outlook）────────────────────────────────────────
 let pickBatches = [];
 function pickParams(){
@@ -522,5 +686,6 @@ async function downloadOutlookCsv(){
 })();
 document.getElementById('gate-input').addEventListener('keydown', e=>{ if(e.key==='Enter') unlock(); });
 </script>
+<script src="/mia-assistant.js" defer></script>
 </body>
 </html>
