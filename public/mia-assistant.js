@@ -22,6 +22,17 @@
   ];
   var CHIPS = ['這幾天記者問了什麼？', '最近有哪些活動？', '報名狀況怎麼樣？', 'AI 追蹤最近表現如何？'];
 
+  // 頭像：右下角的按鈕是會眨眼的動態圖，查資料時對話框裡是拿放大鏡的動態圖；對話框標題與「減少動態效果」的使用者用靜態圖。
+  var STILL = '/mia-avatar.png', IDLE = '/mia-avatar-idle.webp', BUSY = '/mia-avatar-busy.webp';
+  var reduced = false;
+  try { reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) {}
+  function avatar(src, alt) {
+    var img = document.createElement('img');
+    img.src = reduced ? STILL : src; img.alt = alt || '';
+    img.onerror = function () { img.onerror = null; img.src = STILL; }; // 動態圖載入失敗就退回靜態圖
+    return img;
+  }
+
   function pwd() { try { return sessionStorage.getItem('itri_pwd') || ''; } catch (e) { return ''; } }
   function load() { try { return JSON.parse(sessionStorage.getItem(STORE_KEY) || '[]') || []; } catch (e) { return []; } }
   function save() { try { sessionStorage.setItem(STORE_KEY, JSON.stringify(state.log.slice(-40))); } catch (e) {} }
@@ -33,6 +44,8 @@
     '#mia-fab{position:fixed;right:18px;bottom:18px;width:68px;height:68px;border-radius:50%;border:3px solid #fff;background:#dbeafe;box-shadow:0 6px 20px rgba(15,23,42,.28);cursor:pointer;padding:0;z-index:9000;display:none;overflow:hidden;transition:transform .15s}',
     '#mia-fab:hover{transform:scale(1.06)}',
     '#mia-fab img{width:100%;height:100%;object-fit:cover;display:block}',
+    '.mia-m.busy{display:flex;align-items:center;gap:8px;padding:6px 12px 6px 6px}',
+    '.mia-m.busy img{width:44px;height:44px;border-radius:50%;flex:none}',
     '#mia-panel{position:fixed;right:18px;bottom:96px;width:372px;max-width:calc(100vw - 24px);height:540px;max-height:calc(100vh - 120px);background:#fff;border-radius:18px;box-shadow:0 14px 48px rgba(15,23,42,.3);z-index:9001;display:none;flex-direction:column;overflow:hidden;font-family:system-ui,-apple-system,"Noto Sans TC","PingFang TC","Microsoft JhengHei",sans-serif;color:#0f172a}',
     '#mia-panel.open{display:flex}',
     '#mia-head{display:flex;align-items:center;gap:10px;padding:10px 12px;background:#1d4ed8;color:#fff}',
@@ -80,13 +93,12 @@
 
     fab = el('button');
     fab.id = 'mia-fab'; fab.type = 'button'; fab.title = '問米亞'; fab.setAttribute('aria-label', '開啟後台小幫手米亞');
-    var img = document.createElement('img'); img.src = '/mia-avatar.png'; img.alt = '米亞';
-    fab.appendChild(img);
+    fab.appendChild(avatar(IDLE, '米亞'));
     fab.onclick = toggle;
 
     panel = el('div'); panel.id = 'mia-panel';
     var head = el('div'); head.id = 'mia-head';
-    var himg = document.createElement('img'); himg.src = '/mia-avatar.png'; himg.alt = '';
+    var himg = document.createElement('img'); himg.src = STILL; himg.alt = '';
     var t = el('div', 't', '米亞・後台小幫手'); t.appendChild(el('small', '', '可以問活動、報名、記者名單、問答與 AI 追蹤；也能教我記事情'));
     var clear = el('button', '', '清除'); clear.type = 'button'; clear.onclick = function () { state.log = []; save(); render(); };
     var close = el('button', '', '✕'); close.type = 'button'; close.setAttribute('aria-label', '關閉'); close.onclick = toggle;
@@ -134,7 +146,7 @@
       if (m.role === 'card') return msgs.appendChild(cardEl(m, i));
       msgs.appendChild(el('div', 'mia-m ' + (m.role === 'user' ? 'u' : 'a') + (m.err ? ' err' : ''), m.text));
     });
-    if (state.busy) msgs.appendChild(el('div', 'mia-m a', '米亞查詢中…'));
+    if (state.busy) { var b = el('div', 'mia-m a busy'); b.appendChild(avatar(BUSY, '')); b.appendChild(el('span', '', '米亞查詢中…')); msgs.appendChild(b); }
     msgs.scrollTop = msgs.scrollHeight;
     sendBtn.disabled = state.busy;
   }
