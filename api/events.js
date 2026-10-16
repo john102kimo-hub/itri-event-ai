@@ -33,6 +33,8 @@ import { kbHasContent } from '../lib/kb-template.js';
 import { isBusinessEvent } from '../lib/audience.js';
 import { readEventRows, invalidateEventsTable, EVENTS_RANGE } from '../lib/events-table.js';
 import { requireAdmin, passwordFrom, codeMatches, authBlocked, authFailed, tooManyAttempts } from '../lib/auth.js';
+import { runAssistant } from '../lib/assistant.js';
+import { createLimiter, clientIp } from '../lib/rate-limit.js';
 
 // 跟 events 的 knowledge_base 同一個上限理由：Google Sheets 單一儲存格上限約 5 萬字元，
 // 這份清單目前十幾行遠遠用不到，留餘裕只是避免同仁哪天貼了整份含備註的原始文件進來。
@@ -114,6 +116,9 @@ const EVENT_SHEET_HEADERS = ['id', 'name', 'color', 'knowledge_base', 'status', 
 // 後台改了內容、封存活動，記者端大約一分鐘內看到（跟網頁問答原本的 60 秒是同一個尺度）。
 // 只用在成功（200）的回應；404（含未發布）一律 no-store。
 const PUBLIC_CACHE = 'public, max-age=0, s-maxage=15, stale-while-revalidate=30';
+
+// 後台助理限流：每個來源 10 分鐘 60 則（best-effort，單一 instance 記憶體；真正的上限是 Anthropic Console 的月花費上限）
+const assistantLimiter = createLimiter({ windowMs: 10 * 60_000, max: 60 });
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -324,6 +329,16 @@ export default async function handler(req, res) {
       return handleRegistrationRequest(req, res, { adminPassword });
     }
     if (typeof action === 'string' && action.startsWith('b2b_')) return handleB2BRequest(req, res);
+
+    // 後台助理（批次 141）：右下角的胖胖米亞。只有管理員密碼進得來；每次都是一次付費的 AI 呼叫，所以另外限流。
+    // 搭在這支上而不是新開 api/*.js：Vercel Hobby 的 Function 數量有上限，且這支本來就是 60 秒（見 vercel.json）。
+    if (action === 'assistant_chat') {
+      if (!requireAdmin(req, res)) return;
+      if (assistantLimiter.hit(clientIp(req))) return res.status(429).json({ error: '問得太快了，請 10 分鐘後再試' });
+      const r = await runAssistant(body.messages);
+      if (r.error) return res.status(r.status || 500).json({ error: r.error });
+      return res.status(200).json({ reply: r.reply, proposals: r.proposals });
+    }
 
     try {
       // 全域技術窗口分工：整份文字直接覆蓋儲存，跟 events!P 那組窗口分工同一套

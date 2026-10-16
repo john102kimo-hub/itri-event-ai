@@ -26,7 +26,7 @@
 import { readRange, appendRows, updateRange, ensureSheets } from '../lib/sheets.js';
 import { adminAttempt, requireAdmin, passwordFrom, codeMatches, authFailed } from '../lib/auth.js';
 import { generateShareCode } from '../lib/ids.js';
-import { pickRecipients, toBatches, clampBatchSize, buildOutlookCsv, csvCell, normalizeEmail, nextRosterId } from '../lib/media-pick.js';
+import { pickRecipients, toBatches, clampBatchSize, buildOutlookCsv, csvCell, normalizeEmail, nextRosterId, BEATS } from '../lib/media-pick.js';
 import { parseImageInput, scanCard, matchRoster, diffCard, cleanPhone, maskEmail, maskPhone } from '../lib/card-scan.js';
 import { createLimiter, clientIp } from '../lib/rate-limit.js';
 
@@ -41,7 +41,6 @@ const SHEETS = {
 
 const STALE_DAYS = 365;
 const BATCH_SIZE = 25;
-const BEATS = ['半導體', '生醫', 'AI／資通訊', '淨零／能源', '機器人／智慧製造', '材料化學', '財經／產業', '一般'];
 
 const now = () => new Date().toLocaleString('zh-TW', { timeZone: 'Asia/Taipei', hour12: false });
 const today = () => new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Taipei' });
