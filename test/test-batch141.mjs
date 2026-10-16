@@ -195,7 +195,7 @@ console.log('\n── 二之二、記憶（教她記事情）──');
   check('　 再忘一次 → 404', (await callEv({ action: 'assistant_forget', id: 1 })).code === 404);
 
   for (let i = 0; i < M.MAX_ACTIVE; i++) await M.addMemory('第 ' + (i + 100) + ' 條');
-  w = await callEv({ action: 'assistant_remember', content: '第 101 條' });
+  w = await callEv({ action: 'assistant_remember', content: '額外多出來的一條' });
   check('　 上限是 100 條', M.MAX_ACTIVE === 100);
   check('★ 記憶滿 100 條 → 擋下並請先忘掉幾條（系統提示不能無限長）', w.code === 409 && /滿了/.test(w.out.error), JSON.stringify(w));
   ctl.failReads.add('assistant_memory');
