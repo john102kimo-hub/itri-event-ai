@@ -81,14 +81,14 @@ console.log('\n── 三、後台米亞確認卡：執行到一半離開 ──
   };
   const made = [];
   const mkEl = (tag) => {
-    const e = { tag, children: [], style: {}, className: '', textContent: '', classList: { toggle() {}, add() {}, remove() {} },
+    const e = { tag, children: [], style: {}, className: '', textContent: '', classList: { toggle() {}, add() {}, remove() {}, contains() { return false; } },
       appendChild(c) { this.children.push(c); return c; }, addEventListener() {}, setAttribute() {}, focus() {}, scrollHeight: 0 };
     made.push(e);
     return e;
   };
   const sandbox = {
     window: { addEventListener() {}, matchMedia: () => ({ matches: false }), innerHeight: 800, dispatchEvent() {} },
-    document: { readyState: 'complete', head: mkEl('head'), body: mkEl('body'), createElement: mkEl, getElementById: () => null, addEventListener() {} },
+    document: { readyState: 'complete', head: mkEl('head'), body: mkEl('body'), createElement: mkEl, getElementById: () => null, querySelectorAll: () => [], addEventListener() {} },
     sessionStorage: { getItem: (k) => store[k] ?? null, setItem: (k, v) => { store[k] = v; } },
     setInterval: () => 0, setTimeout: () => 0, getComputedStyle: () => ({ position: 'static' }), JSON, Math, String, Array, Object,
     CustomEvent: function () {}, fetch: async () => { throw new Error('不該送出任何請求'); },

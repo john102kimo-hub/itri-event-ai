@@ -51,6 +51,10 @@
   var css = [
     '#mia-fab{position:fixed;right:18px;bottom:18px;width:68px;height:68px;border-radius:50%;border:3px solid #fff;background:#dbeafe;box-shadow:0 6px 20px rgba(15,23,42,.28);cursor:pointer;padding:0;z-index:9000;display:none;overflow:hidden;transition:transform .15s}',
     '#mia-fab:hover{transform:scale(1.06)}',
+    // 長按拖曳（批次 147）：拖的時候不能讓頁面跟著捲、不能跳出 iOS 長按圖片的「儲存影像」選單
+    '#mia-fab{touch-action:none;-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}',
+    '#mia-fab img{pointer-events:none;-webkit-user-drag:none}',
+    '#mia-fab.dragging{transform:scale(1.15);box-shadow:0 12px 30px rgba(15,23,42,.4);cursor:grabbing;transition:none}',
     '#mia-fab img{width:100%;height:100%;object-fit:cover;display:block}',
     '.mia-m.busy{display:flex;align-items:center;gap:8px;padding:6px 12px 6px 6px}',
     '.mia-m.busy img{width:44px;height:44px;border-radius:50%;flex:none}',
@@ -100,9 +104,10 @@
     document.head.appendChild(style);
 
     fab = el('button');
-    fab.id = 'mia-fab'; fab.type = 'button'; fab.title = '問米亞'; fab.setAttribute('aria-label', '開啟後台小幫手米亞');
+    fab.id = 'mia-fab'; fab.type = 'button'; fab.title = '問米亞（長按可以拖到別的位置）'; fab.setAttribute('aria-label', '開啟後台小幫手米亞');
     fab.appendChild(avatar(IDLE, '米亞'));
-    fab.onclick = toggle;
+    fab.onclick = function () { if (suppressClick) { suppressClick = false; return; } toggle(); };
+    setupDrag();
 
     panel = el('div'); panel.id = 'mia-panel';
     var head = el('div'); head.id = 'mia-head';
@@ -128,6 +133,97 @@
     syncVisible();
     setInterval(syncVisible, 1500); // 登入／登出後按鈕跟著出現或消失
     window.addEventListener('resize', function () { if (fab.style.display !== 'none') placeFab(); });
+    // 編輯視窗（.modal-overlay）打開時米亞先躲起來（批次 147，朱朱截圖：米亞壓在編輯視窗的「儲存」上）。
+    // 用 MutationObserver 即時跟著視窗開關，不要等 1.5 秒的輪詢。
+    try {
+      // 只看「別人」的變化：米亞自己（按鈕、對話框）與 body（placeFab 會改它的 padding）的樣式變化不算，
+      // 不然拖曳時每移動一下都會觸發重新定位，把按鈕拉回原位（走查實際踩到）。
+      new MutationObserver(function (list) {
+        var relevant = false;
+        for (var i = 0; i < list.length && !relevant; i++) {
+          var t = list[i].target;
+          relevant = t !== document.body && t !== fab && !fab.contains(t) && !panel.contains(t);
+        }
+        if (!relevant || syncQueued) return;
+        syncQueued = true;
+        requestAnimationFrame(function () { syncQueued = false; syncVisible(); });
+      }).observe(document.body, { subtree: true, attributes: true, attributeFilter: ['style', 'class'] });
+    } catch (e) {}
+  }
+  var syncQueued = false;
+
+  // ── 長按拖曳（批次 147，朱朱：「右下米亞設定長按可以到處移動」）───────────────────────────
+  // 點一下＝打開對話；按住 0.45 秒不動＝拿起來，拖到哪放到哪。位置記在這台裝置的瀏覽器（localStorage），
+  // 存的是「中心點在畫面的比例」，換手機直橫向、視窗大小也放得對；放開時會被夾回畫面內、不壓到底部選單。
+  var POS_KEY = 'mia_fab_pos_v1';
+  var LONG_PRESS_MS = 450;
+  var customPos = loadPos();
+  var suppressClick = false;
+  function loadPos() {
+    try {
+      var p = JSON.parse(localStorage.getItem(POS_KEY) || 'null');
+      return p && typeof p.fx === 'number' && typeof p.fy === 'number' ? p : null;
+    } catch (e) { return null; }
+  }
+  function savePos(p) { try { localStorage.setItem(POS_KEY, JSON.stringify(p)); } catch (e) {} }
+  // 把按鈕左上角放到 (x, y)，夾在畫面內、不壓底部選單
+  function moveFabTo(x, y) {
+    var size = fab.offsetWidth || 68, w = window.innerWidth, h = window.innerHeight, inset = bottomInset();
+    x = Math.min(Math.max(x, 6), w - size - 6);
+    y = Math.min(Math.max(y, 6), h - inset - size - 6);
+    fab.style.left = x + 'px'; fab.style.top = y + 'px'; fab.style.right = 'auto'; fab.style.bottom = 'auto';
+  }
+  function applyCustomPos() {
+    var size = fab.offsetWidth || 68;
+    moveFabTo(customPos.fx * window.innerWidth - size / 2, customPos.fy * window.innerHeight - size / 2);
+  }
+  function setupDrag() {
+    var press = null;
+    fab.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+    fab.addEventListener('pointerdown', function (e) {
+      if (e.button) return;
+      press = { id: e.pointerId, x0: e.clientX, y0: e.clientY, dragging: false };
+      press.timer = setTimeout(function () {
+        if (!press) return;
+        press.dragging = true;
+        fab.classList.add('dragging');
+        try { fab.setPointerCapture(press.id); } catch (err) {}
+        try { if (navigator.vibrate) navigator.vibrate(15); } catch (err) {}
+      }, LONG_PRESS_MS);
+    });
+    fab.addEventListener('pointermove', function (e) {
+      if (!press) return;
+      if (!press.dragging) {
+        // 還沒到長按就移動了＝不是要拖，取消（也就不會變成一次點擊以外的東西）
+        if (Math.abs(e.clientX - press.x0) > 10 || Math.abs(e.clientY - press.y0) > 10) { clearTimeout(press.timer); press = null; }
+        return;
+      }
+      e.preventDefault();
+      var size = fab.offsetWidth || 68;
+      moveFabTo(e.clientX - size / 2, e.clientY - size / 2);
+    });
+    function end() {
+      if (!press) return;
+      clearTimeout(press.timer);
+      var dragged = press.dragging;
+      press = null;
+      if (!dragged) return;
+      fab.classList.remove('dragging');
+      suppressClick = true; // 放開時瀏覽器還會送一次 click，那一次不是要打開對話
+      setTimeout(function () { suppressClick = false; }, 400);
+      var r = fab.getBoundingClientRect();
+      customPos = { fx: (r.left + r.width / 2) / window.innerWidth, fy: (r.top + r.height / 2) / window.innerHeight };
+      savePos(customPos);
+    }
+    fab.addEventListener('pointerup', end);
+    fab.addEventListener('pointercancel', end);
+  }
+
+  // 頁面上有編輯視窗、確認視窗開著（.modal-overlay 看得到）
+  function overlayOpen() {
+    var list = document.querySelectorAll('.modal-overlay');
+    for (var i = 0; i < list.length; i++) if (list[i].getClientRects().length) return true;
+    return false;
   }
 
   // 頁面底部有固定的導覽列（後台首頁手機版的 #sidebar）時，按鈕與對話框往上讓開（批次 144 走查）：
@@ -143,7 +239,8 @@
   }
   function placeFab() {
     var inset = bottomInset();
-    fab.style.bottom = inset ? (inset + 10) + 'px' : '';
+    if (customPos) applyCustomPos(); // 拖過的位置優先（仍然夾在畫面內、不壓底部選單）
+    else { fab.style.left = ''; fab.style.top = ''; fab.style.right = ''; fab.style.bottom = inset ? (inset + 10) + 'px' : ''; }
     panel.style.bottom = inset ? (inset + 84) + 'px' : '';
     panel.style.maxHeight = inset ? 'calc(100vh - ' + (inset + 108) + 'px)' : '';
     // 按鈕抬到選單上面之後，捲到頁面最底時會蓋住最後一段內容的右下角（朱朱手機截圖：「顯示全部 6 場」）。
@@ -153,8 +250,8 @@
 
   function syncVisible() {
     var on = !!pwd();
-    fab.style.display = on ? 'block' : 'none';
-    if (on) placeFab();
+    fab.style.display = on && !overlayOpen() ? 'block' : 'none';
+    if (fab.style.display === 'block' && !fab.classList.contains('dragging')) placeFab(); // 拖曳中不要重新定位
     if (!on && state.open) { state.open = false; panel.classList.remove('open'); }
   }
 

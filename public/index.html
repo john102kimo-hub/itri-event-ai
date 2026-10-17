@@ -779,8 +779,29 @@ details.adv[open] > summary { border-bottom:1px solid var(--border); margin-bott
       </div>
     </div>
 
+    <!-- 批次 147：快速提問從「進階設定」搬出來（朱朱：「快捷鍵選項沒出現」——收在預設收合的進階設定裡，手機上找不到），
+         並在下面即時列出記者現在會看到的按鈕（留空時是系統自動出的題，以前畫面上看不到） -->
+    <div class="form-section">
+      <div class="sec-title"><i class="ti ti-hand-click"></i> 快速提問按鈕 <small>記者在活動網頁和 LINE 點了就問</small></div>
+      <div class="form-group">
+        <label><i class="ti ti-message-question"></i> 快速問題按鈕（每行一題）</label>
+        <textarea class="form-control" id="input-chips" rows="4"
+          placeholder="這次發表的重點是什麼？&#10;有哪些合作廠商參與？&#10;何時量產？"
+          style="font-size:0.85rem"></textarea>
+        <div class="form-hint"><b>留空就好</b>：系統會依知識庫實際寫了什麼自動出題（有【常見問答】就用裡面的 Q，有得獎名單才出「得獎名單有哪些？」），不會再出跟這場無關的問題。想自己決定才在這裡填，每行一題，建議 3–6 題。</div>
+        <div id="chips-preview" aria-live="polite"></div>
+      </div>
+      <div class="form-group">
+        <label><i class="ti ti-list-details"></i> 活動前快速提問（每行一題）</label>
+        <textarea class="form-control" id="input-invite-letter-chips" rows="4"
+          placeholder="邀請函內容是什麼？&#10;採訪申請方式？&#10;活動時間地點？"
+          style="font-size:0.85rem"></textarea>
+        <div class="form-hint">活動前（而且「進階設定」裡有填媒體邀請函時）優先顯示這裡的快速提問按鈕，取代上面「快速問題按鈕」那組——活動前才有意義（例如問邀請函內容、採訪申請方式），跟活動內容那組問句分開設定，記者才不會點了按鈕卻只得到「這部分我沒有資料」。留空則活動前也繼續用下面那組。</div>
+      </div>
+    </div>
+
     <details class="adv" id="adv-box">
-      <summary><i class="ti ti-adjustments"></i> 進階設定 <small>選填，通常不用動：品牌色、主辦單位、快速提問、邀請函、照片…</small></summary>
+      <summary><i class="ti ti-adjustments"></i> 進階設定 <small>選填，通常不用動：品牌色、主辦單位、邀請函、照片…</small></summary>
 
       <div class="form-group">
         <label>品牌主色</label>
@@ -832,20 +853,6 @@ details.adv[open] > summary { border-bottom:1px solid var(--border); margin-bott
           placeholder="貼入邀請媒體來採訪時附的說明文字…"
           style="font-size:0.85rem"></textarea>
         <div class="form-hint">活動日期還沒到、又有填這裡的話，記者問答（LINE 跟網頁都算）只會用這份內容回答，不會提前給正式新聞稿全文或活動照片——避免新聞稿還在改、照片還沒有正式版就先曝光。活動當天起自動改回用上面的「活動知識庫」正常回答，不用手動切換。留空則沒有這層限制。</div>
-      </div>
-      <div class="form-group">
-        <label><i class="ti ti-list-details"></i> 活動前快速提問（每行一題）</label>
-        <textarea class="form-control" id="input-invite-letter-chips" rows="4"
-          placeholder="邀請函內容是什麼？&#10;採訪申請方式？&#10;活動時間地點？"
-          style="font-size:0.85rem"></textarea>
-        <div class="form-hint">活動前優先顯示這裡的快速提問按鈕，取代下面「快速問題按鈕」那組——活動前才有意義（例如問邀請函內容、採訪申請方式），跟活動內容那組問句分開設定，記者才不會點了按鈕卻只得到「這部分我沒有資料」。留空則活動前也繼續用下面那組。</div>
-      </div>
-      <div class="form-group">
-        <label>快速問題按鈕（每行一題）</label>
-        <textarea class="form-control" id="input-chips" rows="4"
-          placeholder="這次發表的重點是什麼？&#10;有哪些合作廠商參與？&#10;何時量產？"
-          style="font-size:0.85rem"></textarea>
-        <div class="form-hint"><b>留空就好</b>：系統會依知識庫實際寫了什麼自動出題（有【常見問答】就用裡面的 Q，有得獎名單才出「得獎名單有哪些？」），不會再出跟這場無關的問題。想自己決定才在這裡填，每行一題，建議 3–6 題。</div>
       </div>
       <div class="form-group">
         <label>AI 開場白（記者前台初始問候語）</label>
@@ -1814,6 +1821,7 @@ function applySnapshot(snap) {
     if (el && snap[id] !== undefined) el.value = snap[id];
   });
   syncModalDerived();
+  if (window.chipsPreview) chipsPreview.schedule(); // 還原草稿後重算快速提問預覽（批次 147）
 }
 
 // 色塊預覽與字數是靠 oninput 更新的，程式化填值不會觸發，還原後要自己補算
@@ -1936,6 +1944,7 @@ function readDraft() {
 // 任何一次輸入都把草稿往前推一格（debounce，避免每個按鍵都寫一次 localStorage）
 function markModalChanged() {
   if (!modalOpen) return;
+  if (window.chipsPreview) chipsPreview.schedule(); // 還原草稿、複製範本這類程式化寫入也要重算預覽
   clearTimeout(draftTimer);
   draftTimer = setTimeout(saveDraft, 400);
 }
@@ -1969,6 +1978,7 @@ function discardDraft() {
 function openModal() {
   document.getElementById('event-modal').style.display = 'flex';
   modalOpen = true;
+  if (window.chipsPreview) chipsPreview.refresh(); // 批次 147：欄位是程式填的（不會觸發 input），打開時算一次
   modalBaseline = snapshotForm();
   offerDraft();
   const box = document.querySelector('#event-modal .modal');
@@ -2799,6 +2809,14 @@ document.getElementById('input-image-file').addEventListener('change', async (e)
   statusEl.textContent = '';
   e.target.value = '';
 });
+</script>
+<script src="/chips-preview.js"></script>
+<script>
+// 批次 147：快速提問預覽——欄位跟 api/events.js chips_preview 對應
+window.chipsPreview = setupChipsPreview({ box: 'chips-preview', fields: {
+  knowledge_base: 'input-kb', chips: 'input-chips', invite_letter: 'input-invite-letter', invite_letter_chips: 'input-invite-letter-chips',
+  event_date: 'input-date', venue: 'input-venue', event_time: 'input-time', press_contact: 'input-contact', status: 'input-status'
+} });
 </script>
 <script src="/mia-assistant.js" defer></script>
 </body>

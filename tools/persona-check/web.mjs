@@ -211,6 +211,57 @@ console.log('\n── 主管：後台與米亞助理 ──');
   check('　 點得到「更多」、面板打開', await page.locator('.more-pop').isVisible().catch(() => false));
   await page.keyboard.press('Escape').catch(() => {});
   await page.click('.more-backdrop').catch(() => {});
+
+  // 批次 147：編輯活動——快速提問在知識庫下面就看得到（不用打開「進階設定」），而且即時列出記者現在會看到的按鈕
+  await page.evaluate(() => showEditModal('med'));
+  await page.waitForSelector('#event-modal', { state: 'visible' });
+  check('★ 編輯視窗打開時米亞先躲起來（不再壓住右下角的「儲存」）', !(await page.locator('#mia-fab').isVisible()));
+  const chipsBox = page.locator('#input-chips');
+  await chipsBox.scrollIntoViewIfNeeded();
+  await chipsBox.fill(''); // 這場本來有一題自訂的；先清空，看「留空時系統自動出題」
+  check('★ 「快速問題按鈕」不在收合的「進階設定」裡，打開編輯視窗就看得到', await chipsBox.isVisible() && !(await page.evaluate(() => !!document.getElementById('input-chips').closest('details'))));
+  await page.waitForFunction(() => /自動出題/.test(document.getElementById('chips-preview').textContent), null, { timeout: 5000 }).catch(() => {});
+  const autoTxt = await page.locator('#chips-preview').textContent();
+  check('　 欄位留空 → 下面列出系統依知識庫自動出的題（記者現在看到的）', /自動出題/.test(autoTxt) && /這次活動的重點是什麼？/.test(autoTxt) && /活動的時間和地點？/.test(autoTxt), autoTxt);
+  await shot(page, 'boss-6-chips-preview.png');
+  await chipsBox.fill('這場的發言人是誰？\n有提供停車位嗎？');
+  await page.waitForFunction(() => /有提供停車位嗎/.test(document.getElementById('chips-preview').textContent), null, { timeout: 5000 }).catch(() => {});
+  const customTxt = await page.locator('#chips-preview').textContent();
+  check('　 自己打了題目 → 預覽馬上換成「用你填的題目」那兩顆', /用你填的題目/.test(customTxt) && /有提供停車位嗎？/.test(customTxt) && !/這次活動的重點是什麼？/.test(customTxt), customTxt);
+  await chipsBox.fill('');
+  await page.evaluate(() => { modalBaseline = snapshotForm(); closeModal(); });
+  await page.waitForFunction(() => getComputedStyle(document.getElementById('mia-fab')).display !== 'none', null, { timeout: 3000 }).catch(() => {});
+  check('　 關掉編輯視窗 → 米亞回來', await page.locator('#mia-fab').isVisible());
+
+  // 批次 147：長按米亞可以拖到別的地方，放開後記住位置；點一下照樣打開對話
+  let fb = await page.locator('#mia-fab').boundingBox();
+  await page.mouse.move(fb.x + fb.width / 2, fb.y + fb.height / 2);
+  await page.mouse.down();
+  await page.waitForTimeout(650);
+  await page.mouse.move(120, 330, { steps: 8 });
+  await page.mouse.up();
+  await page.waitForTimeout(200);
+  fb = await page.locator('#mia-fab').boundingBox();
+  check('★ 長按米亞 → 拖到哪就放在哪', Math.abs(fb.x + fb.width / 2 - 120) < 4 && Math.abs(fb.y + fb.height / 2 - 330) < 4, JSON.stringify(fb));
+  check('　 放開不會順便打開對話框', !(await page.locator('#mia-panel.open').count()));
+  await page.mouse.move(fb.x + fb.width / 2, fb.y + fb.height / 2);
+  await page.mouse.down(); await page.waitForTimeout(150); await page.mouse.move(200, 600, { steps: 4 }); await page.mouse.up();
+  const fb2 = await page.locator('#mia-fab').boundingBox();
+  check('　 沒有長按就滑動 → 不會被拖走（跟一般滑動頁面一樣）', Math.abs(fb2.x - fb.x) < 2 && Math.abs(fb2.y - fb.y) < 2, JSON.stringify(fb2));
+  await page.reload();
+  await page.waitForSelector('#mia-fab', { state: 'visible' });
+  const fb3 = await page.locator('#mia-fab').boundingBox();
+  check('★ 重新整理之後還在剛剛拖到的位置', Math.abs(fb3.x - fb.x) < 4 && Math.abs(fb3.y - fb.y) < 4, JSON.stringify([fb, fb3]));
+  await page.mouse.move(fb3.x + fb3.width / 2, fb3.y + fb3.height / 2);
+  await page.mouse.down(); await page.waitForTimeout(650); await page.mouse.move(380, 830, { steps: 6 }); await page.mouse.up();
+  const fb4 = await page.locator('#mia-fab').boundingBox();
+  const navTop = (await page.locator('#sidebar').boundingBox()).y;
+  check('　 拖到最底下也會被擋在底部選單上方、不會跑出畫面', fb4.y + fb4.height <= navTop && fb4.x + fb4.width <= 390, JSON.stringify({ fb4, navTop }));
+  await shot(page, 'boss-7-drag.png');
+  // 放回預設位置，後面的步驟照原本的版面走
+  await page.evaluate(() => { localStorage.removeItem('mia_fab_pos_v1'); });
+  await page.reload();
+  await page.waitForSelector('#mia-fab', { state: 'visible' });
   await shot(page, 'boss-1-admin.png');
 
   await page.click('#mia-fab');
