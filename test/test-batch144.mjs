@@ -104,6 +104,7 @@ console.log('\n── 五、手機版後台的米亞按鈕位置 ──');
   const js = fs.readFileSync(path.join(ROOT, 'public/mia-assistant.js'), 'utf8');
   check('偵測固定在底部的 #sidebar，按鈕與對話框往上讓開；視窗大小改變時重算',
     /getElementById\('sidebar'\)/.test(js) && /function placeFab/.test(js) && /fab\.style\.bottom/.test(js) && /panel\.style\.bottom/.test(js) && /addEventListener\('resize'/.test(js));
+  check('　 按鈕抬上去之後，頁面底部多留一個按鈕的高度（捲到底時最後一段內容不會躲在按鈕底下）', /document\.body\.style\.paddingBottom = inset \? '84px' : ''/.test(js));
   const html = fs.readFileSync(path.join(ROOT, 'public/index.html'), 'utf8');
   check('（前提）後台首頁手機版的底部選單就是 #sidebar、最右邊是「更多」', /id="sidebar"/.test(html) && /id="nav-more-btn"/.test(html));
   // 真的在瀏覽器裡量位置的是 tools/persona-check/web.mjs（需要 Chromium，不進 npm test）

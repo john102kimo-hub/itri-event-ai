@@ -197,6 +197,16 @@ console.log('\n── 主管：後台與米亞助理 ──');
   const fabBox = await page.locator('#mia-fab').boundingBox(), moreBox = await page.locator('#nav-more-btn').boundingBox();
   const overlap = fabBox && moreBox && !(fabBox.y + fabBox.height <= moreBox.y || moreBox.y + moreBox.height <= fabBox.y || fabBox.x + fabBox.width <= moreBox.x || moreBox.x + moreBox.width <= fabBox.x);
   check('★ 手機版：米亞按鈕不能蓋住底部選單的「更多」（記者名單、活動報名、登出都在裡面）', moreBox && !overlap, JSON.stringify({ fabBox, moreBox }));
+  // 捲到最底：最後一段內容不能躲在米亞按鈕底下（手機上捲到底，右下角的「顯示全部」連結以前被蓋住）
+  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+  await page.waitForTimeout(200);
+  const lastBottom = await page.evaluate(() => {
+    const els = [...document.querySelectorAll('#main *')].filter((e) => e.offsetParent && e.getBoundingClientRect().height > 0 && getComputedStyle(e).position !== 'fixed');
+    return Math.max(...els.map((e) => e.getBoundingClientRect().bottom));
+  });
+  const fabTop = (await page.locator('#mia-fab').boundingBox()).y;
+  check('★ 手機版捲到最底：最後一段內容在米亞按鈕上方，不會被蓋住', lastBottom <= fabTop + 1, JSON.stringify({ lastBottom, fabTop }));
+  await page.evaluate(() => window.scrollTo(0, 0));
   await page.click('#nav-more-btn');
   check('　 點得到「更多」、面板打開', await page.locator('.more-pop').isVisible().catch(() => false));
   await page.keyboard.press('Escape').catch(() => {});

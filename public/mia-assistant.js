@@ -146,6 +146,9 @@
     fab.style.bottom = inset ? (inset + 10) + 'px' : '';
     panel.style.bottom = inset ? (inset + 84) + 'px' : '';
     panel.style.maxHeight = inset ? 'calc(100vh - ' + (inset + 108) + 'px)' : '';
+    // 按鈕抬到選單上面之後，捲到頁面最底時會蓋住最後一段內容的右下角（朱朱手機截圖：「顯示全部 6 場」）。
+    // 頁面底部多留一個按鈕的高度，捲到底時內容會停在按鈕上方。
+    document.body.style.paddingBottom = inset ? '84px' : '';
   }
 
   function syncVisible() {
