@@ -11,6 +11,7 @@
 // POST {action:'card_scan',code,image}  → 名片翻拍：AI 讀出姓名／媒體／mail／電話，並比對名單裡是不是已經有這個人（批次 140）
 // POST card_match（不呼叫 AI）           → 同仁改過讀出來的欄位後，重新比對一次
 // POST {action:'update_contact',code,id,name?,outlet?,email?,phone?,title?,mark?} → 用名片上的新資料更新既有記者（批次 140）
+//                                        同仁要「換掉」既有的 mail 不會直接生效，先排進 media_mail_requests 等管理員核准（批次 145）
 //
 // ── 管理員（需 ADMIN_PASSWORD）───────────────────────────────────────
 // POST {action:'seed',password,csv}    → 貼上 CSV 一次性匯入／更新（用 id 對應，重覆貼不會炸掉）
@@ -19,6 +20,8 @@
 // GET  ?action=pick&beat=&outlet=&recent=1&size=50 → 挑收件人：照路線／媒體／最近受邀篩出有 mail 的在職記者，
 //                                        mail 串成 Outlook 收件人欄的格式並分批（管理員，批次 137）
 // GET  ?action=export_outlook&…(同 pick) → 挑出來的人匯成 Outlook 通訊錄／合併郵件用的 CSV（管理員，批次 137）
+// GET  ?action=mail_requests             → 同仁送來、等核准的 mail 修改（管理員，批次 145）
+// POST {action:'mail_request_decide',id,approve} → 核准（真的換 mail）或不核准（管理員，批次 145）
 //
 // 誠實邊界：這裡不猜記者現在跑什麼路線，只把「太久沒受邀」「從沒填過路線」的人
 // 排到前面讓人判斷，是否還在職、路線是什麼，一律由人工按一下確認。
@@ -37,7 +40,14 @@ const SHEETS = {
     'status', 'note', 'updated_at', 'updated_by',
   ],
   media_settings: ['key', 'value'],
+  // 同仁送來、等管理員核准的 mail 修改（批次 145）。status：open／approved／rejected
+  media_mail_requests: ['id', 'requested_at', 'roster_id', 'name', 'outlet', 'old_email', 'new_email', 'requested_by', 'status', 'decided_at'],
 };
+const MAIL_REQ_RANGE = 'media_mail_requests!A2:J';
+const parseMailReq = (r, i) => ({
+  rowNum: i + 2, id: r[0] || '', requested_at: r[1] || '', roster_id: r[2] || '', name: r[3] || '', outlet: r[4] || '',
+  old_email: r[5] || '', new_email: r[6] || '', requested_by: r[7] || '', status: r[8] || 'open', decided_at: r[9] || '',
+});
 
 const STALE_DAYS = 365;
 const BATCH_SIZE = 25;
@@ -259,6 +269,13 @@ export default async function handler(req, res) {
         });
       }
 
+      // 同仁送來、等核准的 mail 修改（批次 145）：只給管理員（裡面是 mail，個資）
+      if (action === 'mail_requests') {
+        if (!requireAdmin(req, res, password)) return;
+        const reqs = (await safeRead(MAIL_REQ_RANGE)).map(parseMailReq).filter((x) => x.id && x.status === 'open');
+        return res.status(200).json({ requests: reqs.map(({ rowNum, ...x }) => x) });
+      }
+
       return res.status(400).json({ error: '不支援的操作' });
     }
 
@@ -354,6 +371,33 @@ export default async function handler(req, res) {
         return res.status(200).json({ success: true, created, updated, total: all.length });
       }
 
+      // 核准／不核准同仁送來的 mail 修改（批次 145）
+      if (action === 'mail_request_decide') {
+        if (!requireAdmin(req, res, password)) return;
+        const reqs = (await safeRead(MAIL_REQ_RANGE)).map(parseMailReq); // 分頁還沒建＝沒有這筆
+        const q = reqs.find((x) => x.id && x.id === String(body.id || ''));
+        if (!q) return res.status(404).json({ error: '找不到這筆申請' });
+        if (q.status !== 'open') return res.status(409).json({ error: '這筆已經處理過了' });
+        const decide = (status) => updateRange(`media_mail_requests!I${q.rowNum}:J${q.rowNum}`, [[status, now()]]);
+        if (!body.approve) { await decide('rejected'); return res.status(200).json({ success: true, status: 'rejected' }); }
+        const rows = (await readRange('media_roster!A2:N')).map(parseRow);
+        const rec = rows.find((r) => r.id === q.roster_id);
+        if (!rec) return res.status(404).json({ error: '名單裡已經找不到這位記者' });
+        const email = normalizeEmail(q.new_email);
+        const dup = rows.find((r) => r.id !== rec.id && normalizeEmail(r.email) === email);
+        if (dup) return res.status(409).json({ error: `這個 mail 已經是另一位的了：${dup.name}（${dup.outlet}）` });
+        rec.email = email;
+        rec.updated_at = now();
+        rec.updated_by = '管理員核准';
+        await updateRange(`media_roster!A${rec.rowNum}:N${rec.rowNum}`, [[
+          rec.id, rec.name, rec.outlet, rec.beat, rec.email, rec.phone,
+          rec.invited_count, rec.confirmed_count, rec.declined_count, rec.last_invited,
+          rec.status, rec.note, rec.updated_at, rec.updated_by,
+        ]]);
+        await decide('approved');
+        return res.status(200).json({ success: true, status: 'approved' });
+      }
+
       // ── 以下需要同仁 code 或管理員密碼 ──
       const auth = await authorize({ code, password }, req);
       if (!auth.ok) return res.status(auth.status).json({ error: auth.msg });
@@ -437,9 +481,23 @@ export default async function handler(req, res) {
           const dup = rows.find((r) => r.id !== id && normalizeEmail(r.email) === email);
           if (dup) return res.status(409).json({ error: `這個 mail 已經是另一位的了：${dup.name}（${dup.outlet}），請先確認是不是重複建了兩筆`, duplicate: { id: dup.id, name: dup.name, outlet: dup.outlet, status: dup.status } });
         }
+        // 同仁（共用連結）要「換掉」名單裡已經有的 mail：不直接換，排進 media_mail_requests 等管理員核准（批次 145）。
+        // 理由：共用連結是設計成會外流的；拿到連結的人若能直接改 mail，邀請函就會被改寄到別人信箱，而且沒人發現。
+        // 原本沒有 mail 的，補上就直接生效（之前根本寄不到，沒有可以被搶走的收件人）。
+        let pendingEmail = false;
+        if (email && auth.who !== 'admin' && normalizeEmail(rec.email) && normalizeEmail(rec.email) !== email) {
+          // 用 readRange、不用 safeRead：讀失敗當成「還沒有申請」會編出重複的編號，核准時就可能動到別人那一筆（分頁上面 ensureSheets 已經建好）
+          const reqs = (await readRange(MAIL_REQ_RANGE)).map(parseMailReq);
+          const already = reqs.some((x) => x.status === 'open' && x.roster_id === rec.id && normalizeEmail(x.new_email) === email);
+          if (!already) {
+            const nextId = 'M' + String(reqs.reduce((m, x) => Math.max(m, Number(String(x.id).slice(1)) || 0), 0) + 1).padStart(4, '0');
+            await appendRows('media_mail_requests!A:J', [[nextId, now(), rec.id, rec.name, rec.outlet, rec.email, email, String(body.updated_by || '').slice(0, 20), 'open', '']]);
+          }
+          pendingEmail = true;
+        }
         if (name) rec.name = name;
         if (outlet) rec.outlet = outlet;
-        if (email) rec.email = email;
+        if (email && !pendingEmail) rec.email = email;
         if (phone) rec.phone = phone;
         if (title && !rec.note) rec.note = `職稱：${title}`; // note 是人工填的，已經有內容就不蓋
         if (mark === 'active') rec.status = 'active';
@@ -450,7 +508,7 @@ export default async function handler(req, res) {
           rec.invited_count, rec.confirmed_count, rec.declined_count, rec.last_invited,
           rec.status, rec.note, rec.updated_at, rec.updated_by,
         ]]);
-        return res.status(200).json({ success: true });
+        return res.status(200).json({ success: true, ...(pendingEmail ? { pending_email: true } : {}) });
       }
 
       if (action === 'update') {

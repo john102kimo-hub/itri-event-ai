@@ -178,8 +178,14 @@ const cardReply = (o) => ({ body: { content: [{ type: 'text', text: JSON.stringi
   // ── update_contact ──
   r = await call('POST', {}, { action: 'update_contact', code: 'staffcode1', id: 'R1', outlet: '東森新聞', email: 'Wu@Ettoday.net', phone: '0912-111-222', title: '主跑記者', updated_by: '朱朱' });
   let row = book.media_roster.find((x) => x[0] === 'R1');
-  check('★ 更新：媒體、mail 換成名片上的；電話保留；路線、受邀次數、受邀日期原封不動；職稱進備註；留下更新者',
-    r.code === 200 && row[2] === '東森新聞' && row[4] === 'wu@ettoday.net' && row[5] === '0912-111-222' && row[3] === '半導體' && String(row[6]) === '86' && row[11] === '職稱：主跑記者' && row[13] === '朱朱', JSON.stringify(row));
+  // 批次 145：同仁（共用連結）要換掉既有的 mail，不直接生效，排進 media_mail_requests 等管理員核准
+  check('★ 更新：媒體換成名片上的、電話保留；路線、受邀次數、受邀日期原封不動；職稱進備註；留下更新者；mail 先不換（等管理員核准）',
+    r.code === 200 && r.out.pending_email === true && row[2] === '東森新聞' && row[4] === 'wu@setn.com' && row[5] === '0912-111-222' && row[3] === '半導體' && String(row[6]) === '86' && row[11] === '職稱：主跑記者' && row[13] === '朱朱', JSON.stringify([r.out, row]));
+  const mreq = (book.media_mail_requests || []).slice(1).find((x) => x[2] === 'R1');
+  check('　 mail 修改排進 media_mail_requests（舊、新 mail 都記下、狀態 open）', mreq && mreq[5] === 'wu@setn.com' && mreq[6] === 'wu@ettoday.net' && mreq[8] === 'open', JSON.stringify(mreq));
+  r = await call('POST', {}, { action: 'mail_request_decide', password: 'pw', id: mreq[0], approve: true }, A);
+  row = book.media_roster.find((x) => x[0] === 'R1');
+  check('　 管理員核准 → mail 才真的換掉', r.code === 200 && row[4] === 'wu@ettoday.net', JSON.stringify([r.out, row]));
   r = await call('POST', {}, { action: 'update_contact', code: 'staffcode1', id: 'R1', title: '改過的職稱' });
   check('　 備註已經有內容就不蓋掉（備註是人工填的）', book.media_roster.find((x) => x[0] === 'R1')[11] === '職稱：主跑記者');
   r = await call('POST', {}, { action: 'update_contact', code: 'staffcode1', id: 'R1', phone: '0933-000-111' });
@@ -189,9 +195,9 @@ const cardReply = (o) => ({ body: { content: [{ type: 'text', text: JSON.stringi
   check('★ 新 mail 已經是另一位的 → 409 並指出是誰（不會悄悄變成兩筆同 mail）', r.code === 409 && /林小美/.test(r.out.error) && book.media_roster.find((x) => x[0] === 'R1')[4] === 'wu@ettoday.net', JSON.stringify(r.out));
   r = await call('POST', {}, { action: 'update_contact', code: 'staffcode1', id: 'R1', email: 'wu@ettoday.net', name: '吳雅婷' });
   check('　 mail 沒變（自己的）不算重複', r.code === 200);
-  r = await call('POST', {}, { action: 'update_contact', code: 'staffcode1', id: 'R2', mark: 'active', email: 'lin@udn.com.tw' });
+  r = await call('POST', {}, { action: 'update_contact', password: 'pw', id: 'R2', mark: 'active', email: 'lin@udn.com.tw' }, A);
   row = book.media_roster.find((x) => x[0] === 'R2');
-  check('　 已離職的人帶 mark:active → 更新並恢復在職', r.code === 200 && row[10] === 'active' && row[4] === 'lin@udn.com.tw');
+  check('　 已離職的人帶 mark:active → 更新並恢復在職（管理員換 mail 直接生效）', r.code === 200 && row[10] === 'active' && row[4] === 'lin@udn.com.tw');
   const bad = (b) => call('POST', {}, { action: 'update_contact', code: 'staffcode1', ...b });
   check('　 擋下：缺 id、找不到、mail 格式不對、電話太短、什麼都沒帶',
     (await bad({ name: 'x' })).code === 400 && (await bad({ id: 'ZZ', name: 'x' })).code === 404 && (await bad({ id: 'R1', email: 'abc@def' })).code === 400

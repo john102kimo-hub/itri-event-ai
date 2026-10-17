@@ -201,6 +201,12 @@
   <div id="list"></div>
 
   <div class="admin-panel" id="admin-panel" style="display:none">
+    <div id="mailreq-box" style="display:none">
+      <h3>同仁送來的 mail 修改（等你核准）</h3>
+      <p class="desc">同仁用共用連結要換掉名單裡已經有的 mail 時，不會直接生效，要你在這裡核准——連結外流的話，別人沒辦法把邀請函改寄到自己的信箱。</p>
+      <div id="mailreq-list"></div>
+    </div>
+
     <h3>挑收件人（貼進 Outlook 寄邀請函）</h3>
     <p class="desc">平台不代寄信。這裡幫你挑好該寄的人、把 mail 排成 Outlook 收件人欄的格式，你複製貼進去再寄。已離職／轉線的人不會被挑到。</p>
     <div class="pick-form">
@@ -297,6 +303,29 @@ function enterApp(r){
   document.getElementById('admin-panel').style.display = admin ? 'block' : 'none';
   document.getElementById('back-admin').style.display = admin ? 'inline-block' : 'none';
   render(r);
+  if(admin) loadMailRequests();
+}
+
+// ── 批次 145：同仁送來、等核准的 mail 修改（只有管理員看得到）──────────────────
+async function loadMailRequests(){
+  const box = document.getElementById('mailreq-box'), list = document.getElementById('mailreq-list');
+  let r;
+  try{ r = await call('mail_requests'); }catch(e){ return; }
+  const reqs = (r && r.requests) || [];
+  box.style.display = reqs.length ? 'block' : 'none';
+  list.innerHTML = reqs.map(q => `<div class="match mailreq" data-id="${esc(q.id)}">
+      <div class="mt">${esc(q.name)}（${esc(q.outlet)}）</div>
+      <div class="chg">電子郵件：<s>${esc(q.old_email)}</s> → <b>${esc(q.new_email)}</b></div>
+      <div class="why">${esc(q.requested_at)}${q.requested_by ? `・${esc(q.requested_by)}` : ''} 送來</div>
+      <div class="row"><button class="primary" onclick="decideMailRequest('${esc(q.id)}', true)">核准，換成新的</button>
+      <button onclick="decideMailRequest('${esc(q.id)}', false)">不核准</button></div>
+    </div>`).join('');
+}
+async function decideMailRequest(id, approve){
+  const r = await call('mail_request_decide', {id, approve}, 'POST');
+  if(r.error){ toast(r.error); return; }
+  toast(approve ? '已核准，mail 換好了' : '已退回，mail 沒有改');
+  loadMailRequests();
 }
 
 function daysLabel(d){
@@ -532,8 +561,10 @@ function renderCardMatches(matches, matchError){
     return;
   }
   box.innerHTML = cardMatches.map((m, i) => {
+    // 同仁要換掉既有的 mail：先講清楚要等管理員核准（批次 145），不要讓人以為已經換好了
     const chg = (m.changes||[]).map(c =>
-      `${CARD_FIELD[c.field]||esc(c.field)}：${c.from ? `<s>${esc(c.from)}</s> → ` : '（原本沒有）→ '}<b>${esc(c.to)}</b>`).join('<br>');
+      `${CARD_FIELD[c.field]||esc(c.field)}：${c.from ? `<s>${esc(c.from)}</s> → ` : '（原本沒有）→ '}<b>${esc(c.to)}</b>` +
+      (c.field === 'email' && c.from && S.role !== 'admin' ? '<span class="tag">要管理員核准</span>' : '')).join('<br>');
     const left = m.status === 'left';
     const needs = (m.changes||[]).length || left;
     return `<div class="match">
@@ -561,7 +592,7 @@ async function applyCardUpdate(i){
   const f = cardForm();
   const r = await call('update_contact', {id:m.id, name:f.name, outlet:f.outlet, email:f.email, phone:f.phone, title:f.title, mark: m.status==='left' ? 'active' : undefined}, 'POST');
   if(r.error){ toast(r.error); return; }
-  toast(`已更新：${f.name || m.name}`);
+  toast(r.pending_email ? `已更新：${f.name || m.name}（mail 的修改要等管理員核准）` : `已更新：${f.name || m.name}`);
   clearCard();
   render(await call('list'));
 }

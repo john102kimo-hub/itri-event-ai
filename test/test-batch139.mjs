@@ -191,7 +191,7 @@ reset(); state.staff.push(staffRow('U_s'), colleagueRow('U_c')); await fresh();
   check('前置：三題都進了清單', state.teachQueue.length === 3);
 
   let out = await dm('U_s', '待教清單');
-  check('★ 打「待教清單」→ 列出三題，每題有編號與怎麼教', /等著教的題目有 3 題/.test(textOf(out)) && /【1】/.test(textOf(out)) && /【3】/.test(textOf(out)) && /教 2：/.test(textOf(out)), textOf(out));
+  check('★ 打「待教清單」→ 列出三題，每題有編號與怎麼教', /等著教的題目有 3 題/.test(textOf(out)) && /【1】/.test(textOf(out)) && /【3】/.test(textOf(out)) && /回「2」教這題/.test(textOf(out)), textOf(out)); // 批次 146：說法改成「回編號就能教」
 
   const idOf = (q) => state.teachQueue.find((x) => x[4] === q)[0];
   const id1 = idOf('這場有沒有提供停車位？');

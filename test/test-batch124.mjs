@@ -304,13 +304,14 @@ console.log('\n── 六、記者名單健檢：管理員密碼不進網址、�
       const isAdmin = (opts.headers || {})['X-Admin-Password'] === 'Secret-Pw1';
       return { json: async () => (isAdmin && adminOk ? { totalActive: 1, needsReview: [] } : { error: '這條連結已失效，請向承辦人索取新的' }) };
     };
-    const api = new Function('document', 'fetch', 'sessionStorage', 'render', `let S = { pwd:'', code:'', role:'staff' }; ${fnSource(MEDIA, 'call')} ${fnSource(MEDIA, 'unlock')} ${fnSource(MEDIA, 'enterApp')}; return { unlock, S: () => S };`)(document, fetch, sessionStorage, () => {});
+    const api = new Function('document', 'fetch', 'sessionStorage', 'render', `let S = { pwd:'', code:'', role:'staff' }; ${fnSource(MEDIA, 'call')} ${fnSource(MEDIA, 'unlock')} ${fnSource(MEDIA, 'enterApp')} ${fnSource(MEDIA, 'loadMailRequests')}; return { unlock, S: () => S };`)(document, fetch, sessionStorage, () => {});
     return { api, els, store };
   };
   let t = mkUnlock(true);
   await t.api.unlock();
   check('★ 管理員在入口輸入密碼：第一個請求就用 header 送，網址上沒有密碼（以前先被當成連結代碼放進 ?code=，留在伺服器紀錄）',
-    fetches.length === 1 && !fetches[0].url.includes('Secret-Pw1') && fetches[0].headers['X-Admin-Password'] === 'Secret-Pw1', JSON.stringify(fetches));
+    // 批次 145：管理員進場後會再讀一次「待核准的 mail 修改」（也走 header）——守的是每一個請求的網址都沒有密碼
+    fetches.length >= 1 && fetches.every((f) => !f.url.includes('Secret-Pw1')) && fetches[0].headers['X-Admin-Password'] === 'Secret-Pw1', JSON.stringify(fetches));
   check('　 進得去、記住登入（之後同分頁免重登）、出現管理區與「回後台」', t.api.S().role === 'admin' && t.store.itri_pwd === 'Secret-Pw1' && t.els['admin-panel'].style.display === 'block' && t.els['back-admin'].style.display === 'inline-block');
   fetches.length = 0;
   t = mkUnlock(false);

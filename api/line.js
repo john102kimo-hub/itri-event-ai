@@ -51,7 +51,7 @@ import { buildCalendarCards, buildCalendarCardsFor, routeIntent } from '../lib/r
 import { matchEventByName, buildWelcomeFlex } from '../lib/menu.js';
 import { listOpenCampaigns, parseRegBindText, parseRegBindCheck, welcomeButtonLabel } from '../lib/registration.js';
 import { autoSyncRegistrationMenu } from '../lib/richmenu-sync.js';
-import { runTeachQueueCron } from '../lib/teach-queue.js';
+import { runTeachQueueCron, parseQueueCommand } from '../lib/teach-queue.js';
 import {
   isPasscodeMatch, isColleaguePasscodeMatch, isStaffAuthenticated, isColleagueAuthenticated, authenticateStaff, COLLEAGUE
 } from '../lib/staff.js';
@@ -67,7 +67,7 @@ import {
 } from '../lib/line-store.js';
 import {
   HOME_MENU, REQUEST_BUDGET_MS, STAFF_HOME_CHIPS, askMediaNameLater, eventContentChips, eventQuickChips,
-  markStaff, markColleague, COLLEAGUE_HOME_CHIPS, mediaNameChips, rateLimited, replyOrPush, requestCtx, staffChips, toQuickReply
+  markStaff, markColleague, COLLEAGUE_HOME_CHIPS, mediaNameChips, rateLimited, rateCount, RATE_MAX, RATE_MAX_INTERNAL, replyOrPush, requestCtx, staffChips, toQuickReply
 } from '../lib/line-runtime.js';
 import { pinGenericTechQueryToEvent } from '../lib/line-nodata.js';
 import { handleRegBind, resolveMetaIntent } from '../lib/line-register.js';
@@ -181,9 +181,21 @@ async function handleEvent(ev) {
   const text = String(ev.message.text || '').trim();
   if (!text) return;
 
-  if (rateLimited(userId)) {
-    await replyOrPush(replyToken, userId, '提問太頻繁，請稍候片刻再試。');
-    return;
+  // 限流（批次 145）：記者 15 次／分鐘；超過時才查身分，職員與同仁放寬到 40 次（一路點按鈕的操作比打字快得多）。
+  // 職員／同仁真的超過時，回覆帶他們自己的選單，不是記者那一排按鈕。
+  const hitCount = rateCount(userId);
+  if (hitCount > RATE_MAX) {
+    // 讀不到 line_staff（Sheets 忙碌）就照記者的上限算：以前這一段完全不碰試算表，不能因為放寬職員反而多一個會丟例外的地方
+    const staff = await isStaffAuthenticated(userId).catch(() => false);
+    const colleague = !staff && await isColleagueAuthenticated(userId).catch(() => false);
+    if (!(staff || colleague) || hitCount > RATE_MAX_INTERNAL) {
+      if (staff) markStaff();
+      if (colleague) markColleague();
+      await replyOrPush(replyToken, userId,
+        staff || colleague ? '點得太快了，請稍等幾秒再繼續 🙏' : '提問太頻繁，請稍候片刻再試。',
+        staff || colleague ? staffChips() : undefined);
+      return;
+    }
   }
 
   // ── 「輸入中」動畫：每一則 1 對 1 訊息都要跑（批次 60）──────────────────────
@@ -276,6 +288,14 @@ async function handleEvent(ev) {
   if (await isStaffAuthenticated(userId)) {
     markStaff();
     await handleStaffMessage(replyToken, userId, text);
+    return;
+  }
+  // 待教清單的指令（批次 145）：每天的提醒推給 LINE_ADMIN_USER_ID，但「教 N：」「略過 N」「待教清單」只有職員模式認得。
+  // 管理員還沒用職員密語登入（或退出過）時，回這幾句以前會被當成記者的問題送去問模型——現在告訴他先登入。
+  // 只對管理員本人；別人打這幾句照舊是一般訊息（不能讓記者知道有這組指令，更不能讓他們用）。
+  if (process.env.LINE_ADMIN_USER_ID && userId === process.env.LINE_ADMIN_USER_ID && parseQueueCommand(text)) {
+    await replyOrPush(replyToken, userId,
+      '要先登入職員模式才能用待教清單 🙏\n\n在這裡打一次職員密語，登入後再回「待教清單」或「教 N：答案」就可以了。');
     return;
   }
   // 同仁模式（批次 138）：整段接管，只走 lib/line-colleague-mode.js 那份白名單
