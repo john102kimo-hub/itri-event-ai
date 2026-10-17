@@ -253,10 +253,21 @@ console.log('\n── 主管：後台與米亞助理 ──');
   check('下一次對話：系統提示裡帶著剛教的那一條', /四足/.test(ai.calls.filter((c) => (c.body.tools || []).length).at(-1).sys));
   await shot(page, 'boss-4-memory.png');
 
+  // 按了「確認執行」還沒等到結果就重新整理（批次 145）：讓建立活動的請求卡住不回，模擬網路慢、人先離開
+  await ask('再幫我開一個活動草稿：量子運算前瞻論壇，11/20');
+  await page.waitForFunction(() => document.querySelectorAll('.mia-card').length >= 5);
+  await page.route('**/api/events', (route) => (/"action":"create"/.test(route.request().postData() || '') ? undefined : route.continue()));
+  await page.locator('.mia-card').last().locator('button.ok').click();
+  await page.waitForFunction(() => /執行中/.test([...document.querySelectorAll('.mia-card .st')].at(-1)?.textContent || ''));
   await page.reload();
+  await page.unroute('**/api/events');
   await page.waitForSelector('#mia-fab', { state: 'visible' });
   await page.click('#mia-fab');
   check('重新整理頁面 → 對話紀錄還在（同一個分頁）', (await page.locator('#mia-msgs .mia-m').count()) > 3);
+  const lastCard = page.locator('.mia-card').last();
+  check('★ 執行到一半離開的那張卡 → 變成「不確定有沒有完成」，沒有「確認執行」可以再按（不會建出兩份）',
+    /不確定有沒有完成/.test(await lastCard.textContent()) && (await lastCard.locator('button.ok').count()) === 0, await lastCard.textContent());
+  check('　 那個活動草稿真的只有一份（卡住的那次沒寫進去）', rows('events').filter((r) => r[1] === '量子運算前瞻論壇').length === 1);
 
   // 直接打 API：沒有密碼、或拿同仁的名單代碼，都叫不動助理
   const noPw = await (await fetch(`${base}/api/events`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'assistant_chat', messages: [{ role: 'user', content: '名單有幾個人' }] }) })).status;
@@ -292,10 +303,27 @@ console.log('\n── 同事：記者名單（共用連結）與名片翻拍、�
   check('比對名單：同名同媒體的林小美 → 列出要更新的欄位', /林小美（經濟日報）/.test(matchTxt) && /同名|媒體/.test(matchTxt), matchTxt);
   check('★ 同仁看到的「名單裡原本的 mail」是遮過的（不能藉名片比對撈走個資）', !/(^|[^\w.])mei\.lin@udn\.com/.test(matchTxt) && /m\*+@udn\.com/.test(matchTxt), matchTxt);
   await shot(page, 'coll-1-card.png');
+  check('　 要換掉的 mail 旁邊標「要管理員核准」（不讓人以為按下去就換好了）', /要管理員核准/.test(matchTxt), matchTxt);
   await page.locator('#card-matches button.primary').first().click();
   await page.waitForFunction(() => /已更新/.test(document.getElementById('toast')?.textContent || ''));
-  const r1 = rows('media_roster').find((r) => r[0] === 'R1');
-  check('按「用名片更新這位」→ mail、電話換成名片上的，路線沒被洗掉、職稱進備註', r1[4] === 'meimei.lin@udn.com' && r1[5] === '0912-345-678' && r1[3] === '半導體' && /資深記者/.test(r1[11]), JSON.stringify(r1));
+  const toastTxt = await page.textContent('#toast');
+  let r1 = rows('media_roster').find((r) => r[0] === 'R1');
+  check('★ 按「用名片更新這位」→ 電話換成名片上的、路線沒被洗掉、職稱進備註；mail 先不換，提示要等管理員核准（批次 145）',
+    r1[4] === 'mei.lin@udn.com' && r1[5] === '0912-345-678' && r1[3] === '半導體' && /資深記者/.test(r1[11]) && /管理員核准/.test(toastTxt), JSON.stringify([toastTxt, r1]));
+
+  // 管理員打開記者名單 → 看到同仁送來的 mail 修改 → 核准
+  const adminPage = await newPage('主管（名單）');
+  await adminPage.goto(`${base}/media.html`);
+  await adminPage.fill('#gate-input', 'pw'); await adminPage.click('#gate-box button');
+  await adminPage.waitForSelector('#mailreq-box', { state: 'visible', timeout: 8000 }).catch(() => {});
+  const reqTxt = await adminPage.locator('#mailreq-box').textContent().catch(() => '');
+  check('主管打開記者名單 → 看到「同仁送來的 mail 修改」：林小美 舊 mail → 新 mail', /林小美/.test(reqTxt) && /mei\.lin@udn\.com/.test(reqTxt) && /meimei\.lin@udn\.com/.test(reqTxt), reqTxt);
+  await shot(adminPage, 'boss-5-mailreq.png');
+  await adminPage.locator('#mailreq-list button.primary').first().click();
+  await adminPage.waitForFunction(() => /已核准/.test(document.getElementById('toast')?.textContent || ''));
+  r1 = rows('media_roster').find((r) => r[0] === 'R1');
+  check('　 按「核准」→ mail 才真的換掉，清單上不再出現', r1[4] === 'meimei.lin@udn.com' && !(await adminPage.locator('#mailreq-box').isVisible()), JSON.stringify(r1));
+  await adminPage.context().close();
 
   const pick = await (await fetch(`${base}/api/media?action=pick&code=staffcode1`)).status;
   check('★ 同仁代碼直接打「挑收件人」API → 401（mail 清單只給管理員）', pick === 401, pick);

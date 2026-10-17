@@ -37,8 +37,16 @@
   function load() { try { return JSON.parse(sessionStorage.getItem(STORE_KEY) || '[]') || []; } catch (e) { return []; } }
   function save() { try { sessionStorage.setItem(STORE_KEY, JSON.stringify(state.log.slice(-40))); } catch (e) {} }
 
-  // log 項目：{role:'user'|'assistant', text} 或 {role:'card', proposal, status:'pending'|'done'|'cancelled'|'error', note}
+  // log 項目：{role:'user'|'assistant', text} 或 {role:'card', proposal, status:'pending'|'working'|'done'|'cancelled'|'error'|'unknown', note}
   var state = { log: load(), busy: false, open: false };
+  // 上次按了「確認執行」、還沒等到結果就離開（重新整理、關分頁）的卡片（批次 145）：不知道到底寫進去了沒有，
+  // 不能再給一顆「確認執行」——再按一次，活動草稿就會建出兩份。改成「不確定」、請人先去頁面上看。
+  state.log.forEach(function (m) {
+    if (m.role === 'card' && m.status === 'working') {
+      m.status = 'unknown';
+      m.note = '上次按了確認後就離開了頁面，不確定有沒有完成。請先到頁面上確認；沒有的話，再請我重新做一次。';
+    }
+  });
 
   var css = [
     '#mia-fab{position:fixed;right:18px;bottom:18px;width:68px;height:68px;border-radius:50%;border:3px solid #fff;background:#dbeafe;box-shadow:0 6px 20px rgba(15,23,42,.28);cursor:pointer;padding:0;z-index:9000;display:none;overflow:hidden;transition:transform .15s}',
@@ -189,7 +197,7 @@
       no.onclick = function () { m.status = 'cancelled'; m.note = '已取消，沒有寫入任何資料。'; remember('（使用者取消了「' + p.title + '」，沒有寫入。）'); save(); render(); };
       row.appendChild(ok); row.appendChild(no); card.appendChild(row);
     } else {
-      card.appendChild(el('div', 'st', (m.status === 'done' ? '✅ ' : m.status === 'error' ? '⚠️ ' : '') + (m.note || '')));
+      card.appendChild(el('div', 'st', (m.status === 'done' ? '✅ ' : m.status === 'error' || m.status === 'unknown' ? '⚠️ ' : '') + (m.note || '')));
     }
     return card;
   }
@@ -202,17 +210,25 @@
     if (!m || m.status !== 'pending') return;
     var req = m.proposal.request;
     if (!allowed(req)) { m.status = 'error'; m.note = '這個動作不在允許清單內，沒有執行。'; save(); render(); return; }
-    m.status = 'working'; m.note = '執行中…'; render();
+    m.status = 'working'; m.note = '執行中…'; save(); render(); // 先存：執行到一半離開頁面，回來才不會又是一顆可以按的「確認執行」
+    var res = null;
     try {
-      var res = await fetch(req.url, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Admin-Password': pwd() }, body: JSON.stringify(req.body) });
+      res = await fetch(req.url, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Admin-Password': pwd() }, body: JSON.stringify(req.body) });
       var data = await res.json().catch(function () { return {}; });
       if (!res.ok || data.error) throw new Error(data.error || ('失敗（' + res.status + '）'));
       m.status = 'done'; m.note = '已完成。頁面上的資料請重新整理一下就會看到。';
       remember('（使用者按了確認，「' + m.proposal.title + '」已經執行完成。）');
       try { window.dispatchEvent(new CustomEvent('mia-assistant-change', { detail: { kind: m.proposal.kind } })); } catch (e) {}
     } catch (e) {
-      m.status = 'error'; m.note = '沒有成功：' + e.message;
-      remember('（「' + m.proposal.title + '」執行失敗：' + e.message + '，沒有寫入。）');
+      if (!res) {
+        // 沒拿到伺服器的回應（斷線、逾時、頁面重新整理把請求中斷）：請求可能已經送到、也寫進去了（批次 145 走查）。
+        // 不能說「沒有成功」——人會再叫米亞做一次，活動草稿就變兩份。
+        m.status = 'unknown'; m.note = '連線中斷，不確定有沒有完成。請先到頁面上確認；沒有的話，再請我重新做一次。';
+        remember('（「' + m.proposal.title + '」執行時連線中斷，不確定有沒有寫入；請使用者先確認，不要直接再提議一次。）');
+      } else {
+        m.status = 'error'; m.note = '沒有成功：' + e.message;
+        remember('（「' + m.proposal.title + '」執行失敗：' + e.message + '，沒有寫入。）');
+      }
     }
     save(); render();
   }

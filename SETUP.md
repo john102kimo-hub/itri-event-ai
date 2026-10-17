@@ -142,7 +142,7 @@ AI 不報價（答案裡有背景資料沒有的金額，整則換成固定回�
    - H 欄 `source`（`web` 網頁問的、`line` LINE 問的）、I 欄 `reporter_name`（記者姓名，批次 105 起）是系統自動寫的，標題可以補上方便自己看，不補也不影響功能（程式照欄位位置讀寫）。
    - **D 欄 `media_name` 只放「媒體」**，姓名另外放 I 欄——後台的「服務媒體家數」只數 D 欄、同一家媒體的不同記者併成一家。舊資料常是「經濟日報 王小明」一整串放在 D 欄，統計時會自動拆開（不改動試算表裡的原始內容）；要整理成兩欄，後台「問答分析」每一列的「✎ 媒體」可以分別改。
 7. 其餘分頁不用手動建立——第一次用到相關功能時，系統會自動建好並補上表頭：
-   `exposure`（露出上傳）、`geo_prompts`／`geo_runs`／`geo_events`／`geo_settings`（AI 能見度）、`media_roster`／`media_settings`（記者名單健檢）、
+   `exposure`（露出上傳）、`geo_prompts`／`geo_runs`／`geo_events`／`geo_settings`（AI 能見度）、`media_roster`／`media_settings`／`media_mail_requests`（記者名單健檢；最後一個是同仁送來、等管理員核准的 mail 修改，批次 145）、`assistant_memory`（後台米亞的記憶，批次 142）、
    `line_users`（LINE 綁定與對話狀態）、`line_staff`（職員模式）、`line_photo_inbox`（LINE 傳來的照片暫存）、`bot_memory`（教米亞的記憶）、`teach_queue`（待教清單：每天掃問答、推給 `LINE_ADMIN_USER_ID`，批次 139）、
    `contacts_directory`（全域技術窗口分工）、`event_changes`（LINE 職員改資料的紀錄，可復原）、`events_trash`（刪除活動前的備份）、
    `training_log`（媒體訓練演練分數）、`reg_campaigns`／`registrations`（媒體報名）。
