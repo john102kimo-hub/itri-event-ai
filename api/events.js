@@ -23,7 +23,7 @@ import { readRange, appendRows, updateRange, ensureSheets, listSheets, batchUpda
 import { generateId, generateEditCode } from '../lib/ids.js';
 import { del } from '@vercel/blob';
 import { CONTACTS_DIR_RANGE, ensureContactsDirectorySheet } from '../lib/contacts-directory.js';
-import { resolveEventContent } from '../lib/prompt.js';
+import { resolveEventContent, isPreEventMode } from '../lib/prompt.js';
 import { lineBindUrl, lineAddFriendUrl, lineBasicId } from '../lib/line-link.js';
 import { handleRegistrationRequest } from '../lib/registration-api.js';
 import { handleB2BRequest } from '../lib/b2b-api.js';
@@ -330,6 +330,21 @@ export default async function handler(req, res) {
       return handleRegistrationRequest(req, res, { adminPassword });
     }
     if (typeof action === 'string' && action.startsWith('b2b_')) return handleB2BRequest(req, res);
+
+    // 快速提問預覽（批次 147）：編輯畫面上即時顯示「記者現在會看到哪幾顆快速提問」，跟網頁、LINE 用同一支 effectiveChips()。
+    // 不需要密碼：只拿送進來的欄位算一次（純函式，不讀試算表、不呼叫 AI），沒有任何資料可以外洩；
+    // 後台編輯視窗（管理員）與同仁的編輯頁（編輯碼）都要用。輸入照存檔的上限截斷。
+    if (action === 'chips_preview') {
+      const str = (k, n) => String(body[k] ?? '').slice(0, n);
+      const ev = {
+        status: str('status', 20), event_date: str('event_date', 40), chips: str('chips', 4000),
+        invite_letter: str('invite_letter', KB_MAX_LEN), invite_letter_chips: str('invite_letter_chips', 4000),
+        knowledge_base: str('knowledge_base', KB_MAX_LEN), press_contact: str('press_contact', 300),
+        venue: str('venue', 200), event_time: str('event_time', 100),
+      };
+      const custom = !!ev.chips.trim() || (isPreEventMode(ev) && !!ev.invite_letter_chips.trim());
+      return res.status(200).json({ chips: effectiveChips(ev), custom, pre_event: isPreEventMode(ev) });
+    }
 
     // 後台助理（批次 141）：右下角的胖胖米亞。只有管理員密碼進得來；每次都是一次付費的 AI 呼叫，所以另外限流。
     // 搭在這支上而不是新開 api/*.js：Vercel Hobby 的 Function 數量有上限，且這支本來就是 60 秒（見 vercel.json）。

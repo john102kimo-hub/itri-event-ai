@@ -248,7 +248,7 @@ console.log('\n── 四、頁面 ──');
   check('★ 確認卡執行前再擋一次：只允許 /api/media（add、update）與 /api/events（create、記住、忘掉）', /var ALLOWED = \[/.test(js) && /actions: \['add', 'update'\]/.test(js) && /actions: \['create', 'assistant_remember', 'assistant_forget'\]/.test(js) && /if \(!allowed\(req\)\)/.test(js)
     && !/delete|publish|settings_save/.test(js.slice(js.indexOf('var ALLOWED'), js.indexOf('var CHIPS'))));
   check('★ 顯示一律用 textContent，沒有 innerHTML／insertAdjacentHTML（模型回的字不會被當成 HTML）', !/innerHTML|insertAdjacentHTML|document\.write/.test(js));
-  check('　 沒登入（sessionStorage 沒有 itri_pwd）就不顯示按鈕', /syncVisible/.test(js) && /fab\.style\.display = on \? 'block' : 'none'/.test(js));
+  check('　 沒登入（sessionStorage 沒有 itri_pwd）就不顯示按鈕', /syncVisible/.test(js) && /fab\.style\.display = on && !overlayOpen\(\) \? 'block' : 'none'/.test(js)); // 批次 147：編輯視窗開著時也先躲起來
   check('　 密碼走 header（X-Admin-Password），不放網址', /'X-Admin-Password': pwd\(\)/.test(js) && !/\?password=/.test(js));
   check('　 同一個執行不會按兩次（status 不是 pending 就跳過）', /m\.status !== 'pending'\) return/.test(js));
 }

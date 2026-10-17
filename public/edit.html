@@ -297,7 +297,8 @@ textarea.form-control { min-height: 240px; resize: vertical; line-height: 1.65; 
       <textarea class="form-control" id="input-chips" rows="4"
         placeholder="這次活動的主要發表內容是什麼？&#10;有哪些合作廠商參與？&#10;這項技術的應用場域為何？"
         style="font-size:16px;min-height:auto"></textarea>
-      <div class="form-hint">留空則使用預設通用問題；建議 3–6 題</div>
+      <div class="form-hint"><b>留空就好</b>：系統會依知識庫實際寫了什麼自動出題，下面會列出記者現在看到的按鈕。想自己決定才在這裡填，每行一題，建議 3–6 題。</div>
+      <div id="chips-preview" aria-live="polite"></div>
     </div>
     <div class="form-group">
       <label>AI 開場白</label>
@@ -556,6 +557,7 @@ async function load() {
     // 活動日期：只收純日期（見 eventDateIso 的說明），沒填就留空讓同仁自己選
     document.getElementById('input-date').value = eventDateIso(ev);
     updateReadiness();
+    if (window.chipsPreview) chipsPreview.refresh(); // 批次 147：程式填好欄位後算一次快速提問預覽
 
     document.getElementById('preview-link').href = `/event?id=${encodeURIComponent(EVENT_ID)}`;
     // 訓練頁的授權吃網址上的 code，跟這個編輯頁用同一支，同仁不用另外要密碼就能直接點開。
@@ -632,6 +634,7 @@ async function copyFromEvent(sourceId) {
     if (src.organizer) document.getElementById('input-organizer').value = src.organizer;
     if (src.chips) document.getElementById('input-chips').value = src.chips;
     dirty = true;
+    if (window.chipsPreview) chipsPreview.schedule();
     toast('已帶入「' + (src.name || '') + '」的知識庫，請修改成本場內容');
   } catch (e) {
     toast('複製失敗：' + e.message);
@@ -912,6 +915,14 @@ load();
 </script>
 
 <!-- 圖片上傳：直接從瀏覽器把檔案傳到 Vercel Blob，拿回直連網址 -->
+<script src="/chips-preview.js"></script>
+<script>
+// 批次 147：快速提問預覽——欄位跟 api/events.js chips_preview 對應
+window.chipsPreview = setupChipsPreview({ box: 'chips-preview', fields: {
+  knowledge_base: 'input-kb', chips: 'input-chips', invite_letter: 'input-invite-letter', invite_letter_chips: 'input-invite-letter-chips',
+  event_date: 'input-date', venue: 'input-venue', event_time: 'input-time', press_contact: 'input-contact', status: 'input-status'
+}, initial: true });
+</script>
 <script type="module">
   import { upload } from 'https://esm.sh/@vercel/blob@2.6.1/client';
   window.__blobUpload = upload;
