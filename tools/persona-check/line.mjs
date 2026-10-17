@@ -220,8 +220,10 @@ check('換句話又問的那一題也被標成「記者換句話又問了一次�
 c = await cron('cron_teach');
 check('排程再跑一次 → 不重複加、不重複推', c.body?.added === 0 && c.body?.pushed === 0, JSON.stringify(c.body));
 r = await say('U_boss', '待教清單');
-check('待教清單 → 列出題目與「教 N：」「略過 N」的用法', /等著教的題目/.test(r.all) && /教 \d+：/.test(r.all), r.all);
-r = await say('U_boss', `教 ${qid}：發言人是工研院副院長張博士`);
+check('待教清單 → 列出題目與「回 N 教這題」「略過 N」的用法，附「教 N」按鈕', /等著教的題目/.test(r.all) && /回「\d+」教這題/.test(r.all) && r.chips.some((c) => /^教 \d+$/.test(c)), r.all);
+r = await say('U_boss', String(qid), { note: '朱朱實際的用法：看到【1】就回「1」' });
+check('回編號 → 列出那一題、請她直接打答案（以前回「我只收到一個『1』」）', /請直接打正確答案/.test(r.all) && !/只收到/.test(r.all), r.all);
+r = await say('U_boss', '發言人是工研院副院長張博士');
 check('教 N：答案 → 寫進 bot_memory（記在智慧醫療那一場、直接生效）', /學會了/.test(r.all) && state.memories.some((m) => m[1] === 'med' && /張博士/.test(m[3]) && m[5] === 'on'), JSON.stringify(state.memories));
 r = await say('U_boss', `教 ${qid}：重複教一次`);
 check('同一題再教一次 → 說已經教過', /已經教過/.test(r.all), r.all);
