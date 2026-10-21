@@ -167,7 +167,7 @@ async function onSubmit(ev) {
   btn.disabled = true; btn.textContent = '送出中…';
   try {
     const r = await fetch(API, { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'b2b_inquiry_submit', ...d, hp: $('input[name=website]').value, elapsed: Date.now() - loadedAt }) });
+      body: JSON.stringify({ action: 'b2b_inquiry_submit', ...d, ref: new URLSearchParams(location.search).get('e') || '', hp: $('input[name=website]').value, elapsed: Date.now() - loadedAt }) });
     const data = await r.json().catch(() => ({}));
     if (r.ok && data.ok) return done(data);
     (data.errors || []).forEach((x) => setErr(x.field, x.message));

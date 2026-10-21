@@ -252,6 +252,9 @@
   }
   #archive-btn:hover { background: rgba(255,255,255,0.3); }
   #archive-btn:not([hidden]) + #status-dot { margin-left: 8px; }
+  /* 報名按鈕（批次 152）：這場活動有關聯、而且現在收件的報名才會出現 */
+  .reg-link { display: flex; align-items: center; gap: 10px; margin-top: 10px; padding: 10px 14px; border-radius: 12px; background: var(--primary); color: #fff; text-decoration: none; font-weight: 700; }
+  .reg-link small { display: block; font-weight: 400; opacity: .9; font-size: .78rem; }
   #archive-panel { position: fixed; inset: 0; z-index: 150; background: #fff; display: flex; flex-direction: column; }
   #archive-bar { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--border); background: var(--card); flex-shrink: 0; }
   #archive-bar b { flex: 1; font-size: 0.95rem; }
@@ -636,6 +639,7 @@ async function init() {
       welcomeEl.appendChild(c);
     }
     addLineLink(welcomeEl, null, event.line_url, '也可以用 LINE 問米亞', '會自動帶入這一場，會後也能隨時問');
+    addRegisterLink(welcomeEl, event.id); // 不等它：報名資料慢或壞了，活動頁照常能問
 
     // 快速問題：優先使用活動自訂 chips，否則用預設
     const chipsEl = document.getElementById('chips');
@@ -918,6 +922,26 @@ function setupArchive(article) {
   btn.onclick = () => { panel.hidden = false; };
   panel.querySelector('#archive-close').onclick = close;
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
+}
+
+// 報名按鈕（批次 152）。連結由後端 reg_event_link 給；只收本站的 /register，其他一律不畫。
+async function addRegisterLink(parent, id) {
+  try {
+    const r = await fetch(`/api/events?action=reg_event_link&id=${encodeURIComponent(id)}`);
+    if (!r.ok) return;
+    const d = await r.json();
+    if (!d || !d.url) return;
+    const u = new URL(d.url, location.origin);
+    if (u.pathname !== '/register') return;
+    const a = document.createElement('a');
+    a.className = 'reg-link';
+    a.href = '/register' + u.search; // 一律用目前這個網域，不跟著後端設定的 SITE_URL 跑
+    a.rel = 'noopener';
+    a.innerHTML = '<i class="ti ti-ticket"></i><div><span></span><small>填寫姓名與媒體，約 1 分鐘</small></div>';
+    a.querySelector('span').textContent = '我要報名'; // 不再加報名活動的名稱：就是這一場，寫出來只會變成「報名：記者會報名」
+    // 報名是活動前最重要的動作，放在「用 LINE 問」前面；那顆還沒畫出來（或不存在）就放最後
+    parent.insertBefore(a, parent.querySelector('.line-link, .line-qr'));
+  } catch (e) { /* 報名按鈕是加分項，失敗就不畫 */ }
 }
 
 let _pendingEvent = null;

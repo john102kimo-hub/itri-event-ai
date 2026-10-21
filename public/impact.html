@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex,nofollow">
+<meta name="referrer" content="no-referrer">
+<title>計畫成效 — 工研院活動溝通 AI 平台</title>
+<!--
+  計畫成效（唯讀）——批次 151。給部會、計畫主管機關的承辦人看「這一場的媒體露出與 AI 助理被問了什麼」。
+  連結由後台活動卡片的「計畫成效唯讀連結」產生：/impact?id=活動代碼&k=連結碼。沒有登入、不能改任何東西；
+  資料只有數字、露出清單裡的媒體名稱、提問的主題詞與次數（提問原文、提問者、聯絡方式不會從伺服器送出，見 lib/impact.js）。
+  所有伺服器給的文字都用 textContent 放進頁面（不拼 HTML 字串）。
+-->
+<style>
+  :root { --primary:#0F9E7A; --primary-dark:#0a7a60; --primary-light:rgba(15,158,122,0.09); --text:#1a1a2e; --muted:#6b7280; --bg:#f0f4f7; --card:#fff; --border:#e5e7eb; --radius:14px; --font:'Noto Sans TC','PingFang TC','Microsoft JhengHei',system-ui,sans-serif; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: var(--font); background: var(--bg); color: var(--text); line-height: 1.55; font-size: 15px; -webkit-text-size-adjust: 100%; }
+  [hidden] { display: none !important; }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 22px 16px 60px; }
+  .eyebrow { font-size: .78rem; color: var(--primary-dark); font-weight: 700; letter-spacing: .04em; }
+  h1 { font-size: 1.35rem; line-height: 1.4; margin: 2px 0 4px; }
+  .sub { color: var(--muted); font-size: .88rem; display: flex; gap: 6px 14px; flex-wrap: wrap; }
+  .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 18px 0 20px; }
+  .kpi { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 8px; text-align: center; }
+  .kpi .n { font-size: 1.8rem; font-weight: 800; color: var(--primary); line-height: 1.1; font-variant-numeric: tabular-nums; }
+  .kpi .l { font-size: .76rem; color: var(--muted); margin-top: 3px; }
+  .kpi.main { background: var(--primary); border-color: var(--primary); }
+  .kpi.main .n, .kpi.main .l { color: #fff; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; margin-bottom: 14px; }
+  .card h2 { font-size: 1rem; margin-bottom: 10px; }
+  .card h3 { font-size: .85rem; color: var(--muted); margin: 14px 0 6px; font-weight: 700; }
+  .card h3:first-of-type { margin-top: 0; }
+  .bar { display: grid; grid-template-columns: minmax(80px, 38%) 1fr 42px; gap: 8px; align-items: center; font-size: .86rem; margin: 5px 0; }
+  .bar .lab { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .bar .track { background: #eef2f1; border-radius: 6px; height: 10px; overflow: hidden; }
+  .bar .fill { background: var(--primary); height: 100%; border-radius: 6px; }
+  .bar .num { text-align: right; font-variant-numeric: tabular-nums; font-weight: 700; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip { background: var(--primary-light); color: var(--primary-dark); border-radius: 999px; padding: 4px 12px; font-size: .86rem; }
+  .chip b { margin-left: 4px; }
+  .empty { color: var(--muted); font-size: .88rem; }
+  .note { color: var(--muted); font-size: .78rem; margin-top: 18px; line-height: 1.7; }
+  .actions { margin-top: 14px; }
+  button { font: inherit; cursor: pointer; border: 1px solid var(--border); background: #fff; border-radius: 10px; padding: 8px 14px; }
+  .gone { text-align: center; padding: 60px 16px; }
+  .gone h1 { margin-bottom: 8px; }
+  @media (max-width: 520px) { .kpis { grid-template-columns: repeat(2, 1fr); } }
+  @media print { body { background: #fff; } .actions { display: none; } .card, .kpi { break-inside: avoid; } }
+</style>
+</head>
+<body>
+<div class="wrap" id="app"><div class="empty" style="padding:40px 0;text-align:center">載入中…</div></div>
+<script>
+const $app = document.getElementById('app');
+function el(tag, props, ...kids) {
+  const n = document.createElement(tag);
+  for (const [k, v] of Object.entries(props || {})) {
+    if (k === 'class') n.className = v; else if (k === 'text') n.textContent = v; else if (k === 'style') n.style.cssText = v; else n.setAttribute(k, v);
+  }
+  for (const c of kids.flat()) if (c != null && c !== false) n.append(c.nodeType ? c : document.createTextNode(String(c)));
+  return n;
+}
+const fmt = (n) => Number(n || 0).toLocaleString('zh-TW');
+function gone() {
+  $app.replaceChildren(el('div', { class: 'gone' },
+    el('h1', { text: '這個連結已失效或不正確' }),
+    el('p', { class: 'empty', text: '請向分享給您的承辦人重新索取連結。' })));
+}
+function kpi(n, label, main) { return el('div', { class: 'kpi' + (main ? ' main' : '') }, el('div', { class: 'n', text: fmt(n) }), el('div', { class: 'l', text: label })); }
+function bars(rows, unit) {
+  const max = Math.max(1, ...rows.map((r) => r.n));
+  return rows.map((r) => el('div', { class: 'bar' },
+    el('div', { class: 'lab', title: r.label, text: r.label }),
+    el('div', { class: 'track' }, el('div', { class: 'fill', style: `width:${Math.max(2, Math.round(r.n / max * 100))}%` })),
+    el('div', { class: 'num', text: fmt(r.n) + (unit || '') })));
+}
+function render(v) {
+  const e = v.event, x = v.exposure, qa = v.qa;
+  document.title = `${e.name}｜計畫成效`;
+  const kids = [
+    el('div', { class: 'eyebrow', text: '計畫成效' }),
+    el('h1', { text: e.name }),
+    el('div', { class: 'sub', text: '' }, [e.date, e.venue, e.organizer && `主辦：${e.organizer}`].filter(Boolean).map((t) => el('span', { text: t }))),
+    el('div', { class: 'kpis' },
+      kpi(x ? x.total : 0, '媒體露出（則）', true), kpi(x ? x.outlets : 0, '報導媒體（家）'),
+      kpi(qa.questions, 'AI 助理被提問（次）'), kpi(qa.media_asked, '提問的媒體（家）'))
+  ];
+
+  const exp = el('div', { class: 'card' }, el('h2', { text: '媒體露出' }));
+  if (!x) exp.append(el('div', { class: 'empty', text: '尚未提供這一場的媒體露出清單。' }));
+  else {
+    const types = Object.entries(x.byType || {}).sort((a, b) => b[1] - a[1]).map(([label, n]) => ({ label, n }));
+    if (types.length) exp.append(el('h3', { text: '媒體類型' }), ...bars(types, ' 則'));
+    if ((x.topOutlets || []).length) exp.append(el('h3', { text: `報導則數前 ${x.topOutlets.length} 名的媒體` }), ...bars(x.topOutlets.map((o) => ({ label: o.name, n: o.n })), ' 則'));
+    if ((x.dates || []).length > 1) exp.append(el('h3', { text: '各日報導則數' }), ...bars(x.dates.map((d) => ({ label: d.date, n: d.n })), ' 則'));
+  }
+  kids.push(exp);
+
+  const ai = el('div', { class: 'card' }, el('h2', { text: 'AI 新聞助理：記者問了什麼' }));
+  if (!qa.questions) ai.append(el('div', { class: 'empty', text: '這一場還沒有記者提問。' }));
+  else {
+    ai.append(el('h3', { text: '熱門提問主題（含該主題的提問次數）' }));
+    ai.append(qa.topics.length
+      ? el('div', { class: 'chips' }, qa.topics.map((t) => el('span', { class: 'chip' }, t.word, el('b', { text: fmt(t.count) }))))
+      : el('div', { class: 'empty', text: '提問內容分散，沒有明顯集中的主題。' }));
+  }
+  kids.push(ai);
+
+  kids.push(el('div', { class: 'note' },
+    '口徑說明：媒體露出來自監測公司提供的露出清單；提問次數是記者透過本場 AI 新聞助理（網頁與 LINE）查詢的次數，不含測試資料與工研院同仁自己的提問；提問者與提問原文不在這個頁面。',
+    el('br'), `資料更新時間：${(v.generated_at || '').replace('T', ' ').slice(0, 16)}（約每分鐘更新一次）`));
+  kids.push(el('div', { class: 'actions' }, el('button', { type: 'button', onclick: 'window.print()', text: '列印／存成 PDF' })));
+  $app.replaceChildren(...kids);
+}
+(async () => {
+  const q = new URLSearchParams(location.search);
+  const id = q.get('id') || '', k = q.get('k') || '';
+  if (!id || !k) return gone();
+  try {
+    const r = await fetch(`/api/events?action=impact_view&id=${encodeURIComponent(id)}&k=${encodeURIComponent(k)}`);
+    if (!r.ok) return gone();
+    render(await r.json());
+  } catch { $app.replaceChildren(el('div', { class: 'gone' }, el('h1', { text: '暫時連不上' }), el('p', { class: 'empty', text: '請稍後重新整理。' }))); }
+})();
+</script>
+</body>
+</html>

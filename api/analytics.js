@@ -26,6 +26,7 @@ import { readQaRowsWithoutAnswers } from '../lib/qa-log.js';
 import { readEventRows } from '../lib/events-table.js';
 import { isBusinessEvent } from '../lib/audience.js';
 import { UNANSWERED_RE } from '../lib/teach-queue.js';
+import { countTopics } from '../lib/qa-topics.js';
 
 // 「AI 這題疑似沒答到」的判斷（UNANSWERED_RE）住在 lib/teach-queue.js：待教清單（批次 139）要用同一條規則，
 // 兩邊各寫一份遲早會判得不一樣。
@@ -211,23 +212,8 @@ export default async function handler(req, res) {
     // 關鍵字統計：改用字典比對（活動的 chips／知識庫小標題 + 通用產業詞表），
     // 不再用「連續中文 2–8 字」貪婪切詞——貪婪切詞切出的是斷句碎片，
     // 兩位記者問同一件事只要措辭差一個字就會被算成兩個不同關鍵字，熱點永遠浮不出來。
-    const GENERIC_TERMS = [
-      'AI', '人工智慧', '量產', '技轉', '時程', '成本', '合作廠商', '合作對象', '應用場域',
-      '技術突破', '商業化', '專利', '產能', '良率', '補助', '投資', '國際', '出貨', '市場',
-      '規格', '效能', '安全', '法規', '永續', '碳排', '淨零', '智慧製造', '半導體', '晶片',
-      '醫療', '機器人', '能源', '資安', '雲端', '合作備忘錄', 'MOU', '授權', '團隊', '成果'
-    ];
-    const dict = new Set(GENERIC_TERMS);
-    const keywords = {};
-    filtered.forEach(({ r }) => {
-      const q = r[4] || '';
-      dict.forEach(word => {
-        if (q.includes(word)) keywords[word] = (keywords[word] || 0) + 1;
-      });
-    });
-    const topKeywords = Object.entries(keywords)
-      .sort((a, b) => b[1] - a[1]).slice(0, 20)
-      .map(([word, count]) => ({ word, count }));
+    // 詞表與統計在 lib/qa-topics.js（計畫成效唯讀頁也用同一份，批次 151）
+    const topKeywords = countTopics(filtered.map(({ r }) => r[4]), { limit: 20 });
 
     // 每小時分佈
     // ⚠️ qa_log 的時間戳是 toLocaleString('zh-TW') 的字串，長這樣：「2026/8/27 下午9:57:22」

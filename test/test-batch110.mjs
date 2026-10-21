@@ -254,8 +254,9 @@ check('★ public/ 底下每一頁後台頁面（除了記者公開的三頁）�
 check('記者公開頁（/event、/register）維持可被嵌入（沒有擋 iframe）——這是刻意的，要改請連同使用情境一起想', !hdrsFor('/event')['X-Frame-Options'] && !hdrsFor('/register')['X-Frame-Options']);
 // 批次 119 加了 /inquiry、/b2b 兩條 rewrite 與業發處的期限提醒排程（functions 不變：搭在 api/events.js 上）
 // 批次 127 加了 /reg-status（報名狀況唯讀頁，搭在 api/events.js 上，functions 不變）
+// 批次 151 加了 /impact（計畫成效唯讀頁，同樣搭在 api/events.js 上，functions 不變）
 // 批次 121 加了 /t/:id、/n/:id（批次 122 再加 /i/:id）三條短網址 rewrite（搭在 api/event-page.js 上，functions 不變）
-check('原有的 rewrites、functions、crons 沒被動到', vercel.rewrites.length === 16 && Object.keys(vercel.functions).length === 7 && vercel.crons.length === 7); // 批次 139 多了每天一次的 cron_teach；批次 140 多了 api/media.js 的 maxDuration（名片辨識是視覺 AI 呼叫）
+check('原有的 rewrites、functions、crons 沒被動到', vercel.rewrites.length === 17 && Object.keys(vercel.functions).length === 7 && vercel.crons.length === 7); // 批次 139 多了每天一次的 cron_teach；批次 140 多了 api/media.js 的 maxDuration（名片辨識是視覺 AI 呼叫）
 
 /* ───────── 七、CDN 資源的 SRI、.gitignore、CI ───────── */
 console.log('\n── 七、供應鏈與工程衛生 ──');

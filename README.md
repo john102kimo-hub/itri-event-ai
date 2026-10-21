@@ -12,12 +12,13 @@
 | 承辦人（後台） | `/admin` | `public/index.html`、`api/events.js`、`api/analytics.js`、`api/export.js` |
 | 同仁（改自己那一場） | `/edit?id=…&code=…` | `public/edit.html`、`api/events.js`（`get_edit`／`update_edit`） |
 | 主管（成效報告） | `/report` | `public/report.html`、`api/exposure.js` |
+| 部會／計畫主管機關（單場計畫成效，唯讀） | `/impact?id=…&k=…`（後台活動卡片「更多」產生） | `public/impact.html`、`lib/impact.js`、`lib/impact-api.js`（搭在 `api/events.js`，批次 151） |
 | AI 能見度追蹤 | `/geo` | `public/geo.html`、`api/geo.js`、`lib/geo-*.js` |
 | 承辦人與同仁（記者名單健檢） | `/media.html`（後台側邊欄；同仁用共用連結 `?code=`） | `public/media.html`、`api/media.js` |
 | 主管（媒體訓練） | `/training` | `public/training.html`、`api/training.js` |
 | 記者（活動報名）／後台：所有活動與名單 | `/register`／`/registrations` | `public/register.html`、`public/registrations.html`、`lib/registration*.js` |
 | 企業（合作洽詢單） | `/inquiry` | `public/inquiry.html`、`lib/b2b-api.js`（搭在 `api/events.js` 的 `b2b_` 系列） |
-| 業發處（收件匣、成員、設定、稽核） | `/b2b`（每個人自己的連結 `/b2b#k=…`） | `public/b2b.html`、`lib/b2b.js`（資料在**另一本試算表**）、`lib/b2b-api.js`、`lib/b2b-line.js`（米亞那一端） |
+| 業發處（收件匣、成員、設定、稽核；洽詢單上「建立客戶專屬頁」，批次 153） | `/b2b`（每個人自己的連結 `/b2b#k=…`） | `public/b2b.html`、`lib/b2b.js`（資料在**另一本試算表**）、`lib/b2b-api.js`、`lib/b2b-line.js`（米亞那一端） |
 
 ## 先讀這幾份
 

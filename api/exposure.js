@@ -12,7 +12,7 @@
 // 通過，否則這個功能對同仁等於不存在。
 
 import { readRange, appendRows, ensureSheets, listSheets, batchUpdate } from '../lib/sheets.js';
-import { parseExposureFile, normalizeOutlet } from '../lib/exposure-parse.js';
+import { parseExposureFile, normalizeOutlet, summarizeExposure as summarize } from '../lib/exposure-parse.js';
 import { groupOutlets } from '../lib/media-name.js';
 import { readEventRows } from '../lib/events-table.js';
 import { readQaRowsWithoutAnswers } from '../lib/qa-log.js';
@@ -77,23 +77,6 @@ async function deleteEventRows(id) {
     }));
   await batchUpdate(requests);
   return rowIndexes.length;
-}
-
-function summarize(records) {
-  const byOutlet = {}, byType = {}, byDate = {};
-  records.forEach((r) => {
-    if (r.outlet) byOutlet[r.outlet] = (byOutlet[r.outlet] || 0) + 1;
-    if (r.type) byType[r.type] = (byType[r.type] || 0) + 1;
-    if (r.date) byDate[r.date] = (byDate[r.date] || 0) + 1;
-  });
-  return {
-    total: records.length,
-    outlets: Object.keys(byOutlet).length,
-    byType,
-    topOutlets: Object.entries(byOutlet).sort((a, b) => b[1] - a[1]).slice(0, 10)
-      .map(([name, n]) => ({ name, n })),
-    dates: Object.entries(byDate).sort((a, b) => a[0].localeCompare(b[0])).map(([d, n]) => ({ date: d, n })),
-  };
 }
 
 /** 模糊比對：正規化後其中一方包含另一方即算命中（避免「Yahoo」對不上「Yahoo奇摩新聞」） */
