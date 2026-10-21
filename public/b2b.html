@@ -68,6 +68,7 @@
 <header><div class="in">
   <h1>合作洽詢後台</h1>
   <span class="me" id="me"></span>
+  <a id="to-admin" href="/admin" hidden>活動後台</a>
   <a id="line-bind" hidden target="_blank" rel="noopener">綁定 LINE 通知</a>
   <button class="link" id="logout" hidden style="background:none;border:none;cursor:pointer;text-decoration:underline">登出</button>
 </div></header>
@@ -139,6 +140,8 @@ async function boot() {
     return showLogin(e.message);
   }
   $('login').hidden = true; $('main').hidden = false; $('logout').hidden = false;
+  // 用後台管理員密碼進來的（從 /admin 側邊欄過來）才給「回活動後台」；業務窗口用個人連結進來的看不到公關後台的入口（批次 154）
+  $('to-admin').hidden = !!store.get('itri_b2b_key') || !store.get('itri_pwd');
   $('me').textContent = `${ME.me.name}（${ME.roles[ME.me.role] || ME.me.role}${ME.me.unit ? '・' + ME.me.unit : ''}）`;
   const lb = $('line-bind');
   if (ME.me.line_bind_url && !ME.me.line_bound) { lb.href = ME.me.line_bind_url; lb.hidden = false; }
