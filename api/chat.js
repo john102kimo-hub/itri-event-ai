@@ -6,7 +6,8 @@
 
 import { appendRows, warmAuth } from '../lib/sheets.js';
 import { systemPromptFor, resolveEventContent, formatEventBasics } from '../lib/prompt.js';
-import { isBusinessEvent, guardBusinessAnswer } from '../lib/audience.js';
+import { isBusinessEvent, guardBusinessAnswer, blockedReplyWithInquiry } from '../lib/audience.js';
+import { openInquiryLink } from '../lib/b2b.js';
 import { toTraditionalTW, createTraditionalStream, ZH_TW_RULE } from '../lib/zh-tw.js';
 import { reportAiFailure, BUSINESS_KEY_NAME } from '../lib/ai-alert.js';
 import { readEventRows } from '../lib/events-table.js';
@@ -377,7 +378,16 @@ export default async function handler(req, res) {
         reply = toTraditionalName(refusalReply({ contact: event.press_contact, english: looksEnglish(question) }));
       } else {
         reply = toTraditionalTW(text) || '抱歉，無法取得回應。';
-        if (business && text) reply = guardBusinessAnswer(reply, event).text;
+        if (business && text) {
+          const modelReply = reply; // 語言要照模型原本那則答案判斷（固定回覆是中文，用它判斷英文提問會變中文）
+          const guarded = guardBusinessAnswer(modelReply, event);
+          reply = guarded.text;
+          // 擋下報價時，洽詢單有開就附連結（批次 149）；沒開、查失敗都維持原本的固定回覆
+          if (guarded.blocked.length) {
+            const inquiry = await openInquiryLink(event.id);
+            if (inquiry) reply = blockedReplyWithInquiry(modelReply, event, inquiry);
+          }
+        }
         // 批次 132：企業場不跑（它有 guardBusinessAnswer）；note 排在警語之後。預設影子模式 note 是空字串，一個字都不加
         if (!business && text) {
           const note = groundingNoteFor(reply, requestBody, event_id, false);

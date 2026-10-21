@@ -659,17 +659,22 @@ details.adv[open] > summary { border-bottom:1px solid var(--border); margin-bott
             <option value="">全部活動</option>
           </select>
           <input type="search" id="analytics-search" class="search-input" placeholder="搜尋問題、媒體、AI 回答…" oninput="renderQaList()" aria-label="搜尋">
-          <label class="check-inline">
+          <label class="check-inline qa-only">
             <input type="checkbox" id="analytics-exclude-test" checked onchange="loadAnalytics()">
             排除測試資料
           </label>
-          <label class="check-inline" title="AI 回答裡有「這部分我沒有資料」這類說法的問題——最值得回頭補知識庫">
+          <label class="check-inline qa-only" title="AI 回答裡有「這部分我沒有資料」這類說法的問題——最值得回頭補知識庫">
             <input type="checkbox" id="analytics-only-unanswered" onchange="renderQaList()">
             只看疑似答不出來
           </label>
           <button class="btn btn-primary" onclick="loadAnalytics()"><i class="ti ti-refresh"></i> 更新</button>
-          <button class="btn btn-outline" onclick="exportCSV()"><i class="ti ti-download"></i> 匯出 CSV</button>
+          <button class="btn btn-outline qa-only" onclick="exportCSV()"><i class="ti ti-download"></i> 匯出 CSV</button>
         </div>
+      </div>
+      <!-- 批次 150：記者／廠商的問答，和主管媒體訓練的逐題紀錄放在同一頁，用分頁切換（資料在不同的表，統計不會互相混到） -->
+      <div id="analytics-tabs" style="display:flex;gap:8px;padding:0 24px;margin-top:4px" role="tablist">
+        <button class="btn btn-primary" id="atab-qa" role="tab" aria-selected="true" onclick="setAnalyticsTab('qa')"><i class="ti ti-message-circle"></i> 記者與廠商問答</button>
+        <button class="btn btn-outline" id="atab-training" role="tab" aria-selected="false" onclick="setAnalyticsTab('training')"><i class="ti ti-microphone"></i> 主管訓練</button>
       </div>
       <div class="content" id="analytics-view">
         <div style="text-align:center;padding:60px;color:var(--muted)">
@@ -915,6 +920,17 @@ details.adv[open] > summary { border-bottom:1px solid var(--border); margin-bott
       <button class="btn btn-outline" onclick="closeLineQr()">關閉</button>
       <button class="btn btn-primary" onclick="downloadLineQr()"><i class="ti ti-download"></i> 下載 QR 圖檔（可列印）</button>
     </div>
+  </div>
+</div>
+
+<!-- 計畫成效唯讀連結（批次 151）：給部會、計畫主管機關的承辦人看這一場的媒體露出與 AI 助理被問的主題 -->
+<div id="impact-modal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeImpactShare()">
+  <div class="modal" style="width:480px">
+    <h2><i class="ti ti-presentation-analytics" style="color:var(--primary)"></i> <span id="impact-title">計畫成效唯讀連結</span></h2>
+    <div class="form-hint">給部會或計畫主管機關的承辦人：用這條連結就能看到這一場的<b>媒體露出數據</b>和<b>AI 助理被問的主題</b>，不用登入、不能改任何東西。
+      提問原文、提問者與聯絡方式<b>不會</b>出現。連結外流了就按「重新產生」，舊的立刻失效。</div>
+    <div id="impact-body" style="margin-top:12px"></div>
+    <div class="modal-actions"><button class="btn btn-outline" onclick="closeImpactShare()">關閉</button></div>
   </div>
 </div>
 
@@ -1295,6 +1311,7 @@ function moreMenuItems(ev) {
   if (ev.status !== 'archived') add('microphone', '媒體訓練', () => openTraining(id));
   if (ev.status === 'draft' || ev.status === 'active') add('chart-bar', '問答分析', () => showAnalyticsByEvent(id));
   if (ev.status === 'active' || ev.status === 'ended') add('download', '匯出問答 CSV', () => exportCSV(id));
+  if (ev.status === 'active' || ev.status === 'ended') add('presentation-analytics', '計畫成效唯讀連結', () => openImpactShare(id));
   if (ev.status === 'active') add('flag-check', '標為已結束', () => markEnded(id));
   if (ev.status === 'active') add('eye-off', '收回為未發布', () => unpublishEvent(id));
   if (ev.status === 'draft' || ev.status === 'archived') { items.push({ sep: true }); add('trash', '永久刪除', () => deleteEvent(id), true); }
@@ -1438,6 +1455,7 @@ function updateEventFilter() {
 }
 
 function showAnalyticsByEvent(eventId) {
+  setAnalyticsTab('qa', { load: false }); // 從活動卡點進來要看的是這一場的記者問答
   showView('analytics');
   document.getElementById('analytics-event-filter').value = eventId;
   loadAnalytics();
@@ -1581,6 +1599,7 @@ async function applyDirtyMediaClean() {
 }
 
 async function loadAnalytics(opts = {}) {
+  if (state.analyticsTab === 'training') return loadTrainingQa();
   const eid = document.getElementById('analytics-event-filter').value;
   const view = document.getElementById('analytics-view');
   if (!opts.keepLimit) state.qa.limit = 200;
@@ -1667,6 +1686,7 @@ function filterUnanswered() {
 
 // 依搜尋框與「只看疑似答不出來」篩已載入的那些筆，畫成表格（手機上 CSS 會把每一列變成一張卡片）
 function renderQaList() {
+  if (state.analyticsTab === 'training') return renderTrainingList();
   const host = document.getElementById('qa-list');
   if (!host) return;
   const q = (document.getElementById('analytics-search')?.value || '').trim().toLowerCase();
@@ -1705,6 +1725,84 @@ function renderQaList() {
         </td>
       </tr>`;
     }).join('')}
+    </tbody>
+  </table>${more}`;
+}
+
+// ── 問答分析 → 主管訓練（批次 150）─────────────────────────────────────────
+// 資料在 training_qa（api/training.js 的 qa_list）：每一題的題目、主管的回答、分數。
+// 跟記者的問答（qa_log）是兩張表，這一頁只是並排看，統計、待教清單、媒體排行都不會算到它。
+state.analyticsTab = 'qa';
+state.training = { rows: [], total: 0, trainees: 0, avg: null, limit: 200 };
+
+function setAnalyticsTab(tab, { load = true } = {}) {
+  state.analyticsTab = tab === 'training' ? 'training' : 'qa';
+  const isTr = state.analyticsTab === 'training';
+  document.getElementById('atab-qa').className = 'btn ' + (isTr ? 'btn-outline' : 'btn-primary');
+  document.getElementById('atab-training').className = 'btn ' + (isTr ? 'btn-primary' : 'btn-outline');
+  document.getElementById('atab-qa').setAttribute('aria-selected', String(!isTr));
+  document.getElementById('atab-training').setAttribute('aria-selected', String(isTr));
+  document.querySelectorAll('#view-analytics .qa-only').forEach(el => { el.style.display = isTr ? 'none' : ''; });
+  const search = document.getElementById('analytics-search');
+  if (search) search.placeholder = isTr ? '搜尋題目、回答、受訓者…' : '搜尋問題、媒體、AI 回答…';
+  if (load) loadAnalytics();
+}
+
+async function loadTrainingQa(opts = {}) {
+  const eid = document.getElementById('analytics-event-filter').value;
+  const view = document.getElementById('analytics-view');
+  if (!opts.keepLimit) state.training.limit = 200;
+  view.innerHTML = '<div style="text-align:center;padding:60px;color:var(--muted)"><i class="ti ti-loader" style="font-size:32px;display:block;margin-bottom:12px"></i>載入中…</div>';
+  try {
+    const params = new URLSearchParams({ action: 'qa_list', limit: String(state.training.limit) });
+    if (eid) params.set('event_id', eid);
+    const res = await authedFetch(`/api/training?${params.toString()}`);
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    state.training = { ...state.training, rows: data.rows || [], total: data.total || 0, trainees: data.trainees || 0, avg: data.avg_score };
+    view.innerHTML = `
+    <div class="qa-box">
+      <div class="section-title"><span><i class="ti ti-microphone" style="color:var(--primary)"></i> 主管訓練問答紀錄</span></div>
+      <div class="qa-summary">
+        <span>共 <b>${state.training.total}</b> 題</span>
+        <span><b>${state.training.trainees}</b> 位受訓者</span>
+        <span>平均 <b>${state.training.avg ?? '—'}</b> 分</span>
+      </div>
+      <div class="form-hint" style="margin:0 0 12px">練完一場（答完所有題目）才會留下紀錄；中途離開的不記。題目是 AI 扮演的記者出的，回答是主管自己講或打的。</div>
+      <div id="qa-list"></div>
+    </div>`;
+    renderTrainingList();
+  } catch (e) {
+    view.innerHTML = `<div style="color:#ef4444;padding:20px">載入失敗：${escHtml(e.message)}</div>`;
+  }
+}
+
+function renderTrainingList() {
+  const host = document.getElementById('qa-list');
+  if (!host) return;
+  const q = (document.getElementById('analytics-search')?.value || '').trim().toLowerCase();
+  const all = state.training.rows || [];
+  const rows = all.filter(r => !q || [r.question, r.answer, r.trainee, r.event_name].some(x => String(x || '').toLowerCase().includes(q)));
+  if (!all.length) { host.innerHTML = '<div style="color:var(--muted);font-size:0.85rem;padding:20px 0;text-align:center">還沒有人練完一場</div>'; return; }
+  if (!rows.length) { host.innerHTML = '<div style="color:var(--muted);font-size:0.85rem;padding:20px 0;text-align:center">沒有符合的紀錄</div>'; return; }
+  const more = state.training.total > all.length && !q
+    ? `<div style="text-align:center;margin-top:14px;font-size:0.82rem;color:var(--muted)">目前只顯示最近 ${all.length} 題（共 ${state.training.total} 題）
+        ${state.training.limit < 500 ? '<button class="linkbtn" onclick="state.training.limit=Math.min(500,state.training.limit+300);loadTrainingQa({keepLimit:true})">載入更多</button>' : ''}</div>` : '';
+  host.innerHTML = `
+  <table class="qa-table">
+    <thead><tr><th>時間</th><th>活動</th><th>受訓者</th><th>題目與回答</th><th style="width:70px">分數</th></tr></thead>
+    <tbody>${rows.map(r => `
+      <tr>
+        <td class="t-time">${escHtml(r.time || '')}</td>
+        <td class="t-event">${escHtml(r.event_name || r.event_id || '')}</td>
+        <td class="t-media">${escHtml(r.trainee || '—')}<div class="form-hint" style="margin:1px 0 0">第 ${r.no || '?'} 題${r.voice ? '・語音作答' : ''}</div></td>
+        <td class="q">
+          <div class="qtext">${escHtml(r.question || '')}</div>
+          <details style="margin-top:4px"><summary style="cursor:pointer;font-size:0.8rem;color:var(--muted)">看回答</summary>
+            <div class="qa-full" style="display:block;white-space:pre-wrap">${escHtml(r.answer || '（沒有回答）')}</div></details>
+        </td>
+        <td>${r.score == null ? '—' : `<b>${r.score}</b> / 10`}</td>
+      </tr>`).join('')}
     </tbody>
   </table>${more}`;
 }
@@ -2712,6 +2810,59 @@ async function openLineQr(eventId) {
     toast(e.message + '，請重新整理後再試；連結與代碼仍可直接複製');
   }
 }
+// ── 計畫成效唯讀連結（批次 151）────────────────────────────────────────────
+let impactEventId = '';
+function closeImpactShare() { document.getElementById('impact-modal').style.display = 'none'; }
+function renderImpactBody(url) {
+  const body = document.getElementById('impact-body');
+  if (!url) {
+    body.innerHTML = '<div class="form-hint">目前沒有連結（沒產生過，或已停用）。</div><div class="line-qr-row"><button class="btn btn-primary" onclick="impactShareAct(\'create\')"><i class="ti ti-link"></i> 產生唯讀連結</button></div>';
+    return;
+  }
+  body.innerHTML = `<div class="line-qr-row"><code id="impact-url"></code></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+      <button class="btn btn-primary" onclick="copyText(document.getElementById('impact-url').textContent, '連結已複製！', '複製失敗，請自行複製這個連結')"><i class="ti ti-copy"></i> 複製連結</button>
+      <button class="btn btn-outline" onclick="window.open(document.getElementById('impact-url').textContent, '_blank')"><i class="ti ti-external-link"></i> 開啟看看</button>
+      <button class="btn btn-outline" onclick="impactShareAct('rotate')"><i class="ti ti-refresh"></i> 重新產生</button>
+      <button class="btn btn-outline" onclick="impactShareAct('off')"><i class="ti ti-link-off"></i> 停用</button>
+    </div>
+    <div class="form-hint" style="margin-top:8px">露出數據要先在「同仁編輯連結」的畫面上傳監測公司的露出清單才會有；沒上傳時，對方只會看到 AI 助理的提問數字。</div>`;
+  document.getElementById('impact-url').textContent = url; // 連結用 textContent 放，不經過 innerHTML
+}
+async function openImpactShare(eventId) {
+  const ev = state.events.find(e => e.id === eventId);
+  if (!ev) return;
+  impactEventId = eventId;
+  document.getElementById('impact-title').textContent = ev.name + '｜計畫成效唯讀連結';
+  document.getElementById('impact-body').textContent = '載入中…';
+  document.getElementById('impact-modal').style.display = 'flex';
+  try {
+    const res = await authedFetch(`/api/events?action=impact_admin_get&id=${encodeURIComponent(eventId)}`);
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    renderImpactBody(data.url);
+  } catch (e) {
+    document.getElementById('impact-body').textContent = '載入失敗：' + e.message;
+  }
+}
+async function impactShareAct(mode) {
+  if (mode === 'rotate' && !confirm('重新產生後，已經分享出去的舊連結會立刻失效。確定嗎？')) return;
+  if (mode === 'off' && !confirm('停用後，已經分享出去的連結會立刻失效。確定嗎？')) return;
+  try {
+    const res = await authedFetch('/api/events', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'impact_admin_share', id: impactEventId, mode })
+    });
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    renderImpactBody(data.url);
+    toast(mode === 'off' ? '已停用' : mode === 'rotate' ? '已重新產生，舊連結失效' : '連結已產生');
+  } catch (e) {
+    toast('操作失敗：' + e.message, 'error');
+  }
+}
+
 function closeLineQr() {
   document.getElementById('line-qr-modal').style.display = 'none';
 }

@@ -599,7 +599,7 @@
     <div id="qcount-picker"></div>
     <div class="sec-label">
       <b><span class="step">3</span> 基本資料 <em>選填</em></b>
-      <small>方便主管追蹤訓練紀錄；填了負責的領域，記者會問得更準。</small>
+      <small>方便主管追蹤訓練紀錄；填了負責的領域，記者會問得更準。練完一場後，題目、您的回答和分數會記在後台，公關可以看到大家練了哪些題。</small>
     </div>
     <input id="trainee-input" type="text" maxlength="40"
            placeholder="您的姓名／職稱" aria-label="您的姓名／職稱（選填）">
@@ -2245,6 +2245,8 @@ async function logSession() {
         event_id: eventId,
         trainee: document.getElementById('trainee-input').value.trim(),
         scores: sessionScores,
+        // 每一題的題目、回答、分數：後台「問答分析 → 主管訓練」看得到大家練了什麼（批次 150）
+        turns: collectRounds().map((r) => ({ q: r.q, a: r.a, score: r.score, voice: r.voice })),
         voice_answers: voiceAnswerCount,
         code: TRAINING_CODE || undefined,
         password: TRAINING_PWD || undefined

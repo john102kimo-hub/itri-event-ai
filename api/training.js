@@ -4,6 +4,7 @@
 // POST mode: 'transcribe'   — 把主管錄下來的那段話轉成逐字稿（語音作答用）
 // POST mode: 'log_session'  — 記錄一場完整演練的分數（訓練本身不呼叫 Anthropic）
 // GET  ?action=summary（header X-Admin-Password）— 給成效報告用：每場活動累積演練幾次、平均幾分
+// GET  ?action=qa_list（header X-Admin-Password）— 後台「問答分析」的主管訓練分頁：每一題的題目、回答、分數（批次 150）
 //
 // 語音作答（批次 58）：主管反映「真實記者會上沒有人在打字」，改成可以直接用講的。
 // 錄音在瀏覽器端，這裡只收音檔轉逐字稿；評分時把「講了幾秒、幾個字、語速多少」
@@ -159,6 +160,42 @@ async function ensureTrainingLogSheet() {
     console.error('ensureSheets(training_log) 失敗，60 秒後再試:', e.message);
     trainingLogEnsuredAt = Date.now();
   }
+}
+
+// ── 逐題紀錄（training_qa，批次 150）─────────────────────────────────────
+// training_log 只留分數，看不出主管實際被問了什麼、怎麼答。公關要的是「大家練了哪些題」（朱朱：才知道主管們實際問了啥），
+// 所以每一題的題目、回答、分數另外記一張表，後台「問答分析」有一個分頁看它。
+// ⚠️ 刻意不放進 qa_log：qa_log 是記者與廠商的真實提問，後台統計、待教清單（會當成「米亞答不出來」推給朱朱）、
+// 露出交叉分析、媒體訓練「記者真的問過的題目」都讀它——主管的練習答案混進去，統計會被灌水，
+// 訓練還會拿自己出的題目當成「記者真的問過」再出一次。分開一張表，這些地方一個都不會碰到。
+const TRAINING_QA_SHEET = {
+  training_qa: ['timestamp', 'event_id', 'event_name', 'trainee', 'q_no', 'question', 'answer', 'score', 'voice'],
+};
+let trainingQaEnsuredAt = 0;
+async function ensureTrainingQaSheet() {
+  if (trainingQaEnsuredAt === Infinity) return;
+  if (Date.now() - trainingQaEnsuredAt < 60 * 1000) return;
+  try {
+    await ensureSheets(TRAINING_QA_SHEET);
+    trainingQaEnsuredAt = Infinity;
+  } catch (e) {
+    console.error('ensureSheets(training_qa) 失敗，60 秒後再試:', e.message);
+    trainingQaEnsuredAt = Date.now();
+  }
+}
+const QA_MAX_TURNS = 10;
+const QA_Q_MAX = 600;
+const QA_A_MAX = 3000;
+/** 前端送來的逐題內容 → 試算表列。內容是使用者端給的，只當成文字存（長度、題數有上限；後台顯示時一律跳脫）。 */
+export function buildTrainingQaRows(turns, { timestamp, eventId, eventName, trainee }) {
+  if (!Array.isArray(turns)) return [];
+  return turns.slice(0, QA_MAX_TURNS).map((t, i) => {
+    const q = String(t?.q || '').replace(/\r/g, '').trim().slice(0, QA_Q_MAX);
+    const a = String(t?.a || '').replace(/\r/g, '').trim().slice(0, QA_A_MAX);
+    // 沒評到分是 null／空字串——Number(null) 是 0，直接轉會把「沒有分數」記成「0 分」
+    const sc = t?.score == null || t.score === '' ? NaN : Number(t.score);
+    return { q, a, row: [timestamp, eventId, eventName, trainee, i + 1, q, a, Number.isFinite(sc) && sc >= 0 && sc <= 10 ? sc : '', t?.voice ? '1' : ''] };
+  }).filter((x) => x.q).map((x) => x.row);
 }
 
 const sanitize = (s, max) => String(s || '').replace(/\s+/g, ' ').trim().slice(0, max);
@@ -522,7 +559,7 @@ export function parseVoiceCount(note) {
   return m ? Number(m[1]) : 0;
 }
 
-async function logTrainingSession(res, eventId, event, trainee, rawScores, voiceAnswers) {
+async function logTrainingSession(res, eventId, event, trainee, rawScores, voiceAnswers, turns) {
   const attempted = Array.isArray(rawScores) ? rawScores.slice(0, 50) : [];
   if (!attempted.length) return res.status(400).json({ error: '沒有任何題目紀錄，不記錄這場' });
 
@@ -537,11 +574,40 @@ async function logTrainingSession(res, eventId, event, trainee, rawScores, voice
       timestamp, eventId, eventName, sanitize(trainee, 40) || '（未署名）',
       attempted.length, avg, valid.join('|'), formatSessionNote(voiceAnswers, attempted.length)
     ]]);
+    // 逐題紀錄（批次 150）：寫不進去不影響這場演練的紀錄，也不讓主管看到錯誤畫面
+    try {
+      const qaRows = buildTrainingQaRows(turns, { timestamp, eventId, eventName, trainee: sanitize(trainee, 40) || '（未署名）' });
+      if (qaRows.length) {
+        await ensureTrainingQaSheet();
+        await appendRows('training_qa!A:I', qaRows);
+      }
+    } catch (e) {
+      console.error('training_qa 寫入失敗（不影響演練紀錄）:', e.message);
+    }
     return res.status(200).json({ success: true, avg_score: avg });
   } catch (e) {
     console.error('training_log 寫入失敗:', e.message);
     return res.status(500).json({ error: '紀錄寫入失敗，但不影響剛剛的訓練結果' });
   }
+}
+
+/** 後台「問答分析 → 主管訓練」：最新的在前。總數與受訓人數用全部算，列表最多 limit 筆（預設 200、上限 500）。 */
+async function getTrainingQaList({ eventId = '', limit } = {}) {
+  let rows = [];
+  try { rows = await readRange('training_qa!A2:I'); } catch { rows = []; }
+  const mine = rows.map((r, i) => ({ r, n: i + 2 })).filter(({ r }) => r[5] && (!eventId || r[1] === eventId));
+  const scores = mine.filter(({ r }) => r[7] !== '' && r[7] != null && Number.isFinite(Number(r[7]))).map(({ r }) => Number(r[7]));
+  const lim = Math.min(Math.max(parseInt(limit, 10) || 200, 1), 500);
+  return {
+    total: mine.length,
+    trainees: new Set(mine.map(({ r }) => String(r[3] || '').replace(/\s+/g, '').toLowerCase()).filter(Boolean)).size,
+    avg_score: avgOf(scores),
+    rows: mine.slice().reverse().slice(0, lim).map(({ r }) => ({
+      time: r[0] || '', event_id: r[1] || '', event_name: r[2] || '', trainee: r[3] || '',
+      no: Number(r[4]) || 0, question: r[5] || '', answer: r[6] || '',
+      score: r[7] === '' || r[7] == null ? null : Number(r[7]), voice: r[8] === '1'
+    }))
+  };
 }
 
 /**
@@ -799,6 +865,15 @@ export default async function handler(req, res) {
         return res.status(500).json({ error: '伺服器錯誤' });
       }
     }
+    if (action === 'qa_list') {
+      if (!requireAdmin(req, res)) return;
+      try {
+        return res.status(200).json(await getTrainingQaList({ eventId: String(req.query.event_id || ''), limit: req.query.limit }));
+      } catch (err) {
+        console.error(err);
+        return res.status(500).json({ error: '伺服器錯誤' });
+      }
+    }
     if (action !== 'summary') return res.status(400).json({ error: '不支援的操作' });
     if (!requireAdmin(req, res)) return;
     try {
@@ -848,7 +923,7 @@ export default async function handler(req, res) {
     ]);
 
     if (mode === 'log_session') {
-      return await logTrainingSession(res, event_id, event, trainee, scores, voiceAnswers);
+      return await logTrainingSession(res, event_id, event, trainee, scores, voiceAnswers, req.body?.turns);
     }
 
     if (mode === 'transcribe') {

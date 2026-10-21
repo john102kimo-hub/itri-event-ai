@@ -27,6 +27,7 @@ import { resolveEventContent, isPreEventMode } from '../lib/prompt.js';
 import { lineBindUrl, lineAddFriendUrl, lineBasicId } from '../lib/line-link.js';
 import { handleRegistrationRequest } from '../lib/registration-api.js';
 import { handleB2BRequest } from '../lib/b2b-api.js';
+import { handleImpactRequest } from '../lib/impact-api.js';
 import { publishBlockers, isPublishing, taipeiToday, PUBLIC_STATUSES } from '../lib/event-status.js';
 import { effectiveChips } from '../lib/default-chips.js';
 import { kbHasContent } from '../lib/kb-template.js';
@@ -141,6 +142,8 @@ export default async function handler(req, res) {
     }
     // 業發處的合作洽詢（批次 119）：資料在另一本試算表，跟活動表無關，一樣在讀活動表之前交出去。
     if (typeof action === 'string' && action.startsWith('b2b_')) return handleB2BRequest(req, res);
+    // 計畫成效唯讀連結（批次 151）：一樣在讀活動表之前交出去，自己驗連結碼或管理員密碼。
+    if (typeof action === 'string' && action.startsWith('impact_')) return handleImpactRequest(req, res);
 
     // 全域技術窗口分工：跟活動表無關，不需要先讀 events，獨立處理完就回傳。
     if (action === 'contacts_directory') {
@@ -330,6 +333,7 @@ export default async function handler(req, res) {
       return handleRegistrationRequest(req, res, { adminPassword });
     }
     if (typeof action === 'string' && action.startsWith('b2b_')) return handleB2BRequest(req, res);
+    if (typeof action === 'string' && action.startsWith('impact_')) return handleImpactRequest(req, res);
 
     // 快速提問預覽（批次 147）：編輯畫面上即時顯示「記者現在會看到哪幾顆快速提問」，跟網頁、LINE 用同一支 effectiveChips()。
     // 不需要密碼：只拿送進來的欄位算一次（純函式，不讀試算表、不呼叫 AI），沒有任何資料可以外洩；
