@@ -51,6 +51,10 @@
   @media (max-width: 640px) { .grid2 { grid-template-columns: 1fr; } th.hide, td.hide { display: none; } }
   .kv { display: grid; grid-template-columns: 7em 1fr; gap: 4px 10px; font-size: .9rem; }
   .kv dt { color: var(--muted); } .kv dd { white-space: pre-wrap; word-break: break-word; }
+  .page-box { border: 1px dashed #cbd5d1; border-radius: 10px; padding: 10px 12px; margin-top: 10px; font-size: .88rem; }
+  .page-box code { display: block; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 6px 8px; margin: 4px 0 6px; font-size: .78rem; overflow-wrap: anywhere; }
+  .page-box .acts { display: flex; gap: 6px; flex-wrap: wrap; }
+  .page-box .lab { font-weight: 600; margin-top: 8px; }
   .notes { white-space: pre-wrap; background: #f9fafb; border-radius: 8px; padding: 8px 10px; font-size: .85rem; margin-top: 6px; }
   .linkbox { background: #fffbeb; border: 1px solid #fde68a; border-radius: 10px; padding: 10px 12px; margin-top: 10px; word-break: break-all; font-size: .85rem; }
   .err { color: var(--danger); font-size: .85rem; margin-top: 8px; }
@@ -221,6 +225,7 @@ async function openInquiry(id) {
         <dt>個資同意</dt><dd>${esc(when(q.consent_at))}</dd>
       </dl>
       ${q.notes ? `<div class="notes">${esc(q.notes)}</div>` : ''}
+      <div class="page-box" id="q-page"><span class="muted small">檢查客戶專屬頁…</span></div>
       <div class="grid2">
         <div><label class="f" for="q-status">狀態</label><select id="q-status">${Object.entries(ME.statuses).map(([k, v]) => `<option value="${k}"${k === q.status ? ' selected' : ''}>${esc(v)}</option>`).join('')}</select></div>
         <div><label class="f" for="q-owner">承辦人（改派會通知新的承辦人）</label><select id="q-owner"><option value="">未分派</option>${ME.members.map((m) => `<option value="${esc(m.id)}"${m.id === q.owner ? ' selected' : ''}>${esc(m.name)}${m.unit ? '（' + esc(m.unit) + '）' : ''}</option>`).join('')}</select></div>
@@ -236,7 +241,45 @@ async function openInquiry(id) {
       if (TAB === 'inbox') { await renderInbox(); openInquiry(q.id); }
     } catch (e) { toast(e.message); $('q-save').disabled = false; }
   };
+  loadPageBox(q);
   $('q-card').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+/* ── 客戶專屬頁（批次 153）────────────────────────────────
+   一筆洽詢一鍵建一場「企業場」草稿當客戶的專屬網頁，並給同仁一條編輯連結（不用進後台、不用密碼）。
+   只會帶公司名稱，聯絡人與需求內容不會進活動頁。網址一律用 textContent 放，不經過 innerHTML。 */
+function copyText(text) { navigator.clipboard?.writeText(text).then(() => toast('已複製'), () => toast('請手動選取複製')); }
+function pageBoxRender(box, q, p) {
+  box.replaceChildren();
+  const el = (tag, props, ...kids) => { const n = document.createElement(tag); for (const [k, v] of Object.entries(props || {})) { if (k === 'class') n.className = v; else n.setAttribute(k, v); } n.append(...kids.flat().filter((c) => c != null)); return n; };
+  if (!p || !p.exists) {
+    const b = el('button', { class: 'btn outline', type: 'button' }, '建立客戶專屬頁');
+    box.append(el('div', { class: 'muted small', style: 'margin-bottom:8px' }, '為這家客戶開一個專屬網頁：客戶看的活動頁（含 AI 技術說明），加一條給同仁的編輯連結——同仁在編輯頁補內容、發布，不用進後台。只會帶公司名稱，聯絡人與需求內容不會進活動頁。'), b);
+    b.onclick = async () => {
+      b.disabled = true; b.textContent = '建立中…';
+      try { pageBoxRender(box, q, await call('POST', 'b2b_customer_page', { id: q.id, create: true })); toast('已建立專屬頁（草稿）'); }
+      catch (e) { toast(e.message); b.disabled = false; b.textContent = '建立客戶專屬頁'; }
+    };
+    return;
+  }
+  const row = (label, url) => {
+    const code = el('code', {}); code.textContent = url;
+    const copy = el('button', { class: 'btn outline small', type: 'button' }, '複製');
+    const open = el('a', { class: 'btn outline small', href: url, target: '_blank', rel: 'noopener', style: 'text-decoration:none' }, '開啟');
+    copy.onclick = () => copyText(url);
+    return [el('div', { class: 'lab' }, label), code, el('div', { class: 'acts' }, copy, open)];
+  };
+  box.append(
+    el('div', {}, el('b', {}, '客戶專屬頁'), ' ', el('span', { class: 'pill' + (p.status === 'draft' ? ' new' : ' won') }, p.status === 'draft' ? '草稿' : '已發布')),
+    ...row('活動頁（給客戶）', p.page_url),
+    ...row('編輯連結（給同仁，不用密碼）', p.edit_url));
+  if (p.status === 'draft') box.append(el('div', { class: 'muted small', style: 'margin-top:8px' }, '客戶現在還打不開：請同仁在編輯頁補完日期、地點、聯絡窗口和內容，按「發布」之後客戶才看得到。'));
+}
+async function loadPageBox(q) {
+  const box = $('q-page');
+  if (!box) return;
+  try { pageBoxRender(box, q, q.page_event_id ? await call('POST', 'b2b_customer_page', { id: q.id }) : null); }
+  catch (e) { box.textContent = '讀取專屬頁失敗：' + e.message; }
 }
 
 /* ── 成員（管理員）─────────────────────────────────── */
