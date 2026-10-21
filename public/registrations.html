@@ -291,6 +291,11 @@
       <div class="fld"><label for="e-venue">活動地點（選填）</label><input type="text" id="e-venue" maxlength="60" placeholder="場館名稱"><div class="help">出現在報名頁與米亞卡片。各場次的廳別填在下面的場次。</div></div>
       <div class="fld"><label for="e-short">LINE 簡稱（選填）</label><input type="text" id="e-short" maxlength="16" placeholder="例：春季說明會"><div class="help">米亞按鈕寫成「📝 簡稱＋報名」。留空只寫「活動報名」，同時有多場時記者分不出來，建議填。</div></div>
     </div>
+    <div class="row2">
+      <div class="fld"><label for="e-event">關聯活動（選填）</label><input type="text" id="e-event" list="e-event-list" maxlength="40" placeholder="活動代碼，或從清單挑一場" autocomplete="off"><datalist id="e-event-list"></datalist>
+        <div class="help">關聯後，那場活動的網頁會出現「我要報名」按鈕（報名開放期間才顯示）。一場活動只能關聯一個報名。大多數只有一場記者會的活動，直接在後台活動卡片按「用這場活動建立報名」更快。</div></div>
+      <div class="fld"></div>
+    </div>
   </div>
 
   <div class="card">
@@ -824,8 +829,20 @@ function toggleSessMode() {
   else { setSessRows($('e-sessions').value); setSessMode('rows'); }
 }
 
+// 「關聯活動」的候選清單（批次 152）：打開表單時才向活動表要一次，只用來提示，存檔時後端會再驗證
+let eventChoicesLoaded = false;
+async function loadEventChoices() {
+  if (eventChoicesLoaded) return;
+  eventChoicesLoaded = true;
+  try {
+    const r = await callJson('GET', 'list_admin');
+    const list = Array.isArray(r) ? r : (r.events || []);
+    const dl = $('e-event-list');
+    dl.replaceChildren(...list.filter((e) => e && e.id && e.status !== 'archived').map((e) => { const o = document.createElement('option'); o.value = e.id; o.label = e.name || e.id; return o; }));
+  } catch { eventChoicesLoaded = false; /* 清單只是方便挑選，打不開也能手動填代碼 */ }
+}
 function blankCampaign() {
-  return { id: '', title: '', status: 'draft', short_name: '', venue: '', closes_at: '', contact: '', privacy: '', line_pitch: '', audience: 'media',
+  return { id: '', title: '', status: 'draft', short_name: '', venue: '', event_id: '', closes_at: '', contact: '', privacy: '', line_pitch: '', audience: 'media',
     intro: '誠摯邀請您參加，勾選要參加的場次，約 1 分鐘完成；報名後仍可回來修改。',
     sessions_text: '', options_text: '' };
 }
@@ -845,7 +862,7 @@ function openForm(camp, copyId) {
   $('f-errs').hidden = true;
   $('e-id').value = c.id; $('e-id').disabled = !isNew;
   $('e-status').value = c.status; $('e-title').value = c.title;
-  $('e-short').value = c.short_name || ''; $('e-venue').value = c.venue || ''; $('e-closes').value = c.closes_at || '';
+  $('e-short').value = c.short_name || ''; $('e-venue').value = c.venue || ''; $('e-event').value = c.event_id || ''; loadEventChoices(); $('e-closes').value = c.closes_at || '';
   $('e-intro').value = c.intro || ''; $('e-contact').value = c.contact || '';
   $('e-privacy').value = c.privacy || ''; $('e-pitch').value = c.line_pitch || '';
   $('e-audience').value = c.audience === 'business' ? 'business' : 'media'; audienceHint();
@@ -908,6 +925,7 @@ async function saveForm() {
       id: $('e-id').value, title: $('e-title').value, status: $('e-status').value, closes_at: $('e-closes').value,
       intro: $('e-intro').value, sessions_text: sessionsText(), options_text: optionsText(),
       contact: $('e-contact').value, privacy: $('e-privacy').value, line_pitch: $('e-pitch').value, short_name: $('e-short').value, venue: $('e-venue').value,
+      event_id: $('e-event').value.trim(), // 明確傳空字串＝解除關聯
       audience: $('e-audience').value
     };
     const r = await callJson('POST', 'reg_admin_save_campaign', body);

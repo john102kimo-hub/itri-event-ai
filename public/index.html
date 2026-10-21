@@ -420,6 +420,8 @@ details.adv[open] > summary { border-bottom:1px solid var(--border); margin-bott
 .pb-list li { display:flex; align-items:center; gap:8px; font-size:0.92rem; padding:8px 12px; background:#fffbeb; border:1px solid #fde68a; border-radius:8px; color:#92400e; font-weight:600; }
 
 /* 問答分析 */
+.analytics-tabs { display: flex; gap: 8px; padding: 12px 24px 0; }
+@media (max-width: 768px) { .analytics-tabs { padding: 12px 16px 0; } }
 .top-grid { display:grid; grid-template-columns:1fr 1fr; gap:18px; margin-bottom:22px; }
 .qa-box { background:white; border:1px solid var(--border); border-radius:var(--radius); padding:20px; }
 .qa-summary { display:flex; flex-wrap:wrap; gap:6px 18px; align-items:center; font-size:0.84rem; color:var(--muted); margin-bottom:14px; }
@@ -672,7 +674,7 @@ details.adv[open] > summary { border-bottom:1px solid var(--border); margin-bott
         </div>
       </div>
       <!-- 批次 150：記者／廠商的問答，和主管媒體訓練的逐題紀錄放在同一頁，用分頁切換（資料在不同的表，統計不會互相混到） -->
-      <div id="analytics-tabs" style="display:flex;gap:8px;padding:0 24px;margin-top:4px" role="tablist">
+      <div id="analytics-tabs" class="analytics-tabs" role="tablist">
         <button class="btn btn-primary" id="atab-qa" role="tab" aria-selected="true" onclick="setAnalyticsTab('qa')"><i class="ti ti-message-circle"></i> 記者與廠商問答</button>
         <button class="btn btn-outline" id="atab-training" role="tab" aria-selected="false" onclick="setAnalyticsTab('training')"><i class="ti ti-microphone"></i> 主管訓練</button>
       </div>
@@ -1311,7 +1313,10 @@ function moreMenuItems(ev) {
   if (ev.status !== 'archived') add('microphone', '媒體訓練', () => openTraining(id));
   if (ev.status === 'draft' || ev.status === 'active') add('chart-bar', '問答分析', () => showAnalyticsByEvent(id));
   if (ev.status === 'active' || ev.status === 'ended') add('download', '匯出問答 CSV', () => exportCSV(id));
-  if (ev.status === 'active' || ev.status === 'ended') add('presentation-analytics', '計畫成效唯讀連結', () => openImpactShare(id));
+  // 計畫成效是結案後才要交的東西：辦完（標為已結束）的活動才出現，進行中的活動選單不多佔一格（批次 152 易用性檢討）
+  if (ev.status === 'ended') add('presentation-analytics', '計畫成效唯讀連結', () => openImpactShare(id));
+  // 報名只有一個入口：還沒有就用這場活動的資料建一筆草稿，已經有就直接帶過去（後端 reg_admin_from_event 兩種都處理）
+  if (ev.status === 'draft' || ev.status === 'active') add('ticket', '這場的活動報名', () => createRegFromEvent(id));
   if (ev.status === 'active') add('flag-check', '標為已結束', () => markEnded(id));
   if (ev.status === 'active') add('eye-off', '收回為未發布', () => unpublishEvent(id));
   if (ev.status === 'draft' || ev.status === 'archived') { items.push({ sep: true }); add('trash', '永久刪除', () => deleteEvent(id), true); }
@@ -2810,6 +2815,25 @@ async function openLineQr(eventId) {
     toast(e.message + '，請重新整理後再試；連結與代碼仍可直接複製');
   }
 }
+// ── 這場的活動報名：建立或前往（批次 152）──────────────────────────────────────────
+// 把活動的名稱、日期、時間、地點、新聞聯絡人帶去建一筆草稿報名並關聯；已經有就直接帶過去。
+// 開放報名前還是要到報名頁確認、補選填項目；開放後這場活動的網頁會出現「我要報名」。
+async function createRegFromEvent(eventId) {
+  try {
+    const res = await authedFetch('/api/events', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'reg_admin_from_event', event_id: eventId })
+    });
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    toast(data.created ? '已建立報名草稿，帶你去確認' : '這場活動已經有報名了，帶你過去');
+    setTimeout(() => { location.href = '/registrations#/c/' + encodeURIComponent(data.id) + '/set'; }, 600);
+  } catch (e) {
+    toast('無法建立報名：' + e.message, 'error');
+  }
+}
+
 // ── 計畫成效唯讀連結（批次 151）────────────────────────────────────────────
 let impactEventId = '';
 function closeImpactShare() { document.getElementById('impact-modal').style.display = 'none'; }

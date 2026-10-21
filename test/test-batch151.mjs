@@ -176,6 +176,7 @@ console.log('\n── 六、頁面與部署 ──');
   check('★ 頁面：伺服器給的字都用 textContent／createTextNode，不用 innerHTML', !/innerHTML/.test(page) && /textContent = v/.test(page) && /createTextNode/.test(page));
   check('　 頁面打的是 impact_view，帶 id 與 k', /action=impact_view&id=\$\{encodeURIComponent\(id\)\}&k=\$\{encodeURIComponent\(k\)\}/.test(page));
   const idx = read('public/index.html');
+  check('★ 後台：計畫成效入口只在「已結束」的活動出現（結案才要交，進行中的選單不多一格）', /if \(ev\.status === 'ended'\) add\('presentation-analytics'/.test(idx));
   check('後台：活動「更多」選單有入口、有說明、連結用 textContent 放', /計畫成效唯讀連結/.test(idx) && /impact_admin_share/.test(idx) && /getElementById\('impact-url'\)\.textContent = url/.test(idx));
   const fns = fs.readdirSync(path.join(ROOT, 'api')).filter((f) => f.endsWith('.js'));
   check('★ api/ 還是 11 支（Vercel Hobby 上限 12；impact_ 掛在 api/events.js）', fns.length === 11);

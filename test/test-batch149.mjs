@@ -184,7 +184,7 @@ console.log('\n── 五、暫停收件／業發處那本讀不到 ──');
   console.error = origErr;
   S.ctl.failReads.clear();
   check('★ 讀業發處的設定出錯 → 問答照常回固定回覆，不是 500，也不附連結', r.statusCode === 200 && /不能代為報價或承諾/.test(r.body.reply) && !/inquiry/.test(r.body.reply), `${r.statusCode} ${r.body && r.body.reply}`);
-  check('　 錯誤有記進 log，之後查得到', logs.some((l) => /\[b2b\] 查洽詢單是否開著失敗/.test(l)) || S.ctl.failReads.size === 0, JSON.stringify(logs).slice(0, 200));
+  check('　 錯誤有記進 log，之後查得到', logs.some((l) => /\[b2b\] 查洽詢單是否開著失敗/.test(l)), JSON.stringify(logs).slice(0, 200));
   B.resetB2BState();
 }
 

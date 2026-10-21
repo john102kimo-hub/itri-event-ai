@@ -172,7 +172,7 @@ reset(); R.resetRegistrationState(); API.resetRateLimit();
   // 「LINE 簡稱」（第 13 欄 M）：歡迎卡按鈕與報名卡片上寫明是報哪個活動（朱朱 9/29 提醒：只寫「媒體報名」記者不知道報什麼；批次 112 起預設改成「活動報名」）
   // 批次 118：第 15 欄是 audience（報名對象），加在最後面、前面的欄位不動
   // 批次 127：第 16 欄是 share_token（唯讀狀況頁的連結碼），一樣加在最後面
-  check('欄位定義：第 13 欄是 short_name、第 14 欄是 venue、第 15 欄是 audience、第 16 欄是 share_token', R.CAMPAIGN_HEADERS.length === 16 && R.CAMPAIGN_HEADERS[15] === 'share_token' && R.CAMPAIGN_HEADERS[12] === 'short_name' && R.CAMPAIGN_HEADERS[13] === 'venue' && R.CAMPAIGN_HEADERS[14] === 'audience' && book.reg_campaigns[0].length === 16);
+  check('欄位定義：第 13 欄是 short_name、第 14 欄是 venue、第 15 欄是 audience、第 16 欄是 share_token、第 17 欄是 event_id（批次 152）', R.CAMPAIGN_HEADERS.length === 17 && R.CAMPAIGN_HEADERS[16] === 'event_id' && R.CAMPAIGN_HEADERS[15] === 'share_token' && R.CAMPAIGN_HEADERS[12] === 'short_name' && R.CAMPAIGN_HEADERS[13] === 'venue' && R.CAMPAIGN_HEADERS[14] === 'audience' && book.reg_campaigns[0].length === 17);
   const withShort = await admin({ ...base, short_name: '眺望2027場次' });
   check('LINE 簡稱存進第 13 欄', withShort.statusCode === 200 && book.reg_campaigns[1][12] === '眺望2027場次', JSON.stringify(book.reg_campaigns[1]));
   check('存簡稱沒有弄壞其他欄位（名稱、場次、狀態）', book.reg_campaigns[1][1] === 'T' && book.reg_campaigns[1][2] === 'open' && book.reg_campaigns[1][4].startsWith('A1｜2026-10-28'));
