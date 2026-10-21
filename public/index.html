@@ -555,6 +555,11 @@ details.adv[open] > summary { border-bottom:1px solid var(--border); margin-bott
     <a class="nav-item nav-secondary" href="/registrations" style="text-decoration:none;color:rgba(255,255,255,0.7)">
       <i class="ti ti-ticket"></i> 活動報名
     </a>
+    <!-- 批次 154：業發處（合作洽詢）的入口。同一分頁開 /b2b：管理員密碼放在這個分頁的 sessionStorage，/b2b 讀同一個，不用再登入一次。
+         業發處的資料與權限仍是獨立的（另一本試算表、每個人自己的連結），這裡只是讓公關管理員找得到、進得去。 -->
+    <a class="nav-item nav-secondary" href="/b2b" style="text-decoration:none;color:rgba(255,255,255,0.7)">
+      <i class="ti ti-briefcase"></i> 業發處（合作洽詢）
+    </a>
     <!-- 批次 124：記者名單健檢以前在後台找不到入口（SETUP.md 寫「從後台進入」，其實只能自己記網址）。同分頁開，帶得到登入狀態 -->
     <a class="nav-item nav-secondary" href="/media.html" style="text-decoration:none;color:rgba(255,255,255,0.7)">
       <i class="ti ti-users"></i> 記者名單健檢
@@ -1428,6 +1433,7 @@ function openNavMore(btn) {
     { icon: 'microphone', label: '彙整媒體訓練', run: () => { location.href = '/training'; } },
     { icon: 'ticket', label: '活動報名', run: () => { location.href = '/registrations'; } },
     { icon: 'users', label: '記者名單健檢', run: () => { location.href = '/media.html'; } },
+    { icon: 'briefcase', label: '業發處（合作洽詢）', run: () => { location.href = '/b2b'; } },
     { sep: true },
     { icon: 'logout', label: '登出', run: () => logout() }
   ];
