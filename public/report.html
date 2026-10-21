@@ -73,6 +73,7 @@
     input:not([type=checkbox]):not([type=radio]):not([type=color]):not([type=file]), select, textarea { font-size: 16px !important; }
   }
 </style>
+<link rel="stylesheet" href="/report-deck.css">
 </head>
 <body>
 
@@ -95,7 +96,8 @@
     <div class="toolbar no-print">
       <label>每題估算節省 <input type="number" id="min-per-q" value="3" min="1" max="30" onchange="render()"> 分鐘</label>
       <button class="btn btn-outline" onclick="location.href='/'"><i class="ti ti-arrow-left"></i> 回後台</button>
-      <button class="btn btn-primary" onclick="window.print()"><i class="ti ti-printer"></i> 列印 / 存 PDF</button>
+      <button class="btn btn-primary" id="deck-btn" onclick="openDeck()" title="把這份報告的資料做成會動的簡報（給長官看）；要列印請用旁邊的「列印 / 存 PDF」"><i class="ti ti-presentation"></i> 互動簡報</button>
+      <button class="btn btn-outline" onclick="window.print()"><i class="ti ti-printer"></i> 列印 / 存 PDF</button>
     </div>
   </div>
 
@@ -150,6 +152,7 @@ async function load(){
     document.getElementById('gate').style.display='none';
     document.getElementById('report').style.display='block';
     render();
+    if(/^#deck/.test(location.hash)) openDeck();
   }catch(e){
     document.getElementById('gate-err').textContent = '載入失敗：' + e.message;
   }
@@ -275,6 +278,17 @@ function exposureBlock(eventId){
       ${crossLine}`;
 }
 
+// 互動簡報（批次 155）：資料與報告同一份（ANALYTICS／EXPOSURE／TRAINING），每題分鐘數與上方輸入框同步
+function openDeck(){
+  if(!ANALYTICS || typeof ReportDeck === 'undefined') return;
+  ReportDeck.open({
+    analytics: ANALYTICS, exposure: EXPOSURE, training: TRAINING, terms: GENERIC_TERMS,
+    minPerQ: parseInt(document.getElementById('min-per-q').value) || 3,
+    today: new Date().toLocaleDateString('zh-TW',{year:'numeric',month:'long',day:'numeric'}),
+    onMinChange: function(v){ var i = document.getElementById('min-per-q'); i.value = v; render(); }
+  });
+}
+
 function escHtml(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
 // 自後台（同分頁導覽）帶密碼進來時免登入
@@ -283,6 +297,7 @@ function escHtml(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/
   if(p){ PASSWORD=p; load(); }
 })();
 </script>
+<script src="/report-deck.js"></script>
 <script src="/mia-assistant.js" defer></script>
 </body>
 </html>

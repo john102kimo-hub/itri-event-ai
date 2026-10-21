@@ -11,7 +11,7 @@
 | 記者（LINE 米亞） | LINE 官方帳號 | `api/line.js`（webhook 入口）、`lib/line-*.js`（記者、群組、職員、報名各一支，對照表在 `api/line.js` 開頭）、`lib/router.js`、`lib/menu.js`、`lib/staff.js` |
 | 承辦人（後台） | `/admin` | `public/index.html`、`api/events.js`、`api/analytics.js`、`api/export.js` |
 | 同仁（改自己那一場） | `/edit?id=…&code=…` | `public/edit.html`、`api/events.js`（`get_edit`／`update_edit`） |
-| 主管（成效報告） | `/report` | `public/report.html`、`api/exposure.js` |
+| 主管（成效報告） | `/report` | `public/report.html`（含互動簡報 `report-deck.js`／`.css`）、`api/exposure.js` |
 | 部會／計畫主管機關（單場計畫成效，唯讀） | `/impact?id=…&k=…`（後台活動卡片「更多」產生） | `public/impact.html`、`lib/impact.js`、`lib/impact-api.js`（搭在 `api/events.js`，批次 151） |
 | AI 能見度追蹤 | `/geo` | `public/geo.html`、`api/geo.js`、`lib/geo-*.js` |
 | 承辦人與同仁（記者名單健檢） | `/media.html`（後台側邊欄；同仁用共用連結 `?code=`） | `public/media.html`、`api/media.js` |
