@@ -69,10 +69,11 @@
   <h1>企業洽案管理</h1>
   <span class="me" id="me"></span>
   <a id="to-admin" href="/admin" hidden>活動後台</a>
-  <a id="line-bind" hidden target="_blank" rel="noopener">綁定 LINE 通知</a>
+  <button id="line-bind" type="button" class="link" hidden style="background:none;border:none;cursor:pointer;text-decoration:underline;color:inherit;font:inherit">綁定 LINE 通知</button>
   <button class="link" id="logout" hidden style="background:none;border:none;cursor:pointer;text-decoration:underline">登出</button>
 </div></header>
 
+<div id="line-panel" hidden style="position:fixed;inset:0;background:rgba(17,24,39,.55);z-index:50;overflow:auto;padding:0 12px"></div>
 <main class="wrap">
   <section id="login" hidden class="card" style="max-width:420px;margin:40px auto">
     <h2 style="font-size:1.05rem;margin-bottom:8px">請用個人連結登入</h2>
@@ -144,7 +145,7 @@ async function boot() {
   $('to-admin').hidden = !!store.get('itri_b2b_key') || !store.get('itri_pwd');
   $('me').textContent = `${ME.me.name}（${ME.roles[ME.me.role] || ME.me.role}${ME.me.unit ? '・' + ME.me.unit : ''}）`;
   const lb = $('line-bind');
-  if (ME.me.line_bind_url && !ME.me.line_bound) { lb.href = ME.me.line_bind_url; lb.hidden = false; }
+  if (ME.me.line_bind_url && !ME.me.line_bound) { lb.hidden = false; lb.onclick = openLineBind; }
   const tabs = [['inbox', '收件匣'], ...(ME.admin ? [['pages', '客戶專屬頁'], ['members', '成員'], ['settings', '設定'], ['audit', '稽核紀錄']] : [])];
   $('tabs').innerHTML = tabs.map(([k, t]) => `<button data-t="${k}">${t}</button>`).join('');
   $('tabs').onclick = (e) => { const t = e.target.closest('button'); if (t) go(t.dataset.t); };
@@ -168,6 +169,41 @@ async function go(tab) {
     if (tab === 'settings') await renderSettings();
     if (tab === 'audit') await renderAudit();
   } catch (e) { $('view').innerHTML = `<div class="card err">${esc(e.message)}</div>`; }
+}
+
+/* ── 綁定 LINE 通知（批次 158）──────────────────────────
+   「在手機點連結」是 LINE App 的深層連結，電腦瀏覽器點了只會被丟到 LINE 官網首頁（朱朱 10/22 截圖）。
+   所以給三種做法：用手機 LINE 掃 QR、在手機上直接點、或加好友後手動傳那句話（電腦上最穩）。 */
+function loadQr() {
+  if (window.qrcode) return Promise.resolve();
+  return new Promise((ok, no) => { const s = document.createElement('script'); s.src = '/vendor/qrcode.js'; s.onload = ok; s.onerror = () => no(new Error('QR 載入失敗')); document.head.appendChild(s); });
+}
+async function openLineBind() {
+  const { line_bind_url: url, line_bind_text: text, line_add_url: add } = ME.me;
+  const box = $('line-panel');
+  box.innerHTML = `<div class="card" style="max-width:520px;margin:6vh auto;position:relative">
+    <h2 style="font-size:1.05rem;margin-bottom:4px">綁定 LINE 通知</h2>
+    <p class="muted small">綁定後，有新洽詢或快到回覆期限時，米亞會用 LINE 通知您，點通知就能打開那一筆。</p>
+    <ol class="small" style="margin:10px 0 0 18px;line-height:1.8">
+      <li><b>用手機 LINE 掃這個 QR</b>，會打開和米亞的聊天室、訊息已填好，按「送出」。<div id="lb-qr" style="margin:8px 0"></div></li>
+      <li><b>已經在手機上？</b>直接點：<a href="${esc(url)}">在手機開啟 LINE 綁定</a></li>
+      <li><b>在電腦上或點不開？</b>${add ? `先<a href="${esc(add)}" target="_blank" rel="noopener">加米亞為好友</a>，` : '先加米亞（官方帳號）為好友，'}再傳這句話給米亞：
+        <code id="lb-text" style="display:block;background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:6px 8px;margin:4px 0;user-select:all">${esc(text)}</code>
+        <button class="btn outline small" id="lb-copy" type="button">複製這句話</button></li>
+    </ol>
+    <p class="muted small" style="margin-top:10px">米亞回覆「綁定完成」就完成了。這句話只有您自己能用，請不要轉貼給別人。</p>
+    <div class="row" style="margin-top:10px"><button class="btn" id="lb-close" type="button">關閉</button></div>
+  </div>`;
+  box.hidden = false;
+  const close = () => { box.hidden = true; box.innerHTML = ''; };
+  $('lb-close').onclick = close;
+  box.onclick = (e) => { if (e.target === box) close(); };
+  $('lb-copy').onclick = () => navigator.clipboard?.writeText(text).then(() => toast('已複製，貼到和米亞的聊天室傳送'), () => toast('請手動選取複製'));
+  try {
+    await loadQr();
+    const qr = qrcode(0, 'M'); qr.addData(url); qr.make();
+    $('lb-qr').innerHTML = `<img alt="綁定 LINE 通知的 QR" width="168" height="168" style="image-rendering:pixelated;border:1px solid #e5e7eb;border-radius:8px" src="${qr.createDataURL(6, 8)}">`;
+  } catch (e) { $('lb-qr').innerHTML = '<span class="muted">QR 沒載入出來，請用下面第 3 種做法。</span>'; }
 }
 
 /* ── 收件匣 ─────────────────────────────────────────── */
