@@ -172,7 +172,9 @@ function firstImageUrl(images) {
 }
 
 // 摘要：給 meta description / og:description 用，控制在 155 字內
-function makeSummary(name, organizer, pressBody, concluded) {
+function makeSummary(name, organizer, pressBody, concluded, biz = false) {
+  // 企業場（客戶專屬頁，批次 156）：連結貼到 LINE／Email 會出現預覽卡，不能寫「記者會」「新聞稿」
+  if (biz) return `${name}｜${organizer} AI 技術說明助理。可直接提問技術介紹、技轉與合作方式、目前進度等資訊，無需登入。`;
   if (concluded && pressBody) {
     const plain = String(pressBody).replace(/\s+/g, ' ').trim();
     if (plain.length > 20) {
@@ -290,7 +292,9 @@ async function serveEventPage(req, res) {
   const isoDate = toISODate(parseEventDate(ev.date));
   const pageUrl = `${SITE}/event?id=${encodeURIComponent(ev.id)}`;
   const pressBody = concluded ? extractPressBody(ev.knowledge_base) : '';
-  const summary = makeSummary(ev.name, ev.organizer, pressBody, concluded);
+  const biz = isBusinessEvent(row[13]);
+  const assistant = biz ? 'AI 技術說明助理' : 'AI 新聞助理';
+  const summary = makeSummary(ev.name, ev.organizer, pressBody, concluded, biz);
   const chipList = ev.chips.split('\n').map(s => s.trim()).filter(Boolean);
   // 預覽圖也要過「活動前只給邀請函」那道門（批次 116）：get_public 與公開列表都擋了活動前的正式照片，
   // 這裡以前直接拿 H 欄第一張——還在禁發期的新聞照就出現在 og:image，LINE／FB 一貼連結就是那張預覽圖。
@@ -336,12 +340,12 @@ async function serveEventPage(req, res) {
   }
 
   const headBlock = [
-    `<title>${esc(ev.name)} — AI 新聞助理｜${esc(ev.organizer)}</title>`,
+    `<title>${esc(ev.name)} — ${assistant}｜${esc(ev.organizer)}</title>`,
     `<meta name="description" content="${esc(summary)}">`,
     `<meta name="robots" content="${concluded ? 'index, follow, max-snippet:-1, max-image-preview:large' : 'noindex, nofollow'}">`,
     `<link rel="canonical" href="${esc(pageUrl)}">`,
     `<meta property="og:type" content="${concluded ? 'article' : 'website'}">`,
-    `<meta property="og:site_name" content="${esc(ev.organizer)} 記者會 AI 新聞助理">`,
+    `<meta property="og:site_name" content="${esc(ev.organizer)} ${biz ? assistant : '記者會 AI 新聞助理'}">`,
     `<meta property="og:title" content="${esc(ev.name)}">`,
     `<meta property="og:description" content="${esc(summary)}">`,
     `<meta property="og:url" content="${esc(pageUrl)}">`,

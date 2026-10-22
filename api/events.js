@@ -200,7 +200,7 @@ export default async function handler(req, res) {
               status: publicFields.status, event_date: row[5] || '',
               chips: row[6] || '', images: row[7] || '',
               invite_letter: row[16] || '', invite_letter_chips: row[17] || '',
-              knowledge_base: row[3] || '', press_contact: row[14] || '', venue: row[12] || '', event_time: row[11] || ''
+              knowledge_base: row[3] || '', press_contact: row[14] || '', venue: row[12] || '', event_time: row[11] || '', event_type: row[13] || ''
             }).join('\n'),
             images: publicFields.images, greeting: row[8] || '',
             event_time: row[11] || '', venue: row[12] || '', event_type: row[13] || '', press_contact: row[14] || '',
@@ -344,7 +344,7 @@ export default async function handler(req, res) {
         status: str('status', 20), event_date: str('event_date', 40), chips: str('chips', 4000),
         invite_letter: str('invite_letter', KB_MAX_LEN), invite_letter_chips: str('invite_letter_chips', 4000),
         knowledge_base: str('knowledge_base', KB_MAX_LEN), press_contact: str('press_contact', 300),
-        venue: str('venue', 200), event_time: str('event_time', 100),
+        venue: str('venue', 200), event_time: str('event_time', 100), event_type: str('event_type', 40),
       };
       const custom = !!ev.chips.trim() || (isPreEventMode(ev) && !!ev.invite_letter_chips.trim());
       return res.status(200).json({ chips: effectiveChips(ev), custom, pre_event: isPreEventMode(ev) });

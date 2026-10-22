@@ -171,13 +171,44 @@ async function go(tab) {
 
 /* ── 收件匣 ─────────────────────────────────────────── */
 const OPEN_SET = new Set(['new', 'contacted', 'proposing']);
+// 首次設定引導（批次 156）：管理員進來，廠商還送不出表單就在收件匣最上面說清楚缺什麼，並給一鍵開通。
+// 只補「缺的」，不覆蓋已經填好的個資告知；個資告知用範本起頭，仍提醒正式對外前要請法務確認。
+async function setupCard() {
+  if (!ME.admin) return '';
+  const [{ settings: s, privacy_template }, { members }] = await Promise.all([call('GET', 'b2b_settings'), call('GET', 'b2b_members')]);
+  const active = members.filter((m) => m.status === 'active');
+  const owner = active.find((m) => m.id === ME.me.id) || active.find((m) => m.role === 'admin') || null;
+  const todo = [];
+  if (!String(s.privacy || '').trim()) todo.push('個資告知還沒填：<b>沒填的話，廠商送不出表單</b>');
+  if (s.intake_open === '0') todo.push('線上收件目前是「暫停」：廠商打開洽詢單會看到暫不收件');
+  if (!s.default_owner) todo.push(owner ? '還沒指定預設承辦人：沒命中關鍵字的洽詢會只通知管理員，沒有人專責' : '還沒有任何成員：先到「成員」新增自己（管理員）');
+  if (!todo.length) return '';
+  const canFix = todo.length && (owner || s.default_owner);
+  return `<div class="card" id="setup" style="background:#fff7ed;border-color:#fed7aa">
+    <h2 style="font-size:1rem;color:#9a3412">開始使用前，還差一步</h2>
+    <ul class="small" style="margin:6px 0 8px 18px;color:#9a3412">${todo.map((t) => `<li>${t}</li>`).join('')}</ul>
+    ${canFix ? `<div class="row"><button class="btn" id="setup-go">一鍵開通</button><span class="muted small">會補上個資告知範本、開啟收件${!s.default_owner && owner ? '、把「' + esc(owner.name) + '」設為預設承辦人' : ''}；已填好的不會被蓋掉。範本只是起點，正式對外前請院內法務確認文字。</span></div>` : ''}
+  </div>`;
+}
+async function setupGo() {
+  const [{ settings: s, privacy_template }, { members }] = await Promise.all([call('GET', 'b2b_settings'), call('GET', 'b2b_members')]);
+  const active = members.filter((m) => m.status === 'active');
+  const owner = active.find((m) => m.id === ME.me.id) || active.find((m) => m.role === 'admin') || null;
+  const patch = { intake_open: '1' };
+  if (!String(s.privacy || '').trim()) patch.privacy = privacy_template;
+  if (!s.default_owner && owner) patch.default_owner = owner.id;
+  await call('POST', 'b2b_settings_save', patch);
+  toast('已開通，廠商現在可以填洽詢單了');
+  renderInbox();
+}
 async function renderInbox() {
   INBOX = (await call('GET', 'b2b_list')).inquiries;
+  const setup = await setupCard().catch(() => '');
   const rows = INBOX.filter((q) => FILTER === 'all' || (FILTER === 'open' ? OPEN_SET.has(q.status) : q.status === FILTER));
   const late = INBOX.filter((q) => q.overdue).length;
   const push = ME.push && ME.push.exhausted
     ? `<div class="card small" style="background:#fff7ed;border-color:#fed7aa;color:#9a3412">本月用米亞推播的 LINE 通知已達上限（${ME.push.used}／${ME.push.limit} 則），新洽詢與期限提醒暫停推播，請直接看收件匣。上限在「設定」可以調整——這個額度跟記者那邊共用，請不要調太高。</div>` : '';
-  $('view').innerHTML = `${push}
+  $('view').innerHTML = `${push}${setup}
     <div class="card">
       <div class="row">
         <select id="flt" style="width:auto">
@@ -194,9 +225,10 @@ async function renderInbox() {
         <td>${q.owner_name ? esc(q.owner_name) : '<span class="pill late">未分派</span>'}</td>
         <td>${esc(day(q.due_at))}${q.overdue ? '<br><span class="pill late">過期</span>' : ''}</td>
         <td><span class="pill ${q.status === 'new' ? 'new' : q.status === 'won' ? 'won' : ''}">${esc(ME.statuses[q.status] || q.status)}</span></td></tr>`).join('')
-        || '<tr><td colspan="6" class="muted">沒有洽詢</td></tr>'}</tbody></table>
+        || `<tr><td colspan="6" class="muted">${INBOX.length ? '沒有符合的洽詢' : '還沒有洽詢。廠商的洽詢單網址：' + esc(location.origin) + '/inquiry（可以放在名片、簡報最後一頁）'}</td></tr>`}</tbody></table>
     </div>
     <div id="detail"></div>`;
+  if ($('setup-go')) $('setup-go').onclick = async () => { try { await setupGo(); } catch (e) { toast(e.message); } };
   $('flt').value = FILTER;
   $('flt').onchange = (e) => { FILTER = e.target.value; renderInbox(); };
   $('view').querySelector('tbody').onclick = (e) => { const tr = e.target.closest('tr[data-id]'); if (tr) openInquiry(tr.dataset.id); };
@@ -349,19 +381,20 @@ async function renderSettings() {
   const { members } = await call('GET', 'b2b_members');
   $('view').innerHTML = `
     <div class="card">
-      <h2 style="font-size:1rem">洽詢單</h2>
-      <div class="grid2">
-        <div><label class="f">線上收件</label><select id="s-open"><option value="1">收件中</option><option value="0">暫停</option></select></div>
-        <div><label class="f">幾個工作天內要聯繫（逾期每天提醒）</label><input type="number" id="s-sla" min="1" max="10" value="${esc(s.sla_days)}"></div>
-      </div>
-      <label class="f">每月最多用米亞推幾則 LINE 通知（0＝不推播；這個額度跟記者那邊共用，請不要調太高）</label>
-      <input type="number" id="s-push" min="0" max="1000" value="${esc(s.line_push_limit)}">
-      <div class="muted small">本月（${esc(push.month)}）已用 ${push.used}／${push.limit} 則。用完就不推，洽詢照樣進收件匣。</div>
-      <label class="f">沒有命中任何人關鍵字時，分給誰</label>
-      <select id="s-owner"><option value="">不分派（通知所有管理員）</option>${members.filter((m) => m.status === 'active').map((m) => `<option value="${esc(m.id)}">${esc(m.name)}</option>`).join('')}</select>
-      <label class="f">洽詢單上的「技術領域」選項（一行一個；不填就只有「其他」）</label><textarea id="s-topics">${esc(s.topics)}</textarea>
-      <label class="f">個資告知（必填，沒填洽詢單不會收件）</label><textarea id="s-privacy" style="min-height:140px">${esc(s.privacy)}</textarea>
+      <h2 style="font-size:1rem">洽詢單（必要的 3 項）</h2>
+      <p class="muted small">這三項設好，廠商就能填洽詢單、洽詢也有人負責。第一次設定可以直接回收件匣按「一鍵開通」。</p>
+      <label class="f">① 線上收件</label><select id="s-open"><option value="1">收件中</option><option value="0">暫停</option></select>
+      <label class="f">② 個資告知（必填，沒填洽詢單不會收件）</label><textarea id="s-privacy" style="min-height:140px">${esc(s.privacy)}</textarea>
       <div class="row" style="margin-top:6px"><button class="btn outline small" id="s-tpl">套用範本</button><span class="muted small">範本只是起點，正式對外前請院內法務確認文字。</span></div>
+      <label class="f">③ 沒有命中任何人關鍵字時，分給誰</label>
+      <select id="s-owner"><option value="">不分派（通知所有管理員）</option>${members.filter((m) => m.status === 'active').map((m) => `<option value="${esc(m.id)}">${esc(m.name)}</option>`).join('')}</select>
+      <details style="margin-top:14px"><summary class="small" style="cursor:pointer"><b>進階設定</b>（回覆期限、LINE 推播額度、技術領域選項；一般不用動）</summary>
+        <label class="f">幾個工作天內要聯繫（逾期每天提醒）</label><input type="number" id="s-sla" min="1" max="10" value="${esc(s.sla_days)}">
+        <label class="f">每月最多用米亞推幾則 LINE 通知（0＝不推播；這個額度跟記者那邊共用，請不要調太高）</label>
+        <input type="number" id="s-push" min="0" max="1000" value="${esc(s.line_push_limit)}">
+        <div class="muted small">本月（${esc(push.month)}）已用 ${push.used}／${push.limit} 則。用完就不推，洽詢照樣進收件匣。</div>
+        <label class="f">洽詢單上的「技術領域」選項（一行一個；不填就只有「其他」）</label><textarea id="s-topics">${esc(s.topics)}</textarea>
+      </details>
       <div class="row" style="margin-top:12px"><button class="btn" id="s-save">儲存設定</button></div>
     </div>
     <div class="card small muted">洽詢單網址：<code>${esc(location.origin)}/inquiry</code>。米亞收到「企業合作洽詢」這類話，也會回這個網址（不在聊天室收資料）。</div>`;
