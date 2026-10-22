@@ -283,7 +283,7 @@
     </div>
     <div class="row2">
       <div class="fld"><label for="e-audience">報名對象</label><select id="e-audience" onchange="audienceHint()">
-        <option value="media">記者與一般貴賓</option><option value="business">企業（業發處：說明會、技術媒合、客戶參訪）</option></select>
+        <option value="media">記者與一般貴賓</option><option value="business">企業（企業洽案管理：說明會、技術媒合、客戶參訪）</option></select>
         <div class="help" id="e-audience-help">報名頁寫「服務單位／媒體」，個資告知選填。</div></div>
       <div class="fld"></div>
     </div>
@@ -325,7 +325,7 @@
       <div style="margin-top:10px"><button type="button" class="btn outline small" onclick="addOptRow()">＋ 加一項</button>
         <button type="button" class="btn outline small" onclick="addBizOpts()">＋ 企業場常用項目</button></div>
       <div class="help muted small" style="margin-top:6px">「限定場次」可空（＝任何場次都顯示），要限定就寫場次代碼，例如 A1,A2。「人數」是 0–9 的選單，「勾選」是打勾，「文字」是一行自由填寫（最多 200 字，例如「想了解的技術或合作主題」）。
-        「企業場常用項目」會加上「想了解的技術或合作主題」與「希望業務窗口與我聯繫」（代碼 <code>contact_me</code>）：業發處的合作洽詢有啟用時，勾了的人會自動轉成一筆洽詢、分給業務窗口。</div>
+        「企業場常用項目」會加上「想了解的技術或合作主題」與「希望業務窗口與我聯繫」（代碼 <code>contact_me</code>）：企業洽案管理有啟用時，勾了的人會自動轉成一筆洽詢、分給業務窗口。</div>
     </details>
     <details class="more" id="privacy-box"><summary>個資告知</summary>
       <div class="fld"><textarea id="e-privacy" style="min-height:90px"></textarea><div class="help" id="e-privacy-help">出現在送出鈕上方。留空＝不顯示（預設不放）。</div>

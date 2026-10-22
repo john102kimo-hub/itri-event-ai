@@ -117,7 +117,7 @@ console.log('\n── 四、編輯頁與 /b2b 引導（結構；畫面另用 Chr
   check('　 一鍵開通只補缺的：個資告知已填就不覆蓋、預設承辦人已設就不動', /if \(!String\(s\.privacy \|\| ''\)\.trim\(\)\) patch\.privacy = privacy_template/.test(b2b) && /if \(!s\.default_owner && owner\) patch\.default_owner = owner\.id/.test(b2b));
   check('　 範本要法務確認的提醒留在卡片上', /正式對外前請院內法務確認文字/.test(b2b));
   check('　 設定頁：必要 3 項在前、其他收進「進階設定」（預設收合）', /洽詢單（必要的 3 項）/.test(b2b) && /<details style="margin-top:14px"><summary[^>]*><b>進階設定<\/b>/.test(b2b) && !/<details[^>]* open/.test(b2b));
-  check('　 一般同仁（業務窗口）不用設定：設定與成員分頁、設定引導只給管理員', /ME\.admin \? \[\['members'/.test(b2b) && /if \(!ME\.admin\) return ''/.test(b2b));
+  check('　 一般同仁（業務窗口）不用設定：設定與成員分頁、設定引導只給管理員', /ME\.admin \? \[\['pages'/.test(b2b) && /if \(!ME\.admin\) return ''/.test(b2b));
 }
 
 console.log('\n── 五、結構 ──');

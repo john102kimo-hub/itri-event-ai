@@ -257,8 +257,8 @@ const escHtml = load(INDEX, ['escHtml'], [], {}).escHtml;
     /#event-modal \.modal-actions \{\s*position: sticky; bottom: 0;[^}]*background: #fff;/.test(INDEX) && /#event-modal \.modal \{ padding-bottom: 0; \}/.test(INDEX));
 
   // 記者名單健檢的入口
-  check('★ 側邊欄有「記者名單健檢」（以前後台找不到入口，只能自己記網址）', /<a class="nav-item nav-secondary" href="\/media\.html"[^>]*>\s*<i class="ti ti-users"><\/i> 記者名單健檢/.test(INDEX));
-  check('　 手機底部選單的「更多」也有', /label: '記者名單健檢', run: \(\) => \{ location\.href = '\/media\.html'; \}/.test(fnSource(INDEX, 'openNavMore')));
+  check('★ 記者名單健檢找得到入口（以前只能自己記網址）：批次 157 起放在「記者與邀訪」頁右上角，同分頁開（帶得到登入狀態）', /<a class="btn btn-outline" href="\/media\.html"[^>]*><i class="ti ti-users"><\/i> 記者名單健檢<\/a>/.test(INDEX) && !/target="_blank"[^>]*media\.html/.test(INDEX));
+  check('　 手機底部選單的「更多」有「記者與邀訪」（名單健檢在那一頁裡）', /label: '記者與邀訪', run: \(\) => showView\('contacts'\)/.test(fnSource(INDEX, 'openNavMore')));
 
   // 範本下拉依活動日期排
   const opts = [];

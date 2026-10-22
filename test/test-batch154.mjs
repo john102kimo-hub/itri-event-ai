@@ -16,9 +16,9 @@ const b2b = read('public/b2b.html');
 console.log('\n── 一、入口 ──');
 {
   const side = (idx.match(/<a class="nav-item nav-secondary" href="\/b2b"[^>]*>[\s\S]*?<\/a>/) || [''])[0];
-  check('電腦版側邊欄：有「業發處（合作洽詢）」，連到 /b2b', /業發處（合作洽詢）/.test(side) && /ti-briefcase/.test(side), side);
+  check('電腦版側邊欄：有「企業洽案管理」（批次 157 由「業發處（合作洽詢）」改名），連到 /b2b', /企業洽案管理/.test(side) && /ti-briefcase/.test(side), side);
   check('★ 同一分頁開（沒有 target=_blank）：管理員密碼在這個分頁的 sessionStorage，開新分頁就要重新登入', !/target=/.test(side));
-  check('手機「更多」選單也有，同一分頁開 /b2b', /label: '業發處（合作洽詢）', run: \(\) => \{ location\.href = '\/b2b'; \}/.test(idx));
+  check('手機「更多」選單也有，同一分頁開 /b2b', /label: '企業洽案管理', run: \(\) => \{ location\.href = '\/b2b'; \}/.test(idx));
   check('電腦版入口是次要項目（nav-secondary）：手機底部選單不被塞滿，改放在「更多」', /class="nav-item nav-secondary" href="\/b2b"/.test(idx));
 }
 
