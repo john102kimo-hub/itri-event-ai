@@ -116,7 +116,7 @@ console.log('\n── 三、同仁編輯頁：標題寫出哪一場、手機按�
   check('　 載入時就呼叫、改名稱的時候也跟著變', /showEventName\(ev\.name\)/.test(fnSource(EDIT, 'load')) && /getElementById\('input-name'\)\.addEventListener\('change', \(e\) => showEventName\(e\.target\.value\)\)/.test(EDIT));
 
   const toasts = [];
-  const mk = (status) => new Function('toast', `let loadedStatus = ${JSON.stringify(status)}; ${fnSource(EDIT, 'previewBlocked')}; return previewBlocked;`)((m) => toasts.push(m));
+  const mk = (status) => new Function('toast', `let BIZ = false; let loadedStatus = ${JSON.stringify(status)}; ${fnSource(EDIT, 'previewBlocked')}; return previewBlocked;`)((m) => toasts.push(m));
   let prevented = false;
   mk('draft')({ preventDefault() { prevented = true; } });
   check('★ 未發布的場次按「預覽記者前台」：不再打開「找不到活動」，改成說明要發布後才看得到', prevented && /還沒發布/.test(toasts[0] || '') && /進行中/.test(toasts[0] || ''), toasts[0]);

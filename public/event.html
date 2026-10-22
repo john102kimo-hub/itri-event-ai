@@ -523,7 +523,7 @@ const WORDS_MEDIA = {
   modalLabel: '媒體／單位', modalPlaceholder: '例：經濟日報（貴賓請寫單位）', bannerPlaceholder: '媒體／單位（必填）'
 };
 const WORDS_BUSINESS = {
-  assistant: 'AI 技術說明助理', ended: '活動已結束', who: '單位', contact: '活動窗口',
+  assistant: 'AI 技術說明助理', ended: '洽談已結束', who: '單位', contact: '洽談窗口',
   modalTitle: '先留下您的公司與姓名', modalSub: '填寫後即可向 AI 提問，所有資訊隨問隨答。<br>只用來統計服務了哪些單位，不會公開。',
   modalLabel: '公司／單位', modalPlaceholder: '例：○○科技（請寫公司全名）', bannerPlaceholder: '公司／單位（必填）'
 };
@@ -538,6 +538,8 @@ function applyAudienceWords(event) {
   document.querySelector('label[for="media-input"]').lastChild.textContent = ` ${WORDS.who}：`;
   document.getElementById('media-input').placeholder = WORDS.bannerPlaceholder;
   document.getElementById('header-icon').className = 'ti ti-building';
+  const gt = document.getElementById('image-gallery-title');
+  if (gt) gt.innerHTML = '<i class="ti ti-photo"></i> 技術資料圖片';
 }
 
 // 圖示字型（Tabler）是從 CDN 載的：會場網路擋 CDN、或 LINE 內建瀏覽器載入失敗時，沒有文字陪伴的
@@ -614,7 +616,7 @@ async function init() {
     // 的一顆按鈕，點了才整頁展開；伺服器端 api/chat.js 本來就沒擋已結束的活動。
     applyAudienceWords(event);
     const ended = event.status === 'ended';
-    const hasArchive = ended && !!document.getElementById('geo-article');
+    const hasArchive = ended && event.audience !== 'business' && !!document.getElementById('geo-article');
     if (hasArchive) setupArchive(document.getElementById('geo-article'));
 
     document.getElementById('event-title').textContent = event.name;

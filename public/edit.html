@@ -136,13 +136,18 @@ textarea.form-control { min-height: 240px; resize: vertical; line-height: 1.65; 
   /* 提示框左右各留 12px 撐滿：以前 left:50% 再往回推一半，可用寬度只剩半個螢幕，長一點的說明被擠成細長一條 */
   #toast { bottom: 76px; left: 12px; right: 12px; transform: none; text-align: center; }
 }
+/* 企業場（客戶專屬頁，批次 156）：只留標題、三段內容、聯絡窗口、狀態；日期地點、邀請函、露出、前台呈現全部藏起來 */
+.biz-only { display: none; }
+body.biz .biz-only { display: block; }
+body.biz .biz-hide { display: none !important; }
+.biz-box textarea { font-size: 16px; min-height: 120px; }
 </style>
 </head>
 <body>
 
 <div class="topbar">
   <i class="ti ti-edit"></i>
-  <div class="topbar-title">更新我的記者會內容
+  <div class="topbar-title"><span id="topbar-label">更新我的記者會內容</span>
     <span id="topbar-event">工研院活動溝通 AI 平台</span>
   </div>
 </div>
@@ -165,8 +170,8 @@ textarea.form-control { min-height: 240px; resize: vertical; line-height: 1.65; 
   <div class="banner">
     <i class="ti ti-info-circle"></i>
     <div>
-      這是你這場記者會的<b>專屬編輯頁</b>。在這裡更新的內容，記者掃 QR / 開連結時，AI 就會依此回答。
-      <br>填完記得按下方<b>「儲存內容」</b>。有問題請聯絡活動承辦人。
+      <span id="banner-text">這是你這場記者會的<b>專屬編輯頁</b>。在這裡更新的內容，記者掃 QR / 開連結時，AI 就會依此回答。
+      <br>填完記得按下方<b>「儲存內容」</b>。有問題請聯絡活動承辦人。</span>
     </div>
   </div>
 
@@ -174,27 +179,27 @@ textarea.form-control { min-height: 240px; resize: vertical; line-height: 1.65; 
 
   <div class="card">
     <h2><i class="ti ti-file-text" style="color:var(--primary)"></i> 基本資訊</h2>
-    <div class="sub">這場記者會的名稱、日期與狀態</div>
+    <div class="sub" id="basic-sub">這場記者會的名稱、日期與狀態</div>
 
     <div class="form-group">
-      <label>活動名稱</label>
+      <label id="lbl-name">活動名稱</label>
       <input class="form-control" id="input-name" placeholder="例：工研院 AI 智慧醫療大平台發表記者會">
     </div>
-    <div class="form-group">
+    <div class="form-group biz-hide">
       <label><i class="ti ti-calendar-event"></i> 活動日期<span class="req">發布前必填</span></label>
       <input class="form-control" id="input-date" type="date">
       <div class="form-hint">這個日期會顯示在後台的活動行事曆上</div>
     </div>
-    <div class="form-group">
+    <div class="form-group biz-hide">
       <label><i class="ti ti-clock"></i> 活動時間（選填）</label>
       <input class="form-control" id="input-time" placeholder="例：10:00">
     </div>
-    <div class="form-group">
+    <div class="form-group biz-hide">
       <label><i class="ti ti-map-pin"></i> 活動地點<span class="req">發布前必填</span></label>
       <input class="form-control" id="input-venue" placeholder="例：工研院中興院區 中興文薈廳">
       <div class="form-hint">記者問「在哪裡」時，AI 靠這一欄回答</div>
     </div>
-    <div class="form-group">
+    <div class="form-group biz-hide">
       <label><i class="ti ti-category"></i> 活動類型（選填）</label>
       <input class="form-control" id="input-type" list="type-list" placeholder="例：記者會">
       <datalist id="type-list">
@@ -210,32 +215,32 @@ textarea.form-control { min-height: 240px; resize: vertical; line-height: 1.65; 
       <div class="form-hint">選「企業說明會／技術媒合會／客戶參訪／技術交流會」＝企業場：活動頁問公司名稱、AI 不報價，不算進媒體統計，也不在米亞給記者的活動清單裡</div>
     </div>
     <div class="form-group">
-      <label><i class="ti ti-headset"></i> 新聞聯絡人<span class="req">發布前必填</span></label>
+      <label><i class="ti ti-headset"></i> <span id="lbl-contact">新聞聯絡人</span><span class="req">發布前必填</span></label>
       <input class="form-control" id="input-contact" placeholder="例：王小明 03-1234567 分機 8888">
-      <div class="form-hint">AI 答不出來時，會請記者洽詢這裡填的人；也是 LINE 查詢「這場還沒有內容」時唯一能給的線索。</div>
+      <div class="form-hint" id="hint-contact">AI 答不出來時，會請記者洽詢這裡填的人；也是 LINE 查詢「這場還沒有內容」時唯一能給的線索。</div>
     </div>
-    <div class="form-group">
+    <div class="form-group biz-hide">
       <label><i class="ti ti-address-book"></i> 邀訪聯絡窗口分工（選填，每行一組）</label>
       <textarea class="form-control" id="input-contacts" rows="4"
         placeholder="新聞稿｜王小明｜03-1234567 分機8888&#10;技術規格｜陳美玲｜03-1234567 分機9999｜LINE ID"
         style="font-size:16px;min-height:auto"></textarea>
       <div class="form-hint">記者在 LINE 點「媒體邀訪需求」時會列出這裡的關鍵字，點了直接給對應窗口的聯絡方式；LINE ID 選填。格式：<code>關鍵字｜姓名｜電話｜LINE ID</code>，半形 <code>|</code> 或全形 <code>｜</code> 都可以。留空則只給上面的「新聞聯絡人」。</div>
     </div>
-    <div class="form-group">
+    <div class="form-group biz-hide">
       <label><i class="ti ti-mail-forward"></i> 媒體邀請函（選填，活動前用）</label>
       <textarea class="form-control" id="input-invite-letter" rows="6"
         placeholder="貼入邀請媒體來採訪時附的說明文字…"
         style="font-size:16px;min-height:auto"></textarea>
       <div class="form-hint">活動日期還沒到、又有填這裡的話，記者問答只會用這份內容回答，不會提前給正式新聞稿全文或活動照片。活動當天起自動改回正常回答，不用手動切換。留空則沒有這層限制。</div>
     </div>
-    <div class="form-group">
+    <div class="form-group biz-hide">
       <label><i class="ti ti-list-details"></i> 活動前快速提問（選填，每行一題）</label>
       <textarea class="form-control" id="input-invite-letter-chips" rows="4"
         placeholder="邀請函內容是什麼？&#10;採訪申請方式？&#10;活動時間地點？"
         style="font-size:16px;min-height:auto"></textarea>
       <div class="form-hint">活動前優先顯示這裡的快速提問按鈕，取代下面「快速問題按鈕」那組——留空則活動前也繼續用下面那組。</div>
     </div>
-    <div class="form-group">
+    <div class="form-group biz-hide">
       <label><i class="ti ti-building"></i> 主辦單位</label>
       <input class="form-control" id="input-organizer" list="organizer-list" placeholder="工研院">
       <datalist id="organizer-list">
@@ -257,10 +262,10 @@ textarea.form-control { min-height: 240px; resize: vertical; line-height: 1.65; 
   </div>
 
   <div class="card">
-    <h2><i class="ti ti-database" style="color:var(--primary)"></i> 活動知識庫（最重要）<span class="req">新聞稿發布前必填</span></h2>
-    <div class="sub">貼上本場新聞稿與重要資訊，AI 只會根據這裡的內容回答記者</div>
+    <h2><i class="ti ti-database" style="color:var(--primary)"></i> <span id="kb-h2">活動知識庫（最重要）</span><span class="req" id="kb-req">新聞稿發布前必填</span></h2>
+    <div class="sub" id="kb-sub">貼上本場新聞稿與重要資訊，AI 只會根據這裡的內容回答記者</div>
 
-    <div class="form-group" id="copy-template-group" style="display:none;background:var(--primary-light);border:1px solid var(--border);border-radius:10px;padding:14px">
+    <div class="form-group biz-hide" id="copy-template-group" style="display:none;background:var(--primary-light);border:1px solid var(--border);border-radius:10px;padding:14px">
       <label style="display:flex;align-items:center;gap:6px"><i class="ti ti-copy" style="color:var(--primary)"></i> 以既有活動為範本（複製其知識庫來改）</label>
       <select class="form-control" id="copy-template-select" onchange="copyFromEvent(this.value)" style="cursor:pointer">
         <option value="">— 選擇要複製的活動 —</option>
@@ -276,7 +281,7 @@ textarea.form-control { min-height: 240px; resize: vertical; line-height: 1.65; 
       <span class="form-hint" id="word-import-status" style="margin:0">新聞稿的 .docx 檔直接選，文字會自動填進下面（舊版 .doc 請先另存成 .docx）</span>
     </div>
 
-    <div class="form-group">
+    <div class="form-group biz-hide" id="kb-group">
       <textarea class="form-control" id="input-kb"
         placeholder="貼入本次活動的新聞稿或重要資訊…"
         oninput="updateKbCount()"></textarea>
@@ -286,9 +291,29 @@ textarea.form-control { min-height: 240px; resize: vertical; line-height: 1.65; 
         <br>若欄位是空的，可按 <a href="#" onclick="fillTemplate();return false" style="color:var(--primary);font-weight:600">帶入填寫範本</a>。
       </div>
     </div>
+    <div id="biz-kb" class="biz-only biz-box">
+      <div class="form-group">
+        <label>① 技術介紹</label>
+        <textarea class="form-control" id="biz-tech" placeholder="這項技術是什麼、能解決什麼問題、適用哪些產業與場景"></textarea>
+      </div>
+      <div class="form-group">
+        <label>② 技轉與合作規範</label>
+        <textarea class="form-control" id="biz-coop" placeholder="合作方式、洽談流程、智財與授權的原則。⚠️ 不要寫價格：AI 不會報價，客戶要報價會被請去聯絡窗口"></textarea>
+      </div>
+      <div class="form-group">
+        <label>③ 目前技術進度</label>
+        <textarea class="form-control" id="biz-prog" placeholder="技術成熟度、已驗證的場域、預計時程與下一步"></textarea>
+      </div>
+      <div class="form-group" id="biz-extra-wrap" style="display:none">
+        <label>其他資料（原本就有的內容，AI 一樣會參考）</label>
+        <textarea class="form-control" id="biz-extra"></textarea>
+      </div>
+      <div class="char-count" id="biz-count">0 / 8000 字</div>
+      <div class="form-hint"><b>AI 只會根據這裡寫的內容回答客戶</b>；沒寫到的，AI 會說沒有資料並請客戶聯絡窗口。回答範圍限制與「不報價、不承諾」的警語由系統自動加上，不需要自己寫。</div>
+    </div>
   </div>
 
-  <div class="card">
+  <div class="card biz-hide">
     <h2><i class="ti ti-adjustments" style="color:var(--primary)"></i> 前台呈現（選填）</h2>
     <div class="sub">調整記者看到的畫面，不填就用系統預設</div>
 
@@ -331,7 +356,7 @@ textarea.form-control { min-height: 240px; resize: vertical; line-height: 1.65; 
     </div>
   </div>
 
-  <div class="card">
+  <div class="card biz-hide">
     <h2><i class="ti ti-chart-bar" style="color:var(--primary)"></i> 媒體露出（活動結束後上傳）</h2>
     <div class="sub">上傳這場活動的露出清單，系統會自動統計並和記者的 AI 提問交叉分析</div>
 
@@ -354,7 +379,7 @@ textarea.form-control { min-height: 240px; resize: vertical; line-height: 1.65; 
 
   <div class="action-bar">
     <span class="saved-hint" id="saved-hint"></span>
-    <a class="btn btn-outline" id="training-link" target="_blank" title="AI 扮演犀利記者做問答演練，幫發言人先練習">
+    <a class="btn btn-outline biz-hide" id="training-link" target="_blank" title="AI 扮演犀利記者做問答演練，幫發言人先練習">
       <i class="ti ti-microphone"></i> <span class="lbl-full">媒體訓練</span><span class="lbl-short">訓練</span>
     </a>
     <a class="btn btn-outline" id="preview-link" target="_blank">
@@ -423,9 +448,83 @@ const STATUS_HINTS = {
   ended:    '活動確定結束、新聞稿已正式對外發布後再選這個。選了以後，完整新聞稿會開放讓搜尋引擎與 AI 收錄索引，且無法完全收回，請確認真的可以公開了再選。',
   archived: '封存後記者前台將立即無法使用，且你之後將無法再自行修改這場活動，如需取消請聯絡活動承辦人／後台管理員。'
 };
+const BIZ_STATUS_HINTS = {
+  draft: '客戶現在打不開這一頁（會顯示「找不到活動」），可以放心慢慢補內容。補完改選「已發布」並儲存，客戶才看得到。',
+  active: '客戶拿到連結就能打開，並向 AI 提問。請先確認內容都是可以給客戶看的。',
+  ended: '案子結束後選這個：頁面仍可開啟、仍可提問。',
+  archived: '封存後客戶立刻打不開，你之後也無法自行修改，如需取消請聯絡業發處承辦人。'
+};
 function updateStatusHint() {
   const v = document.getElementById('input-status').value;
-  document.getElementById('status-hint').textContent = STATUS_HINTS[v] || '';
+  document.getElementById('status-hint').textContent = (BIZ ? BIZ_STATUS_HINTS : STATUS_HINTS)[v] || '';
+}
+
+// ── 企業場（客戶專屬頁，批次 156）──────────────────────────
+// 活動類型是企業場四種之一（lib/audience.js BUSINESS_EVENT_TYPES）就換成簡單的編輯畫面：標題、三段內容、聯絡窗口、狀態。
+// 資料仍是同一份知識庫文字（【技術介紹】【技轉與合作規範】【目前技術進度】三個小節），存檔時由三個框組回去；
+// 不在這三段裡的原有內容原樣放在「其他資料」，不會因為換了畫面就遺失。
+const BIZ_TYPES = ['企業說明會', '技術媒合會', '客戶參訪', '技術交流會'];
+const BIZ_HEADS = ['技術介紹', '技轉與合作規範', '目前技術進度'];
+const BIZ_BOX = { '技術介紹': 'biz-tech', '技轉與合作規範': 'biz-coop', '目前技術進度': 'biz-prog' };
+let BIZ = false;
+function bizParse(kb) {
+  const out = { '技術介紹': '', '技轉與合作規範': '', '目前技術進度': '', extra: '' };
+  if (!kbHasContent(kb)) return out;           // 還只是範本（或舊的新聞範本）：當作空的，不把範本標題塞進「其他資料」
+  const acc = { '技術介紹': [], '技轉與合作規範': [], '目前技術進度': [], extra: [] };
+  let cur = 'extra';
+  for (const line of String(kb).split('\n')) {
+    const m = line.match(/^\s*【([^】]*)】(.*)$/);
+    if (m) {
+      const h = m[1].trim();
+      if (BIZ_HEADS.includes(h)) { cur = h; if (m[2].trim()) acc[cur].push(m[2].trim()); }
+      else { cur = 'extra'; acc.extra.push(line); }
+      continue;
+    }
+    acc[cur].push(line);
+  }
+  for (const k of Object.keys(acc)) out[k] = acc[k].join('\n').trim();
+  return out;
+}
+function bizCompose() {
+  const v = id => document.getElementById(id).value.trim();
+  const parts = BIZ_HEADS.map(h => `【${h}】` + (v(BIZ_BOX[h]) ? '\n' + v(BIZ_BOX[h]) : ''));
+  const extra = v('biz-extra');
+  return parts.join('\n\n') + (extra ? '\n\n' + extra : '');
+}
+function bizPush() {       // 三個框 → 知識庫（儲存、必填檢查、字數都吃 input-kb）
+  document.getElementById('input-kb').value = bizCompose();
+  updateKbCount();
+  const n = document.getElementById('input-kb').value.length;
+  document.getElementById('biz-count').textContent = `${n} / ${KB_SOFT_LIMIT} 字`;
+}
+function bizPull() {       // 知識庫 → 三個框（載入、Word 匯入之後）
+  const p = bizParse(document.getElementById('input-kb').value);
+  for (const h of BIZ_HEADS) document.getElementById(BIZ_BOX[h]).value = p[h];
+  document.getElementById('biz-extra').value = p.extra;
+  document.getElementById('biz-extra-wrap').style.display = p.extra ? '' : 'none';
+  bizPush();
+}
+function enterBizMode() {
+  BIZ = true;
+  document.body.classList.add('biz');
+  const set = (id, t) => { const e = document.getElementById(id); if (e) e.textContent = t; };
+  set('topbar-label', '更新客戶專屬頁');
+  document.querySelector('#preview-link .lbl-full').textContent = '預覽客戶頁面';
+  set('basic-sub', '客戶會看到的頁面標題，以及要不要對客戶開放');
+  set('lbl-name', '頁面標題');
+  set('lbl-contact', '聯絡窗口');
+  set('hint-contact', 'AI 答不出來、或客戶要報價時，會請客戶聯絡這裡填的人。例：王小明 03-1234567 分機 8888');
+  set('kb-h2', '頁面內容（最重要）');
+  set('kb-req', '三段至少填一段');
+  set('kb-sub', 'AI 助理只會根據這裡的內容回答客戶');
+  document.getElementById('input-contact').placeholder = '例：王小明 03-1234567 分機 8888';
+  document.getElementById('banner-text').innerHTML = '這是給客戶看的<b>專屬頁編輯畫面</b>。在這裡寫的內容，客戶打開連結後，AI 助理就會依此回答。<br>填完記得按下方<b>「儲存內容」</b>；要讓客戶打開，請把狀態改成「已發布」。';
+  const opt = (v, t) => { const o = document.querySelector(`#input-status option[value="${v}"]`); if (o) o.textContent = t; };
+  opt('draft', '未發布（客戶打不開）'); opt('active', '已發布（客戶可以打開）'); opt('ended', '已結束'); opt('archived', '已封存');
+  document.getElementById('word-import-status').textContent = '技術說明的 .docx 檔直接選，文字會自動填進下面（舊版 .doc 請先另存成 .docx）';
+  document.title = '更新客戶專屬頁';
+  for (const id of Object.values(BIZ_BOX).concat(['biz-extra'])) document.getElementById(id).addEventListener('input', bizPush);
+  bizPull();
 }
 
 // ── 知識庫字數上限 ────────────────────────────────────────
@@ -467,6 +566,11 @@ function kbHasContent(kb) {
 function missingForPublish() {
   const v = id => (document.getElementById(id)?.value || '').trim();
   const miss = [];
+  if (BIZ) {               // 企業場只要求內容與聯絡窗口（跟 lib/event-status.js eventChecklist 同一套）
+    if (!kbHasContent(v('input-kb'))) miss.push({ label: '內容', field: 'biz-tech' });
+    if (!v('input-contact')) miss.push({ label: '聯絡窗口', field: 'input-contact' });
+    return miss;
+  }
   if (!/^\d{4}-\d{2}-\d{2}$/.test(v('input-date'))) miss.push({ label: '日期', field: 'input-date' });
   if (!v('input-venue')) miss.push({ label: '地點', field: 'input-venue' });
   if (!v('input-contact')) miss.push({ label: '新聞聯絡人', field: 'input-contact' });
@@ -480,12 +584,12 @@ function updateReadiness() {
   const missLabels = new Set(miss.map(m => m.label));
   const chip = l => missLabels.has(l) ? `<span class="miss"><i class="ti ti-square"></i> ${l}</span>` : `<span class="ok"><i class="ti ti-circle-check"></i> ${l}</span>`;
   box.className = 'readiness' + (miss.length ? '' : ' all-ok');
-  box.innerHTML = `<span class="lead">發布前必填</span>${['日期', '地點', '新聞聯絡人', '新聞稿'].map(chip).join('')}` +
-    (miss.length ? '' : '<span class="ok">　都齊了，可以把狀態改成「進行中」</span>');
+  box.innerHTML = `<span class="lead">發布前必填</span>${(BIZ ? ['內容', '聯絡窗口'] : ['日期', '地點', '新聞聯絡人', '新聞稿']).map(chip).join('')}` +
+    (miss.length ? '' : `<span class="ok">　都齊了，可以把狀態改成「${BIZ ? '已發布' : '進行中'}」</span>`);
 }
 // 儲存被擋下來時，把缺的欄位框起來並捲過去
 function highlightMissing(labels) {
-  const map = { '日期': 'input-date', '地點': 'input-venue', '新聞聯絡人': 'input-contact', '新聞稿': 'input-kb' };
+  const map = { '日期': 'input-date', '地點': 'input-venue', '新聞聯絡人': 'input-contact', '新聞稿': 'input-kb', '內容': 'biz-tech', '聯絡窗口': 'input-contact' };
   let first = null;
   (labels || []).forEach(l => {
     const el = document.getElementById(map[l]);
@@ -550,6 +654,7 @@ async function load() {
     document.getElementById('input-contacts').value = ev.contacts || '';
     document.getElementById('input-invite-letter').value = ev.invite_letter || '';
     document.getElementById('input-invite-letter-chips').value = ev.invite_letter_chips || '';
+    if (BIZ_TYPES.includes(String(ev.event_type || '').trim())) enterBizMode();
     loadedStatus = ev.status || 'active';
     document.getElementById('input-status').value = loadedStatus;
     updateStatusHint();
@@ -588,6 +693,7 @@ function showEventName(name) {
 function previewBlocked(e) {
   if (loadedStatus !== 'draft') return;
   e.preventDefault();
+  if (BIZ) { toast('這一頁還沒發布，客戶現在會看到「找不到活動」。把狀態改成「已發布」並儲存後，就能預覽。', 8000); return; }
   toast('這場還沒發布，記者前台現在會顯示「找不到活動」。把狀態改成「進行中」並儲存後，就能預覽；想先試試 AI 怎麼答，可以用「媒體訓練」。', 9000);
 }
 document.getElementById('preview-link').addEventListener('click', previewBlocked);
@@ -898,6 +1004,7 @@ async function importWordFile(file) {
       kb.value = text;
     }
     updateKbCount();
+    if (BIZ) bizPull();
     dirty = true;
     toast(`已匯入「${file.name}」（${text.length} 字），記得按「儲存內容」`);
   } catch (e) {
