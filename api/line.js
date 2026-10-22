@@ -56,7 +56,7 @@ import {
   isPasscodeMatch, isColleaguePasscodeMatch, isStaffAuthenticated, isColleagueAuthenticated, authenticateStaff, COLLEAGUE
 } from '../lib/staff.js';
 import { isBusinessEvent } from '../lib/audience.js';
-import { parseB2BBind, handleB2BBind, isPartnershipAsk, handlePartnershipAsk } from '../lib/b2b-line.js';
+import { parseB2BBind, handleB2BBind, isUnbindAsk, handleB2BUnbind, isPartnershipAsk, handlePartnershipAsk } from '../lib/b2b-line.js';
 import { sanitize } from '../lib/line-format.js';
 import {
   CHITCHAT_FIXED_REPLIES, detectBoundChitchat, looksLikeNameOrSkip, mediaFromGreeting, mediaNameOf, nonTextReply
@@ -285,6 +285,8 @@ async function handleEvent(ev) {
     await handleB2BBind(replyToken, userId, b2bBind);
     return;
   }
+  // 「取消綁定」（批次 160）：只有這個 LINE 真的綁著企業洽案管理的成員才處理；沒綁過的人打同一句照原本的路徑走
+  if (isUnbindAsk(text) && await handleB2BUnbind(replyToken, userId)) return;
   if (await isStaffAuthenticated(userId)) {
     markStaff();
     await handleStaffMessage(replyToken, userId, text);
