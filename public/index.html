@@ -93,6 +93,10 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); min-
 .nav-item i { font-size: 18px; }
 .nav-item:hover { background: rgba(255,255,255,0.08); color: white; }
 .nav-item.active { background: var(--primary); color: white; }
+.biz-note { margin: 0 0 14px; padding: 10px 14px; border-radius: 10px; background: #eef2ff; color: #3730a3; font-size: 0.85rem; }
+.biz-note a { color: inherit; font-weight: 700; }
+.nav-label { padding: 14px 20px 4px; font-size: 0.7rem; letter-spacing: 1px; color: rgba(255,255,255,0.38); }
+.nav-label.sep { margin-top: 8px; border-top: 1px solid rgba(255,255,255,0.08); }
 .sidebar-bottom { margin-top: auto; padding: 16px 20px; border-top: 1px solid rgba(255,255,255,0.08); }
 .logout-btn {
   display: flex; align-items: center; gap: 8px;
@@ -117,6 +121,11 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); min-
 }
 .topbar h1 { font-size: 1.15rem; font-weight: 700; }
 .topbar-actions { display: flex; gap: 10px; }
+/* 批次 157：問答與成效頁的操作列多了「成效報告」按鈕，窄一點的螢幕按鈕會被擠成直排——允許換行、按鈕文字不折行 */
+#view-analytics .topbar { flex-wrap: wrap; row-gap: 10px; }
+#view-analytics .topbar h1 { white-space: nowrap; }
+#view-analytics .topbar-actions { flex-wrap: wrap; justify-content: flex-end; align-items: center; }
+#view-analytics .topbar-actions .btn { white-space: nowrap; }
 .btn {
   display: inline-flex; align-items: center; gap: 6px;
   padding: 9px 16px;
@@ -485,10 +494,10 @@ details.adv[open] > summary { border-bottom:1px solid var(--border); margin-bott
   #event-modal .modal { padding-bottom: 0; }
   #event-modal .modal-actions { margin: 16px -16px 0; padding: 12px 16px calc(12px + env(safe-area-inset-bottom)); }
   .search-input { min-width: 0; width: 100%; }
-  /* 批次 104：底部選單只留四個最常用的 ＋「更多」，其餘（邀訪窗口分工／彙整媒體訓練／活動報名／登出）收進面板。
+  /* 批次 104：底部選單只留最常用的 ＋「更多」，其餘（記者與邀訪／彙整媒體訓練／活動報名／成效報告／企業洽案管理／登出）收進面板。
      原本八個項目擠不下，「AI 能見度」「成效報告」「登出」被推到畫面外、也沒有任何捲動提示。 */
   #sidebar { justify-content: space-around; }
-  #sidebar .nav-item.nav-secondary, #sidebar .sidebar-bottom { display: none; }
+  #sidebar .nav-item.nav-secondary, #sidebar .nav-label, #sidebar .sidebar-bottom { display: none; }
   #sidebar .nav-more-btn { display: flex; }
   #sidebar .nav-item { flex: 1 1 0; min-width: 0; padding: 8px 4px; }
   /* 問答表在手機上變成一則一張卡片：原本橫向捲動，問題欄在畫面外 */
@@ -538,37 +547,33 @@ details.adv[open] > summary { border-bottom:1px solid var(--border); margin-bott
       <h2>工研院活動<br>AI 溝通平台</h2>
       <span>ITRI Event AI</span>
     </div>
+    <!-- 批次 157：左欄 9 項整理成 7 項、分三區。成效報告改成「問答與成效」頁右上角的按鈕（報告是從問答資料做出來的）；
+         邀訪窗口分工與記者名單健檢合成「記者與邀訪」；企業洽案獨立在最下面（企業場也不再列在活動管理）。
+         連到別的頁面的項目都要同分頁開：管理員密碼放在這個分頁的 sessionStorage，新分頁不保證帶得過去。 -->
+    <div class="nav-label">活動</div>
     <button class="nav-item active" data-view="events" onclick="showView('events')">
       <i class="ti ti-calendar-event"></i> 活動管理
     </button>
-    <button class="nav-item" data-view="analytics" onclick="showView('analytics')">
-      <i class="ti ti-chart-bar"></i> 問答分析
-    </button>
-    <button class="nav-item nav-secondary" data-view="contacts" onclick="showView('contacts')">
-      <i class="ti ti-address-book"></i> 邀訪窗口分工
-    </button>
-    <!-- 這條不能開新分頁。彙整訓練（event_id=all）後端只認管理員密碼，密碼放在 sessionStorage，
-         新分頁不保證帶得過去，帶不過去就會被擋在「這個功能只給內部同仁使用」。同分頁開才穩。 -->
-    <a class="nav-item nav-secondary" href="/training" style="text-decoration:none;color:rgba(255,255,255,0.7)">
-      <i class="ti ti-microphone"></i> 彙整媒體訓練
-    </a>
     <a class="nav-item nav-secondary" href="/registrations" style="text-decoration:none;color:rgba(255,255,255,0.7)">
       <i class="ti ti-ticket"></i> 活動報名
     </a>
-    <!-- 批次 154：業發處（合作洽詢）的入口。同一分頁開 /b2b：管理員密碼放在這個分頁的 sessionStorage，/b2b 讀同一個，不用再登入一次。
-         業發處的資料與權限仍是獨立的（另一本試算表、每個人自己的連結），這裡只是讓公關管理員找得到、進得去。 -->
-    <a class="nav-item nav-secondary" href="/b2b" style="text-decoration:none;color:rgba(255,255,255,0.7)">
-      <i class="ti ti-briefcase"></i> 業發處（合作洽詢）
+    <a class="nav-item nav-secondary" href="/training" style="text-decoration:none;color:rgba(255,255,255,0.7)">
+      <i class="ti ti-microphone"></i> 彙整媒體訓練
     </a>
-    <!-- 批次 124：記者名單健檢以前在後台找不到入口（SETUP.md 寫「從後台進入」，其實只能自己記網址）。同分頁開，帶得到登入狀態 -->
-    <a class="nav-item nav-secondary" href="/media.html" style="text-decoration:none;color:rgba(255,255,255,0.7)">
-      <i class="ti ti-users"></i> 記者名單健檢
-    </a>
-    <a class="nav-item" href="/report" style="text-decoration:none;color:rgba(255,255,255,0.7)">
-      <i class="ti ti-chart-histogram"></i> 成效報告
-    </a>
+    <div class="nav-label">記者</div>
+    <button class="nav-item nav-secondary" data-view="contacts" onclick="showView('contacts')">
+      <i class="ti ti-address-book"></i> 記者與邀訪
+    </button>
+    <div class="nav-label">數據</div>
+    <button class="nav-item" data-view="analytics" onclick="showView('analytics')">
+      <i class="ti ti-chart-bar"></i> 問答與成效
+    </button>
     <a class="nav-item" href="/geo" style="text-decoration:none;color:rgba(255,255,255,0.7)">
       <i class="ti ti-radar"></i> AI 能見度
+    </a>
+    <div class="nav-label sep">企業</div>
+    <a class="nav-item nav-secondary" href="/b2b" style="text-decoration:none;color:rgba(255,255,255,0.7)">
+      <i class="ti ti-briefcase"></i> 企業洽案管理
     </a>
     <!-- 手機才出現：把電腦版側邊欄多出來的項目收在這裡（批次 104） -->
     <button class="nav-item nav-more-btn" id="nav-more-btn" onclick="openNavMore(this)" aria-haspopup="true">
@@ -660,7 +665,7 @@ details.adv[open] > summary { border-bottom:1px solid var(--border); margin-bott
     <!-- 問答分析（含最新問答紀錄） -->
     <div id="view-analytics" style="display:none">
       <div class="topbar">
-        <h1><i class="ti ti-chart-bar" style="color:var(--primary)"></i> 問答分析</h1>
+        <h1><i class="ti ti-chart-bar" style="color:var(--primary)"></i> 問答與成效</h1>
         <div class="topbar-actions">
           <select id="analytics-event-filter" class="btn btn-outline" style="font-family:var(--font);cursor:pointer" onchange="loadAnalytics()">
             <option value="">全部活動</option>
@@ -676,6 +681,8 @@ details.adv[open] > summary { border-bottom:1px solid var(--border); margin-bott
           </label>
           <button class="btn btn-primary" onclick="loadAnalytics()"><i class="ti ti-refresh"></i> 更新</button>
           <button class="btn btn-outline qa-only" onclick="exportCSV()"><i class="ti ti-download"></i> 匯出 CSV</button>
+          <!-- 批次 157：成效報告是從這些問答資料做出來的給主管看的報告（有列印、互動簡報），入口放在這裡；同分頁開才帶得到登入狀態 -->
+          <a class="btn btn-outline" href="/report" title="把問答資料做成給主管看的成效報告（可列印、可轉互動簡報）"><i class="ti ti-chart-histogram"></i> 成效報告（給主管）</a>
         </div>
       </div>
       <!-- 批次 150：記者／廠商的問答，和主管媒體訓練的逐題紀錄放在同一頁，用分頁切換（資料在不同的表，統計不會互相混到） -->
@@ -694,8 +701,9 @@ details.adv[open] > summary { border-bottom:1px solid var(--border); margin-bott
     <!-- 全域技術窗口分工（跨活動，不綁定特定場次）-->
     <div id="view-contacts" style="display:none">
       <div class="topbar">
-        <h1><i class="ti ti-address-book" style="color:var(--primary)"></i> 邀訪窗口分工</h1>
+        <h1><i class="ti ti-address-book" style="color:var(--primary)"></i> 記者與邀訪</h1>
         <div class="topbar-actions">
+          <a class="btn btn-outline" href="/media.html" title="檢查記者名單有沒有重複、缺漏、寫錯"><i class="ti ti-users"></i> 記者名單健檢</a>
           <button class="btn btn-outline" onclick="loadContactsDirectory()"><i class="ti ti-refresh"></i> 重整</button>
           <button class="btn btn-primary" onclick="saveContactsDirectory()"><i class="ti ti-device-floppy"></i> 儲存</button>
         </div>
@@ -703,7 +711,7 @@ details.adv[open] > summary { border-bottom:1px solid var(--border); margin-bott
       <div class="content">
         <div class="section-block">
           <div class="section-header">
-            <h2><i class="ti ti-list-details"></i> 全站技術主題聯絡窗口</h2>
+            <h2><i class="ti ti-list-details"></i> 邀訪窗口分工：全站技術主題聯絡窗口</h2>
           </div>
           <div class="form-hint" style="margin-bottom:12px">
             這份清單跟活動無關，記者在 LINE 隨時問「媒體邀訪需求」，只要目前沒有綁定活動（或綁定的那場沒有另外設定專屬窗口），就會看到這份清單的主題按鈕。<br>
@@ -984,7 +992,7 @@ details.adv[open] > summary { border-bottom:1px solid var(--border); margin-bott
 <div id="toast" role="status" aria-live="polite"></div>
 
 <script>
-let state = { password: '', events: [], analytics: null };
+let state = { password: '', events: [], bizEvents: [], analytics: null };
 
 // ── 登入 ─────────────────────────────────────────────────
 async function login() {
@@ -1115,7 +1123,10 @@ async function loadEvents() {
     const res = await authedFetch('/api/events?action=list_admin');
     const data = await res.json();
     if (data.error) throw new Error(data.error);
-    state.events = data.events || [];
+    // 企業場（批次 157）不列在活動管理：統一在「企業洽案管理」。這裡只留記者會與一般活動，卡片、行事曆、數字都只算這些
+    const all = data.events || [];
+    state.events = all.filter(e => !isBusinessCard(e));
+    state.bizEvents = all.filter(isBusinessCard);
     state.line = data.line || {};
     renderEvents();
     updateEventFilter();
@@ -1340,13 +1351,16 @@ function renderEvents() {
   if (state.analytics) (state.analytics.by_event || []).forEach(e => qCount[e.event_id] = e.count);
   const cards = (list) => list.map(ev => eventCardHtml(ev, { count: qCount[ev.id] || 0, today })).join('');
 
+  const bizNote = (state.bizEvents || []).length
+    ? `<div class="biz-note" id="biz-note"><i class="ti ti-briefcase"></i> 企業場（客戶專屬頁、企業說明會、客戶參訪等）共 ${state.bizEvents.length} 場，已移到「<a href="/b2b">企業洽案管理</a>」→「客戶專屬頁」。</div>` : '';
+
   if (!(state.events || []).length) {
-    host.innerHTML = `<div class="ev-empty"><i class="ti ti-calendar-off" style="font-size:40px;display:block;opacity:.3;margin-bottom:8px"></i>
+    host.innerHTML = bizNote + `<div class="ev-empty"><i class="ti ti-calendar-off" style="font-size:40px;display:block;opacity:.3;margin-bottom:8px"></i>
       尚無活動。<br><button class="btn btn-primary" onclick="showCreateModal()"><i class="ti ti-plus"></i> 新增第一場活動</button></div>`;
     return;
   }
 
-  let html = `
+  let html = bizNote + `
     <section class="ev-section" id="sec-upcoming">
       <div class="ev-section-head">
         <h2><i class="ti ti-calendar-event"></i> 接下來要辦 <span class="count">${upcoming.length}</span></h2>
@@ -1429,11 +1443,11 @@ function openCardMore(e, id) {
 // 手機底部選單的「更多」：電腦版側邊欄放得下的次要項目
 function openNavMore(btn) {
   const items = [
-    { icon: 'address-book', label: '邀訪窗口分工', run: () => showView('contacts') },
+    { icon: 'address-book', label: '記者與邀訪', run: () => showView('contacts') },
     { icon: 'microphone', label: '彙整媒體訓練', run: () => { location.href = '/training'; } },
     { icon: 'ticket', label: '活動報名', run: () => { location.href = '/registrations'; } },
-    { icon: 'users', label: '記者名單健檢', run: () => { location.href = '/media.html'; } },
-    { icon: 'briefcase', label: '業發處（合作洽詢）', run: () => { location.href = '/b2b'; } },
+    { icon: 'chart-histogram', label: '成效報告', run: () => { location.href = '/report'; } },
+    { icon: 'briefcase', label: '企業洽案管理', run: () => { location.href = '/b2b'; } },
     { sep: true },
     { icon: 'logout', label: '登出', run: () => logout() }
   ];
@@ -1454,12 +1468,13 @@ document.addEventListener('keydown', e => {
 function updateEventFilter() {
   const sel = document.getElementById('analytics-event-filter');
   const keep = sel.value;
-  const activeIds = new Set(state.events.map(e => e.id));
+  const bizEvents = state.bizEvents || [];
+  const activeIds = new Set([...state.events, ...bizEvents].map(e => e.id));
   // 從分析資料補入已封存但有問答紀錄的活動
   const archivedWithData = (state.analytics?.by_event || [])
     .filter(e => !activeIds.has(e.event_id))
     .map(e => ({ id: e.event_id, name: e.event_name + ' (已封存)' }));
-  const allEvents = [...state.events, ...archivedWithData];
+  const allEvents = [...state.events, ...bizEvents, ...archivedWithData];
   sel.innerHTML = '<option value="">全部活動</option>' +
     allEvents.map(e => `<option value="${escHtml(e.id)}">${escHtml(e.name)}</option>`).join('');
   sel.value = keep;
@@ -2328,9 +2343,10 @@ async function saveEvent() {
     closeModal();
     // 新活動一律從「未發布」開始：記者掃 QR、點連結都還看不到。以前只說「活動已建立！」，
     // 承辦人以為好了，記者會當天掃出來才發現找不到活動（批次 104）。
-    toast(id ? '活動已更新！' : '活動已建立——目前是「未發布」，記者還看不到。補齊必填後，到卡片上按「發布」。', id ? 'ok' : 'notice');
+    const toBiz = isBusinessCard({ event_type });
+    toast(id ? (toBiz ? '已更新。這是企業場，已移到「企業洽案管理」→「客戶專屬頁」。' : '活動已更新！') : toBiz ? '已建立企業場（未發布）。它不在活動管理，請到「企業洽案管理」→「客戶專屬頁」編輯與發布。' : '活動已建立——目前是「未發布」，記者還看不到。補齊必填後，到卡片上按「發布」。', id ? 'ok' : 'notice');
     await loadEvents();
-    if (!id && data.id) flashCard(data.id);
+    if (!id && data.id && !toBiz) flashCard(data.id);
   } catch(e) {
     // 存不進去（網路斷、Sheets 掛了、內容過長）時 modal 刻意不關，
     // 草稿也再推一次——這正是最容易整段蒸發的時刻

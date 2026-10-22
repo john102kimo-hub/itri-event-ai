@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="referrer" content="no-referrer">
 <meta name="robots" content="noindex,nofollow">
-<title>合作洽詢後台｜業發處</title>
+<title>企業洽案管理</title>
 <!--
   業發處的合作洽詢後台（批次 119）。資料層在 lib/b2b.js、API 在 lib/b2b-api.js（api/events.js 的 b2b_ 系列）。
   登入方式：每個人自己的連結（/b2b#k=…，代碼放在 # 後面，不會送到伺服器的存取紀錄或別的網站）；
@@ -66,7 +66,7 @@
 <body>
 
 <header><div class="in">
-  <h1>合作洽詢後台</h1>
+  <h1>企業洽案管理</h1>
   <span class="me" id="me"></span>
   <a id="to-admin" href="/admin" hidden>活動後台</a>
   <a id="line-bind" hidden target="_blank" rel="noopener">綁定 LINE 通知</a>
@@ -76,7 +76,7 @@
 <main class="wrap">
   <section id="login" hidden class="card" style="max-width:420px;margin:40px auto">
     <h2 style="font-size:1.05rem;margin-bottom:8px">請用個人連結登入</h2>
-    <p class="muted small">業發處管理員會給您一條個人連結（/b2b#k=…）。連結就是您的身分，請不要轉傳；外流了請管理員「重發連結」。</p>
+    <p class="muted small">企業洽案管理員會給您一條個人連結（/b2b#k=…）。連結就是您的身分，請不要轉傳；外流了請管理員「重發連結」。</p>
     <p class="muted small">從 LINE 通知點進來卻看到這一頁：請先在這支手機的瀏覽器打開一次您的個人連結，之後點通知就會直接打開那一筆。公用電腦用完請按右上角「登出」。</p>
     <label class="f" for="pwd">或：後台管理員密碼</label>
     <input type="password" id="pwd" autocomplete="current-password">
@@ -145,7 +145,7 @@ async function boot() {
   $('me').textContent = `${ME.me.name}（${ME.roles[ME.me.role] || ME.me.role}${ME.me.unit ? '・' + ME.me.unit : ''}）`;
   const lb = $('line-bind');
   if (ME.me.line_bind_url && !ME.me.line_bound) { lb.href = ME.me.line_bind_url; lb.hidden = false; }
-  const tabs = [['inbox', '收件匣'], ...(ME.admin ? [['members', '成員'], ['settings', '設定'], ['audit', '稽核紀錄']] : [])];
+  const tabs = [['inbox', '收件匣'], ...(ME.admin ? [['pages', '客戶專屬頁'], ['members', '成員'], ['settings', '設定'], ['audit', '稽核紀錄']] : [])];
   $('tabs').innerHTML = tabs.map(([k, t]) => `<button data-t="${k}">${t}</button>`).join('');
   $('tabs').onclick = (e) => { const t = e.target.closest('button'); if (t) go(t.dataset.t); };
   await go('inbox');
@@ -163,6 +163,7 @@ async function go(tab) {
   $('view').innerHTML = '<div class="card muted">載入中…</div>';
   try {
     if (tab === 'inbox') await renderInbox();
+    if (tab === 'pages') await renderPages();
     if (tab === 'members') await renderMembers();
     if (tab === 'settings') await renderSettings();
     if (tab === 'audit') await renderAudit();
@@ -317,6 +318,27 @@ async function loadPageBox(q) {
   catch (e) { box.textContent = '讀取專屬頁失敗：' + e.message; }
 }
 
+/* ── 客戶專屬頁／全部企業場（管理員，批次 157）──────────────────────
+   企業場（企業說明會、技術媒合會、客戶參訪、技術交流會）不再列在 /admin 的「活動管理」，統一在這裡看。
+   包含洽詢單一鍵建的專屬頁，也包含公關在後台直接建的企業場。每一列的編輯連結等於一把鑰匙，列出來會記稽核。 */
+const PAGE_STATUS = { draft: '未發布（客戶打不開）', active: '已發布', ended: '已結束', archived: '已封存' };
+async function renderPages() {
+  const { pages } = await call('GET', 'b2b_pages');
+  $('view').innerHTML = `<div class="card">
+    <h2 style="font-size:1rem;margin-bottom:6px">客戶專屬頁與企業場</h2>
+    <p class="muted small">這裡列出全部的企業場，記者會與一般活動在 /admin 的「活動管理」。新的專屬頁請從收件匣的洽詢單一鍵建立；點「編輯」可以補技術介紹、技轉與合作規範、目前進度，並決定要不要對客戶發布。</p>
+    <table style="margin-top:8px"><thead><tr><th>頁面</th><th>狀態</th><th class="hide">洽詢單</th><th></th></tr></thead>
+    <tbody>${pages.map((p) => `<tr${p.status === 'archived' ? ' style="opacity:.55"' : ''}>
+      <td>${esc(p.name)}<br><span class="muted small">${esc(p.type)}${p.contact ? '・窗口：' + esc(p.contact) : ''}</span></td>
+      <td><span class="pill ${p.status === 'draft' ? 'new' : ''}">${esc(PAGE_STATUS[p.status] || p.status)}</span></td>
+      <td class="hide small">${p.inquiry_id ? `<a href="#" data-q="${esc(p.inquiry_id)}">${esc(p.company || p.inquiry_id)}</a>` : '<span class="muted">（後台直接建立）</span>'}</td>
+      <td style="white-space:nowrap"><a class="btn small" href="${esc(p.edit_url)}" target="_blank" rel="noopener" style="text-decoration:none">編輯</a>
+        <a class="btn outline small" href="${esc(p.page_url)}" target="_blank" rel="noopener" style="text-decoration:none">開啟頁面</a></td></tr>`).join('')
+      || '<tr><td colspan="4" class="muted">還沒有企業場。到收件匣打開一筆洽詢單，按「建立客戶專屬頁」。</td></tr>'}</tbody></table>
+  </div>`;
+  $('view').querySelectorAll('a[data-q]').forEach((a) => { a.onclick = (e) => { e.preventDefault(); go('inbox').then(() => openInquiry(a.dataset.q)); }; });
+}
+
 /* ── 成員（管理員）─────────────────────────────────── */
 async function renderMembers() {
   const { members } = await call('GET', 'b2b_members');
@@ -410,7 +432,7 @@ async function renderSettings() {
 }
 
 /* ── 稽核紀錄（管理員）─────────────────────────────── */
-const ACTION_LABEL = { submit: '新洽詢', view: '查看', update: '修改', member_create: '新增成員', member_update: '修改成員', member_reset_link: '重發連結', line_bind: '綁定 LINE', settings: '改設定', sla_remind: '期限提醒', notify_skipped: '通知沒推（額度用完）' };
+const ACTION_LABEL = { create_page: '建客戶專屬頁', view_page: '查看專屬頁連結', list_pages: '列出全部企業場', submit: '新洽詢', view: '查看', update: '修改', member_create: '新增成員', member_update: '修改成員', member_reset_link: '重發連結', line_bind: '綁定 LINE', settings: '改設定', sla_remind: '期限提醒', notify_skipped: '通知沒推（額度用完）' };
 async function renderAudit() {
   const [{ audit }, { members }] = await Promise.all([call('GET', 'b2b_audit'), call('GET', 'b2b_members')]);
   const nameOf = (id) => (id === 'public' ? '洽詢單' : id === 'system' ? '排程' : id === 'admin' ? '系統管理員' : (members.find((m) => m.id === id)?.name || id));
