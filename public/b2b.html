@@ -206,6 +206,64 @@ async function openLineBind() {
   } catch (e) { $('lb-qr').innerHTML = '<span class="muted">QR 沒載入出來，請用下面第 3 種做法。</span>'; }
 }
 
+/* ── 同仁自己新增洽案（批次 159）──────────────────────────
+   洽案不一定是廠商自己上網填的：展場拿到名片、電話詢問、拜訪客戶，同仁可以自己建。 */
+function startGuide() {
+  return `<div class="card" id="guide" style="background:#f0fdf4;border-color:#bbf7d0">
+    <h2 style="font-size:1rem;margin-bottom:6px">第一次使用？先看這裡</h2>
+    <p class="small" style="margin-bottom:6px">這裡是<b>分給您的合作洽詢</b>。洽案有兩個來源：</p>
+    <ol class="small" style="margin:0 0 8px 18px;line-height:1.7">
+      <li><b>廠商自己填洽詢單</b>：系統依技術領域自動分給負責的同仁，有新洽詢會通知您（先按右上角「綁定 LINE 通知」才收得到）。廠商填表的網址：<code>${esc(location.origin)}/inquiry</code>（可放名片、簡報最後一頁）。</li>
+      <li><b>您自己新增</b>：展場拿到名片、電話詢問、拜訪客戶，按「<b>＋ 新增洽案</b>」，填對方資料就好，約 1 分鐘。</li>
+    </ol>
+    <p class="small">每筆洽案都有<b>回覆期限</b>，聯繫之後記得把狀態改成「已聯繫」；談到要做專屬網頁給客戶，打開那筆按「建立客戶專屬頁」。</p>
+  </div>`;
+}
+async function openNewInquiry() {
+  const host = $('detail') || $('view');
+  let topics = [];
+  try { topics = (await call('GET', 'b2b_public_config')).topics || []; } catch { /* 沒有選項就讓人自己填 */ }
+  host.innerHTML = `<div class="card" id="nq-card">
+    <h2 style="font-size:1.05rem;margin-bottom:4px">新增洽案</h2>
+    <p class="muted small">對方是你親自接觸到的（遞名片、電話、拜訪）才用這個；廠商自己上網填的會自動進來，不用另外建。</p>
+    <div class="grid2">
+      <div><label class="f" for="nq-company">公司／單位 *</label><input type="text" id="nq-company" maxlength="60"></div>
+      <div><label class="f" for="nq-name">聯絡人 *</label><input type="text" id="nq-name" maxlength="40"></div>
+      <div><label class="f" for="nq-title">職稱</label><input type="text" id="nq-title" maxlength="40"></div>
+      <div><label class="f" for="nq-topic">技術領域</label><input type="text" id="nq-topic" maxlength="40" list="nq-topics"><datalist id="nq-topics">${topics.map((t) => `<option value="${esc(t)}">`).join('')}</datalist></div>
+      <div><label class="f" for="nq-email">Email</label><input type="email" id="nq-email" maxlength="100"></div>
+      <div><label class="f" for="nq-phone">電話</label><input type="text" id="nq-phone" maxlength="40"></div>
+    </div>
+    <p class="muted small" style="margin-top:2px">Email 與電話至少填一項（名片上有哪個填哪個）。</p>
+    <label class="f" for="nq-need">對方的需求／這次接觸的情形 *</label>
+    <textarea id="nq-need" placeholder="例：展場來看先進封裝攤位，想了解散熱模組能不能導入他們的產線，約下週電話細談"></textarea>
+    <div class="grid2">
+      <div><label class="f" for="nq-status">目前狀態</label><select id="nq-status"><option value="contacted">已聯繫過（剛接觸到對方）</option><option value="new">待聯繫（之後再主動聯絡）</option></select></div>
+      ${ME.admin ? `<div><label class="f" for="nq-owner">承辦人</label><select id="nq-owner"><option value="">依技術領域自動分派</option>${ME.members.map((m) => `<option value="${esc(m.id)}">${esc(m.name)}</option>`).join('')}</select></div>` : ''}
+    </div>
+    <label class="row" style="margin-top:10px;gap:8px;align-items:flex-start"><input type="checkbox" id="nq-ok" style="width:auto;margin-top:3px"><span class="small">我已確認：<b>對方知道並同意工研院與他聯絡</b>（例如對方主動遞名片，或已口頭同意）。</span></label>
+    <div class="row" style="margin-top:12px"><button class="btn" id="nq-save" type="button">新增</button><button class="btn outline" id="nq-cancel" type="button">取消</button><span class="muted small">${ME.admin ? '' : '新增後由您自己承辦。'}每次新增都會記在稽核紀錄。</span></div>
+    <div class="err" id="nq-err"></div>
+  </div>`;
+  $('nq-card').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  $('nq-cancel').onclick = () => { host.innerHTML = ''; };
+  $('nq-save').onclick = async () => {
+    $('nq-err').textContent = '';
+    $('nq-save').disabled = true;
+    try {
+      const r = await call('POST', 'b2b_inquiry_create', {
+        company: $('nq-company').value, name: $('nq-name').value, title: $('nq-title').value, topic: $('nq-topic').value,
+        email: $('nq-email').value, phone: $('nq-phone').value, need: $('nq-need').value, status: $('nq-status').value,
+        owner: $('nq-owner') ? $('nq-owner').value : '', contact_ok: $('nq-ok').checked
+      });
+      toast('已新增洽案');
+      FILTER = 'all';
+      await renderInbox();
+      openInquiry(r.id);
+    } catch (e) { $('nq-err').textContent = e.message; $('nq-save').disabled = false; }
+  };
+}
+
 /* ── 收件匣 ─────────────────────────────────────────── */
 const OPEN_SET = new Set(['new', 'contacted', 'proposing']);
 // 首次設定引導（批次 156）：管理員進來，廠商還送不出表單就在收件匣最上面說清楚缺什麼，並給一鍵開通。
@@ -252,6 +310,7 @@ async function renderInbox() {
           <option value="open">處理中</option><option value="all">全部</option>
           ${Object.entries(ME.statuses).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join('')}
         </select>
+        <button class="btn small" id="new-q" type="button" style="margin-left:auto">＋ 新增洽案</button>
         <span class="muted small">${rows.length} 筆${late ? `・<b style="color:var(--danger)">${late} 筆過期未聯繫</b>` : ''}</span>
       </div>
       <table style="margin-top:8px"><thead><tr><th>編號</th><th>公司</th><th class="hide">領域</th><th>承辦</th><th>期限</th><th>狀態</th></tr></thead>
@@ -262,9 +321,11 @@ async function renderInbox() {
         <td>${q.owner_name ? esc(q.owner_name) : '<span class="pill late">未分派</span>'}</td>
         <td>${esc(day(q.due_at))}${q.overdue ? '<br><span class="pill late">過期</span>' : ''}</td>
         <td><span class="pill ${q.status === 'new' ? 'new' : q.status === 'won' ? 'won' : ''}">${esc(ME.statuses[q.status] || q.status)}</span></td></tr>`).join('')
-        || `<tr><td colspan="6" class="muted">${INBOX.length ? '沒有符合的洽詢' : '還沒有洽詢。廠商的洽詢單網址：' + esc(location.origin) + '/inquiry（可以放在名片、簡報最後一頁）'}</td></tr>`}</tbody></table>
+        || `<tr><td colspan="6" class="muted">${INBOX.length ? '沒有符合的洽詢' : '目前還沒有洽詢——看下面的說明，或直接按右上角「＋ 新增洽案」。'}</td></tr>`}</tbody></table>
     </div>
+    ${INBOX.length ? '' : startGuide()}
     <div id="detail"></div>`;
+  $('new-q').onclick = () => openNewInquiry();
   if ($('setup-go')) $('setup-go').onclick = async () => { try { await setupGo(); } catch (e) { toast(e.message); } };
   $('flt').value = FILTER;
   $('flt').onchange = (e) => { FILTER = e.target.value; renderInbox(); };
@@ -288,7 +349,7 @@ async function openInquiry(id) {
         ${q.overdue ? '<span class="pill late">過期未聯繫</span>' : ''}</div>
       <dl class="kv" style="margin-top:8px">
         <dt>聯絡人</dt><dd>${esc(q.name)}${q.title ? '・' + esc(q.title) : ''}</dd>
-        <dt>Email</dt><dd><a href="mailto:${esc(q.email)}">${esc(q.email)}</a></dd>
+        <dt>Email</dt><dd>${q.email ? `<a href="mailto:${esc(q.email)}">${esc(q.email)}</a>` : '—'}</dd>
         <dt>電話</dt><dd>${q.phone ? (phoneHref(q.phone) ? `<a href="${esc(phoneHref(q.phone))}">${esc(q.phone)}</a>` : esc(q.phone)) : '—'}</dd>
         <dt>技術領域</dt><dd>${esc(q.topic || '—')}</dd>
         <dt>需求</dt><dd>${esc(q.need)}</dd>
@@ -468,7 +529,7 @@ async function renderSettings() {
 }
 
 /* ── 稽核紀錄（管理員）─────────────────────────────── */
-const ACTION_LABEL = { create_page: '建客戶專屬頁', view_page: '查看專屬頁連結', list_pages: '列出全部企業場', submit: '新洽詢', view: '查看', update: '修改', member_create: '新增成員', member_update: '修改成員', member_reset_link: '重發連結', line_bind: '綁定 LINE', settings: '改設定', sla_remind: '期限提醒', notify_skipped: '通知沒推（額度用完）' };
+const ACTION_LABEL = { create: '同仁新增洽案', create_page: '建客戶專屬頁', view_page: '查看專屬頁連結', list_pages: '列出全部企業場', submit: '新洽詢', view: '查看', update: '修改', member_create: '新增成員', member_update: '修改成員', member_reset_link: '重發連結', line_bind: '綁定 LINE', settings: '改設定', sla_remind: '期限提醒', notify_skipped: '通知沒推（額度用完）' };
 async function renderAudit() {
   const [{ audit }, { members }] = await Promise.all([call('GET', 'b2b_audit'), call('GET', 'b2b_members')]);
   const nameOf = (id) => (id === 'public' ? '洽詢單' : id === 'system' ? '排程' : id === 'admin' ? '系統管理員' : (members.find((m) => m.id === id)?.name || id));
