@@ -163,6 +163,7 @@ export function reset() {
   state.staffRouteForce = null; // 批次 115：同上，職員那一支
   staffModelCalls = 0;
   state.routeForce = null; // 批次 115：(text) => 路由結果，覆蓋假模型的判斷，用來重現「正式環境的模型判成別的意圖」
+  state.staffSheetFail = null; // 批次 161：'read'／'write'＝模擬 line_staff 分頁讀不到／寫不進去
   state.anthropicFail = null; // 批次 85：'auth'＝金鑰失效（401）、'overload'＝過載（529），見 installFetchStub()
   state.noDataKeyword = ''; // 非空＝模擬「這場答不出來」，見 installFetchStub() 的問答分支
   state.newsDigestText = ''; // 非空＝模擬「官網補查那支模型」吐出這段話（批次 44）
@@ -201,7 +202,10 @@ export const sheets = {
     await lag();
     if (range.startsWith('events!')) return state.events.map(r => [...r]);
     if (range.startsWith('line_users!')) return bindingRows();
-    if (range.startsWith('line_staff!')) return state.staff.map(r => [...r]);
+    if (range.startsWith('line_staff!')) {
+      if (state.staffSheetFail === 'read') throw new Error('模擬：line_staff 讀取失敗（配額或網路）'); // 批次 161
+      return state.staff.map(r => [...r]);
+    }
     if (range.startsWith('contacts_directory!')) return state.contactsDirectory ? [[state.contactsDirectory]] : [];
     if (range.startsWith('bot_memory!')) return state.memories.map(r => [...r]);
     if (range.startsWith('qa_log!')) return (state.qaLog || []).map(r => [...r]);          // 批次 139：待教清單掃的問答紀錄
@@ -221,7 +225,10 @@ export const sheets = {
         groupTurns: r[9] || ''
       });
     }
-    if (range.startsWith('line_staff!')) state.staff.push(...rows.map(r => [...r]));
+    if (range.startsWith('line_staff!')) {
+      if (state.staffSheetFail === 'write') throw new Error('模擬：line_staff 寫入失敗'); // 批次 161
+      state.staff.push(...rows.map(r => [...r]));
+    }
     if (range.startsWith('bot_memory!')) state.memories.push(...rows.map(r => [...r]));
     if (range.startsWith('teach_queue!')) (state.teachQueue ||= []).push(...rows.map(r => [...r]));
     if (range.startsWith('events!')) state.events.push(...rows.map(r => [...r]));
@@ -258,6 +265,7 @@ export const sheets = {
     }
     const staffM = range.match(/^line_staff!([A-F])(\d+)(?::([A-F])(\d+))?$/);
     if (staffM) {
+      if (state.staffSheetFail === 'write') throw new Error('模擬：line_staff 寫入失敗'); // 批次 161
       const row = state.staff[Number(staffM[2]) - 2];
       if (row) values[0].forEach((v, i) => { row[staffM[1].charCodeAt(0) - 65 + i] = v; });
       return;
