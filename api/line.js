@@ -53,7 +53,7 @@ import { listOpenCampaigns, parseRegBindText, parseRegBindCheck, welcomeButtonLa
 import { autoSyncRegistrationMenu } from '../lib/richmenu-sync.js';
 import { runTeachQueueCron, parseQueueCommand } from '../lib/teach-queue.js';
 import {
-  isPasscodeMatch, isColleaguePasscodeMatch, isStaffAuthenticated, isColleagueAuthenticated, authenticateStaff, COLLEAGUE
+  isPasscodeMatch, isColleaguePasscodeMatch, isStaffAuthenticated, isColleagueAuthenticated, authenticateStaff, COLLEAGUE, isCreateEventAsk, internalModeEnabled
 } from '../lib/staff.js';
 import { isBusinessEvent } from '../lib/audience.js';
 import { parseB2BBind, handleB2BBind, isUnbindAsk, handleB2BUnbind, isPartnershipAsk, handlePartnershipAsk } from '../lib/b2b-line.js';
@@ -314,6 +314,18 @@ async function handleEvent(ev) {
   if (await isColleagueAuthenticated(userId)) {
     markColleague();
     await handleColleagueMessage(replyToken, userId, text);
+    return;
+  }
+  // 「新增活動」但還不是同仁／職員（批次 162）：忘了進入、以為進入了（退出過、登入沒成功、被換過密語）、
+  // 或選單還是舊的。提醒他先進入同仁模式，不能掉進記者問答。字面比對、不問模型（CLAUDE.md 第 2 條）。
+  // 兩組密語都沒設定時不攔——那時候沒有「進入」這條路，照原本的記者流程走。
+  if (isCreateEventAsk(text) && internalModeEnabled()) {
+    console.log(`[line] 非同仁打新增活動 → 提醒先進入同仁模式 user=${userId}`);
+    await replyOrPush(replyToken, userId,
+      '「新增活動」要先進入同仁模式才能用，您現在還沒有進入 🙏\n\n' +
+      '如果您是工研院同仁：請先輸入同仁模式的密語（不知道密語請問公關窗口），看到「同仁模式已啟用」之後，再傳一次「新增活動」。' +
+      '以為已經進入了也一樣，再輸入一次密語就可以。\n\n' +
+      '如果您是想了解活動，直接告訴我活動名稱或想問的內容就好。');
     return;
   }
   // 「企業合作洽詢」只回洽詢單網址（批次 119）。排在職員模式之後：職員怎麼講都照原本的職員模式走，不被業發處攔走；
