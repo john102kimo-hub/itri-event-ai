@@ -96,6 +96,14 @@ export { toTraditionalTW };
 export { stripMarkdownForLine, tidyLineLayout } from '../lib/line-format.js';
 export { extractNoDataKeyword, guessNoDataKeyword } from '../lib/line-nodata.js';
 
+// 密語對了、但名單（line_staff）寫不進去（批次 161）。這時候不能回「已啟用」也不能換選單：
+// 名單裡沒有他，下一則訊息就會被當成記者。老實說沒成功，請他稍後再傳一次密語。
+async function replyLoginFailed(replyToken, userId) {
+  console.error(`[line] 密語登入失敗：line_staff 寫入失敗 user=${userId}`);
+  await replyOrPush(replyToken, userId,
+    '登入沒有成功 🙏 我這邊暫時存不了登入狀態，所以還沒有幫您開啟。\n\n請過一分鐘再傳一次密語；如果一直這樣，請通知管理員檢查試算表的 line_staff 分頁。');
+}
+
 // ── 逐一事件處理 ─────────────────────────────────────────────────────
 async function handleEvent(ev) {
   console.log(`[line] 收到事件 type=${ev.type} msgType=${ev.message?.type || '-'} user=${ev.source?.userId || '-'}`);
@@ -236,7 +244,8 @@ async function handleEvent(ev) {
       await replyOrPush(replyToken, userId, '您已經是職員模式了，直接問我就可以，不用再輸入一次密語。', STAFF_HOME_CHIPS);
       return;
     }
-    const { displayName } = await authenticateStaff(userId);
+    const { displayName, ok } = await authenticateStaff(userId);
+    if (!ok) return replyLoginFailed(replyToken, userId);
     await applyStaffMenu(userId); // 下方選單換成職員版
     console.log(`[line] 新職員登入 user=${userId} name=${displayName || '(無)'}`);
     // 批次 125：「LINE ID／LINE_ADMIN_USER_ID 環境變數」那段是給管理員設定通知用的，以前每一位同仁登入都看到
@@ -261,7 +270,8 @@ async function handleEvent(ev) {
       await replyOrPush(replyToken, userId, '您已經是同仁模式了，直接用下方選單就可以，不用再輸入一次密語。', COLLEAGUE_HOME_CHIPS);
       return;
     }
-    const { displayName } = await authenticateStaff(userId, { role: COLLEAGUE });
+    const { displayName, ok } = await authenticateStaff(userId, { role: COLLEAGUE });
+    if (!ok) return replyLoginFailed(replyToken, userId);
     await applyColleagueMenu(userId); // 下方選單換成同仁版（三格）
     console.log(`[line] 新同仁登入 user=${userId} name=${displayName || '(無)'}`);
     const adminSetup = process.env.LINE_ADMIN_USER_ID ? ''
