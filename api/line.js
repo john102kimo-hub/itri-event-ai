@@ -302,18 +302,20 @@ async function handleEvent(ev) {
     await handleStaffMessage(replyToken, userId, text);
     return;
   }
-  // 待教清單的指令（批次 145）：每天的提醒推給 LINE_ADMIN_USER_ID，但「教 N：」「略過 N」「待教清單」只有職員模式認得。
-  // 管理員還沒用職員密語登入（或退出過）時，回這幾句以前會被當成記者的問題送去問模型——現在告訴他先登入。
-  // 只對管理員本人；別人打這幾句照舊是一般訊息（不能讓記者知道有這組指令，更不能讓他們用）。
-  if (process.env.LINE_ADMIN_USER_ID && userId === process.env.LINE_ADMIN_USER_ID && parseQueueCommand(text)) {
-    await replyOrPush(replyToken, userId,
-      '要先登入職員模式才能用待教清單 🙏\n\n在這裡打一次職員密語，登入後再回「待教清單」或「教 N：答案」就可以了。');
-    return;
-  }
   // 同仁模式（批次 138）：整段接管，只走 lib/line-colleague-mode.js 那份白名單
   if (await isColleagueAuthenticated(userId)) {
     markColleague();
     await handleColleagueMessage(replyToken, userId, text);
+    return;
+  }
+  // 待教清單的指令（批次 145）：每天的提醒推給 LINE_ADMIN_USER_ID，但「教 N：」「略過 N」「待教清單」只有職員模式認得。
+  // 管理員還沒用職員密語登入（或退出過）時，回這幾句以前會被當成記者的問題送去問模型——現在告訴他先登入。
+  // 只對管理員本人；別人打這幾句照舊是一般訊息（不能讓記者知道有這組指令，更不能讓他們用）。
+  // ⚠️ 一定排在同仁判斷「之後」（批次 163）：管理員自己也可能是同仁模式（朱朱就是），parseQueueCommand 又把
+  // 純數字當成「選第 N 題」——排在前面的話，同仁模式裡打「123」當新活動名稱會被這段吃掉、回「要先登入職員模式」。
+  if (process.env.LINE_ADMIN_USER_ID && userId === process.env.LINE_ADMIN_USER_ID && parseQueueCommand(text)) {
+    await replyOrPush(replyToken, userId,
+      '要先登入職員模式才能用待教清單 🙏\n\n在這裡打一次職員密語，登入後再回「待教清單」或「教 N：答案」就可以了。');
     return;
   }
   // 「新增活動」但還不是同仁／職員（批次 162）：忘了進入、以為進入了（退出過、登入沒成功、被換過密語）、
