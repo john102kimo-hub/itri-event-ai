@@ -8,10 +8,10 @@
 // 輸出（每張各一份）：*.html（來源）、*.pdf（印刷用，向量 QR）、*.png（預覽、傳 LINE 用）。
 // 開發機要有 Chromium＋Playwright（見 README.md）。
 //
-// QR 放活動網頁連結（`https://{網域}/event?id={活動代碼}`）：手機相機、LINE 都掃得開，網頁上本來就有
-// 「也可以用 LINE 問米亞」（會帶入這一場），記者想用 LINE 再點一下。
+// QR 放活動網頁連結（`https://{網域}/event?id={活動代碼}`），掃了開的是網頁版 AI 問答，所以印刷品上的說明文字
+// 一律講「AI 問答頁」、不提 LINE（朱朱要求：點進去不是 LINE，旁邊的字就不能寫 LINE）。
 // 想讓 QR 直接開 LINE 的話，--url 換成後台「LINE QR」彈窗給的網址（lib/line-link.js lineBindUrl()），
-// 但那種連結在沒有 LINE 的手機上掃不開，步驟文字也要跟著改。
+// 步驟文字（build.mjs 裡的 .steps 與 .how）也要跟著改成「掃描 → 按傳送」。
 // 輸出的 PDF／PNG 不進 git（.gitignore 的 assets/print/），印完或傳完就丟，要改場次重跑即可。
 import fs from 'node:fs';
 import path from 'node:path';
@@ -107,9 +107,9 @@ h1 em { font-style: normal; color: var(--green); }
   <div class="scan">掃描 QR code</div>
   <div class="card">${QR}</div>
   <div class="steps">
-    <div class="step"><i>1</i><div>用手機掃描<span>相機或 LINE 都可以</span></div></div>
-    <div class="step"><i>2</i><div>開啟活動頁<span>直接輸入問題問米亞</span></div></div>
-    <div class="step"><i>3</i><div>想用 LINE 也行<span>頁面內有 LINE 入口</span></div></div>
+    <div class="step"><i>1</i><div>用手機掃描<span>開啟相機對準即可</span></div></div>
+    <div class="step"><i>2</i><div>進入 AI 問答頁<span>先留下媒體與姓名</span></div></div>
+    <div class="step"><i>3</i><div>直接輸入問題<span>米亞馬上回答</span></div></div>
   </div>
   <div class="foot">
     <img src="${MIA}" alt="">
@@ -153,7 +153,7 @@ const cover = `<!doctype html><html lang="zh-TW"><head><meta charset="utf-8"><ti
     <div>
       <h2>不想翻紙本？<br>掃描後<em>直接問米亞</em></h2>
       <ul><li>新聞稿重點與數據</li><li>講者、議程、活動資訊</li><li>新聞照片與下載連結</li></ul>
-      <div class="how">掃描後開啟活動頁即可提問，也可轉到 LINE</div>
+      <div class="how">用手機相機掃描，開啟 AI 問答頁即可提問</div>
     </div>
     <img class="mia" src="${MIA}" alt="">
   </div>
