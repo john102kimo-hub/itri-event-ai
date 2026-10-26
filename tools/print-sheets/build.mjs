@@ -82,14 +82,14 @@ body { font-family: "NotoTC", "WenQuanYi Zen Hei", sans-serif; font-weight: 700;
 const standee = `<!doctype html><html lang="zh-TW"><head><meta charset="utf-8"><title>報到立牌 A4</title><style>${BASE_CSS}
 .top { position: absolute; left: 16mm; right: 16mm; top: 14mm; display: flex; align-items: center; justify-content: space-between; }
 .chip { background: var(--green); color: #fff; font-size: 5.2mm; padding: 2.4mm 6mm; border-radius: 99mm; letter-spacing: .5mm; }
-.hero { position: absolute; left: 16mm; right: 16mm; top: 38mm; }
+.hero { position: absolute; left: 16mm; right: 16mm; top: 36mm; }
 .eyebrow { color: var(--green); font-size: 6mm; letter-spacing: 1mm; }
-h1 { font-size: 17.5mm; line-height: 1.12; margin-top: 3mm; letter-spacing: -.3mm; }
+h1 { font-size: 14.5mm; line-height: 1.12; margin-top: 0; letter-spacing: -.3mm; }
 h1 em { font-style: normal; color: var(--green); }
-.lead { margin-top: 5mm; font-size: 6.4mm; color: var(--mute); line-height: 1.5; }
-.card { position: absolute; left: 50%; top: 128mm; transform: translateX(-50%); width: 100mm; padding: 6mm; border: 1.6mm solid var(--green); border-radius: 9mm; background: #fff; }
-.scan { position: absolute; left: 50%; top: 123.5mm; transform: translateX(-50%); background: #06C755; color: #fff; font-size: 6mm; padding: 1.8mm 7mm; border-radius: 99mm; white-space: nowrap; z-index: 2; letter-spacing: .4mm; }
-.steps { position: absolute; left: 16mm; right: 16mm; top: 238mm; display: flex; gap: 6mm; }
+.lead { margin-top: 4mm; font-size: 5.4mm; color: var(--mute); line-height: 1.5; white-space: nowrap; }
+.card { position: absolute; left: 50%; top: 88mm; transform: translateX(-50%); width: 144mm; padding: 2mm; border: 1.6mm solid var(--green); border-radius: 9mm; background: #fff; }
+.scan { position: absolute; left: 50%; top: 83.5mm; transform: translateX(-50%); background: #06C755; color: #fff; font-size: 6mm; padding: 1.8mm 7mm; border-radius: 99mm; white-space: nowrap; z-index: 2; letter-spacing: .4mm; }
+.steps { position: absolute; left: 16mm; right: 16mm; top: 240mm; display: flex; gap: 6mm; }
 .step { flex: 1; display: flex; align-items: flex-start; gap: 3mm; font-size: 4.7mm; line-height: 1.4; }
 .step i { flex: none; width: 9mm; height: 9mm; border-radius: 50%; background: var(--ink); color: #fff; font-style: normal; font-size: 5.4mm; display: flex; align-items: center; justify-content: center; }
 .step span { display: block; font-size: 3.7mm; color: var(--mute); margin-top: .8mm; }
@@ -101,9 +101,8 @@ h1 em { font-style: normal; color: var(--green); }
 </style></head><body><div class="page">
   <div class="top">${LOGO}<div class="chip">記者報到</div></div>
   <div class="hero">
-    <div class="eyebrow">SCAN ＆ ASK</div>
     <h1>掃描 QR code<br><em>直接問</em> AI 新聞助理</h1>
-    <p class="lead">新聞稿重點、講者、議程、新聞照片，<br>掃描後直接問米亞，馬上回答。</p>
+    <p class="lead">新聞稿重點、講者、議程、新聞照片，掃描後直接問米亞。</p>
   </div>
   <div class="scan">掃描 QR code</div>
   <div class="card">${QR}</div>
