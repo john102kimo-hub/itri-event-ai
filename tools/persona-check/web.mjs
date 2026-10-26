@@ -32,6 +32,7 @@ const { book, books } = S;
 // ── 日期（相對今天，不寫死）──
 const iso = (d) => new Date(Date.now() + d * 86400000).toLocaleDateString('sv-SE', { timeZone: 'Asia/Taipei' });
 const YEAR = iso(0).slice(0, 4);
+const ts = (d) => new Date(Date.now() + d * 86400000).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' });
 
 // ── 假資料 ──────────────────────────────────────────────────────────────
 const EV_HEAD = ['id', 'name', 'color', 'knowledge_base', 'status', 'created_at', 'chips', 'images', 'greeting', 'organizer', 'edit_code', 'event_time', 'venue', 'event_type', 'press_contact', 'contacts', 'invite_letter', 'invite_letter_chips'];
@@ -45,7 +46,12 @@ book.media_roster = [['id', 'name', 'outlet', 'beat', 'email', 'phone', 'invited
   ['R2', '張大同', '中央社', '', 'tung@cna.com.tw', '', '1', '0', '0', iso(-500), 'active', '', '', ''],
 ];
 book.media_settings = [['key', 'value'], ['staff_code', 'staffcode1']];
-book.qa_log = [['time', 'event_id', 'event_name', 'media', 'question', 'answer', 'deleted', 'source', 'name']];
+book.qa_log = [['time', 'event_id', 'event_name', 'media', 'question', 'answer', 'deleted', 'source', 'name'],
+  // 已經辦完的那場有真的記者問答；活動前兩天同仁打的 hi 不算成效（批次 170：主管快看的題數要跟首頁一樣）
+  [ts(-6), 'semi', '半導體先進封裝技術發表會', 'hi', '測試', '好的', '', 'line', ''],
+  [ts(-4), 'semi', '半導體先進封裝技術發表會', '中央社', '封裝良率多少？', '九成以上。', '', 'line', '張大同'],
+  [ts(-3), 'semi', '半導體先進封裝技術發表會', '經濟日報', '量產時程？', '明年第二季。', '', 'web', '林小美'],
+];
 
 // ── 假的 Anthropic ─────────────────────────────────────────────────────
 const ai = { calls: [] };
@@ -266,7 +272,19 @@ console.log('\n── 主管：後台與米亞助理 ──');
 
   await page.click('#mia-fab');
   await page.waitForSelector('#mia-panel.open');
-  check('點米亞 → 對話框打開，有開場白與建議問題', (await page.locator('.mia-chips button').count()) === 4);
+  check('點米亞 → 對話框打開：三顆大按鈕（主管快看）＋三個常用問題；輸入框上方的小按鈕列還不出現', (await page.locator('.mia-big button').count()) === 3 && (await page.locator('.mia-chips button').count()) === 3 && !(await page.isVisible('#mia-quick')));
+  // 主管快看（批次 170）：按了直接出程式算好的圖卡，不經過 AI
+  await page.click('.mia-big button:has-text("一分鐘看成效")');
+  await page.waitForSelector('.mia-brief');
+  const kpiCard = (await page.locator('.mia-brief').last().textContent()) || '';
+  const homeQa = (await page.textContent('#stat-total-qa')) || '';
+  check('★ 按「一分鐘看成效」→ 成效圖卡（數字方塊、各場長條、打開互動簡報），題數跟後台首頁的「記者問答」同一個數字', /成效一覽/.test(kpiCard) && /記者提問/.test(kpiCard) && kpiCard.includes(homeQa.trim() + '題') && /打開完整互動簡報/.test(kpiCard), kpiCard + ' / 首頁 ' + homeQa);
+  check('　 對話開始後，輸入框上方出現三顆小按鈕', await page.isVisible('#mia-quick') && (await page.locator('#mia-quick button').count()) === 3);
+  await page.click('#mia-quick button[title="活動近況"]');
+  await page.waitForFunction(() => document.querySelectorAll('.mia-brief').length >= 2);
+  const evCard = (await page.locator('.mia-brief').last().textContent()) || '';
+  check('按「📅 活動近況」→ 列出接下來的活動與準備狀況', /活動近況/.test(evCard) && /接下來/.test(evCard), evCard);
+  await shot(page, 'boss-2b-brief.png');
   const ask = async (text) => {
     const before = await page.locator('#mia-msgs .mia-m').count();
     await page.fill('#mia-input', text); await page.press('#mia-input', 'Enter');

@@ -223,7 +223,8 @@ export default async function handler(req, res) {
     // 不再用「連續中文 2–8 字」貪婪切詞——貪婪切詞切出的是斷句碎片，
     // 兩位記者問同一件事只要措辭差一個字就會被算成兩個不同關鍵字，熱點永遠浮不出來。
     // 詞表與統計在 lib/qa-topics.js（計畫成效唯讀頁也用同一份，批次 151）
-    const topKeywords = countTopics(filtered.map(({ r }) => r[4]), { limit: 20 });
+    // 成效口徑（report=1）不算企業場的提問，跟互動簡報的「記者最常問」一致（批次 170：後台米亞的成效圖卡用這一份）
+    const topKeywords = countTopics((scope ? outletRows : filtered).map(({ r }) => r[4]), { limit: 20 });
 
     // 每小時分佈
     // ⚠️ qa_log 的時間戳是 toLocaleString('zh-TW') 的字串，長這樣：「2026/8/27 下午9:57:22」
@@ -262,6 +263,16 @@ export default async function handler(req, res) {
     // 有媒體名稱的筆數／全部筆數：成效報告的「媒體填寫率」
     const filledRows = outletRows.filter(({ r }) => !isNotMedia(r[3]) && splitMedia(r[3]).outlet).length;
 
+    // 成效口徑的累積數字（批次 170）：後台首頁的「記者問答」「服務媒體」要跟成效報告、米亞的成效卡講同一個數字
+    // （批次 104 的原則：同一份資料不能三個畫面三個數字）。同一份資料在記憶體裡多篩一次，不多讀試算表。
+    // 「今日問答」與各場題數照舊看全部：活動當天盯場，記者在 LINE 問一場兩個月前的舊活動，也是真的提問。
+    let reportScopeTotals = null;
+    if (!scope && dropTest && !event_id) {
+      const rs = buildReportScope(eventRows);
+      const rr = valid.filter(({ r }) => rs.includesQa(r[1], r[0]) && !businessIds.has(r[1]));
+      reportScopeTotals = { total: rr.length, media_total: groupOutlets(rr.map(({ r }) => r[3])).length, window_days: REPORT_WINDOW_DAYS };
+    }
+
     const base = {
       total: filtered.length,
       today_count: todayCount,
@@ -273,7 +284,8 @@ export default async function handler(req, res) {
       top_keywords: topKeywords,
       top_media: topMedia,
       hourly_distribution: hourly,
-      ...(scope ? { report_window_days: REPORT_WINDOW_DAYS } : {})
+      ...(scope ? { report_window_days: REPORT_WINDOW_DAYS } : {}),
+      ...(reportScopeTotals ? { report_scope: reportScopeTotals } : {})
     };
     // 儀表板只要數字：不回逐筆（批次 104）。同樣 120 筆，完整版 200KB、摘要版 < 3KB。
     if (summaryOnly) return res.status(200).json(base);

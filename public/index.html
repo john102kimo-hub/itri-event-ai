@@ -613,7 +613,7 @@ details.adv[open] > summary { border-bottom:1px solid var(--border); margin-bott
             <div class="stat-icon"><i class="ti ti-message-dots"></i></div>
             <div class="stat-label">記者問答</div>
             <div class="stat-value" id="stat-total-qa">—</div>
-            <div class="stat-note">不含測試與同仁自己問的</div>
+            <div class="stat-note">跟成效報告同一個數字（不含測試與活動前的準備）</div>
           </div>
           <div class="stat-card">
             <div class="stat-icon"><i class="ti ti-building-newspaper"></i></div>
@@ -1164,9 +1164,11 @@ function updateEventCount() {
 
 function updateStats(data) {
   updateEventCount();
-  document.getElementById('stat-total-qa').textContent = data.total || 0;
+  // 累積的兩個數字用成效口徑（批次 170）：跟成效報告、米亞的成效卡同一個數字；舊版後端沒有 report_scope 就照舊
+  const rs = data.report_scope || null;
+  document.getElementById('stat-total-qa').textContent = (rs ? rs.total : data.total) || 0;
   // 服務媒體家數由後端算（同一家併在一起、不算「未提供」「群組提問」「內部職員」，見 lib/media-name.js）
-  document.getElementById('stat-media').textContent = data.media_total ?? 0;
+  document.getElementById('stat-media').textContent = (rs ? rs.media_total : data.media_total) ?? 0;
   // 後端對全量資料算好的今日筆數 —— 之前是在最近 50 筆裡數今天的，記者會當天問答一旦破 50
   // 就會低估，而那正是最需要盯著這個數字的時候。
   document.getElementById('stat-today').textContent = data.today_count ?? 0;
