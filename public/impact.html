@@ -108,7 +108,7 @@ function render(v) {
   kids.push(ai);
 
   kids.push(el('div', { class: 'note' },
-    '口徑說明：媒體露出來自監測公司提供的露出清單；提問次數是記者透過本場 AI 新聞助理（網頁與 LINE）查詢的次數，不含測試資料與工研院同仁自己的提問；提問者與提問原文不在這個頁面。',
+    '口徑說明：媒體露出來自監測公司提供的露出清單；提問次數是記者透過本場 AI 新聞助理（網頁與 LINE）查詢的次數，只計活動當天起 7 天內，不含活動前的準備測試、測試資料與工研院同仁自己的提問；提問者與提問原文不在這個頁面。',
     el('br'), `資料更新時間：${(v.generated_at || '').replace('T', ' ').slice(0, 16)}（約每分鐘更新一次）`));
   kids.push(el('div', { class: 'actions' }, el('button', { type: 'button', onclick: 'window.print()', text: '列印／存成 PDF' })));
   $app.replaceChildren(...kids);

@@ -59,6 +59,8 @@
 .rd-cover .rd-k { position: absolute; left: 96px; top: 150px; font-size: 38px; font-weight: 900; letter-spacing: 6px; color: #fff; background: var(--ink); padding: 6px 22px; border-radius: 12px; transform: rotate(-2deg); }
 .rd-cover .rd-t { position: absolute; left: 90px; top: 250px; font-size: 92px; font-weight: 900; line-height: 1.12; letter-spacing: 2px; }
 .rd-cover .rd-t span { background: linear-gradient(transparent 62%, var(--yellow) 62%, var(--yellow) 94%, transparent 94%); padding: 0 8px; }
+/* 單場簡報（批次 166）：封面放活動名稱，名稱常常四五十個字——字小一點、限制寬度，不壓到右邊的米亞 */
+.rd-cover .rd-t.ev { font-size: 58px; line-height: 1.2; width: 1040px; max-height: 280px; overflow: hidden; }
 .rd-cover .rd-chips { position: absolute; left: 96px; top: 520px; display: flex; gap: 18px; flex-wrap: wrap; width: 1000px; }
 .rd-cover .rd-chips .rd-tag { font-size: 34px; padding: 10px 22px; box-shadow: 0 5px 0 var(--ink); }
 .rd-cover .rd-chips .rd-tag b { font-family: var(--num); font-size: 44px; color: var(--orange2); margin-right: 6px; }
@@ -97,6 +99,8 @@
 .rd-cols { display: grid; grid-template-columns: 1fr 560px; gap: 44px; height: 100%; }
 .rd-side { padding: 22px 26px; align-self: start; max-height: 100%; overflow-y: auto; }
 .rd-side h3 { font-size: 28px; font-weight: 900; margin-bottom: 10px; }
+.rd-side .rd-open-ev { font-size: 24px; font-weight: 900; padding: 8px 22px; border-radius: 12px; background: var(--yellow); border: 3px solid var(--ink); box-shadow: 0 4px 0 var(--ink); cursor: pointer; }
+.rd-side .rd-open-ev:active { transform: translateY(4px); box-shadow: none; }
 .rd-side p, .rd-side li { font-size: 23px; line-height: 1.6; font-weight: 700; color: var(--ink2); }
 .rd-side ul { padding-left: 22px; }
 .rd-big { font-family: var(--num); font-size: 92px; line-height: 1.05; color: var(--orange2); font-variant-numeric: tabular-nums; }

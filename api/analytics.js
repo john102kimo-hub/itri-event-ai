@@ -27,6 +27,7 @@ import { readEventRows } from '../lib/events-table.js';
 import { isBusinessEvent } from '../lib/audience.js';
 import { UNANSWERED_RE } from '../lib/teach-queue.js';
 import { countTopics } from '../lib/qa-topics.js';
+import { buildReportScope, REPORT_WINDOW_DAYS } from '../lib/report-scope.js';
 
 // 「AI 這題疑似沒答到」的判斷（UNANSWERED_RE）住在 lib/teach-queue.js：待教清單（批次 139）要用同一條規則，
 // 兩邊各寫一份遲早會判得不一樣。
@@ -139,7 +140,10 @@ export default async function handler(req, res) {
   // 測試資料（依媒體名稱）：測試／test／demo／純數字／常見亂打，以及同仁在 LINE 職員模式自己問的
   // （「（內部職員）」，批次 104 起算測試資料）。判斷放在 lib/media-name.js，後台首頁、問答分析、
   // 成效報告、LINE 職員的「後台數據」共用同一份。
-  const dropTest = exclude_test === '1' || exclude_test === 'true';
+  // 成效報告（/report、互動簡報）的口徑（批次 166，見 lib/report-scope.js）：已刪除／草稿／測試活動不算，
+  // 每場只算活動當天起 REPORT_WINDOW_DAYS 天內的問答，活動名稱用現在的名字。後台首頁與問答分析不帶這個參數，照舊看全部。
+  const reportScope = req.query.report === '1' || req.query.report === 'true';
+  const dropTest = reportScope || exclude_test === '1' || exclude_test === 'true';
   const summaryOnly = req.query.summary === '1' || req.query.summary === 'true';
 
   // 單筆 AI 回答全文：列表只帶預覽（每筆回答動輒上千字，一次全帶 200 筆是好幾百 KB），
@@ -170,6 +174,10 @@ export default async function handler(req, res) {
     // 過濾已刪除：新資料看 G 欄（deleted 標記），舊資料相容 B 欄殘留的 [deleted] 寫法
     let valid = rowsWithNum.filter(({ r }) => r[1] && r[1] !== '[deleted]' && r[6] !== '1');
     if (dropTest) valid = valid.filter(({ r }) => !isTestMedia(r[3]));
+    // 活動表走共用快取，讀不到就當作空的（企業場判斷與成效口徑都退回「不套」，見 buildReportScope()）
+    const eventRows = await readEventRows().catch(() => []);
+    const scope = reportScope ? buildReportScope(eventRows) : null;
+    if (scope) valid = valid.filter(({ r }) => scope.includesQa(r[1], r[0]));
     const filtered = event_id
       ? valid.filter(({ r }) => r[1] === event_id)
       : valid;
@@ -177,9 +185,7 @@ export default async function handler(req, res) {
     // 企業場（批次 118，見 lib/audience.js）：與會者填的是公司，不是媒體——不算進「服務媒體家數」、
     // 媒體排行與填寫率（那幾個數字是要報給長官的公關成效）。問答則數照算。
     // 只看單一場企業場時，同一組數字照算，畫面上改叫「單位」（audience）。活動表走共用快取，讀不到就當沒有企業場。
-    const businessIds = new Set(await readEventRows()
-      .then((rows) => rows.filter((r) => isBusinessEvent(r[13])).map((r) => r[0]))
-      .catch(() => []));
+    const businessIds = new Set(eventRows.filter((r) => isBusinessEvent(r[13])).map((r) => r[0]));
     const audience = event_id && businessIds.has(event_id) ? 'business' : 'media';
     const outletRows = audience === 'business' ? filtered : filtered.filter(({ r }) => !businessIds.has(r[1]));
 
@@ -193,7 +199,9 @@ export default async function handler(req, res) {
     filtered.forEach(({ r }) => {
       const eid = r[1] || 'unknown';
       if (!byEvent[eid]) {
-        byEvent[eid] = { event_id: eid, event_name: r[2] || eid, count: 0, medias: [], questions: [], line_count: 0, media_filled: 0 };
+        // 成效口徑用活動現在的名字：qa_log 存的是發問當時的名稱，改過名的活動會顯示舊名（批次 166）
+        byEvent[eid] = { event_id: eid, event_name: (scope && scope.nameOf(eid)) || r[2] || eid, count: 0, medias: [], questions: [], line_count: 0, media_filled: 0,
+          ...(scope ? { event_date: scope.dateOf(eid) } : {}) };
       }
       byEvent[eid].count++;
       // 媒體填寫率的分子：要真的有一家媒體才算（「（未填寫）」「（未提供）」「（群組提問）」、整句問題都不算）
@@ -205,7 +213,9 @@ export default async function handler(req, res) {
 
     const byEventArr = Object.values(byEvent).map(({ medias, questions, ...e }) => {
       const outlets = groupOutlets(medias);
+      // media_top：這一場的媒體排行（含題數），單場的互動簡報用（批次 166）
       return { ...e, ...(summaryOnly ? {} : { questions }), media_list: outlets.map(o => o.name), media_count: outlets.length,
+        media_top: outlets.slice(0, 8).map(({ name, count }) => ({ name, count })),
         audience: businessIds.has(e.event_id) ? 'business' : 'media' };
     });
 
@@ -262,7 +272,8 @@ export default async function handler(req, res) {
       by_event: byEventArr,
       top_keywords: topKeywords,
       top_media: topMedia,
-      hourly_distribution: hourly
+      hourly_distribution: hourly,
+      ...(scope ? { report_window_days: REPORT_WINDOW_DAYS } : {})
     };
     // 儀表板只要數字：不回逐筆（批次 104）。同樣 120 筆，完整版 200KB、摘要版 < 3KB。
     if (summaryOnly) return res.status(200).json(base);
