@@ -132,7 +132,7 @@ document.getElementById('gate-input').addEventListener('keydown', e=>{ if(e.key=
 
 async function load(){
   try{
-    // report=1：成效口徑（批次 166，見 lib/report-scope.js）——已刪除／草稿／測試活動不算，每場只算活動當天起 7 天內，活動用現在的名稱
+    // report=1：成效口徑（批次 166，見 lib/report-scope.js）——已刪除／草稿／測試活動不算，每場只算活動當天起 14 天內，活動用現在的名稱
     const res = await fetch('/api/analytics?exclude_test=1&report=1', { headers: { 'X-Admin-Password': PASSWORD } });
     const data = await res.json();
     if(data.error){ document.getElementById('gate-err').textContent = data.error; return; }

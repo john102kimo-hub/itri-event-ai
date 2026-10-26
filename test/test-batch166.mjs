@@ -53,7 +53,8 @@ console.log('\n── 三、成效口徑 ──');
   check('qa_log 時間戳讀得出台灣日期', R.qaDateOf('2026/9/1 上午7:59:34') === '2026-09-01' && R.qaDateOf('2026/10/28 下午1:05:00') === '2026-10-28');
   const W = R.REPORT_WINDOW_DAYS;
   check('★ 活動前一天不算（準備測試）', !R.inReportWindow('2026-09-01', '2026/8/31 下午9:11:29'));
-  check('活動當天、第 7 天（含當天）算；第 8 天起不算', W === 7 && R.inReportWindow('2026-09-01', '2026/9/1 上午7:59:34') && R.inReportWindow('2026-09-01', '2026/9/7 下午11:59:59') && !R.inReportWindow('2026-09-01', '2026/9/8 上午0:00:01'));
+  check('活動當天、第 14 天（含當天）算；第 15 天起不算', W === 14 && R.inReportWindow('2026-09-01', '2026/9/1 上午7:59:34') && R.inReportWindow('2026-09-01', '2026/9/14 下午11:59:59') && !R.inReportWindow('2026-09-01', '2026/9/15 上午0:00:01'));
+  check('★ 多週的活動（眺望 10/28 起辦 8 天到 11/6）：最後一天與會後幾天都算；8/24 那種一個多月後的內部測試照樣不算', R.inReportWindow('2026-10-28', '2026/11/6 下午3:00:00') && R.inReportWindow('2026-10-28', '2026/11/9 上午10:00:00') && !R.inReportWindow('2026-07-08', '2026/8/24 下午2:36:44'));
   check('活動沒有正式日期（只有建立時間戳）、時間戳讀不出日期 → 不限（判斷不了的不丟）', R.inReportWindow('2026/6/18 下午11:06:04', '2026/6/23 上午10:51:19') && R.inReportWindow('2026-09-01', 't1'));
   check('★ 測試活動名稱（正式資料裡的）', ['test', 'pwtest', '測試', '測試活動', '測試 技術洽談', '測試活動-請忽略可刪除-驗證用', '10/29測試', '晶鏈論壇_報名組測試'].every(R.isTestEventName));
   check('★ 真的活動名稱不誤判（Contest、Test Bed）', !['5G Test Bed 啟用記者會', 'AI Contest 頒獎典禮', '工研院創新日', '眺望~2027產業發展趨勢研討會'].some(R.isTestEventName));
@@ -84,8 +85,8 @@ function seed() {
     q('2026/9/1 上午8:22:09', 'jl', '晶鏈', '經濟日報曾學仁'),
     q('2026/9/1 上午7:59:34', 'jl', '晶鏈', '中央社張建中'),
     q('2026/9/1 上午9:25:27', 'jl', '晶鏈', 'XX'),                   // 活動當天，但名稱是測試
-    q('2026/9/7 下午3:00:00', 'jl', '晶鏈', '自由時報'),             // 第 7 天：算
-    q('2026/9/8 上午9:00:00', 'jl', '晶鏈', '三立'),                 // 第 8 天：不算
+    q('2026/9/14 下午3:00:00', 'jl', '晶鏈', '自由時報'),            // 第 14 天：算
+    q('2026/9/15 上午9:00:00', 'jl', '晶鏈', '三立'),                // 第 15 天：不算
     q('2026/7/8 上午9:00:00', 'quad', '經濟部四足機器人國產研發平台發表記者會', 'TVBS'), // 舊名
     q('2026/8/24 下午2:36:44', 'quad', '經濟部四足機器人記者會', '天下雜誌'),           // 一個多月後的內部測試
     q('2026/10/20 上午9:00:00', 'soon', '眺望研討會', '（未填寫）'),                    // 還沒辦
@@ -109,11 +110,11 @@ console.log('\n── 四、API ──');
   const b = r.body || {};
   const ev = Object.fromEntries((b.by_event || []).map((e) => [e.event_id, e]));
   check('★ 只剩真的活動：晶鏈、四足、沒有日期的那場（眺望沒辦、測試／草稿／已刪除都不在）', Object.keys(ev).sort().join() === 'jl,nodate,quad', Object.keys(ev).join());
-  check('★ 晶鏈只算活動當天到第 7 天、而且不含 XX：4 題', ev.jl?.count === 4, ev.jl?.count);
-  check('晶鏈的媒體：經濟日報（2）、中央社、自由時報——活動前的「工商時報」與第 8 天的「三立」都不在', ev.jl?.media_count === 3 && ev.jl.media_top[0].name === '經濟日報' && ev.jl.media_top[0].count === 2 && !ev.jl.media_list.includes('工商時報') && !ev.jl.media_list.includes('三立'), JSON.stringify(ev.jl?.media_top));
+  check('★ 晶鏈只算活動當天到第 14 天、而且不含 XX：4 題', ev.jl?.count === 4, ev.jl?.count);
+  check('晶鏈的媒體：經濟日報（2）、中央社、自由時報——活動前的「工商時報」與第 15 天的「三立」都不在', ev.jl?.media_count === 3 && ev.jl.media_top[0].name === '經濟日報' && ev.jl.media_top[0].count === 2 && !ev.jl.media_list.includes('工商時報') && !ev.jl.media_list.includes('三立'), JSON.stringify(ev.jl?.media_top));
   check('★ 用活動現在的名稱（qa_log 存的是舊名）', ev.quad?.event_name === '經濟部四足機器人記者會' && ev.quad.count === 1, JSON.stringify(ev.quad));
   check('沒有正式日期的活動照算，但「愛台灣」不算', ev.nodate?.count === 1 && ev.nodate.media_list.join() === 'SHEN', JSON.stringify(ev.nodate));
-  check('總數、媒體家數、口徑天數', b.total === 6 && b.media_total === 5 && b.report_window_days === 7 && ev.jl.event_date === '2026-09-01', `${b.total}/${b.media_total}/${b.report_window_days}`);
+  check('總數、媒體家數、口徑天數', b.total === 6 && b.media_total === 5 && b.report_window_days === 14 && ev.jl.event_date === '2026-09-01', `${b.total}/${b.media_total}/${b.report_window_days}`);
   check('「hi」不會出現在媒體排行', !(b.top_media || []).some((m) => m.name === 'hi'), JSON.stringify(b.top_media));
 
   const d = (await getA({ summary: '1', exclude_test: '1' })).body || {};
@@ -134,7 +135,7 @@ console.log('\n── 五、互動簡報 ──');
   const ctx = { globalThis: null }; ctx.globalThis = ctx; vm.createContext(ctx); vm.runInContext(src, ctx);
   const D = ctx.ReportDeck;
   const A = {
-    total: 12, media_total: 4, report_window_days: 7, top_media: [{ name: '經濟日報', count: 5 }],
+    total: 12, media_total: 4, report_window_days: 14, top_media: [{ name: '經濟日報', count: 5 }],
     by_event: [
       { event_id: 'jl', event_name: '2026晶鏈高峰論壇（Semicon Network Summit）', event_date: '2026-09-01', count: 9, line_count: 3, media_count: 3, media_list: ['經濟日報', '中央社', '自由時報'],
         media_top: [{ name: '經濟日報', count: 5 }, { name: '中央社', count: 2 }, { name: '自由時報', count: 1 }], questions: [{ question: '量產時程？', media: '經濟日報' }] },
@@ -168,7 +169,7 @@ console.log('\n── 五、互動簡報 ──');
   check('★ 各場側欄可以打開那一場的簡報；網址寫成 #deck=代碼/頁碼', /rd-open-ev/.test(src) && /eventId: id/.test(src) && /'#deck=' \+ encodeURIComponent\(one\.id\) \+ '\/'/.test(src));
   const html = read('public/report.html');
   check('★ report.html：用成效口徑（report=1）、每場卡片有「這場的互動簡報」、#deck=代碼 直接開那一場', /\/api\/analytics\?exclude_test=1&report=1/.test(html) && /data-deck-ev="\$\{escHtml\(e\.event_id\)\}"/.test(html) && /#deck=\(\[\^\/\]\+\)/.test(html) && /eventId: typeof eventId === 'string' \? eventId : ''/.test(html));
-  check('部會唯讀頁也只算活動當天起的那幾天（口徑文字同步）', /inReportWindow\(ev\[5\], r\[0\]\)/.test(read('lib/impact.js')) && /只計活動當天起 7 天內/.test(read('public/impact.html')));
+  check('部會唯讀頁也只算活動當天起的那幾天（口徑文字同步）', /inReportWindow\(ev\[5\], r\[0\]\)/.test(read('lib/impact.js')) && /只計活動當天起 14 天內/.test(read('public/impact.html')));
   check('沒有新增 Function（api/ 仍是 11 支）', fs.readdirSync(path.join(ROOT, 'api')).filter((f) => f.endsWith('.js')).length === 11);
 }
 
