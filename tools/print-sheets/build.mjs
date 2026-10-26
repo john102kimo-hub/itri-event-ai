@@ -8,9 +8,11 @@
 // 輸出（每張各一份）：*.html（來源）、*.pdf（印刷用，向量 QR）、*.png（預覽、傳 LINE 用）。
 // 開發機要有 Chromium＋Playwright（見 README.md）。
 //
-// QR 的網址格式見 lib/line-link.js lineBindUrl()：`https://line.me/R/oaMessage/{LINE_BASIC_ID}/?%23{活動代碼}`，
-// 記者掃了會打開米亞的聊天室、輸入框已帶好「#活動代碼」，按傳送就接上這一場。
-// 不要自己手組——忘了 %23 或 @ 沒編碼，記者掃了就接不上。後台「LINE QR」彈窗給的網址可直接貼進 --url。
+// QR 放活動網頁連結（`https://{網域}/event?id={活動代碼}`）：手機相機、LINE 都掃得開，網頁上本來就有
+// 「也可以用 LINE 問米亞」（會帶入這一場），記者想用 LINE 再點一下。
+// 想讓 QR 直接開 LINE 的話，--url 換成後台「LINE QR」彈窗給的網址（lib/line-link.js lineBindUrl()），
+// 但那種連結在沒有 LINE 的手機上掃不開，步驟文字也要跟著改。
+// 輸出的 PDF／PNG 不進 git（.gitignore 的 assets/print/），印完或傳完就丟，要改場次重跑即可。
 import fs from 'node:fs';
 import path from 'node:path';
 import vm from 'node:vm';
@@ -19,9 +21,9 @@ import { createRequire } from 'node:module';
 const ROOT = path.join(import.meta.dirname, '..', '..');
 const arg = (k, d) => { const i = process.argv.indexOf(`--${k}`); return i > 0 ? process.argv[i + 1] : d; };
 
-// 預設是 2027 產業發展趨勢研討會（QR 取自現場用的那張圖，掃出來的網址）。
+// 預設是 2027 產業發展趨勢研討會。
 const CFG = {
-  url: arg('url', 'https://line.me/R/oaMessage/%40300adknw/?%232027--mu3o3x5r'),
+  url: arg('url', 'https://itri-event-ai.vercel.app/event?id=2027--mu3o3x5r'),
   title: arg('title', '眺望～2027 產業發展趨勢研討會'),
   subtitle: arg('subtitle', '開幕暨年度專刊《啟自主：無人科技 百業新生》'),
   date: arg('date', '2026 年 10 月 28 日（三）'),
@@ -101,14 +103,14 @@ h1 em { font-style: normal; color: var(--green); }
   <div class="hero">
     <div class="eyebrow">SCAN ＆ ASK</div>
     <h1>掃描 QR code<br><em>直接問</em> AI 新聞助理</h1>
-    <p class="lead">新聞稿重點、講者、議程、新聞照片，<br>在 LINE 上問米亞，馬上回答。</p>
+    <p class="lead">新聞稿重點、講者、議程、新聞照片，<br>掃描後直接問米亞，馬上回答。</p>
   </div>
-  <div class="scan">用 LINE 掃描</div>
+  <div class="scan">掃描 QR code</div>
   <div class="card">${QR}</div>
   <div class="steps">
-    <div class="step"><i>1</i><div>打開 LINE 掃描<span>LINE → 掃描 QR code</span></div></div>
-    <div class="step"><i>2</i><div>按「傳送」<span>已幫您填好，免打字</span></div></div>
-    <div class="step"><i>3</i><div>直接問米亞<span>像跟同事聊天一樣提問</span></div></div>
+    <div class="step"><i>1</i><div>用手機掃描<span>相機或 LINE 都可以</span></div></div>
+    <div class="step"><i>2</i><div>開啟活動頁<span>直接輸入問題問米亞</span></div></div>
+    <div class="step"><i>3</i><div>想用 LINE 也行<span>頁面內有 LINE 入口</span></div></div>
   </div>
   <div class="foot">
     <img src="${MIA}" alt="">
@@ -152,7 +154,7 @@ const cover = `<!doctype html><html lang="zh-TW"><head><meta charset="utf-8"><ti
     <div>
       <h2>不想翻紙本？<br>掃描後<em>直接問米亞</em></h2>
       <ul><li>新聞稿重點與數據</li><li>講者、議程、活動資訊</li><li>新聞照片與下載連結</li></ul>
-      <div class="how">用 LINE 掃描 → 按「傳送」即可開始提問</div>
+      <div class="how">掃描後開啟活動頁即可提問，也可轉到 LINE</div>
     </div>
     <img class="mia" src="${MIA}" alt="">
   </div>
