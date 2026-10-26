@@ -276,17 +276,20 @@ function renderForm(prefill) {
     field('email', 'Email', 'email', { autocomplete: 'email', inputmode: 'email', autocapitalize: 'off', placeholder: 'name@company.com', value: pre.email }, '請用公司信箱，主辦單位聯繫時使用'),
     field('phone', '手機號碼', 'tel', { autocomplete: 'tel', inputmode: 'tel', placeholder: '0912-345-678', value: pre.phone }, '活動當天現場聯繫會用到')));
 
-  const sess = el('div', { class: 'card', id: 'sess-card' },
-    el('h2', {}, el('span', { class: 'step', text: '2' }), '要參加哪幾場？', el('span', { class: 'req', text: '*' })));
   // 已經辦完的場次自動從表單消失；只有這個人原本報了的才留著（鎖住、標「已結束」），
   // 紀錄不會因為他改別的欄位或別的場次被拿掉（伺服器端也會保留）。
   const shown = c.sessions.filter((s) => !s.ended || (pre.sessions || []).includes(s.code));
+  // 只有一場可以報（大多數記者會、企業說明會都是）：預先勾好，標題改成「活動場次」（批次 172）。
+  // 以前記者要自己勾那唯一的一場，沒勾就被「請至少勾選一個場次」擋下來；跟著場次才出現的其他需求（餐盒等）也要勾了才看得到。
+  const only = shown.length === 1 && !shown[0].disabled && !(pre.sessions || []).length ? shown[0].code : '';
+  const sess = el('div', { class: 'card', id: 'sess-card' },
+    el('h2', {}, el('span', { class: 'step', text: '2' }), only ? '活動場次' : '要參加哪幾場？', el('span', { class: 'req', text: '*' })));
   const days = [...new Set(shown.map((s) => s.date))];
   days.forEach((d) => {
     const list = shown.filter((s) => s.date === d);
     const day = el('div', { class: 'day' }, el('div', { class: 'day-head' }, el('b', { text: list[0].dateLabel }),
       list.filter((s) => !s.disabled).length > 1 ? el('button', { type: 'button', text: '全選這天', onclick: () => toggleDay(list) }) : null));
-    list.forEach((s) => day.append(sessionCard(s, (pre.sessions || []).includes(s.code))));
+    list.forEach((s) => day.append(sessionCard(s, (pre.sessions || []).includes(s.code) || s.code === only)));
     sess.append(day);
   });
   sess.append(el('div', { class: 'sess-msg', id: 'sess-msg', role: 'alert' }));
