@@ -177,9 +177,10 @@ console.log('\n── 三、伺服器是 UTC：台灣清晨（00:00–08:00）�
 
   // 活動當天起，記者問答就該改回正式新聞稿（邀請函只在「活動前」用）
   const { resolveEventContent } = await import('../lib/prompt.js');
-  const ev = { invite_letter: '【邀請函】歡迎採訪', knowledge_base: '【正式新聞稿】', event_date: '2026-10-02', chips: '正式題', invite_letter_chips: '邀請函題', images: 'https://x/a.jpg' };
+  // 知識庫要有真的內容：只有一行「【正式新聞稿】」標題算沒填（kbHasContent），活動當天會繼續用邀請函（批次 173）
+  const ev = { invite_letter: '【邀請函】歡迎採訪', knowledge_base: '【正式新聞稿】\n工研院今日發表新技術。', event_date: '2026-10-02', chips: '正式題', invite_letter_chips: '邀請函題', images: 'https://x/a.jpg' };
   const early = withFakeNow(TW_MORNING, () => resolveEventContent(ev));
-  check('★ 活動當天台灣 07:30（伺服器還是前一天）→ 已經是「活動當天」，用正式新聞稿與照片', early.knowledge_base === '【正式新聞稿】' && early.images === 'https://x/a.jpg', JSON.stringify(early));
+  check('★ 活動當天台灣 07:30（伺服器還是前一天）→ 已經是「活動當天」，用正式新聞稿與照片', early.knowledge_base === ev.knowledge_base && early.images === 'https://x/a.jpg', JSON.stringify(early));
   const eve = withFakeNow('2026-10-01T10:00:00Z', () => resolveEventContent(ev));   // 台灣 10/01 18:00
   check('　 前一天傍晚 → 仍是活動前，只給邀請函（原本的保護照舊）', eve.knowledge_base === '【邀請函】歡迎採訪' && eve.images === '', JSON.stringify(eve));
 

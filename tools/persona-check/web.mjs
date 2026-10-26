@@ -291,6 +291,20 @@ console.log('\n── 主管：後台與米亞助理 ──');
   await page.click('#save-btn');
   await page.waitForFunction(() => document.getElementById('event-modal').style.display === 'none', null, { timeout: 5000 }).catch(() => {});
   check('　 同一個頁面再改一次 → 不再問、直接存（已經確認過這場的內容可以公開）', /第二季/.test(pre()[3]) && !(await page.isVisible('#invite-warn-modal')), pre()[3]);
+
+  // 批次 173：活動前有媒體邀請函 → 新聞稿可以當天再補（「發布前必填」那一列跟著放行）。只看畫面，不存
+  await page.evaluate(() => showEditModal('drafty'));
+  await page.waitForSelector('#event-modal', { state: 'visible' });
+  await page.waitForFunction(() => document.getElementById('input-name').value === '還在準備的草稿活動');
+  await page.fill('#input-venue', '工研院中興院區');
+  await page.fill('#input-contact', '王小明 03-5911111');
+  let rd = (await page.textContent('#readiness')) || '';
+  check('★ 沒有新聞稿、也還沒填邀請函 →「發布前必填」新聞稿那一格沒勾', !/都齊了/.test(rd), rd);
+  await page.fill('#input-invite-letter', '親愛的媒體朋友：誠摯邀請蒞臨採訪。');
+  rd = (await page.textContent('#readiness')) || '';
+  check('★ 貼上媒體邀請函 → 新聞稿那一格打勾「活動前先用邀請函，當天再補」、四項都齊了', /新聞稿（活動前先用邀請函，當天再補）/.test(rd) && /都齊了/.test(rd), rd);
+  await shot(page, 'boss-10-invite-covers.png');
+  await page.evaluate(() => { modalBaseline = snapshotForm(); closeModal(); });
   await page.waitForFunction(() => getComputedStyle(document.getElementById('mia-fab')).display !== 'none', null, { timeout: 3000 }).catch(() => {});
 
   // 批次 147：長按米亞可以拖到別的地方，放開後記住位置；點一下照樣打開對話
