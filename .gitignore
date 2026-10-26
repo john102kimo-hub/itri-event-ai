@@ -23,3 +23,6 @@ tools/grounding-backtest/*.real.csv
 *.local.csv
 *-qa-????-??-??.csv
 qa-export-????-??-??.csv
+
+# 現場印刷品的輸出（tools/print-sheets/build.mjs），不進 git
+assets/print/
