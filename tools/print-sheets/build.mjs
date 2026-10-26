@@ -118,48 +118,40 @@ h1 em { font-style: normal; color: var(--green); }
   </div>
 </div></body></html>`;
 
-// ── ② 新聞稿封面（放在紙本新聞稿最前面，單獨一頁；版面走「公文封面」的調性，跟立牌不同）──
+// ── ② 新聞稿封面（放在紙本新聞稿最前面，單獨一頁）──────────────────────────────
+// 做成「書封」：上面一塊色底放書名（新聞稿＋活動名稱），下面是整張的主角——大 QR。
+// ⚠️ 訂書針只會訂左上角：左上 30×30 mm 不放任何字、圖、QR，色塊本身讓訂書針穿過沒關係。
+// ⚠️ 辦公室印表機印不到紙邊（通常留 4～5 mm），所以不做滿版出血，色塊與外框都內縮 12 mm。
+// 記者沒有耐心：QR 圖樣約 112 mm 見方、一眼就是重點，其餘文字都收到最少。
 const cover = `<!doctype html><html lang="zh-TW"><head><meta charset="utf-8"><title>新聞稿封面 A4</title><style>${BASE_CSS}
-.bar { position: absolute; left: 0; top: 0; bottom: 0; width: 9mm; background: var(--green); }
-.bar::after { content: ""; position: absolute; left: 0; top: 0; width: 9mm; height: 40mm; background: var(--itri); }
-.inner { position: absolute; left: 28mm; right: 20mm; top: 0; bottom: 0; }
-.logo-row { position: absolute; top: 18mm; left: 0; right: 0; display: flex; justify-content: space-between; align-items: center; }
-.logo-row .date { font-size: 4.6mm; color: var(--mute); }
-.kind { position: absolute; top: 58mm; left: 0; }
-.kind .en { color: var(--green); font-size: 5mm; letter-spacing: 1.6mm; }
-.kind h1 { font-size: 38mm; line-height: 1; margin-top: 4mm; letter-spacing: 2mm; }
-.rule { position: absolute; top: 118mm; left: 0; width: 24mm; height: 2mm; background: var(--green); }
-.title { position: absolute; top: 128mm; left: 0; right: 0; }
-.title b { display: block; font-size: 10.5mm; line-height: 1.3; }
-.title span { display: block; font-size: 7mm; line-height: 1.45; color: var(--mute); margin-top: 3mm; }
-.scanbox { position: absolute; top: 178mm; left: 0; right: 0; height: 66mm; border-radius: 6mm; background: var(--soft); display: flex; align-items: center; gap: 8mm; padding: 0 8mm; }
-.scanbox .q { flex: none; width: 50mm; background: #fff; padding: 2.2mm; border-radius: 3mm; }
-.scanbox h2 { font-size: 8mm; line-height: 1.25; }
-.scanbox h2 em { font-style: normal; color: var(--green); }
-.scanbox ul { list-style: none; margin-top: 3.5mm; font-size: 4.6mm; line-height: 1.75; color: var(--ink); }
-.scanbox li::before { content: ""; display: inline-block; width: 2.2mm; height: 2.2mm; border-radius: 50%; background: var(--green); margin-right: 2.6mm; vertical-align: .3mm; }
-.scanbox .how { margin-top: 3mm; font-size: 3.9mm; color: var(--mute); }
-.mia { position: absolute; right: -2mm; top: -9mm; width: 20mm; height: 20mm; border-radius: 50%; background: #fff; border: 1.2mm solid var(--soft); }
-.contact { position: absolute; left: 0; right: 0; bottom: 30mm; font-size: 4.6mm; line-height: 1.6; display: flex; gap: 5mm; align-items: baseline; }
-.contact small { color: var(--mute); font-size: 3.9mm; letter-spacing: .6mm; }
-.note { position: absolute; left: 0; right: 0; bottom: 15mm; font-size: 3.5mm; color: var(--mute); line-height: 1.5; border-top: .3mm solid #D5E0E6; padding-top: 3mm; }
-</style></head><body><div class="page"><div class="bar"></div><div class="inner">
-  <div class="logo-row">${LOGO}<div class="date">${esc(CFG.date)}</div></div>
-  <div class="kind"><div class="en">PRESS RELEASE</div><h1>新聞稿</h1></div>
-  <div class="rule"></div>
-  <div class="title"><b>${esc(CFG.title)}</b><span>${esc(CFG.subtitle)}</span></div>
-  <div class="scanbox">
-    <div class="q">${QR}</div>
-    <div>
-      <h2>不想翻紙本？<br>掃描後<em>直接問米亞</em></h2>
-      <ul><li>新聞稿重點與數據</li><li>講者、議程、活動資訊</li><li>新聞照片與下載連結</li></ul>
-      <div class="how">用手機相機掃描，開啟 AI 問答頁即可提問</div>
-    </div>
+.head { position: absolute; left: 12mm; top: 12mm; width: 186mm; height: 102mm; background: var(--green); border-radius: 6mm; color: #fff; overflow: hidden; }
+.head .logo-chip { position: absolute; right: 8mm; top: 8mm; background: #fff; border-radius: 3mm; padding: 2.4mm 4mm; }
+.head .logo-chip .logo { height: 11mm; }
+.head .eyebrow { position: absolute; left: 14mm; top: 36mm; font-size: 4.2mm; letter-spacing: .5mm; opacity: .9; }
+.head h1 { position: absolute; left: 14mm; top: 43mm; font-size: 30mm; line-height: 1; letter-spacing: 1.5mm; }
+.head .mia { position: absolute; right: 12mm; top: 44mm; width: 40mm; height: 40mm; border-radius: 50%; background: #fff; border: 1.6mm solid rgba(255,255,255,.55); }
+.head .ev { position: absolute; left: 14mm; right: 10mm; top: 79mm; }
+.head .ev b { display: block; font-size: 7.4mm; line-height: 1.3; }
+.head .ev span { display: block; font-size: 5mm; line-height: 1.4; opacity: .92; margin-top: 1mm; }
+.ask { position: absolute; left: 0; right: 0; top: 119mm; text-align: center; font-size: 8.6mm; line-height: 1.2; }
+.ask em { font-style: normal; color: var(--green); }
+.qrcard { position: absolute; left: 50%; top: 131mm; transform: translateX(-50%); width: 140mm; padding: 0; border: 1.6mm solid var(--green); border-radius: 8mm; background: #fff; overflow: hidden; }
+.contact { position: absolute; left: 12mm; right: 12mm; top: 273mm; text-align: center; font-size: 4.4mm; }
+.contact small { color: var(--mute); font-size: 3.8mm; letter-spacing: .5mm; margin-right: 3mm; }
+.note { position: absolute; left: 12mm; right: 12mm; top: 281mm; text-align: center; font-size: 3.2mm; color: var(--mute); }
+</style></head><body><div class="page">
+  <div class="head">
+    <div class="logo-chip">${LOGO}</div>
+    <div class="eyebrow">PRESS RELEASE　｜　${esc(CFG.date)}</div>
+    <h1>新聞稿</h1>
     <img class="mia" src="${MIA}" alt="">
+    <div class="ev"><b>${esc(CFG.title)}</b><span>${esc(CFG.subtitle)}</span></div>
   </div>
-  <div class="contact"><small>新聞聯絡人</small><span>${esc(CFG.contact)}</span></div>
+  <div class="ask">不想翻紙本？<em>掃描直接問米亞</em></div>
+  <div class="qrcard">${QR}</div>
+  <div class="contact reg"><small>新聞聯絡人</small>${esc(CFG.contact)}</div>
   <div class="note reg">米亞是工研院的 AI 新聞助理，內容僅供參考，正式引用請以工研院官網新聞稿或發言為準。</div>
-</div></div></body></html>`;
+</div></body></html>`;
 
 // ── 輸出 ───────────────────────────────────────────────────────────────────
 fs.mkdirSync(CFG.out, { recursive: true });
