@@ -28,7 +28,7 @@ import { lineBindUrl, lineAddFriendUrl, lineBasicId } from '../lib/line-link.js'
 import { handleRegistrationRequest } from '../lib/registration-api.js';
 import { handleB2BRequest } from '../lib/b2b-api.js';
 import { handleImpactRequest } from '../lib/impact-api.js';
-import { publishBlockers, isPublishing, taipeiToday, PUBLIC_STATUSES } from '../lib/event-status.js';
+import { publishBlockers, isPublishing, taipeiToday, PUBLIC_STATUSES, inviteLetterCheck, inviteLetterWarning } from '../lib/event-status.js';
 import { effectiveChips } from '../lib/default-chips.js';
 import { kbHasContent } from '../lib/kb-template.js';
 import { isBusinessEvent } from '../lib/audience.js';
@@ -79,6 +79,19 @@ function publishBlocked(res, missing) {
     code: 'publish_blocked',
     missing
   });
+}
+
+// 活動前沒有邀請函（批次 171）：不擋，但一定要先看過後果——沒帶 ack_no_invite 就退回 409，
+// 後台與同仁編輯頁據此跳出確認視窗，按「照樣發布／照樣儲存」才帶著 ack 再送一次。規則與文字在 lib/event-status.js。
+function inviteNotAcked(res, body, before, after) {
+  if (body.ack_no_invite === true) return false;
+  const check = inviteLetterCheck(before, after);
+  if (!check) return false;
+  res.status(409).json({
+    error: inviteLetterWarning(check, after[1] || ''),
+    code: 'pre_event_no_invite', kind: check.kind, date: check.date, days_left: check.daysLeft
+  });
+  return true;
 }
 
 // 同仁可編輯的內容欄位 → 組出完整 16 欄，編輯碼(K)一律沿用既有值。
@@ -412,6 +425,7 @@ export default async function handler(req, res) {
           const missing = publishBlockers(updated);
           if (missing.length) return publishBlocked(res, missing);
         }
+        if (inviteNotAcked(res, body, existing, updated)) return;
         await updateRange(`events!A${rowIndex + 2}:R${rowIndex + 2}`, [updated]);
         invalidateEventsTable();
         return res.status(200).json({ success: true });
@@ -449,6 +463,7 @@ export default async function handler(req, res) {
           const missing = publishBlockers(newRow);
           if (missing.length) return publishBlocked(res, missing);
         }
+        if (inviteNotAcked(res, body, null, newRow)) return;
         await appendRows('events!A:R', [newRow]);
         invalidateEventsTable();
         return res.status(200).json({ success: true, id: newId, edit_code: editCode, status: initialStatus });
@@ -484,6 +499,7 @@ export default async function handler(req, res) {
           const missing = publishBlockers(updated);
           if (missing.length) return publishBlocked(res, missing);
         }
+        if (inviteNotAcked(res, body, existing, updated)) return;
         await updateRange(`events!A${rowIndex + 2}:R${rowIndex + 2}`, [updated]);
         invalidateEventsTable();
         return res.status(200).json({ success: true, edit_code: updated[10] });

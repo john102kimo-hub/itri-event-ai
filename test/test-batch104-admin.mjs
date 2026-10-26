@@ -188,7 +188,7 @@ const REAL_KB = '【新聞稿全文】\n工研院今日發表新一代技術，�
   const dom = makeDom({ 'edit-event-id': 'e1', 'input-name': '眺望', 'input-organizer': '', 'input-color': '#0F9E7A', 'input-kb': REAL_KB, 'input-status': 'active', 'input-date': '2026-10-20' });
   const toasts = [], calls = [];
   const authedFetch = async () => ({ ok: false, json: async () => ({ error: '還不能發布，必填還缺：地點。', code: 'publish_blocked', missing: ['地點'] }) });
-  const f = load(INDEX, ['saveEvent', 'finishSave', 'highlightMissing'], [constSource(INDEX, /const KB_SOFT_LIMIT = \d+;/), constSource(INDEX, /const KB_HARD_LIMIT = \d+;/)], {
+  const f = load(INDEX, ['saveEvent', 'finishSave', 'highlightMissing'], [constSource(INDEX, /const KB_SOFT_LIMIT = \d+;/), constSource(INDEX, /const KB_HARD_LIMIT = \d+;/), constSource(INDEX, /const inviteAcked = new Set\(\);/)], {
     document: dom.document, state: { password: 'pw' }, authedFetch, setTimeout: noTimers, confirm: () => true,
     toast: (m, t) => toasts.push([m, t]), saveDraft: () => calls.push('saveDraft'), clearDraft: () => calls.push('clearDraft'),
     closeModal: () => calls.push('closeModal'), loadEvents: async () => calls.push('loadEvents'), flashCard: () => calls.push('flash')
@@ -205,7 +205,9 @@ const REAL_KB = '【新聞稿全文】\n工研院今日發表新一代技術，�
   check('edit.html：頁面上有發布前檢查列 #readiness', /id="readiness"/.test(EDIT));
   const dom = makeDom({ 'input-name': '眺望', 'input-kb': REAL_KB, 'input-status': 'active', 'input-color': '#0F9E7A', 'input-date': '2026-10-20', 'input-venue': '' });
   const toasts = [];
-  const EDIT_CONSTS = [constSource(EDIT, /const KB_SOFT_LIMIT = \d+;/), constSource(EDIT, /const KB_HARD_LIMIT = \d+;/), 'let loadedStatus = "draft"; let dirty = true; const EVENT_ID = "e1"; const EDIT_CODE = "code";'];
+  const EDIT_CONSTS = [constSource(EDIT, /const KB_SOFT_LIMIT = \d+;/), constSource(EDIT, /const KB_HARD_LIMIT = \d+;/), 'let loadedStatus = "draft"; let dirty = true; const EVENT_ID = "e1"; const EDIT_CODE = "code";',
+    // 批次 171：save() 會先看「活動前、沒邀請函」（那種情況不先跳一般的確認，改由後端問更具體的那一個）
+    'let BIZ = false; let inviteAcked = false;', ...['preEventDaysWithoutInvite', 'daysUntil', 'todayTaipeiIso'].map((n) => fnSource(EDIT, n))];
   const fetchBlocked = async () => ({ ok: false, json: async () => ({ error: '還不能發布，必填還缺：地點。請先補齊，或讓活動維持在「未發布」。', code: 'publish_blocked', missing: ['地點'] }) });
   const f = load(EDIT, ['save', 'highlightMissing'], EDIT_CONSTS, { document: dom.document, fetch: fetchBlocked, setTimeout: noTimers, confirm: () => true, toast: (m, ms) => toasts.push([m, ms]) });
   await f.save();

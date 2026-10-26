@@ -195,6 +195,14 @@ await page.click('.choices a >> nth=0'); await page.waitForSelector('form#f');
 check(/服務單位／媒體/.test(await page.textContent('form#f')) && !/要採訪/.test(await page.textContent('#app')), '報名表單用通用的字');
 await shot('11-form');
 
+// 批次 172：只有一場的活動（記者會、企業說明會大多是）→ 那一場預先勾好，不用記者自己勾、也不會被「請至少勾選一個場次」擋
+await page.goto(base + '/register?c=workshop'); await page.waitForSelector('#sess-card');
+check(/活動場次/.test(await page.textContent('#sess-card')) && !/要參加哪幾場/.test(await page.textContent('#sess-card')), '只有一場：標題是「活動場次」，不是「要參加哪幾場？」');
+check(await page.locator('input[name=sess]:checked').count() === 1 && /已選 1 場/.test(await page.textContent('#sum')), '只有一場：已經勾好，底下寫「已選 1 場」');
+await shot('12-single-session');
+await page.goto(base + '/register?c=tw2099'); await page.waitForSelector('#sess-card');
+check(/要參加哪幾場/.test(await page.textContent('#sess-card')) && await page.locator('input[name=sess]:checked').count() === 0, '多場（眺望）照舊：要自己挑，一場都不預先勾');
+
 check(errs.length === 0, `瀏覽器沒有 JS 錯誤${errs.length ? '：' + errs.join(' | ') : ''}`);
 await browser.close(); server.close();
 console.log(fails ? `\n❌ ${fails} 項失敗` : '\n✅ 全部通過');

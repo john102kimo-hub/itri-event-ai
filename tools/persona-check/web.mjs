@@ -32,6 +32,7 @@ const { book, books } = S;
 // ── 日期（相對今天，不寫死）──
 const iso = (d) => new Date(Date.now() + d * 86400000).toLocaleDateString('sv-SE', { timeZone: 'Asia/Taipei' });
 const YEAR = iso(0).slice(0, 4);
+const ts = (d) => new Date(Date.now() + d * 86400000).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' });
 
 // ── 假資料 ──────────────────────────────────────────────────────────────
 const EV_HEAD = ['id', 'name', 'color', 'knowledge_base', 'status', 'created_at', 'chips', 'images', 'greeting', 'organizer', 'edit_code', 'event_time', 'venue', 'event_type', 'press_contact', 'contacts', 'invite_letter', 'invite_letter_chips'];
@@ -39,13 +40,20 @@ book.events = [EV_HEAD,
   ['med', '智慧醫療解決方案記者會', '#0F9E7A', '【新聞稿】工研院今天發表 AI 輔助診斷平台，已在三家醫院試行。', 'active', iso(7), '這場的重點是什麼？', '', '', '工研院', 'code3', '14:00-15:30', '工研院中興院區 51 館', 'press', '王小明 03-5911111', '', '', ''],
   ['semi', '半導體先進封裝技術發表會', '#0F9E7A', '【新聞稿】先進封裝…', 'active', iso(-4), '', '', '', '工研院', 'code2', '10:00', '台北國際會議中心', 'press', '陳大文 03-2222222', '', '', ''],
   ['drafty', '還在準備的草稿活動', '#0F9E7A', '', 'draft', iso(30), '', '', '', '工研院', 'code9', '', '', '', '', '', '', ''],
+  // 批次 171：必填都齊、三天後才辦、沒填媒體邀請函的草稿——按發布要先跳警告
+  ['pre171', '綠能儲電新技術發表會', '#0F9E7A', '【新聞稿全文】工研院發表新一代儲電技術（禁發至活動當天 10:00）。', 'draft', iso(3), '', '', '', '工研院', 'code171', '10:00', '工研院中興院區 51 館', '記者會', '林小華 03-5912222', '', '', ''],
 ];
 book.media_roster = [['id', 'name', 'outlet', 'beat', 'email', 'phone', 'invited_count', 'confirmed_count', 'declined_count', 'last_invited', 'status', 'note', 'updated_at', 'updated_by'],
   ['R1', '林小美', '經濟日報', '半導體', 'mei.lin@udn.com', '0912000111', '6', '3', '0', iso(-40), 'active', '', '', ''],
   ['R2', '張大同', '中央社', '', 'tung@cna.com.tw', '', '1', '0', '0', iso(-500), 'active', '', '', ''],
 ];
 book.media_settings = [['key', 'value'], ['staff_code', 'staffcode1']];
-book.qa_log = [['time', 'event_id', 'event_name', 'media', 'question', 'answer', 'deleted', 'source', 'name']];
+book.qa_log = [['time', 'event_id', 'event_name', 'media', 'question', 'answer', 'deleted', 'source', 'name'],
+  // 已經辦完的那場有真的記者問答；活動前兩天同仁打的 hi 不算成效（批次 170：主管快看的題數要跟首頁一樣）
+  [ts(-6), 'semi', '半導體先進封裝技術發表會', 'hi', '測試', '好的', '', 'line', ''],
+  [ts(-4), 'semi', '半導體先進封裝技術發表會', '中央社', '封裝良率多少？', '九成以上。', '', 'line', '張大同'],
+  [ts(-3), 'semi', '半導體先進封裝技術發表會', '經濟日報', '量產時程？', '明年第二季。', '', 'web', '林小美'],
+];
 
 // ── 假的 Anthropic ─────────────────────────────────────────────────────
 const ai = { calls: [] };
@@ -233,6 +241,58 @@ console.log('\n── 主管：後台與米亞助理 ──');
   await page.waitForFunction(() => getComputedStyle(document.getElementById('mia-fab')).display !== 'none', null, { timeout: 3000 }).catch(() => {});
   check('　 關掉編輯視窗 → 米亞回來', await page.locator('#mia-fab').isVisible());
 
+  // 批次 171：活動前沒填媒體邀請函就按發布 → 先跳警告；「先去填邀請函」直接帶到那一格（不在收合的進階設定裡）
+  const pre = () => rows('events').find((r) => r[0] === 'pre171');
+  await page.evaluate(() => loadEvents());
+  await page.evaluate(() => publishEvent('pre171'));
+  await page.waitForSelector('#invite-warn-modal', { state: 'visible', timeout: 5000 }).catch(() => {});
+  const iw = (await page.locator('#invite-warn-modal').textContent().catch(() => '')) || '';
+  check('★ 活動前、沒填邀請函就按「發布」→ 先跳警告：講幾天後辦、記者會拿到整份知識庫（新聞稿全文和照片）', /活動還沒到，還沒填媒體邀請函/.test(iw) && /）才辦（還有 3 天）/.test(iw) && /新聞稿全文和照片/.test(iw) && pre()[4] === 'draft', iw);
+  check('　 兩顆按鈕講白話：「內容可以公開，照樣發布」「先去填邀請函」', /內容可以公開，照樣發布/.test(iw) && /先去填邀請函/.test(iw));
+  await shot(page, 'boss-8-invite-warn.png');
+  await page.click('#iw-fill');
+  await page.waitForSelector('#event-modal', { state: 'visible' });
+  await page.waitForFunction(() => document.activeElement && document.activeElement.id === 'input-invite-letter', null, { timeout: 5000 }).catch(() => {});
+  check('★ 按「先去填邀請函」→ 打開編輯視窗、游標就在「媒體邀請函」那一格（不在收合的進階設定裡）',
+    await page.evaluate(() => document.activeElement?.id === 'input-invite-letter' && !document.getElementById('input-invite-letter').closest('details')) && await page.locator('#input-invite-letter').isVisible());
+  let now = (await page.textContent('#pre-event-now')) || '';
+  check('　 邀請函上面那一行講後果：「還沒填邀請函：一發布，記者…就會拿到上面整份知識庫」', /還沒填邀請函：一發布，記者在 LINE 和網頁問米亞，就會拿到上面整份知識庫/.test(now), now);
+  await page.waitForFunction(() => { const r = document.getElementById('input-invite-letter').getBoundingClientRect(); return r.top >= 0 && r.bottom <= innerHeight; }, null, { timeout: 3000 }).catch(() => {});
+  check('　 而且捲到那一格了（在畫面上，不用自己找）', await page.evaluate(() => { const r = document.getElementById('input-invite-letter').getBoundingClientRect(); return r.top >= 0 && r.bottom <= innerHeight; }));
+  await shot(page, 'boss-9-invite-field.png');
+  await page.fill('#input-invite-letter', '親愛的媒體朋友：誠摯邀請蒞臨採訪，10:00 開始。');
+  now = (await page.textContent('#pre-event-now')) || '';
+  check('　 貼上邀請函 → 那一行馬上變成「活動前記者只拿得到下面這份邀請函」', /活動前記者只拿得到下面這份邀請函/.test(now), now);
+  await page.evaluate(() => { modalBaseline = snapshotForm(); closeModal(); });   // 這次不存，下面試「照樣發布」
+  await page.evaluate(() => publishEvent('pre171'));
+  await page.waitForSelector('#invite-warn-modal', { state: 'visible', timeout: 5000 }).catch(() => {});
+  await page.click('#iw-proceed');
+  await page.waitForFunction(() => /已發布/.test(document.getElementById('toast')?.textContent || ''), null, { timeout: 5000 }).catch(() => {});
+  check('★ 按「內容可以公開，照樣發布」→ 發布（不是每場都要邀請函）', pre()[4] === 'active', JSON.stringify(pre()));
+  // 已發布、活動前、還是沒邀請函：同仁把新的內容貼進知識庫 → 一樣先問。
+  // 剛剛在這個頁面按過「照樣發布」，同一頁不會再問（改錯字不用每次被攔）——重新整理才是另一次
+  await page.reload();
+  await page.waitForSelector('#app', { state: 'visible' });
+  await page.evaluate(() => showEditModal('pre171'));
+  await page.waitForSelector('#event-modal', { state: 'visible' });
+  await page.waitForFunction(() => document.getElementById('input-kb').value !== '');
+  await page.fill('#input-kb', (await page.inputValue('#input-kb')) + '\n【補充】量產時程：2027 年。');
+  await page.click('#save-btn');
+  await page.waitForSelector('#invite-warn-modal', { state: 'visible', timeout: 5000 }).catch(() => {});
+  const iw2 = (await page.locator('#invite-warn-modal').textContent().catch(() => '')) || '';
+  check('★ 已發布、活動前、沒邀請函，改了知識庫按儲存 → 也先問（這次存的內容記者馬上就問得到）', /這場已經發布，但還沒有媒體邀請函/.test(iw2) && /內容可以公開，照樣儲存/.test(iw2) && !/量產時程/.test(pre()[3]), iw2);
+  await page.click('#iw-proceed');
+  await page.waitForFunction(() => document.getElementById('event-modal').style.display === 'none', null, { timeout: 5000 }).catch(() => {});
+  check('　 按「照樣儲存」→ 存進去', /量產時程/.test(pre()[3]), pre()[3]);
+  await page.evaluate(() => showEditModal('pre171'));
+  await page.waitForSelector('#event-modal', { state: 'visible' });
+  await page.waitForFunction(() => /量產時程/.test(document.getElementById('input-kb').value));
+  await page.fill('#input-kb', (await page.inputValue('#input-kb')).replace('2027 年', '2027 年第二季'));
+  await page.click('#save-btn');
+  await page.waitForFunction(() => document.getElementById('event-modal').style.display === 'none', null, { timeout: 5000 }).catch(() => {});
+  check('　 同一個頁面再改一次 → 不再問、直接存（已經確認過這場的內容可以公開）', /第二季/.test(pre()[3]) && !(await page.isVisible('#invite-warn-modal')), pre()[3]);
+  await page.waitForFunction(() => getComputedStyle(document.getElementById('mia-fab')).display !== 'none', null, { timeout: 3000 }).catch(() => {});
+
   // 批次 147：長按米亞可以拖到別的地方，放開後記住位置；點一下照樣打開對話
   let fb = await page.locator('#mia-fab').boundingBox();
   await page.mouse.move(fb.x + fb.width / 2, fb.y + fb.height / 2);
@@ -266,7 +326,19 @@ console.log('\n── 主管：後台與米亞助理 ──');
 
   await page.click('#mia-fab');
   await page.waitForSelector('#mia-panel.open');
-  check('點米亞 → 對話框打開，有開場白與建議問題', (await page.locator('.mia-chips button').count()) === 4);
+  check('點米亞 → 對話框打開：三顆大按鈕（主管快看）＋三個常用問題；輸入框上方的小按鈕列還不出現', (await page.locator('.mia-big button').count()) === 3 && (await page.locator('.mia-chips button').count()) === 3 && !(await page.isVisible('#mia-quick')));
+  // 主管快看（批次 170）：按了直接出程式算好的圖卡，不經過 AI
+  await page.click('.mia-big button:has-text("一分鐘看成效")');
+  await page.waitForSelector('.mia-brief');
+  const kpiCard = (await page.locator('.mia-brief').last().textContent()) || '';
+  const homeQa = (await page.textContent('#stat-total-qa')) || '';
+  check('★ 按「一分鐘看成效」→ 成效圖卡（數字方塊、各場長條、打開互動簡報），題數跟後台首頁的「記者問答」同一個數字', /成效一覽/.test(kpiCard) && /記者提問/.test(kpiCard) && kpiCard.includes(homeQa.trim() + '題') && /打開完整互動簡報/.test(kpiCard), kpiCard + ' / 首頁 ' + homeQa);
+  check('　 對話開始後，輸入框上方出現三顆小按鈕', await page.isVisible('#mia-quick') && (await page.locator('#mia-quick button').count()) === 3);
+  await page.click('#mia-quick button[title="活動近況"]');
+  await page.waitForFunction(() => document.querySelectorAll('.mia-brief').length >= 2);
+  const evCard = (await page.locator('.mia-brief').last().textContent()) || '';
+  check('按「📅 活動近況」→ 列出接下來的活動與準備狀況', /活動近況/.test(evCard) && /接下來/.test(evCard), evCard);
+  await shot(page, 'boss-2b-brief.png');
   const ask = async (text) => {
     const before = await page.locator('#mia-msgs .mia-m').count();
     await page.fill('#mia-input', text); await page.press('#mia-input', 'Enter');
@@ -274,7 +346,8 @@ console.log('\n── 主管：後台與米亞助理 ──');
     return (await page.locator('#mia-msgs .mia-m.a').last().textContent()) || '';
   };
   let reply = await ask('最近有哪些活動？');
-  check('問「最近有哪些活動」→ 走 list_events 工具、數字跟試算表一樣（3 場）', /3 場/.test(reply), reply);
+  const nEv = rows('events').length;
+  check(`問「最近有哪些活動」→ 走 list_events 工具、數字跟試算表一樣（${nEv} 場）`, new RegExp(`${nEv} 場`).test(reply), reply);
   check('★ 模型回的 Markdown（**粗體**、- 條列）在出口被清掉', !/\*\*|^- /m.test(reply), reply);
   check('活動狀態講中文（工具給 status_label），不會冒出 active／draft 這種代碼', /進行中/.test(reply) && /未發布/.test(reply) && !/\b(active|draft)\b/.test(reply), reply);
   await shot(page, 'boss-2-ask.png');
@@ -400,6 +473,27 @@ console.log('\n── 同事：記者名單（共用連結）與名片翻拍、�
   await page.waitForTimeout(800);
   check('改地點按儲存 → 活動表真的更新', rows('events').find((r) => r[0] === 'med')[12] === '工研院中興院區 中興文薈廳', rows('events').find((r) => r[0] === 'med')[12]);
   await shot(page, 'coll-2-edit.png');
+  // 批次 171：同仁編輯頁——同一套提示與確認
+  await page.goto(`${base}/edit?id=pre171&code=code171`);
+  await page.waitForFunction(() => document.getElementById('input-kb')?.value !== '');
+  let pnow = (await page.textContent('#pre-event-now')) || '';
+  check('★ 同仁編輯頁：媒體邀請函就在知識庫下面，上面那一行講「記者現在…就會拿到上面整份知識庫」', /還沒填邀請函：記者現在在 LINE 和網頁問米亞/.test(pnow) && await page.locator('#input-invite-letter').isVisible(), pnow);
+  await page.fill('#input-kb', (await page.inputValue('#input-kb')) + '\n【補充】合作廠商：三家。');
+  await page.click('#save-btn');
+  await page.waitForSelector('#invite-warn', { state: 'visible', timeout: 5000 }).catch(() => {});
+  check('★ 改了知識庫按儲存 → 跳「這場已經發布，但還沒有媒體邀請函」，還沒存進去', /這場已經發布，但還沒有媒體邀請函/.test((await page.textContent('#invite-warn')) || '') && !/合作廠商/.test(rows('events').find((r) => r[0] === 'pre171')[3]));
+  await shot(page, 'coll-3-invite-warn.png');
+  await page.click('#iw-fill');
+  await page.waitForFunction(() => document.activeElement?.id === 'input-invite-letter', null, { timeout: 5000 }).catch(() => {});
+  await page.waitForFunction(() => { const r = document.getElementById('input-invite-letter').getBoundingClientRect(); return r.top >= 0 && r.bottom <= innerHeight; }, null, { timeout: 3000 }).catch(() => {});
+  check('　 按「先去填邀請函」→ 捲到邀請函那一格、游標在裡面', await page.evaluate(() => { const r = document.getElementById('input-invite-letter').getBoundingClientRect(); return document.activeElement?.id === 'input-invite-letter' && r.top >= 0 && r.bottom <= innerHeight; }));
+  await shot(page, 'coll-4-invite-field.png');
+  await page.fill('#input-invite-letter', '親愛的媒體朋友：誠摯邀請蒞臨採訪。');
+  await page.click('#save-btn');
+  await page.waitForFunction(() => /已儲存/.test(document.getElementById('toast')?.textContent || ''), null, { timeout: 5000 }).catch(() => {});
+  const p171 = rows('events').find((r) => r[0] === 'pre171');
+  check('★ 填了邀請函再按儲存 → 不再問，知識庫和邀請函一起存進去', !(await page.isVisible('#invite-warn')) && /合作廠商/.test(p171[3]) && /誠摯邀請/.test(p171[16]), JSON.stringify(p171));
+
   await page.goto(`${base}/edit?id=med&code=wrongcode`);
   await page.waitForTimeout(800);
   check('★ 編輯碼不對 → 看不到也改不了', !(await page.locator('#save-btn').isVisible().catch(() => false)) || /連結|無效|錯誤|找不到/.test(await page.textContent('body')));

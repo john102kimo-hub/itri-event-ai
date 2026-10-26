@@ -413,6 +413,15 @@ textarea.form-control { min-height: 200px; resize: vertical; line-height: 1.6; }
 .readiness .miss { color:#b45309; font-weight:600; }
 .readiness.all-ok { background:#f0fdf4; border-color:#bbf7d0; }
 .form-section { border:1px solid var(--border); border-radius:12px; padding:14px 16px 2px; margin-bottom:16px; }
+/* 批次 171：媒體邀請函上面那一行——「活動前，記者現在問得到什麼」 */
+.pre-now { border-radius:8px; padding:8px 11px; margin:-2px 0 10px; font-size:0.83rem; line-height:1.55; background:#f8fafc; color:var(--muted); }
+.pre-now.warn { background:#fffbeb; border:1px solid #fde68a; color:#92400e; }
+.pre-now.ok { background:#f0fdf4; border:1px solid #bbf7d0; color:#047857; }
+.iw-choices { margin:10px 0 4px; padding-left:20px; font-size:0.86rem; line-height:1.6; }
+.iw-choices li { margin-bottom:6px; }
+/* 兩顆按鈕的字都長，手機上各佔一整列，不要折成「照樣發／布」 */
+#invite-warn-modal .modal-actions { flex-wrap:wrap; }
+#invite-warn-modal .modal-actions .btn { flex:1 1 200px; justify-content:center; }
 .form-section > .sec-title { font-size:0.92rem; font-weight:700; margin-bottom:12px; display:flex; align-items:center; gap:8px; }
 .form-section > .sec-title i { color:var(--primary); font-size:18px; }
 .form-section > .sec-title small { font-weight:500; color:var(--muted); font-size:0.76rem; }
@@ -613,7 +622,7 @@ details.adv[open] > summary { border-bottom:1px solid var(--border); margin-bott
             <div class="stat-icon"><i class="ti ti-message-dots"></i></div>
             <div class="stat-label">記者問答</div>
             <div class="stat-value" id="stat-total-qa">—</div>
-            <div class="stat-note">不含測試與同仁自己問的</div>
+            <div class="stat-note">跟成效報告同一個數字（不含測試與活動前的準備）</div>
           </div>
           <div class="stat-card">
             <div class="stat-icon"><i class="ti ti-building-newspaper"></i></div>
@@ -732,7 +741,7 @@ details.adv[open] > summary { border-bottom:1px solid var(--border); margin-bott
 <!-- 新增/編輯活動 Modal
      批次 104：十六個欄位不再一路排下去（3000 多 px、約四個畫面）——
        ① 最上面一條「發布前必填」即時顯示還缺什麼（跟後端發布閘門同一套規則）
-       ② 基本資料與知識庫放在前面；其餘（主色、類型、主辦、窗口分工、邀請函、提問、開場白、照片、狀態）收進「進階設定」
+       ② 基本資料與知識庫放在前面；其餘（主色、類型、主辦、窗口分工、開場白、照片、狀態）收進「進階設定」——快速提問（批次 147）與媒體邀請函（批次 171）後來搬了出來
      所有欄位的 id 都沒變，MODAL_FIELDS／草稿保護照舊。-->
 <div id="event-modal" class="modal-overlay" style="display:none" onclick="if(event.target===this)requestCloseModal('backdrop')">
   <div class="modal">
@@ -799,6 +808,19 @@ details.adv[open] > summary { border-bottom:1px solid var(--border); margin-bott
       </div>
     </div>
 
+    <!-- 批次 171：媒體邀請函從「進階設定」搬出來。朱朱：「怕同仁先上傳資料、忘記填活動前資訊（媒體邀請函），活動前就按發布」——
+         它收在預設收合的地方，同仁根本不知道有這一格（批次 147 同一個教訓）。上面那一行即時講「活動前記者現在問得到什麼」。 -->
+    <div class="form-section" id="pre-event-section">
+      <div class="sec-title"><i class="ti ti-mail-forward"></i> 媒體邀請函（活動前用） <small>活動前記者問得到的版本</small></div>
+      <div class="pre-now" id="pre-event-now" aria-live="polite"></div>
+      <div class="form-group">
+        <textarea class="form-control" id="input-invite-letter" rows="5"
+          placeholder="貼入邀請媒體來採訪時附的說明文字（時間、地點、議程、採訪方式）…"
+          style="font-size:0.85rem"></textarea>
+        <div class="form-hint">活動日期還沒到、又有填這裡的話，記者問答（LINE 跟網頁都算）只會用這份內容回答，不會提前給正式新聞稿全文或活動照片——避免新聞稿還在改、還在禁發就先曝光。活動當天起自動改回用上面的「活動知識庫」，不用手動切換。新聞稿本來就可以公開的場次，留空就好。</div>
+      </div>
+    </div>
+
     <!-- 批次 147：快速提問從「進階設定」搬出來（朱朱：「快捷鍵選項沒出現」——收在預設收合的進階設定裡，手機上找不到），
          並在下面即時列出記者現在會看到的按鈕（留空時是系統自動出的題，以前畫面上看不到） -->
     <div class="form-section">
@@ -816,12 +838,12 @@ details.adv[open] > summary { border-bottom:1px solid var(--border); margin-bott
         <textarea class="form-control" id="input-invite-letter-chips" rows="4"
           placeholder="邀請函內容是什麼？&#10;採訪申請方式？&#10;活動時間地點？"
           style="font-size:0.85rem"></textarea>
-        <div class="form-hint">活動前（而且「進階設定」裡有填媒體邀請函時）優先顯示這裡的快速提問按鈕，取代上面「快速問題按鈕」那組——活動前才有意義（例如問邀請函內容、採訪申請方式），跟活動內容那組問句分開設定，記者才不會點了按鈕卻只得到「這部分我沒有資料」。留空則活動前也繼續用上面那組。</div>
+        <div class="form-hint">活動前（而且上面有填媒體邀請函時）優先顯示這裡的快速提問按鈕，取代上面「快速問題按鈕」那組——活動前才有意義（例如問邀請函內容、採訪申請方式），跟活動內容那組問句分開設定，記者才不會點了按鈕卻只得到「這部分我沒有資料」。留空則活動前也繼續用上面那組。</div>
       </div>
     </div>
 
     <details class="adv" id="adv-box">
-      <summary><i class="ti ti-adjustments"></i> 進階設定 <small>選填，通常不用動：品牌色、主辦單位、邀請函、照片…</small></summary>
+      <summary><i class="ti ti-adjustments"></i> 進階設定 <small>選填，通常不用動：品牌色、主辦單位、開場白、照片…</small></summary>
 
       <div class="form-group">
         <label>品牌主色</label>
@@ -866,13 +888,6 @@ details.adv[open] > summary { border-bottom:1px solid var(--border); margin-bott
           placeholder="新聞稿｜王小明｜03-1234567 分機8888&#10;技術規格｜陳美玲｜03-1234567 分機9999｜LINE ID"
           style="font-size:0.85rem"></textarea>
         <div class="form-hint">記者在 LINE 點「媒體邀訪需求」時會列出這裡的關鍵字，點了直接給對應窗口的聯絡方式；LINE ID 選填。格式：<code>關鍵字｜姓名｜電話｜LINE ID</code>，半形 <code>|</code> 或全形 <code>｜</code> 都可以。留空則只給上面的「新聞聯絡人」。（跨活動、依技術單位分的窗口在左側「邀訪窗口分工」。）</div>
-      </div>
-      <div class="form-group">
-        <label><i class="ti ti-mail-forward"></i> 媒體邀請函（活動前用）</label>
-        <textarea class="form-control" id="input-invite-letter" rows="6"
-          placeholder="貼入邀請媒體來採訪時附的說明文字…"
-          style="font-size:0.85rem"></textarea>
-        <div class="form-hint">活動日期還沒到、又有填這裡的話，記者問答（LINE 跟網頁都算）只會用這份內容回答，不會提前給正式新聞稿全文或活動照片——避免新聞稿還在改、照片還沒有正式版就先曝光。活動當天起自動改回用上面的「活動知識庫」正常回答，不用手動切換。留空則沒有這層限制。</div>
       </div>
       <div class="form-group">
         <label>AI 開場白（記者前台初始問候語）</label>
@@ -959,6 +974,23 @@ details.adv[open] > summary { border-bottom:1px solid var(--border); margin-bott
     <div class="modal-actions">
       <button class="btn btn-outline" onclick="closePublishBlocked()">知道了</button>
       <button class="btn btn-primary" id="pb-go"><i class="ti ti-edit"></i> 去補齊</button>
+    </div>
+  </div>
+</div>
+
+<!-- 活動前沒有邀請函（批次 171）：後端退回 code=pre_event_no_invite 時問一次。預設（藍色）那顆是比較安全的「先去填」 -->
+<div id="invite-warn-modal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeInviteWarn()">
+  <div class="modal" style="width:480px">
+    <h2><i class="ti ti-alert-triangle" style="color:var(--accent)"></i> <span id="iw-title">活動還沒到，還沒填媒體邀請函</span></h2>
+    <div id="iw-name" style="font-weight:700"></div>
+    <div id="iw-body" style="margin-top:8px;font-size:0.9rem;line-height:1.6"></div>
+    <ul class="iw-choices">
+      <li><b>新聞稿還不能曝光</b>（有禁發時間、還在改）→ 先填邀請函。活動前米亞只用邀請函回答，活動當天自動換回知識庫。</li>
+      <li><b>內容本來就可以公開</b> → <span id="iw-ok-text">照樣發布就好</span>。</li>
+    </ul>
+    <div class="modal-actions">
+      <button class="btn btn-outline" id="iw-proceed">內容可以公開，照樣發布</button>
+      <button class="btn btn-primary" id="iw-fill"><i class="ti ti-mail-forward"></i> 先去填邀請函</button>
     </div>
   </div>
 </div>
@@ -1164,9 +1196,11 @@ function updateEventCount() {
 
 function updateStats(data) {
   updateEventCount();
-  document.getElementById('stat-total-qa').textContent = data.total || 0;
+  // 累積的兩個數字用成效口徑（批次 170）：跟成效報告、米亞的成效卡同一個數字；舊版後端沒有 report_scope 就照舊
+  const rs = data.report_scope || null;
+  document.getElementById('stat-total-qa').textContent = (rs ? rs.total : data.total) || 0;
   // 服務媒體家數由後端算（同一家併在一起、不算「未提供」「群組提問」「內部職員」，見 lib/media-name.js）
-  document.getElementById('stat-media').textContent = data.media_total ?? 0;
+  document.getElementById('stat-media').textContent = (rs ? rs.media_total : data.media_total) ?? 0;
   // 後端對全量資料算好的今日筆數 —— 之前是在最近 50 筆裡數今天的，記者會當天問答一旦破 50
   // 就會低估，而那正是最需要盯著這個數字的時候。
   document.getElementById('stat-today').textContent = data.today_count ?? 0;
@@ -1458,7 +1492,7 @@ document.addEventListener('keydown', e => {
   if (e.key !== 'Escape') return;
   const pop = document.getElementById('more-pop');
   if (pop && pop.style.display === 'block') { e.stopPropagation(); closeMore(); return; }
-  for (const [id, close] of [['publish-blocked-modal', closePublishBlocked], ['media-edit-modal', closeMediaEdit], ['line-qr-modal', closeLineQr]]) {
+  for (const [id, close] of [['invite-warn-modal', closeInviteWarn], ['publish-blocked-modal', closePublishBlocked], ['media-edit-modal', closeMediaEdit], ['line-qr-modal', closeLineQr]]) {
     const el = document.getElementById(id);
     if (el && el.style.display === 'flex') { close(); return; }
   }
@@ -1955,7 +1989,7 @@ function syncModalDerived() {
   syncColorPicker(color);
   updateKbCount();
   updateStatusHint();
-  updateReadiness();
+  updateReadiness(); updatePreEventNow();
 }
 
 // 色票與 HEX 欄互相同步。<input type=color> 只吃 #rrggbb，格式不對就維持上一個顏色，不報錯。
@@ -2000,6 +2034,72 @@ function updateReadiness() {
   box.className = 'readiness' + (miss.length ? '' : ' all-ok');
   box.innerHTML = `<span class="lead">發布前必填</span>${['日期', '地點', '新聞聯絡人', '新聞稿'].map(chip).join('')}` +
     (miss.length ? '' : '<span class="ok">　都齊了，儲存後就可以按「發布」</span>');
+}
+
+// ── 活動前，記者現在問得到什麼（批次 171）──────────────────────
+// 媒體邀請函上面那一行。規則跟後端 lib/event-status.js preEventWithoutInvite()、答題時的
+// lib/prompt.js resolveEventContent() 一致：活動日期嚴格晚於台灣的今天、而且有填邀請函 → 只用邀請函；
+// 沒填 → 整份知識庫。這裡只是讓人看得到後果；真正「一定要先確認」的是後端那道（code=pre_event_no_invite）。
+const WEEKDAY_ZH = ['日', '一', '二', '三', '四', '五', '六'];
+function mdWeekday(iso) {
+  const [y, m, d] = iso.split('-').map(Number);
+  return `${m}/${d}（${WEEKDAY_ZH[new Date(Date.UTC(y, m - 1, d)).getUTCDay()]}）`;
+}
+function daysUntil(iso) {
+  return Math.round((Date.parse(iso + 'T00:00:00Z') - Date.parse(todayTaipeiIso() + 'T00:00:00Z')) / 86400000);
+}
+function updatePreEventNow() {
+  const sec = document.getElementById('pre-event-section');
+  const box = document.getElementById('pre-event-now');
+  if (!sec || !box) return;
+  const v = id => (document.getElementById(id)?.value || '').trim();
+  sec.style.display = isBusinessCard({ event_type: v('input-type') }) ? 'none' : '';   // 企業場沒有「活動前」這回事
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(v('input-date')) ? v('input-date') : '';
+  const left = date ? daysUntil(date) : null;
+  const live = ['active', 'ended'].includes(v('input-status'));
+  if (!date) { box.className = 'pre-now'; box.textContent = '填了活動日期之後，這裡會告訴你活動前記者問得到什麼。'; return; }
+  if (left <= 0) { box.className = 'pre-now'; box.textContent = '活動已經到了：記者問到的是上面的知識庫，這份邀請函不再使用。'; return; }
+  const when = `這場 ${mdWeekday(date)}才辦，還有 ${left} 天`;
+  if (v('input-invite-letter')) {
+    box.className = 'pre-now ok';
+    box.textContent = `✅ ${when}：活動前記者只拿得到下面這份邀請函，${mdWeekday(date)}當天起自動改用上面的知識庫。`;
+  } else {
+    box.className = 'pre-now warn';
+    box.textContent = `⚠️ ${when}，還沒填邀請函：${live ? '記者現在' : '一發布，記者'}在 LINE 和網頁問米亞，就會拿到上面整份知識庫（包括新聞稿全文、照片）。新聞稿還不能曝光的話，請把邀請函貼在下面。`;
+  }
+}
+
+// 後端說「活動前、沒有邀請函」（code=pre_event_no_invite，批次 171）時問一次。
+// 按過「照樣發布／照樣儲存」的活動記在這個頁面裡：之後改個錯字不用每次都再問一遍（重新整理就重來）。
+const inviteAcked = new Set();
+function askInviteWarn(data, name, { onProceed, onFill }) {
+  const publish = data.kind === 'publish';
+  const left = Number(data.days_left) || 0;
+  const when = data.date ? `${mdWeekday(data.date)}才辦（還有 ${left} 天）` : '還沒到';
+  document.getElementById('iw-title').textContent = publish ? '活動還沒到，還沒填媒體邀請函' : '這場已經發布，但還沒有媒體邀請函';
+  document.getElementById('iw-name').textContent = name || '';
+  document.getElementById('iw-body').textContent = publish
+    ? `這場 ${when}。現在發布，記者在 LINE 和活動網頁一問，米亞就會用整份知識庫回答——包括新聞稿全文和照片。`
+    : `這場 ${when}，又沒有邀請函：這次存的內容，記者在 LINE 和活動網頁馬上就問得到——包括新聞稿全文和照片。`;
+  document.getElementById('iw-ok-text').textContent = publish ? '照樣發布就好' : '照樣儲存就好';
+  const go = document.getElementById('iw-proceed');
+  go.textContent = publish ? '內容可以公開，照樣發布' : '內容可以公開，照樣儲存';
+  go.onclick = () => { closeInviteWarn(); onProceed(); };
+  document.getElementById('iw-fill').onclick = () => { closeInviteWarn(); onFill(); };
+  document.getElementById('invite-warn-modal').style.display = 'flex';
+  document.getElementById('iw-fill').focus();
+}
+function closeInviteWarn() {
+  document.getElementById('invite-warn-modal').style.display = 'none';
+}
+// 「先去填邀請函」：捲到那一格、框起來、游標放進去
+function focusInviteLetter() {
+  const el = document.getElementById('input-invite-letter');
+  if (!el) return;
+  el.classList.add('field-missing');
+  setTimeout(() => el.classList.remove('field-missing'), 6000);
+  el.scrollIntoView?.({ behavior: 'smooth', block: 'center' });
+  el.focus({ preventScroll: true });
 }
 // 儲存／發布被擋下來時，把缺的欄位框起來並捲過去
 function highlightMissing(labels) {
@@ -2142,8 +2242,8 @@ window.addEventListener('beforeunload', e => {
 // 綁在 overlay 上用事件冒泡收所有欄位，之後加欄位不用再補一條 listener
 document.getElementById('event-modal').addEventListener('input', markModalChanged);
 document.getElementById('event-modal').addEventListener('change', markModalChanged);
-document.getElementById('event-modal').addEventListener('input', () => updateReadiness());
-document.getElementById('event-modal').addEventListener('change', () => updateReadiness());
+document.getElementById('event-modal').addEventListener('input', () => { updateReadiness(); updatePreEventNow(); });
+document.getElementById('event-modal').addEventListener('change', () => { updateReadiness(); updatePreEventNow(); });
 
 // ── Modal ─────────────────────────────────────────────────
 // prefillDate：從行事曆點空白日期新增活動時，把那天帶進來（YYYY-MM-DD）
@@ -2182,7 +2282,7 @@ function showCreateModal(prefillDate) {
   const adv = document.getElementById('adv-box');
   if (adv) adv.open = false;           // 進階設定預設收起來
   updateStatusHint();
-  updateReadiness();
+  updateReadiness(); updatePreEventNow();
   openModal();
 }
 
@@ -2266,7 +2366,7 @@ async function showEditModal(eventId) {
     const adv = document.getElementById('adv-box');
     if (adv) adv.open = false;
     updateStatusHint();
-    updateReadiness();
+    updateReadiness(); updatePreEventNow();
     openModal();
   } catch(e) {
     toast('載入失敗：' + e.message);
@@ -2282,7 +2382,7 @@ function closeModal() {
   document.getElementById('draft-banner').style.display = 'none';
 }
 
-async function saveEvent() {
+async function saveEvent(ack = false) {
   const id = document.getElementById('edit-event-id').value;
   const name = document.getElementById('input-name').value.trim();
   const organizer = document.getElementById('input-organizer').value.trim() || '工研院';
@@ -2325,10 +2425,21 @@ async function saveEvent() {
         password: state.password,
         id: id || undefined,
         name, organizer, color, knowledge_base, chips, images, greeting, status, event_date,
-        event_time, venue, event_type, press_contact, contacts, invite_letter, invite_letter_chips
+        event_time, venue, event_type, press_contact, contacts, invite_letter, invite_letter_chips,
+        ack_no_invite: ack || (!!id && inviteAcked.has(id)) || undefined
       })
     });
     const data = await res.json();
+    if (data.code === 'pre_event_no_invite') {
+      // 活動前、沒有邀請函（批次 171）：modal 不關、內容都還在，問他要先填邀請函、還是照樣存
+      saveDraft();
+      finishSave(btn);
+      askInviteWarn(data, name, {
+        onProceed: () => { if (id) inviteAcked.add(id); saveEvent(true); },
+        onFill: focusInviteLetter
+      });
+      return;
+    }
     if (data.code === 'publish_blocked') {
       // 把狀態改成公開（進行中／已結束）但必填沒齊：後端擋下來了。modal 不關、內容都還在，
       // 把缺的欄位框起來，並告訴他最簡單的出路——先維持「未發布」存起來。
@@ -2454,15 +2565,23 @@ async function deleteEvent(eventId) {
 // 發布：draft → active。卡片與行事曆共用。
 // 必填沒齊時後端會擋（批次 103 發布閘門，code=publish_blocked）：這裡不只丟一句錯誤，而是列出缺什麼、
 // 帶人去補（批次 104）。
-async function publishEvent(id) {
+async function publishEvent(id, ack = false) {
   try {
     const res = await authedFetch('/api/events', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'update', password: state.password, id, status: 'active' })
+      body: JSON.stringify({ action: 'update', password: state.password, id, status: 'active', ack_no_invite: ack || undefined })
     });
     const data = await res.json();
     if (data.code === 'publish_blocked') { showPublishBlocked(id, data.missing || []); return; }
+    if (data.code === 'pre_event_no_invite') {
+      const ev = (state.events || []).find(e => e.id === id);
+      askInviteWarn(data, ev ? ev.name : '', {
+        onProceed: () => { inviteAcked.add(id); publishEvent(id, true); },
+        onFill: async () => { await showEditModal(id); focusInviteLetter(); }
+      });
+      return;
+    }
     if (data.error) throw new Error(data.error);
     toast('已發布，記者前台現在看得到這場了', 'ok');
     await loadEvents();
