@@ -825,7 +825,9 @@ check('回覆名稱 → 沿用既有 ask_name 擷取機制正常記錄', /已記
 check('媒體名稱真的寫進去了', state.bindings.get('U_reporter')?.media_name === '中央社');
 
 // 綁定過期（6 小時 TTL）不代表「不知道這個人是誰」——媒體名稱要留著，不能再問一次
+// 批次 167：TTL 從最後一次在這場問答起算，上一輪（I 欄）也要清掉才是真的過期
 state.bindings.get('U_reporter').bound_at = Date.now() - 7 * 60 * 60 * 1000;
+state.bindings.get('U_reporter').lastTurn = '';
 await freshModule();
 out = await send('智慧醫療解決方案記者會的重點');
 check('綁定過期後再次自然語言命中 → 沿用先前的媒體名稱，不再補問',
@@ -839,6 +841,7 @@ check('回「略過」後媒體名稱記成「（未提供）」', state.binding
 // 綁定過期後再進一次 handleUnbound（還在綁定期間內會走「換場」而不是這條路，
 // 見 matchEventByName 對完整句子跟純活動名稱的比對差異），驗證「略過」也記得住
 state.bindings.get('U_reporter').bound_at = Date.now() - 7 * 60 * 60 * 1000;
+state.bindings.get('U_reporter').lastTurn = ''; // 批次 167：同上，上一輪也要是過期的
 await freshModule();
 out = await send('半導體先進封裝技術發表會');
 check('之前回過「略過」的人，綁定過期後再次自然語言命中不會又被補問一次',

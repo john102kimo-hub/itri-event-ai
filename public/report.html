@@ -132,7 +132,8 @@ document.getElementById('gate-input').addEventListener('keydown', e=>{ if(e.key=
 
 async function load(){
   try{
-    const res = await fetch('/api/analytics?exclude_test=1', { headers: { 'X-Admin-Password': PASSWORD } });
+    // report=1：成效口徑（批次 166，見 lib/report-scope.js）——已刪除／草稿／測試活動不算，每場只算活動當天起 14 天內，活動用現在的名稱
+    const res = await fetch('/api/analytics?exclude_test=1&report=1', { headers: { 'X-Admin-Password': PASSWORD } });
     const data = await res.json();
     if(data.error){ document.getElementById('gate-err').textContent = data.error; return; }
     ANALYTICS = data;
@@ -152,7 +153,10 @@ async function load(){
     document.getElementById('gate').style.display='none';
     document.getElementById('report').style.display='block';
     render();
-    if(/^#deck/.test(location.hash)) openDeck();
+    // #deck、#deck-3 開整體簡報；#deck=活動代碼（或 #deck=活動代碼/3）開那一場的簡報
+    const evHash = location.hash.match(/^#deck=([^/]+)/);
+    if(evHash) openDeck(decodeURIComponent(evHash[1]));
+    else if(/^#deck/.test(location.hash)) openDeck();
   }catch(e){
     document.getElementById('gate-err').textContent = '載入失敗：' + e.message;
   }
@@ -215,6 +219,7 @@ function render(){
     <div class="ev-card">
       <div class="ev-head">
         <h3>${escHtml(e.event_name)}</h3>
+        <button class="btn btn-outline no-print" data-deck-ev="${escHtml(e.event_id)}" title="只看這一場的互動簡報"><i class="ti ti-presentation"></i> 這場的互動簡報</button>
       </div>
       <div class="ev-stats">
         <div class="ev-stat"><div class="n">${e.count}</div><div class="l">回答題數</div></div>
@@ -240,7 +245,7 @@ function render(){
     <div class="section-label">各場記者會成效</div>
     ${cards || '<div class="ev-card">尚無問答資料。</div>'}
     <div class="foot-note">
-      · 本報告數據來自 AI 新聞助理實際問答紀錄，已排除測試資料。<br>
+      · 本報告數據來自 AI 新聞助理實際問答紀錄，已排除測試資料${ANALYTICS.report_window_days ? `；每場只計活動當天起 ${ANALYTICS.report_window_days} 天內的問答（活動前的準備測試不列入）` : ''}。<br>
       · 「服務媒體家數」以記者填寫之媒體名稱計算，同一家媒體的不同記者只算一家，實際觸及媒體數可能更高（部分記者未填寫）。<br>
       ${ANALYTICS.business_qa ? `· 企業場（企業說明會、技術媒合會、客戶參訪、技術交流會）的 ${ANALYTICS.business_qa} 則問答不列入本報告。<br>` : ''}
       · 「估算節省人力工時」為 AI 代答題數 × 每題估算人工回覆時間，供效益評估參考。<br>
@@ -248,6 +253,7 @@ function render(){
     </div>`;
   document.getElementById('loading').style.display='none';
   document.getElementById('body').style.display='block';
+  document.querySelectorAll('[data-deck-ev]').forEach(b => { b.onclick = () => openDeck(b.dataset.deckEv); });
 }
 
 // 該場的媒體露出 + 「提問 vs 發稿」交叉分析；沒上傳露出清單就整段不顯示
@@ -279,10 +285,11 @@ function exposureBlock(eventId){
 }
 
 // 互動簡報（批次 155）：資料與報告同一份（ANALYTICS／EXPOSURE／TRAINING），每題分鐘數與上方輸入框同步
-function openDeck(){
+// eventId：只看那一場（批次 166）；不帶就是整體
+function openDeck(eventId){
   if(!ANALYTICS || typeof ReportDeck === 'undefined') return;
   ReportDeck.open({
-    analytics: ANALYTICS, exposure: EXPOSURE, training: TRAINING, terms: GENERIC_TERMS,
+    analytics: ANALYTICS, exposure: EXPOSURE, training: TRAINING, terms: GENERIC_TERMS, eventId: typeof eventId === 'string' ? eventId : '',
     minPerQ: parseInt(document.getElementById('min-per-q').value) || 3,
     today: new Date().toLocaleDateString('zh-TW',{year:'numeric',month:'long',day:'numeric'}),
     onMinChange: function(v){ var i = document.getElementById('min-per-q'); i.value = v; render(); }

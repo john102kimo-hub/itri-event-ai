@@ -13,7 +13,8 @@
 
 import { readRange, appendRows, ensureSheets, listSheets, batchUpdate } from '../lib/sheets.js';
 import { parseExposureFile, normalizeOutlet, summarizeExposure as summarize } from '../lib/exposure-parse.js';
-import { groupOutlets } from '../lib/media-name.js';
+import { groupOutlets, isTestMedia } from '../lib/media-name.js';
+import { buildReportScope } from '../lib/report-scope.js';
 import { readEventRows } from '../lib/events-table.js';
 import { readQaRowsWithoutAnswers } from '../lib/qa-log.js';
 import { adminAttempt, requireAdmin, passwordFrom, codeMatches, authFailed } from '../lib/auth.js';
@@ -158,8 +159,10 @@ export default async function handler(req, res) {
         const [expRows, qaRowsRaw] = await Promise.all([
           safeRead('exposure!A2:I'), readQaRowsWithoutAnswers().catch(() => []), // 批次 117：不讀 AI 回答全文
         ]);
-        // 已刪除的問答（G 欄標記，或舊資料殘留的 B 欄 [deleted]）不該算進交叉分析
-        const qaRows = qaRowsRaw.filter((r) => r[1] !== '[deleted]' && r[6] !== '1');
+        // 已刪除的問答（G 欄標記，或舊資料殘留的 B 欄 [deleted]）不該算進交叉分析。
+        // 測試資料也不算（批次 166）：以前「測試」「test」「hi」「工研院」都被當成「問過、沒發稿」的媒體，
+        // 「提問 → 發稿」的分母被灌大、比例被拉低——這個比例是要報給長官的。
+        const qaRows = qaRowsRaw.filter((r) => r[1] !== '[deleted]' && r[6] !== '1' && !isTestMedia(r[3]));
 
         if (action === 'analysis') {
           return res.status(200).json({
@@ -168,11 +171,13 @@ export default async function handler(req, res) {
           });
         }
 
-        // 批次：每個有露出資料的活動各算一份，給 /report 用
+        // 批次：每個有露出資料的活動各算一份，給 /report 用。提問側跟成效報告同一個口徑（批次 166，lib/report-scope.js）：
+        // 只算活動當天起那幾天——活動前同仁試打的「工商時報、天下雜誌、中央社…」不能被算成「問過而且有發稿」。
+        const scope = buildReportScope(await readEventRows().catch(() => []));
         const ids = [...new Set(expRows.map((r) => r[0]).filter(Boolean))];
         const byEvent = {};
         ids.forEach((eid) => {
-          byEvent[eid] = crossAnalyze(rowsForEvent(expRows, eid), qaRows.filter((r) => r[1] === eid));
+          byEvent[eid] = crossAnalyze(rowsForEvent(expRows, eid), qaRows.filter((r) => r[1] === eid && scope.includesQa(eid, r[0])));
         });
         return res.status(200).json({
           byEvent,

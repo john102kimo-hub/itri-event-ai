@@ -37,9 +37,32 @@
   }
   var NOT_MEDIA_RE = /^（(未填寫|未提供|內部職員|群組提問)）$/;
 
+  // 單場簡報（批次 166，朱朱：「成效簡報除了整體外，每場活動也要有各自的」）：把輸入縮成只有這一場，
+  // 其餘照整體的算法走——同一場在兩份簡報裡的數字才會是同一套。找不到這一場（或是企業場）回 null。
+  function scopeToEvent(input, id) {
+    var A = input.analytics || {};
+    var ev = (A.by_event || []).filter(function (e) { return e.event_id === id && e.audience !== 'business'; })[0];
+    if (!ev) return null;
+    var X = input.exposure, xe = X && X.byEvent ? X.byEvent[id] : null, xs = null;
+    if (xe && xe.exposure && xe.exposure.total) {
+      xs = { totalExposure: xe.exposure.total, totalOutlets: xe.exposure.outlets, eventsWithExposure: 1, byEvent: {}, caveat: X.caveat };
+      xs.byEvent[id] = xe;
+    }
+    var te = ((input.training && input.training.by_event) || []).filter(function (t) { return t.event_id === id; })[0];
+    return {
+      analytics: { by_event: [ev], total: ev.count || 0, media_total: ev.media_count || 0, top_media: ev.media_top || [], report_window_days: A.report_window_days },
+      exposure: xs,
+      training: te && te.sessions ? { overall: { sessions: te.sessions, voice_sessions: te.voice_sessions || 0, avg_score: te.avg_score }, by_event: [te] } : null,
+      minPerQ: input.minPerQ, terms: input.terms, today: input.today,
+      single: { id: ev.event_id, name: ev.event_name || ev.event_id, date: ev.event_date || '' }
+    };
+  }
+
   // ───────────────────────── 資料模型（純函式，可在 node 測）─────────────────────────
   function buildModel(input) {
     input = input || {};
+    if (input.eventId) return buildModel(scopeToEvent(input, input.eventId) || { analytics: {}, minPerQ: input.minPerQ, terms: input.terms, today: input.today });
+    var single = input.single || null;
     var A = input.analytics || {}, X = input.exposure || null, T = input.training || null;
     var minPerQ = clampMin(input.minPerQ);
     var terms = input.terms || [];
@@ -110,17 +133,18 @@
       rows: ((T.by_event) || []).filter(function (t) { return t.sessions; }).slice(0, 8) } : null;
 
     function hoursFor(m) { return total * clampMin(m) / 60; }
+    var who = single ? '《' + shortName(single.name, 14) + '》' : '';
     var titles = {
       kpi: function (m) {
-        return total ? '記者問了 ' + fmt(total) + ' 題、服務 ' + fmt(mediaTotal) + ' 家媒體，估計替同仁省下 ' + hoursStr(hoursFor(m)) + ' 小時'
+        return total ? who + '記者問了 ' + fmt(total) + ' 題' + (mediaTotal ? '、服務 ' + fmt(mediaTotal) + ' 家媒體' : '') + '，估計替同仁省下 ' + hoursStr(hoursFor(m)) + ' 小時'
           : '目前還沒有記者問答紀錄';
       },
       calc: function (m) { m = clampMin(m); return '每題人工回覆以 ' + m + ' 分鐘估算，' + fmt(total) + ' 題等於省下 ' + hoursStr(hoursFor(m)) + ' 小時'; }
     };
 
     var slides = [];
-    slides.push({ id: 'cover', chapter: '總覽', kind: 'cover', title: '工研院活動溝通 AI 平台｜成效報告' });
-    slides.push({ id: 'kpi', chapter: '總覽', kind: 'kpi', title: titles.kpi(minPerQ), sub: '先看整體：幾場、幾題、幾家媒體、省了多少人力' });
+    slides.push({ id: 'cover', chapter: '總覽', kind: 'cover', title: single ? single.name + '｜成效報告' : '工研院活動溝通 AI 平台｜成效報告' });
+    slides.push({ id: 'kpi', chapter: '總覽', kind: 'kpi', title: titles.kpi(minPerQ), sub: single ? '先看這一場：幾題、幾家媒體、省了多少人力' : '先看整體：幾場、幾題、幾家媒體、省了多少人力' });
     if (topics.length) {
       var t = topics;
       slides.push({ id: 'topics', chapter: '記者問什麼', kind: 'topics',
@@ -132,15 +156,15 @@
         title: '共服務 ' + fmt(mediaTotal) + ' 家媒體' + (topMedia[0] ? '，最常使用的是' + shortName(topMedia[0].name, 14) + '（' + topMedia[0].count + ' 題）' : ''),
         sub: '同一家媒體只算一次；排行看的是各家提問的題數' });
     }
-    if (events.length) {
+    if (events.length && !single) { // 單場簡報不需要「各場」表格（只有一列）
       slides.push({ id: 'events', chapter: '各場成效', kind: 'events',
         title: eventsTitle(events),
-        sub: '點任一場，右邊看該場記者最關心的議題與到訪媒體；點欄位標題可以重新排序' });
+        sub: '點任一場，右邊看該場記者最關心的議題與到訪媒體，也可以打開那一場自己的簡報；點欄位標題可以重新排序' });
     }
     if (exp) {
-      slides.push({ id: 'exposure', chapter: '露出', kind: 'exposure',
+      slides.push({ id: 'exposure', chapter: '露出', kind: single ? 'exposureOne' : 'exposure',
         title: fmt(exp.total) + ' 則媒體報導、' + fmt(exp.outlets) + ' 家媒體' + (exp.rate != null ? '；使用過 AI 問答的媒體，' + exp.rate + '% 後續有發稿' : ''),
-        sub: '來自各場上傳的媒體露出清單，與 AI 問答紀錄交叉比對' });
+        sub: (single ? '來自這一場上傳的媒體露出清單' : '來自各場上傳的媒體露出清單') + '，與 AI 問答紀錄交叉比對' });
     }
     if (train) {
       slides.push({ id: 'training', chapter: '訓練', kind: 'training',
@@ -152,6 +176,7 @@
 
     return {
       minPerQ: minPerQ, today: today, total: total, mediaTotal: mediaTotal, analysed: analysed, fillRate: fillRate,
+      single: single, windowDays: A.report_window_days || 0, lineCount: sum(events.map(function (e) { return e.lineCount; })),
       events: events, topics: topics, topMedia: topMedia, exposure: exp, training: train,
       businessQa: A.business_qa || 0, slides: slides, hoursFor: hoursFor, titles: titles, hoursStr: hoursStr
     };
@@ -178,14 +203,18 @@
 
   var RENDER = {
     cover: function (m) {
-      var chips = '<span class="rd-tag"><b>' + fmt(m.events.length) + '</b>場記者會</span><span class="rd-tag o"><b>' + fmt(m.total) + '</b>題問答</span><span class="rd-tag"><b>' + fmt(m.mediaTotal) + '</b>家媒體</span>';
+      var chips = (m.single ? (m.single.date ? '<span class="rd-tag"><b>' + esc(m.single.date.replace(/-/g, '/')) + '</b>舉辦</span>' : '')
+        : '<span class="rd-tag"><b>' + fmt(m.events.length) + '</b>場記者會</span>') +
+        '<span class="rd-tag o"><b>' + fmt(m.total) + '</b>題問答</span>' + (m.mediaTotal ? '<span class="rd-tag"><b>' + fmt(m.mediaTotal) + '</b>家媒體</span>' : '');
       var facts = [];
       if (m.topics[0]) facts.push('記者最常問的是「' + m.topics[0].w + '」，共 ' + m.topics[0].c + ' 題');
-      if (m.events[0] && m.events[0].count) facts.push('問題最多的一場：《' + m.events[0].name + '》，' + m.events[0].count + ' 題');
-      facts.push('累計服務 ' + fmt(m.mediaTotal) + ' 家媒體');
+      if (!m.single && m.events[0] && m.events[0].count) facts.push('問題最多的一場：《' + m.events[0].name + '》，' + m.events[0].count + ' 題');
+      if (m.mediaTotal) facts.push((m.single ? '這一場服務了 ' : '累計服務 ') + fmt(m.mediaTotal) + ' 家媒體');
+      if (m.single && m.exposure) facts.push('活動後有 ' + fmt(m.exposure.total) + ' 則媒體報導');
       facts.push('估計替同仁省下 ' + hoursStr(m.hoursFor(m.minPerQ)) + ' 小時');
-      return '<div class="rd-cover"><div class="rd-k rd-rv">AI 新聞助理</div>' +
-        '<div class="rd-t rd-rv" style="--d:1">工研院活動溝通<br><span>AI 平台成效報告</span></div>' +
+      return '<div class="rd-cover"><div class="rd-k rd-rv">' + (m.single ? 'AI 新聞助理｜單場成效' : 'AI 新聞助理') + '</div>' +
+        (m.single ? '<div class="rd-t ev rd-rv" style="--d:1">' + esc(shortName(m.single.name, 60)) + '</div>'
+          : '<div class="rd-t rd-rv" style="--d:1">工研院活動溝通<br><span>AI 平台成效報告</span></div>') +
         '<div class="rd-chips rd-rv pop" style="--d:3">' + chips + '</div>' +
         '<div class="rd-meta rd-rv" style="--d:4">報告產出日：' + esc(m.today) + '<br>數據來自 AI 新聞助理實際問答紀錄，已排除測試資料</div>' +
         '<div class="rd-hero rd-rv pop" style="--d:2"><div class="rd-bubble" id="rd-bubble">嗨！點我看一個重點 👆</div><img class="rd-mia" id="rd-mia" src="/mia-avatar.png" alt="米亞" data-facts="' + esc(JSON.stringify(facts)) + '"></div>' +
@@ -193,20 +222,22 @@
     },
     kpi: function (m) {
       var cards = [
-        { c: 't1', lab: '支援記者會場次', v: m.events.length, hint: '企業場不列入' },
-        { c: 't2', lab: '累積回答題數', v: m.total, hint: '已排除測試資料' },
-        { c: 't3', lab: '服務媒體家數', v: m.mediaTotal, hint: '同一家媒體只算一次；未填媒體名稱的不計，實際觸及可能更高' },
+        // 單場：第一張換成「來自 LINE 的提問」；一題都沒有就不放這張（0 不是成效）
+        m.single ? (m.lineCount ? { c: 't1', lab: '來自 LINE 的提問', v: m.lineCount, unit: '題', hint: m.lineCount >= m.total ? '全部透過 LINE 問米亞' : '其餘來自活動網頁的 AI 問答' } : null)
+          : { c: 't1', lab: '支援記者會場次', v: m.events.length, hint: '企業場不列入' },
+        { c: 't2', lab: m.single ? '回答題數' : '累積回答題數', v: m.total, hint: '已排除測試資料' },
+        m.mediaTotal ? { c: 't3', lab: '服務媒體家數', v: m.mediaTotal, hint: '同一家媒體只算一次；未填媒體名稱的不計，實際觸及可能更高' } : null,
         { c: 't4', lab: '估算節省工時', v: Number(hoursStr(m.hoursFor(m.minPerQ))), dec: m.hoursFor(m.minPerQ) >= 10 ? 0 : 1, unit: '小時', hint: '<span data-bind="formula">' + fmt(m.total) + ' 題 × ' + m.minPerQ + ' 分 ÷ 60</span>（下一頁可調）' }
       ];
       if (m.exposure) {
-        cards.push({ c: 't1', lab: '累積媒體露出則數', v: m.exposure.total, hint: '涵蓋 ' + m.exposure.events + ' 場已登錄露出的活動' });
+        cards.push({ c: 't1', lab: m.single ? '媒體露出則數' : '累積媒體露出則數', v: m.exposure.total, hint: m.single ? '同仁上傳的露出清單（監測公司提供）' : '涵蓋 ' + m.exposure.events + ' 場已登錄露出的活動' });
         cards.push({ c: 't2', lab: '露出媒體家數', v: m.exposure.outlets, hint: '依監測清單的媒體名稱去重' });
       }
       if (m.training) {
         cards.push({ c: 't3', lab: '媒體訓練演練場次', v: m.training.sessions, hint: '發言人會前 AI 記者實戰演練' });
         cards.push({ c: 't4', lab: '平均訓練分數', v: m.training.avg == null ? 0 : m.training.avg, dec: 1, unit: '/ 10', hint: 'AI 訓練師逐題評分的平均' });
       }
-      cards = cards.slice(0, 8);
+      cards = cards.filter(Boolean).slice(0, 8);
       return head(m.slides[1]) + '<div class="rd-body"><div class="rd-kpis">' + cards.map(function (k, i) {
         return '<div class="rd-kpi rd-card rd-rv pop ' + k.c + '" style="--d:' + (i + 2) + '"><div class="rd-lab">' + esc(k.lab) + '</div><div class="rd-val">' +
           (k.lab === '估算節省工時' ? '<span class="rd-cu" data-bind="hours" data-to="' + k.v + '" data-dec="' + (k.dec || 0) + '">' + fmt(k.v, k.dec) + '</span>' : cu(k.v, k.dec)) +
@@ -227,18 +258,18 @@
       var shown = names.slice(0, 30);
       return head(s) + '<div class="rd-body"><div class="rd-cols"><div class="rd-bars">' +
         (m.topMedia.length ? m.topMedia.map(function (t, i) { return bar(t.name, t.count, max, '題', '', i + 2); }).join('') : '<div class="rd-empty">記者多未填寫媒體名稱，暫時沒有排行</div>') +
-        '</div><div class="rd-side rd-card rd-rv" style="--d:6"><h3>媒體填寫率</h3><div class="rd-big">' + cu(m.fillRate) + '<small>%</small></div><p>有填媒體名稱的題數 ÷ 全部題數。</p>' +
-        '<h3 style="margin-top:14px">到訪媒體</h3><div class="rd-chipwrap">' + shown.map(function (n) { return '<span class="rd-tag">' + esc(n) + '</span>'; }).join('') +
+        '</div><div class="rd-side rd-card rd-rv" style="--d:6">' +
+        '<h3>到訪媒體</h3><div class="rd-chipwrap">' + shown.map(function (n) { return '<span class="rd-tag">' + esc(n) + '</span>'; }).join('') +
         (names.length > shown.length ? '<span class="rd-tag o">…等 ' + names.length + ' 家</span>' : '') + (names.length ? '' : '<p>尚無資料</p>') + '</div></div></div></div>' +
         note('媒體名稱由記者自己填；同一家媒體的不同記者併成一家，「（未提供）」「（內部職員）」與整句問題不算媒體。沒填名稱的題目不計入家數，所以實際觸及的媒體可能更多。');
     },
     events: function (m, s) {
       var hasExp = !!m.exposure;
-      var cols = '1fr 150px 130px 140px 140px' + (hasExp ? ' 130px' : '');
-      var head0 = '<div class="rd-tr0" style="grid-template-columns:' + cols + '"><button data-sort="name">場次</button><button data-sort="count" class="on">回答題數</button><button data-sort="media">媒體家數</button><button data-sort="fill">媒體填寫率</button><button data-sort="hours">估算省時</button>' + (hasExp ? '<button data-sort="exp">露出則數</button>' : '') + '</div>';
+      var cols = '1fr 150px 130px 140px' + (hasExp ? ' 130px' : '');
+      var head0 = '<div class="rd-tr0" style="grid-template-columns:' + cols + '"><button data-sort="name">場次</button><button data-sort="count" class="on">回答題數</button><button data-sort="media">媒體家數</button><button data-sort="hours">估算省時</button>' + (hasExp ? '<button data-sort="exp">露出則數</button>' : '') + '</div>';
       return head(s) + '<div class="rd-body"><div class="rd-cols"><div class="rd-tbl rd-rv" style="--d:2">' + head0 +
         '<div class="rd-tbody" id="rd-tbody" data-cols="' + cols + '"></div></div><div class="rd-side rd-card rd-rv" style="--d:3" id="rd-evside"></div></div></div>' +
-        note('題數＝該場記者實際問的題數（已排除測試資料）；媒體填寫率＝有填媒體名稱的題數 ÷ 題數；估算省時＝題數 × 每題分鐘 ÷ 60（每題分鐘數見「算法」頁）。');
+        note('題數＝該場記者實際問的題數（已排除測試資料' + (m.windowDays ? '，只算活動當天起 ' + m.windowDays + ' 天內' : '') + '）；估算省時＝題數 × 每題分鐘 ÷ 60（每題分鐘數見「算法」頁）。');
     },
     exposure: function (m, s) {
       var e = m.exposure, cols = '1fr 120px 130px 170px 110px';
@@ -256,6 +287,16 @@
         '<div class="rd-cap">使用過 AI 問答的媒體，<br>後續有露出的比例</div><p style="margin-top:10px">另有 <b>' + fmt(e.publishedNotAsked) + '</b> 家媒體沒用 AI 問答，但仍有露出。</p></div></div></div>' +
         note('露出清單由同仁上傳（監測公司提供）；「提問 → 發稿」以媒體名稱模糊比對，可能有誤差，而且只涵蓋「有使用 AI 問答」的媒體；各場合計，同一家媒體跨場會重複計算。' +
           (e.eventCount > e.rows.length ? '表格只列露出最多的 ' + e.rows.length + ' 場（共 ' + e.eventCount + ' 場）。' : ''));
+    },
+    exposureOne: function (m, s) {
+      var e = m.exposure, top = e.rows[0] ? e.rows[0].exposure.top : [], max = top[0] ? top[0].n : 0;
+      var ringHtml = e.rate != null ? ring(e.rate, e.rate + '%', e.askedPublished + ' / ' + e.asked + ' 家', '#14C2B5')
+        : '<div class="rd-empty" style="font-size:24px;padding:20px 0">沒有媒體同時用過 AI 問答，<br>無法計算發稿率</div>';
+      return head(s) + '<div class="rd-body"><div class="rd-cols"><div class="rd-bars">' +
+        top.map(function (o, i) { return bar(o.name, o.n, max, '則', '', i + 2); }).join('') +
+        '</div><div class="rd-side rd-card rd-rv" style="--d:5"><h3>提問 → 發稿</h3>' + ringHtml +
+        '<div class="rd-cap">使用過 AI 問答的媒體，<br>後續有露出的比例</div><p style="margin-top:10px">另有 <b>' + fmt(e.publishedNotAsked) + '</b> 家媒體沒用 AI 問答，但仍有露出。</p></div></div></div>' +
+        note('露出清單由同仁上傳（監測公司提供），左邊是露出則數最多的媒體；「提問 → 發稿」以媒體名稱模糊比對，可能有誤差，而且只涵蓋「有使用 AI 問答」的媒體。');
     },
     training: function (m, s) {
       var t = m.training, avg = t.avg == null ? 0 : t.avg;
@@ -276,13 +317,14 @@
     },
     defs: function (m, s) {
       var defs = [
-        ['數據從哪來', '來自 AI 新聞助理（網頁與 LINE）實際的問答紀錄，已排除測試資料，以及同仁自己問的題目。'],
-        ['企業場不列入', '企業說明會、技術媒合會、客戶參訪、技術交流會的問答不算進這份報告' + (m.businessQa ? '（目前有 ' + m.businessQa + ' 則）' : '') + '。'],
+        ['數據從哪來', '來自 AI 新聞助理（網頁與 LINE）實際的問答紀錄' + (m.windowDays ? '，每場只算活動當天起 ' + m.windowDays + ' 天內；活動前的準備測試、' : '，已排除') +
+          '測試資料，以及同仁自己問的題目都不算。'],
+        m.single ? null : ['企業場不列入', '企業說明會、技術媒合會、客戶參訪、技術交流會的問答不算進這份報告' + (m.businessQa ? '（目前有 ' + m.businessQa + ' 則）' : '') + '。'],
         ['服務媒體家數', '以記者填寫的媒體名稱計算，同一家媒體的不同記者只算一家；沒填名稱的不計，實際觸及可能更高。'],
         ['估算節省工時', '回答題數 × 每題人工回覆分鐘數 ÷ 60。分鐘數是估計值，可在「算法」頁調整，不是實測。'],
         ['媒體露出', '露出清單由同仁上傳（監測公司提供）；「提問 → 發稿」以名稱模糊比對，可能有誤差。'],
         ['媒體訓練', '發言人會前讓 AI 扮記者出題、逐題評分；只統計練完整場的紀錄。']
-      ];
+      ].filter(Boolean);
       return head(s) + '<div class="rd-body"><div class="rd-defs">' + defs.map(function (d, i) {
         return '<div class="rd-def rd-card rd-rv pop" style="--d:' + (i + 2) + '"><h4>' + esc(d[0]) + '</h4><p>' + esc(d[1]) + '</p></div>';
       }).join('') + '</div></div><div class="rd-note rd-rv" style="--d:9">報告產出日：' + esc(m.today) + '　·　這份簡報由後台資料即時產生；要列印或存 PDF，請回到報告頁按「列印／存 PDF」。</div>';
@@ -401,7 +443,7 @@
   }
 
   function evValue(e, key, m) {
-    if (key === 'name') return e.name; if (key === 'media') return e.mediaCount; if (key === 'fill') return e.fillRate;
+    if (key === 'name') return e.name; if (key === 'media') return e.mediaCount;
     if (key === 'hours') return e.count * m.minPerQ / 60; if (key === 'exp') return e.exposure ? e.exposure.total : 0; return e.count;
   }
   function renderRows() {
@@ -414,7 +456,7 @@
     tb.innerHTML = rows.map(function (e) {
       return '<button type="button" class="rd-trow' + (e.id === deck.sel ? ' sel' : '') + '" data-id="' + esc(e.id) + '" style="grid-template-columns:' + cols + '"><div class="rd-nm">' + esc(e.name) + '</div>' +
         '<div class="c">' + fmt(e.count) + '<small>題</small><i class="rd-mini" style="--w:' + Math.max(3, Math.round(e.count / max * 100)) + '%"></i></div>' +
-        '<div class="c">' + fmt(e.mediaCount) + '<small>家</small></div><div class="c">' + e.fillRate + '<small>%</small></div>' +
+        '<div class="c">' + (e.mediaCount ? fmt(e.mediaCount) + '<small>家</small>' : '—') + '</div>' +
         '<div class="c" data-evq="' + e.count + '">' + (e.count * m.minPerQ / 60).toFixed(1) + '<small>小時</small></div>' +
         (hasExp ? '<div class="c">' + (e.exposure ? fmt(e.exposure.total) + '<small>則</small>' : '—') + '</div>' : '') + '</button>';
     }).join('');
@@ -424,12 +466,16 @@
   function renderSide() {
     var m = deck.model, e = m.events.filter(function (x) { return x.id === deck.sel; })[0], host = el('rd-evside');
     if (!e) { host.innerHTML = '<p>點左邊任一場看細節</p>'; return; }
-    var parts = ['<h3>' + esc(e.name) + '</h3><p><b>' + fmt(e.count) + '</b> 題・<b>' + fmt(e.mediaCount) + '</b> 家媒體' + (e.lineCount ? '・其中 ' + e.lineCount + ' 題來自 LINE' : '') + '</p>'];
+    var parts = ['<h3>' + esc(e.name) + '</h3><p><b>' + fmt(e.count) + '</b> 題' + (e.mediaCount ? '・<b>' + fmt(e.mediaCount) + '</b> 家媒體' : '') + (e.lineCount ? '・其中 ' + e.lineCount + ' 題來自 LINE' : '') + '</p>' +
+      '<p style="margin-top:10px"><button type="button" class="rd-open-ev" id="rd-open-ev">▶ 看這一場的完整簡報</button></p>'];
     parts.push('<h3 style="margin-top:12px">記者最關心</h3><div class="rd-chipwrap">' + (e.topics.length ? e.topics.map(function (t) { return '<span class="rd-tag">' + esc(t.w) + '・' + t.c + ' 題</span>'; }).join('') : '<p>尚無資料</p>') + '</div>');
-    parts.push('<h3 style="margin-top:12px">到訪媒體</h3><div class="rd-chipwrap">' + (e.mediaList.length ? e.mediaList.slice(0, 16).map(function (n) { return '<span class="rd-tag o">' + esc(n) + '</span>'; }).join('') + (e.mediaList.length > 16 ? '<span class="rd-tag">…等 ' + e.mediaList.length + ' 家</span>' : '') : '<p>記者多未填寫媒體名稱</p>') + '</div>');
+    if (e.mediaList.length) parts.push('<h3 style="margin-top:12px">到訪媒體</h3><div class="rd-chipwrap">' + e.mediaList.slice(0, 16).map(function (n) { return '<span class="rd-tag o">' + esc(n) + '</span>'; }).join('') + (e.mediaList.length > 16 ? '<span class="rd-tag">…等 ' + e.mediaList.length + ' 家</span>' : '') + '</div>');
     if (e.exposure) parts.push('<h3 style="margin-top:12px">媒體露出</h3><p><b>' + fmt(e.exposure.total) + '</b> 則・<b>' + fmt(e.exposure.outlets) + '</b> 家媒體' + (e.exposure.rate != null ? '・提問媒體發稿率 <b>' + e.exposure.rate + '%</b>' : '') + '</p>');
     if (e.training) parts.push('<h3 style="margin-top:12px">媒體訓練</h3><p><b>' + e.training.sessions + '</b> 場演練' + (e.training.avg != null ? '・平均 <b>' + e.training.avg + '</b> / 10' : '') + '</p>');
     host.innerHTML = parts.join('');
+    // 單場簡報（批次 166）：同一份資料，只換成這一場
+    var btn = el('rd-open-ev'), opts = deck.opts, id = e.id;
+    if (btn) btn.onclick = function () { open(Object.assign({}, opts, { eventId: id })); };
   }
 
   // 每題分鐘數改了：只更新有標記的地方，不重畫（拖滑桿時不能把滑桿本身換掉）
@@ -462,7 +508,8 @@
     var ch = deck.model.slides[i].chapter;
     qsa(el('rd-chap'), 'button').forEach(function (b) { b.classList.toggle('on', b.textContent === ch); });
     enter(nw);
-    try { history.replaceState(null, '', '#deck-' + (i + 1)); } catch (e) { /* ignore */ }
+    var one = deck.model.single; // 單場：#deck=活動代碼/頁碼，重新整理或傳連結都會回到同一場
+    try { history.replaceState(null, '', (one ? '#deck=' + encodeURIComponent(one.id) + '/' : '#deck-') + (i + 1)); } catch (e) { /* ignore */ }
   }
   function next() { if (deck.cur < deck.model.slides.length - 1) go(deck.cur + 1); }
   function prev() { if (deck.cur > 0) go(deck.cur - 1, true); }
