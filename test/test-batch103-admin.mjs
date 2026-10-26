@@ -88,10 +88,11 @@ console.log('\n── 一、發布閘門：三個入口都擋（後台發布鈕�
   check('★ 日期欄只有「建立時間戳」（沒填活動日期）→ 算沒有日期，擋下來', r.statusCode === 400 && r.body.missing.includes('日期'), JSON.stringify(r.body));
 
   // 同一次請求把缺的補上、同時發布 → 以「寫入後的整列」判斷，放行
-  r = await call('POST', {}, { action: 'update', password: 'pw', id: 'dr1', status: 'active', venue: '南港展覽館', press_contact: '王小明 03-5911234' });
+  // （這幾場都是活動前、沒有邀請函：批次 171 另外要先確認過後果，這裡帶 ack_no_invite，只驗必填閘門；確認本身見 test-batch171）
+  r = await call('POST', {}, { action: 'update', password: 'pw', id: 'dr1', status: 'active', venue: '南港展覽館', press_contact: '王小明 03-5911234', ack_no_invite: true });
   check('　 同一次請求補齊缺項再發布 → 放行，狀態變進行中', r.statusCode === 200 && statusOf('dr1') === 'active', JSON.stringify(r.body));
 
-  r = await call('POST', {}, { action: 'update', password: 'pw', id: 'ok1', status: 'active' });
+  r = await call('POST', {}, { action: 'update', password: 'pw', id: 'ok1', status: 'active', ack_no_invite: true });
   check('　 本來就齊全的草稿 → 照常發布', r.statusCode === 200 && statusOf('ok1') === 'active');
 
   // 沒有要離開草稿的編輯：不受影響
@@ -121,9 +122,9 @@ console.log('\n── 一之二、同仁編輯頁（update_edit）與直接新�
   book.events = [['id'], row({ id: 'dr1', name: '草稿一', kb: REAL_KB, date: inDays(10), code: 'cc1' })];
   let r = await call('POST', {}, { action: 'update_edit', id: 'dr1', code: 'cc1', status: 'active' }, {});
   check('★ 同仁編輯頁把狀態改進行中：缺項 → 400（同仁不用後台密碼，更要擋）', r.statusCode === 400 && r.body.code === 'publish_blocked' && statusOf('dr1') === 'draft', JSON.stringify(r.body));
-  r = await call('POST', {}, { action: 'update_edit', id: 'dr1', code: 'cc1', status: 'active', venue: '中興院區', press_contact: '王小明' }, {});
+  r = await call('POST', {}, { action: 'update_edit', id: 'dr1', code: 'cc1', status: 'active', venue: '中興院區', press_contact: '王小明', ack_no_invite: true }, {});
   check('　 同一次補齊 → 放行', r.statusCode === 200 && statusOf('dr1') === 'active', JSON.stringify(r.body));
-  r = await call('POST', {}, { action: 'update_edit', id: 'dr1', code: 'cc1', knowledge_base: REAL_KB + '\n再補一句。' }, {});
+  r = await call('POST', {}, { action: 'update_edit', id: 'dr1', code: 'cc1', knowledge_base: REAL_KB + '\n再補一句。', ack_no_invite: true }, {});
   check('　 已公開的活動，同仁只改內容 → 不受影響', r.statusCode === 200);
 
   reset();
@@ -132,7 +133,7 @@ console.log('\n── 一之二、同仁編輯頁（update_edit）與直接新�
   check('★ 新增活動預設草稿：只填名字、範本沒動 → 允許（草稿本來就是先開框架）', r.statusCode === 200 && r.body.status === 'draft' && book.events.length === 2, JSON.stringify(r.body));
   r = await call('POST', {}, { action: 'create', password: 'pw', name: '想直接公開', knowledge_base: KB_TEMPLATE, status: 'active' });
   check('★ 直接以「進行中」新增、必填沒齊 → 400，而且沒有新增那一列（API 是公開入口，不能繞過）', r.statusCode === 400 && r.body.code === 'publish_blocked' && book.events.length === 2, JSON.stringify(r.body));
-  r = await call('POST', {}, { action: 'create', password: 'pw', name: '齊全直接公開', knowledge_base: REAL_KB, status: 'active', event_date: inDays(5), venue: '中興院區', press_contact: '王小明 03-1' });
+  r = await call('POST', {}, { action: 'create', password: 'pw', name: '齊全直接公開', knowledge_base: REAL_KB, status: 'active', event_date: inDays(5), venue: '中興院區', press_contact: '王小明 03-1', ack_no_invite: true });
   check('　 必填齊全才可以直接以進行中新增', r.statusCode === 200 && r.body.status === 'active');
 }
 

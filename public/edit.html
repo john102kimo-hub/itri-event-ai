@@ -140,6 +140,18 @@ textarea.form-control { min-height: 240px; resize: vertical; line-height: 1.65; 
 .biz-only { display: none; }
 body.biz .biz-only { display: block; }
 body.biz .biz-hide { display: none !important; }
+/* 批次 171：媒體邀請函上面那一行（活動前，記者現在問得到什麼）與「活動前沒有邀請函」的確認視窗——跟後台編輯視窗同一套字 */
+.pre-now { border-radius: 8px; padding: 9px 12px; margin: 0 0 12px; font-size: 0.86rem; line-height: 1.6; background: #f8fafc; color: var(--muted); }
+.pre-now.warn { background: #fffbeb; border: 1px solid #fde68a; color: #92400e; }
+.pre-now.ok { background: #f0fdf4; border: 1px solid #bbf7d0; color: #047857; }
+.iw-overlay { position: fixed; inset: 0; background: rgba(15,23,42,0.45); z-index: 300; display: none; align-items: center; justify-content: center; padding: 16px; }
+.iw-box { background: #fff; border-radius: 14px; max-width: 480px; width: 100%; padding: 20px 20px 16px; box-shadow: 0 20px 50px rgba(0,0,0,0.25); max-height: 90vh; overflow: auto; }
+.iw-box h3 { font-size: 1.05rem; margin-bottom: 10px; display: flex; gap: 8px; align-items: center; }
+.iw-box p { font-size: 0.92rem; line-height: 1.65; }
+.iw-box ul { margin: 10px 0 14px; padding-left: 20px; font-size: 0.88rem; line-height: 1.6; }
+.iw-box li { margin-bottom: 6px; }
+.iw-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+.iw-actions .btn { flex: 1 1 auto; justify-content: center; }
 .biz-box textarea { font-size: 16px; min-height: 120px; }
 </style>
 </head>
@@ -283,6 +295,20 @@ body.biz .biz-hide { display: none !important; }
     </div>
   </div>
 
+  <!-- 批次 171：媒體邀請函搬到知識庫正下方。朱朱：「怕同仁先上傳資料、忘記填活動前資訊（媒體邀請函），活動前就按發布」——
+       放在後面的選填卡片裡，同仁滑不到也不知道它管的是「活動前記者拿得到什麼」。上面那一行即時講後果。 -->
+  <div class="card biz-hide" id="pre-event-card">
+    <h2><i class="ti ti-mail-forward" style="color:var(--primary)"></i> 媒體邀請函（活動前用）</h2>
+    <div class="sub">活動還沒辦之前，記者問得到的版本</div>
+    <div class="pre-now" id="pre-event-now" aria-live="polite"></div>
+    <div class="form-group biz-hide">
+      <textarea class="form-control" id="input-invite-letter" rows="6"
+        placeholder="貼入邀請媒體來採訪時附的說明文字（時間、地點、議程、採訪方式）…"
+        style="font-size:16px;min-height:auto"></textarea>
+      <div class="form-hint">活動日期還沒到、又有填這裡的話，記者問答（LINE 跟網頁都算）只會用這份內容回答，不會提前給正式新聞稿全文或活動照片。活動當天起自動改回用上面的知識庫，不用手動切換。新聞稿本來就可以公開的場次，留空就好。</div>
+    </div>
+  </div>
+
   <div class="card biz-hide">
     <h2><i class="ti ti-adjustments" style="color:var(--primary)"></i> 前台呈現（選填）</h2>
     <div class="sub">調整記者看到的畫面，不填就用系統預設</div>
@@ -334,7 +360,7 @@ body.biz .biz-hide { display: none !important; }
   </div>
 
   <div class="card biz-hide">
-    <h2><i class="ti ti-address-book" style="color:var(--primary)"></i> 邀訪窗口與邀請函（選填）</h2>
+    <h2><i class="ti ti-address-book" style="color:var(--primary)"></i> 邀訪窗口與主辦單位（選填）</h2>
     <div class="sub">大部分場次不用填，留空就照預設；需要時再填</div>
 
     <div class="form-group biz-hide">
@@ -343,13 +369,6 @@ body.biz .biz-hide { display: none !important; }
         placeholder="新聞稿｜王小明｜03-1234567 分機8888&#10;技術規格｜陳美玲｜03-1234567 分機9999｜LINE ID"
         style="font-size:16px;min-height:auto"></textarea>
       <div class="form-hint">記者在 LINE 點「媒體邀訪需求」時會列出這裡的關鍵字，點了直接給對應窗口的聯絡方式；LINE ID 選填。格式：<code>關鍵字｜姓名｜電話｜LINE ID</code>，半形 <code>|</code> 或全形 <code>｜</code> 都可以。留空則只給上面的「新聞聯絡人」。</div>
-    </div>
-    <div class="form-group biz-hide">
-      <label><i class="ti ti-mail-forward"></i> 媒體邀請函（選填，活動前用）</label>
-      <textarea class="form-control" id="input-invite-letter" rows="6"
-        placeholder="貼入邀請媒體來採訪時附的說明文字…"
-        style="font-size:16px;min-height:auto"></textarea>
-      <div class="form-hint">活動日期還沒到、又有填這裡的話，記者問答只會用這份內容回答，不會提前給正式新聞稿全文或活動照片。活動當天起自動改回正常回答，不用手動切換。留空則沒有這層限制。</div>
     </div>
     <div class="form-group biz-hide">
       <label><i class="ti ti-building"></i> 主辦單位</label>
@@ -394,6 +413,22 @@ body.biz .biz-hide { display: none !important; }
     <button class="btn btn-primary" id="save-btn" onclick="save()">
       <i class="ti ti-device-floppy"></i> 儲存內容
     </button>
+  </div>
+</div>
+
+<!-- 活動前沒有邀請函（批次 171）：後端退回 code=pre_event_no_invite 時問一次。藍色那顆是比較安全的「先去填」 -->
+<div class="iw-overlay" id="invite-warn" role="dialog" aria-modal="true" aria-labelledby="iw-title" onclick="if(event.target===this)closeInviteWarn()">
+  <div class="iw-box">
+    <h3><i class="ti ti-alert-triangle" style="color:#d97706"></i> <span id="iw-title">活動還沒到，還沒填媒體邀請函</span></h3>
+    <p id="iw-body"></p>
+    <ul>
+      <li><b>新聞稿還不能曝光</b>（有禁發時間、還在改）→ 先填邀請函。活動前米亞只用邀請函回答，活動當天自動換回知識庫。</li>
+      <li><b>內容本來就可以公開</b> → <span id="iw-ok-text">照樣發布就好</span>。</li>
+    </ul>
+    <div class="iw-actions">
+      <button type="button" class="btn btn-outline" id="iw-proceed">內容可以公開，照樣發布</button>
+      <button type="button" class="btn btn-primary" id="iw-fill"><i class="ti ti-mail-forward"></i> 先去填邀請函</button>
+    </div>
   </div>
 </div>
 
@@ -542,7 +577,7 @@ const KB_SOFT_LIMIT = 8000;
 const KB_HARD_LIMIT = 45000;
 
 function updateKbCount() {
-  updateReadiness();
+  updateReadiness(); updatePreEventNow();
   const out = document.getElementById('kb-count');
   const n = document.getElementById('input-kb').value.length;
   if (n > KB_HARD_LIMIT) {
@@ -593,6 +628,73 @@ function updateReadiness() {
   box.innerHTML = `<span class="lead">發布前必填</span>${(BIZ ? ['內容', '聯絡窗口'] : ['日期', '地點', '新聞聯絡人', '新聞稿']).map(chip).join('')}` +
     (miss.length ? '' : `<span class="ok">　都齊了，可以把狀態改成「${BIZ ? '已發布' : '進行中'}」</span>`);
 }
+
+// ── 活動前，記者現在問得到什麼（批次 171，跟後台編輯視窗同一套字）──────────
+// 規則跟後端 lib/event-status.js preEventWithoutInvite()、答題時的 lib/prompt.js resolveEventContent() 一致：
+// 活動日期嚴格晚於台灣的今天、而且有填邀請函 → 只用邀請函；沒填 → 整份知識庫。
+// 這裡只是讓人看得到後果；真正「一定要先確認」的是後端那道（code=pre_event_no_invite）。
+const WEEKDAY_ZH = ['日', '一', '二', '三', '四', '五', '六'];
+function todayTaipeiIso() { return new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Taipei' }); }
+function mdWeekday(iso) {
+  const [y, m, d] = iso.split('-').map(Number);
+  return `${m}/${d}（${WEEKDAY_ZH[new Date(Date.UTC(y, m - 1, d)).getUTCDay()]}）`;
+}
+function daysUntil(iso) {
+  return Math.round((Date.parse(iso + 'T00:00:00Z') - Date.parse(todayTaipeiIso() + 'T00:00:00Z')) / 86400000);
+}
+/** 活動前、沒有邀請函、不是企業場 → 還有幾天；否則 0 */
+function preEventDaysWithoutInvite() {
+  const v = id => (document.getElementById(id)?.value || '').trim();
+  if (BIZ || v('input-invite-letter') || !/^\d{4}-\d{2}-\d{2}$/.test(v('input-date'))) return 0;
+  return Math.max(0, daysUntil(v('input-date')));
+}
+function updatePreEventNow() {
+  const box = document.getElementById('pre-event-now');
+  if (!box || BIZ) return;
+  const v = id => (document.getElementById(id)?.value || '').trim();
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(v('input-date')) ? v('input-date') : '';
+  const left = date ? daysUntil(date) : null;
+  const live = ['active', 'ended'].includes(v('input-status'));
+  if (!date) { box.className = 'pre-now'; box.textContent = '填了活動日期之後，這裡會告訴你活動前記者問得到什麼。'; return; }
+  if (left <= 0) { box.className = 'pre-now'; box.textContent = '活動已經到了：記者問到的是上面的知識庫，這份邀請函不再使用。'; return; }
+  const when = `這場 ${mdWeekday(date)}才辦，還有 ${left} 天`;
+  if (v('input-invite-letter')) {
+    box.className = 'pre-now ok';
+    box.textContent = `✅ ${when}：活動前記者只拿得到下面這份邀請函，${mdWeekday(date)}當天起自動改用上面的知識庫。`;
+  } else {
+    box.className = 'pre-now warn';
+    box.textContent = `⚠️ ${when}，還沒填邀請函：${live ? '記者現在' : '一發布，記者'}在 LINE 和網頁問米亞，就會拿到上面整份知識庫（包括新聞稿全文、照片）。新聞稿還不能曝光的話，請把邀請函貼在下面。`;
+  }
+}
+
+// 後端說「活動前、沒有邀請函」（code=pre_event_no_invite，批次 171）時問一次。按過「照樣」之後，
+// 這個頁面裡再存就不用每次都問（重新整理就重來）。
+let inviteAcked = false;
+function askInviteWarn(data, onProceed) {
+  const publish = data.kind === 'publish';
+  const left = Number(data.days_left) || 0;
+  const when = data.date ? `${mdWeekday(data.date)}才辦（還有 ${left} 天）` : '還沒到';
+  document.getElementById('iw-title').textContent = publish ? '活動還沒到，還沒填媒體邀請函' : '這場已經發布，但還沒有媒體邀請函';
+  document.getElementById('iw-body').textContent = publish
+    ? `這場 ${when}。現在發布，記者在 LINE 和活動網頁一問，米亞就會用整份知識庫回答——包括新聞稿全文和照片。`
+    : `這場 ${when}，又沒有邀請函：這次存的內容，記者在 LINE 和活動網頁馬上就問得到——包括新聞稿全文和照片。`;
+  document.getElementById('iw-ok-text').textContent = publish ? '照樣發布就好' : '照樣儲存就好';
+  const go = document.getElementById('iw-proceed');
+  go.textContent = publish ? '內容可以公開，照樣發布' : '內容可以公開，照樣儲存';
+  go.onclick = () => { closeInviteWarn(); inviteAcked = true; onProceed(); };
+  document.getElementById('iw-fill').onclick = () => { closeInviteWarn(); focusInviteLetter(); };
+  document.getElementById('invite-warn').style.display = 'flex';
+  document.getElementById('iw-fill').focus();
+}
+function closeInviteWarn() { document.getElementById('invite-warn').style.display = 'none'; }
+function focusInviteLetter() {
+  const el = document.getElementById('input-invite-letter');
+  el.classList.add('field-missing');
+  setTimeout(() => el.classList.remove('field-missing'), 8000);
+  el.scrollIntoView?.({ behavior: 'smooth', block: 'center' });
+  el.focus({ preventScroll: true });
+}
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeInviteWarn(); });
 // 儲存被擋下來時，把缺的欄位框起來並捲過去
 function highlightMissing(labels) {
   const map = { '日期': 'input-date', '地點': 'input-venue', '新聞聯絡人': 'input-contact', '新聞稿': 'input-kb', '內容': 'biz-tech', '聯絡窗口': 'input-contact' };
@@ -619,7 +721,7 @@ let loadedStatus = 'active';
 
 // 沒存就關分頁毫無警告的話，同仁手打的內容會整段蒸發 —— 追蹤是否有未儲存的變更
 let dirty = false;
-document.getElementById('editor').addEventListener('input', () => { dirty = true; updateReadiness(); });
+document.getElementById('editor').addEventListener('input', () => { dirty = true; updateReadiness(); updatePreEventNow(); });
 window.addEventListener('beforeunload', (e) => {
   if (dirty) { e.preventDefault(); e.returnValue = ''; }
 });
@@ -667,7 +769,7 @@ async function load() {
 
     // 活動日期：只收純日期（見 eventDateIso 的說明），沒填就留空讓同仁自己選
     document.getElementById('input-date').value = eventDateIso(ev);
-    updateReadiness();
+    updateReadiness(); updatePreEventNow();
     if (window.chipsPreview) chipsPreview.refresh(); // 批次 147：程式填好欄位後算一次快速提問預覽
 
     document.getElementById('preview-link').href = `/event?id=${encodeURIComponent(EVENT_ID)}`;
@@ -753,7 +855,7 @@ async function copyFromEvent(sourceId) {
   }
 }
 
-async function save() {
+async function save(ack = false) {
   const name = document.getElementById('input-name').value.trim();
   const knowledge_base = document.getElementById('input-kb').value.trim();
   if (!name) { toast('請填寫活動名稱'); return; }
@@ -788,7 +890,8 @@ async function save() {
       !confirm('確定要封存這場活動嗎？封存後記者前台將立即無法使用，且你之後將無法自行修改，如需取消要聯絡後台管理員。')) {
     return;
   }
-  if (status === 'active' && loadedStatus === 'draft' &&
+  // 活動前、沒有邀請函的話，後端會退回來、改問更具體的那一個（批次 171）——這裡就不先問一次一般的，免得連跳兩個視窗
+  if (status === 'active' && loadedStatus === 'draft' && !ack && !preEventDaysWithoutInvite() &&
       !confirm('確定要發布這場活動嗎？發布後記者就能透過連結問到這裡的內容，請確認內容已經準備好。')) {
     return;
   }
@@ -820,10 +923,18 @@ async function save() {
         press_contact: document.getElementById('input-contact').value.trim(),
         contacts: document.getElementById('input-contacts').value.trim(),
         invite_letter: document.getElementById('input-invite-letter').value.trim(),
-        invite_letter_chips: document.getElementById('input-invite-letter-chips').value.trim()
+        invite_letter_chips: document.getElementById('input-invite-letter-chips').value.trim(),
+        ack_no_invite: ack || inviteAcked || undefined
       })
     });
     const data = await res.json();
+    if (data.code === 'pre_event_no_invite') {
+      // 活動前、沒有邀請函（批次 171）：內容都還在畫面上，問他要先填邀請函、還是照樣存
+      btn.disabled = false;
+      btn.innerHTML = '<i class="ti ti-device-floppy"></i> 儲存內容';
+      askInviteWarn(data, () => save(true));
+      return;
+    }
     if (data.code === 'publish_blocked') {
       // 把狀態改成公開（進行中／已結束）但必填沒齊：後端擋下來了，內容都還在畫面上。
       // 把缺的欄位框起來、捲過去，並告訴他最簡單的出路——先維持「未發布」存起來。
