@@ -804,7 +804,7 @@ details.adv[open] > summary { border-bottom:1px solid var(--border); margin-bott
           placeholder="貼入本次活動的新聞稿或重要資訊，AI 將根據此內容回答記者問題…"
           oninput="updateKbCount()"></textarea>
         <div class="char-count" id="kb-count">0 / 8000 字</div>
-        <div class="form-hint">新增活動時已內建固定範本，照格式填空即可，不會漏欄位；<b>範本沒填內容，不算有新聞稿，不能發布</b>。<b>範圍限制與結尾警語由系統自動加上，不需自己寫。</b>建議 8000 字以內（超過會讓 AI 每次回答變慢、變貴）；硬上限 45000 字，超過存不進去。</div>
+        <div class="form-hint">新增活動時已內建固定範本，照格式填空即可，不會漏欄位；<b>範本沒填內容，不算有新聞稿，不能發布</b>（活動前填了下面的媒體邀請函就可以先發布，新聞稿活動當天再補）。<b>範圍限制與結尾警語由系統自動加上，不需自己寫。</b>建議 8000 字以內（超過會讓 AI 每次回答變慢、變貴）；硬上限 45000 字，超過存不進去。</div>
       </div>
     </div>
 
@@ -970,7 +970,7 @@ details.adv[open] > summary { border-bottom:1px solid var(--border); margin-bott
     <h2><i class="ti ti-alert-triangle" style="color:var(--accent)"></i> 還不能發布</h2>
     <div id="pb-name" style="font-weight:700"></div>
     <ul class="pb-list" id="pb-list"></ul>
-    <div class="form-hint">發布前必填四項：<b>日期、地點、新聞聯絡人、新聞稿</b>（知識庫只有範本、沒填內容不算）。補齊之後再按「發布」。</div>
+    <div class="form-hint">發布前必填四項：<b>日期、地點、新聞聯絡人、新聞稿</b>（知識庫只有範本、沒填內容不算）。活動還沒到、新聞稿還沒好的話，先填<b>媒體邀請函</b>就可以發布，新聞稿活動當天再補。補齊之後再按「發布」。</div>
     <div class="modal-actions">
       <button class="btn btn-outline" onclick="closePublishBlocked()">知道了</button>
       <button class="btn btn-primary" id="pb-go"><i class="ti ti-edit"></i> 去補齊</button>
@@ -2022,7 +2022,10 @@ function missingForPublish() {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(v('input-date'))) miss.push({ label: '日期', field: 'input-date' });
   if (!v('input-venue')) miss.push({ label: '地點', field: 'input-venue' });
   if (!v('input-contact')) miss.push({ label: '新聞聯絡人', field: 'input-contact' });
-  if (!kbHasContent(v('input-kb'))) miss.push({ label: '新聞稿', field: 'input-kb' });
+  // 批次 173：活動前、有填媒體邀請函 → 新聞稿可以活動當天再補（跟 lib/event-status.js eventChecklist 同一條）
+  const today = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Taipei' });
+  miss.kbViaInvite = !kbHasContent(v('input-kb')) && /^\d{4}-\d{2}-\d{2}$/.test(v('input-date')) && v('input-date') > today && !!v('input-invite-letter');
+  if (!kbHasContent(v('input-kb')) && !miss.kbViaInvite) miss.push({ label: '新聞稿', field: 'input-kb' });
   return miss;
 }
 function updateReadiness() {
@@ -2030,7 +2033,7 @@ function updateReadiness() {
   if (!box) return;
   const miss = missingForPublish();
   const missLabels = new Set(miss.map(m => m.label));
-  const chip = l => missLabels.has(l) ? `<span class="miss"><i class="ti ti-square"></i> ${l}</span>` : `<span class="ok"><i class="ti ti-circle-check"></i> ${l}</span>`;
+  const chip = l => missLabels.has(l) ? `<span class="miss"><i class="ti ti-square"></i> ${l}</span>` : `<span class="ok"><i class="ti ti-circle-check"></i> ${l}${l === '新聞稿' && miss.kbViaInvite ? '（活動前先用邀請函，當天再補）' : ''}</span>`;
   box.className = 'readiness' + (miss.length ? '' : ' all-ok');
   box.innerHTML = `<span class="lead">發布前必填</span>${['日期', '地點', '新聞聯絡人', '新聞稿'].map(chip).join('')}` +
     (miss.length ? '' : '<span class="ok">　都齊了，儲存後就可以按「發布」</span>');
@@ -2058,11 +2061,19 @@ function updatePreEventNow() {
   const left = date ? daysUntil(date) : null;
   const live = ['active', 'ended'].includes(v('input-status'));
   if (!date) { box.className = 'pre-now'; box.textContent = '填了活動日期之後，這裡會告訴你活動前記者問得到什麼。'; return; }
-  if (left <= 0) { box.className = 'pre-now'; box.textContent = '活動已經到了：記者問到的是上面的知識庫，這份邀請函不再使用。'; return; }
+  if (left <= 0) {
+    // 批次 173：當天新聞稿還沒貼、又有邀請函 → 米亞繼續用邀請函（lib/prompt.js isInviteFallback）
+    const stillInvite = !kbHasContent(v('input-kb')) && !!v('input-invite-letter');
+    box.className = stillInvite ? 'pre-now warn' : 'pre-now';
+    box.textContent = stillInvite ? '⚠️ 活動已經到了，但上面的知識庫還沒有新聞稿：記者問到的仍是這份邀請函，請盡快把新聞稿貼上。'
+      : '活動已經到了：記者問到的是上面的知識庫，這份邀請函不再使用。';
+    return;
+  }
   const when = `這場 ${mdWeekday(date)}才辦，還有 ${left} 天`;
   if (v('input-invite-letter')) {
     box.className = 'pre-now ok';
-    box.textContent = `✅ ${when}：活動前記者只拿得到下面這份邀請函，${mdWeekday(date)}當天起自動改用上面的知識庫。`;
+    box.textContent = `✅ ${when}：活動前記者只拿得到下面這份邀請函，${mdWeekday(date)}當天起自動改用上面的知識庫` +
+      (kbHasContent(v('input-kb')) ? '。' : '（新聞稿還沒貼上之前，繼續用邀請函；記得當天補上新聞稿）。');
   } else {
     box.className = 'pre-now warn';
     box.textContent = `⚠️ ${when}，還沒填邀請函：${live ? '記者現在' : '一發布，記者'}在 LINE 和網頁問米亞，就會拿到上面整份知識庫（包括新聞稿全文、照片）。新聞稿還不能曝光的話，請把邀請函貼在下面。`;
