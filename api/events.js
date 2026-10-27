@@ -312,6 +312,7 @@ export default async function handler(req, res) {
             status: r[4] || 'active', created_at: r[5] || '', event_date: r[5] || '',
             chips: r[6] || '', images: r[7] || '', greeting: r[8] || '', organizer: r[9] || '工研院',
             has_kb: kbHasContent(r[3]),   // 批次 117：範本沒動過不算有資料（同發布閘門）
+            has_invite: !!String(r[16] || '').trim(),   // 批次 176：有沒有媒體邀請函（只給旗標、不給全文），後台「試問當天答案」用
             event_time: r[11] || '', venue: r[12] || '', event_type: r[13] || '', press_contact: r[14] || '',
             contacts: r[15] || '',
             // 必填還缺哪幾項（批次 103）：卡片上直接寫出來，發布前就知道缺什麼，不用按了才被擋
