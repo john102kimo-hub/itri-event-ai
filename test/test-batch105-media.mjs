@@ -259,7 +259,7 @@ const lineOf = (html, re) => { const m = re.exec(html); if (!m) throw new Error(
   // 對話紀錄的存取
   const store = {};
   const ls = { getItem: (k) => (k in store ? store[k] : null), setItem: (k, v) => { store[k] = String(v); }, removeItem: (k) => { delete store[k]; } };
-  const pre = ["const CHAT_LS_PREFIX = 'itri_chat_'; const CHAT_TTL_MS = 12 * 3600 * 1000; const CHAT_KEEP = 40;", 'let hist = []; const eventId = "ev1";', fnSource(EV, 'lsGet'), fnSource(EV, 'lsSet'), fnSource(EV, 'saveChat'), fnSource(EV, 'clearChat'), fnSource(EV, 'loadChat')].join('\n');
+  const pre = ["const CHAT_LS_PREFIX = 'itri_chat_'; const CHAT_TTL_MS = 12 * 3600 * 1000; const CHAT_KEEP = 40; const SIM = false;", 'let hist = []; const eventId = "ev1";', fnSource(EV, 'lsGet'), fnSource(EV, 'lsSet'), fnSource(EV, 'saveChat'), fnSource(EV, 'clearChat'), fnSource(EV, 'loadChat')].join('\n');
   const mk = (now) => new Function('localStorage', 'Date', `${pre}; return { saveChat, loadChat, clearChat, setHist: (h) => { hist = h; } };`)(ls, now ? class extends Date { constructor(...a) { if (a.length) super(...a); else super(now); } static now() { return now; } } : Date);
   const f = mk();
   const big = []; for (let i = 1; i <= 30; i++) { big.push({ role: 'user', content: `問${i}` }, { role: 'assistant', content: `答${i}` }); }
@@ -293,7 +293,7 @@ const lineOf = (html, re) => { const m = re.exec(html); if (!m) throw new Error(
     const wrapOf = () => ({ children: [], appendChild(c) { this.children.push(c); } });
     const src = [fnSource(EV, 'addRetry'), fnSource(EV, 'failTurn'), fnSource(EV, 'sendMessage')].join('\n');
     const factory = new Function('document', 'fetch', 'addMessage', 'showTyping', 'dockChips', 'lockUntilMedia', 'showMediaModal', 'saveChat', 'addHumanHelp', 'clientId', 'streamReply', 'UNANSWERED_RE', 'eventId',
-      `let hist = ${JSON.stringify(preHist)}; let isWaiting = false; let mediaName = ${JSON.stringify(mediaName)}; let personName = ${JSON.stringify(personName)};
+      `const SIM = false, SIM_CODE = ''; let hist = ${JSON.stringify(preHist)}; let isWaiting = false; let mediaName = ${JSON.stringify(mediaName)}; let personName = ${JSON.stringify(personName)};
        ${src}
        return { sendMessage, get hist() { return hist; }, set mediaName(v) { mediaName = v; } };`);
     const api = factory(document,

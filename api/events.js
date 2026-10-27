@@ -23,7 +23,7 @@ import { readRange, appendRows, updateRange, ensureSheets, listSheets, batchUpda
 import { generateId, generateEditCode } from '../lib/ids.js';
 import { del } from '@vercel/blob';
 import { CONTACTS_DIR_RANGE, ensureContactsDirectorySheet } from '../lib/contacts-directory.js';
-import { resolveEventContent, isPreEventMode } from '../lib/prompt.js';
+import { resolveEventContent, isPreEventMode, simulateEventDay } from '../lib/prompt.js';
 import { lineBindUrl, lineAddFriendUrl, lineBasicId } from '../lib/line-link.js';
 import { handleRegistrationRequest } from '../lib/registration-api.js';
 import { stripRegisterLineTokens } from '../lib/registration.js';
@@ -180,7 +180,7 @@ export default async function handler(req, res) {
     }
 
     // 批次 110：猜編輯碼的人（錯得太多次的來源）在讀 Sheets 之前就擋下來，也順便擋掉亂填 id 的讀取
-    if (action === 'get_edit' && authBlocked(req)) return tooManyAttempts(res);
+    if ((action === 'get_edit' || (action === 'get_public' && req.query.sim_day)) && authBlocked(req)) return tooManyAttempts(res);
 
     try {
       // 批次 109：公開端點（get_public、公開列表）走 lib/events-table.js 的 30 秒快取——
@@ -197,33 +197,44 @@ export default async function handler(req, res) {
           res.setHeader('Cache-Control', 'no-store');   // 還沒發布的場次不能被 CDN 記住：發布後要馬上看得到
           return res.status(404).json({ error: '活動不存在' });
         }
+        // 模擬記者會當天（批次 175）：帶 sim_day=1 而且編輯碼對得上這一場，才用「活動當天」的 chips／images 算。
+        // 編輯碼不對一律 403，不會退回一般回應——這個請求本來就只有同仁的編輯頁會送。
+        // 這種回應含當天才公開的照片，一定不能被 CDN 記住（no-store）。
+        const simulating = !!req.query.sim_day;
+        if (simulating && !codeMatches(code, row[10])) {
+          authFailed(req);
+          res.setHeader('Cache-Control', 'no-store');
+          return res.status(403).json({ error: '編輯碼不正確，無法模擬記者會當天。' });
+        }
+        const dayOf = ev => (simulating ? simulateEventDay(ev) : ev);
         // 活動前只給邀請函對應的 chips／images（見 lib/prompt.js resolveEventContent()
         // 的說明）——public/event.html 直接顯示 event.chips／event.images，AI 問答那邊
         // 擋了但這個公開頁面沒擋的話，官方照片一樣會在活動前被看到，等於防了一半。
         // invite_letter／invite_letter_chips 原始文字不外送：這個端點只需要「已經算好」
         // 的 chips／images，公開頁面不會直接顯示邀請函全文本身。
-        const { invite_letter, invite_letter_chips, ...publicFields } = resolveEventContent({
+        const { invite_letter, invite_letter_chips, sim_day: _sim, ...publicFields } = resolveEventContent(dayOf({
           status: row[4] || 'active', event_date: row[5] || '',
           chips: row[6] || '', images: row[7] || '',
           invite_letter: row[16] || '', invite_letter_chips: row[17] || ''
-        });
+        }));
         // ⚠️ P 欄（邀訪窗口分工：關鍵字｜姓名｜電話｜LINE ID）不外送（批次 82）。
         // 這是公開、免登入的端點，前台根本沒用到這一欄；以前照樣回傳，等於任何人打一次
         // 網址就拿得到每場技術窗口同仁的姓名、分機與私人 LINE ID。記者要找人走 LINE 的
         // 邀訪流程（一次只給對應的那一位），不是整份名單。
-        res.setHeader('Cache-Control', PUBLIC_CACHE);
+        res.setHeader('Cache-Control', simulating ? 'no-store' : PUBLIC_CACHE);
         return res.status(200).json({
           event: {
+            ...(simulating ? { sim_day: true } : {}),
             id: row[0], name: row[1], color: row[2] || '#0F9E7A',
             status: publicFields.status, created_at: row[5] || '', event_date: publicFields.event_date,
             // 快速提問（批次 104）：同仁自訂的優先；沒自訂就依知識庫實際有寫的小節算，不再是一組寫死的
             // 「技術商業化」五題（院士授證典禮點下去只會得到「沒有資料」）。算法與 LINE 共用 lib/default-chips.js。
-            chips: effectiveChips({
+            chips: effectiveChips(dayOf({
               status: publicFields.status, event_date: row[5] || '',
               chips: row[6] || '', images: row[7] || '',
               invite_letter: row[16] || '', invite_letter_chips: row[17] || '',
               knowledge_base: row[3] || '', press_contact: row[14] || '', venue: row[12] || '', event_time: row[11] || '', event_type: row[13] || ''
-            }).join('\n'),
+            })).join('\n'),
             images: publicFields.images, greeting: row[8] || '',
             event_time: row[11] || '', venue: row[12] || '', event_type: row[13] || '', press_contact: row[14] || '',
             // 企業場（批次 118）：活動頁問「公司／單位」不問媒體，字樣不寫記者會，見 lib/audience.js

@@ -819,6 +819,11 @@ details.adv[open] > summary { border-bottom:1px solid var(--border); margin-bott
           style="font-size:0.85rem"></textarea>
         <div class="form-hint">活動日期還沒到、又有填這裡的話，記者問答（LINE 跟網頁都算）只會用這份內容回答，不會提前給正式新聞稿全文或活動照片——避免新聞稿還在改、還在禁發就先曝光。活動當天起自動改回用上面的「活動知識庫」，不用手動切換。新聞稿本來就可以公開的場次，留空就好。</div>
       </div>
+      <!-- 批次 175：同仁編輯頁（public/edit.html）同一顆按鈕。朱朱「無法測試記者會當天真實問答狀況」 -->
+      <div class="form-group" id="sim-row" hidden>
+        <button type="button" class="btn btn-outline" id="sim-btn" onclick="openSimDay()"><i class="ti ti-microphone-2"></i> 試問：記者會當天的答案</button>
+        <div class="form-hint">想先看看記者會當天，米亞會怎麼回答？點這顆會開一個<b>測試用的記者前台</b>，用上面「活動知識庫」的新聞稿與照片回答。只有你看得到，記者現在問到的還是邀請函，問答也不會算進統計。剛改的內容要先儲存。</div>
+      </div>
     </div>
 
     <!-- 批次 147：快速提問從「進階設定」搬出來（朱朱：「快捷鍵選項沒出現」——收在預設收合的進階設定裡，手機上找不到），
@@ -2060,6 +2065,9 @@ function updatePreEventNow() {
   const date = /^\d{4}-\d{2}-\d{2}$/.test(v('input-date')) ? v('input-date') : '';
   const left = date ? daysUntil(date) : null;
   const live = ['active', 'ended'].includes(v('input-status'));
+  // 試問按鈕只在「活動還沒到、有邀請函、已經存過（有 id）」時出現
+  const simRow = document.getElementById('sim-row');
+  if (simRow) simRow.hidden = !(date && left > 0 && v('input-invite-letter') && v('edit-event-id'));
   if (!date) { box.className = 'pre-now'; box.textContent = '填了活動日期之後，這裡會告訴你活動前記者問得到什麼。'; return; }
   if (left <= 0) {
     // 批次 173：當天新聞稿還沒貼、又有邀請函 → 米亞繼續用邀請函（lib/prompt.js isInviteFallback）
@@ -2859,6 +2867,35 @@ async function copyEditLink(eventId, btn) {
     toast('產生失敗：' + e.message, 'error');
   }
   if (btn) { btn.disabled = false; btn.innerHTML = original; }
+}
+
+// 試問記者會當天的答案（批次 175）：跟 openTraining 同一個做法，先取該場的 edit_code 再開測試前台。
+// 測試前台由伺服器驗編輯碼，記者自己加參數開不起來。
+async function openSimDay() {
+  const eventId = document.getElementById('edit-event-id').value;
+  if (!eventId) return;
+  const btn = document.getElementById('sim-btn');
+  const original = btn.innerHTML;
+  const status = document.getElementById('input-status').value;
+  if (status === 'draft') { toast('這場還沒發布，測試前台也開不起來。把狀態改成「進行中」並儲存後，就能試問。', 'error'); return; }
+  btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader"></i> 準備中…';
+  const win = window.open('about:blank', '_blank');
+  try {
+    const res = await authedFetch('/api/events', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'ensure_edit_code', password: state.password, id: eventId })
+    });
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    const url = `${location.origin}/event?id=${encodeURIComponent(eventId)}&sim=day&code=${encodeURIComponent(data.edit_code)}`;
+    if (win) win.location = url;
+    else location.href = url;
+  } catch (e) {
+    if (win) win.close();
+    toast('開啟測試前台失敗：' + e.message, 'error');
+  }
+  btn.disabled = false; btn.innerHTML = original;
 }
 
 // 單場媒體訓練：先取該場的 edit_code，開成 /training?id=&code= 的連結。

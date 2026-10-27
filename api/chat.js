@@ -5,7 +5,9 @@
 //   2. 沒帶 → 維持原本一次回傳 { reply } 的 JSON（舊前端／外部呼叫者不會被打斷）
 
 import { appendRows, warmAuth } from '../lib/sheets.js';
-import { systemPromptFor, resolveEventContent, formatEventBasics } from '../lib/prompt.js';
+import { systemPromptFor, resolveEventContent, formatEventBasics, simulateEventDay } from '../lib/prompt.js';
+import { codeMatches, isAdminPassword, passwordFrom, authBlocked, authFailed, tooManyAttempts } from '../lib/auth.js';
+import { MEDIA_STAFF } from '../lib/media-name.js';
 import { isBusinessEvent, guardBusinessAnswer, blockedReplyWithInquiry } from '../lib/audience.js';
 import { openInquiryLink } from '../lib/b2b.js';
 import { toTraditionalTW, createTraditionalStream, ZH_TW_RULE } from '../lib/zh-tw.js';
@@ -145,7 +147,9 @@ async function fetchEventConfig(eventId) {
     // 時間、地點、新聞聯絡人（批次 72）：記者問「幾點開始／在哪裡」時答得出來，見 formatEventBasics()
     event_time: row[11] || '', venue: row[12] || '', press_contact: row[14] || '',
     // 活動類型（批次 118）：企業場換一份 prompt、出口擋報價，見 lib/audience.js
-    event_type: row[13] || ''
+    event_type: row[13] || '',
+    // 只給「模擬記者會當天」驗身分用（批次 175），不會進 prompt、也不會回給前端
+    edit_code: row[10] || ''
   };
 }
 
@@ -246,7 +250,10 @@ export default async function handler(req, res) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return res.status(500).json({ error: 'ANTHROPIC_API_KEY 未設定' });
 
-  const { messages, event_id, media_name, reporter_name, stream, client_id } = req.body || {};
+  const { messages, event_id, media_name: mediaNameGiven, reporter_name, stream, client_id, sim_day, edit_code } = req.body || {};
+  // 批次 175：同仁「模擬記者會當天」。只有 sim_day === true 才算要求；真的放行要等下面驗過編輯碼。
+  const wantSim = sim_day === true;
+  let media_name = mediaNameGiven;
 
   const ip = String(req.headers['x-forwarded-for'] || req.socket?.remoteAddress || 'unknown').split(',')[0].trim();
   // client_id 只拿來當限流的 key，不寫進任何資料表、也不跟媒體名稱綁在一起
@@ -261,7 +268,7 @@ export default async function handler(req, res) {
   // 前台的彈窗與輸入框鎖定是第一道，這裡是**程式出口**那一道（CLAUDE.md 第 2 條）：舊版頁面
   // 還開在記者手機上、或有人直接打這支 API，都不會多出一筆「（未填寫）」。
   // 用 code 讓前台認得是這一種錯、重新打開彈窗，而不是把這句話當成 AI 的回答印出來。
-  if (!sanitize(media_name, 40)) {
+  if (!wantSim && !sanitize(media_name, 40)) {
     return res.status(400).json({ error: '請先填寫貴媒體名稱，再開始提問。', code: 'media_required' });
   }
 
@@ -298,8 +305,23 @@ export default async function handler(req, res) {
     if (!rawEvent || rawEvent.status === 'archived' || rawEvent.status === 'draft') {
       return res.status(404).json({ error: '活動不存在或已結束' });
     }
+    // 模擬記者會當天（批次 175）：驗過這一場的編輯碼（或後台密碼）才把活動當成「今天就是活動日」，
+    // 其餘照舊。旗標由這裡加、不收請求內容裡的任何「現在是當天」說法——記者自己加參數不能提早拿到新聞稿。
+    // 同仁的試問一律記成「（內部職員）」，結案報告與後台統計本來就會濾掉（lib/media-name.js）。
+    let simulating = false;
+    if (wantSim) {
+      if (authBlocked(req)) return tooManyAttempts(res);
+      const ok = codeMatches(edit_code, rawEvent.edit_code) || isAdminPassword(passwordFrom(req));
+      if (!ok) {
+        authFailed(req);
+        return res.status(403).json({ error: '編輯碼不正確，無法模擬記者會當天。' });
+      }
+      simulating = true;
+      media_name = MEDIA_STAFF;
+    }
     // 活動前只給媒體邀請函，不給正式新聞稿與照片（見 lib/prompt.js 的說明）。
-    const event = resolveEventContent(rawEvent);
+    const { edit_code: _editCode, ...configNoCode } = rawEvent;
+    const event = resolveEventContent(simulating ? simulateEventDay(configNoCode) : configNoCode);
 
     const eventName = event.name;
     // 企業場（批次 118）：企業版的規則；答案要先整則過出口檢查（背景資料沒有的金額＝報價，整則換掉），

@@ -170,6 +170,7 @@ export function reset() {
   state.memories = [];       // bot_memory 的列（批次 46）：[時間, 範圍, 類型, 內容, 建立者, 狀態]
   state.changes = [];
   state.qaLog = [];          // 批次 139：qa_log!A2:I 的列
+  state.qaAppended = [];     // 批次 175：LINE／網頁問答真的 append 進 qa_log 的列（要設 GOOGLE_SPREADSHEET_ID 才會寫）
   state.teachQueue = [];     // 批次 139：teach_queue!A2:J 的列
   state.sheetLatencyMs = 0;  // 批次 80：>0 時每次讀寫都延遲，讓同時進來的兩個請求真的交錯（測競態用）
   state.photoInbox = [];     // 批次 80：line_photo_inbox 的列 [LINE ID, messageId, 時戳, 已用]
@@ -216,6 +217,7 @@ export const sheets = {
   },
   async appendRows(range, rows) {
     await lag();
+    if (range.startsWith('qa_log!')) state.qaAppended.push(...rows.map(r => [...r]));
     if (range.startsWith('line_users!')) {
       for (const r of rows) state.bindings.set(r[0], {
         event_id: r[1], media_name: r[2], bound_at: Number(r[3]), note: r[5],
