@@ -2970,16 +2970,27 @@ async function openLineQr(eventId) {
 // ── 這場的活動報名：建立或前往（批次 152）──────────────────────────────────────────
 // 把活動的名稱、日期、時間、地點、新聞聯絡人帶去建一筆草稿報名並關聯；已經有就直接帶過去。
 // 開放報名前還是要到報名頁確認、補選填項目；開放後這場活動的網頁會出現「我要報名」。
-async function createRegFromEvent(eventId) {
+async function createRegFromEvent(eventId, extra = {}) {
   try {
     const res = await authedFetch('/api/events', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'reg_admin_from_event', event_id: eventId })
+      body: JSON.stringify({ action: 'reg_admin_from_event', event_id: eventId, ...extra })
     });
     const data = await res.json();
     if (data.error) throw new Error(data.error);
-    toast(data.created ? '已建立報名草稿，帶你去確認' : '這場活動已經有報名了，帶你過去');
+    // 批次 174：「活動報名」裡已經有同一天、還沒關聯的報名 → 先問是不是這場的，不要直接再建一筆重複的
+    if (Array.isArray(data.candidates) && data.candidates.length) {
+      const ev = (state.events || []).find(e => e.id === eventId);
+      for (const c of data.candidates) {
+        if (confirm(`「活動報名」裡已經有一筆同一天的報名：\n《${c.title}》\n\n這就是「${ev ? ev.name : eventId}」的報名嗎？\n\n按「確定」：把它跟這場活動連起來並打開（活動網頁會出現「我要報名」按鈕）\n按「取消」：不是這一筆`)) {
+          return createRegFromEvent(eventId, { link_to: c.id });
+        }
+      }
+      if (!confirm('要用這場活動的資料，另外建一筆新的報名草稿嗎？')) return;
+      return createRegFromEvent(eventId, { create_new: true });
+    }
+    toast(data.created ? '已建立報名草稿，帶你去確認' : data.linked ? '已把報名跟這場活動連起來，帶你過去' : '這場活動已經有報名了，帶你過去');
     setTimeout(() => { location.href = '/registrations#/c/' + encodeURIComponent(data.id) + '/set'; }, 600);
   } catch (e) {
     toast('無法建立報名：' + e.message, 'error');
