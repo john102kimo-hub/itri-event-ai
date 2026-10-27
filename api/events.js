@@ -26,6 +26,7 @@ import { CONTACTS_DIR_RANGE, ensureContactsDirectorySheet } from '../lib/contact
 import { resolveEventContent, isPreEventMode } from '../lib/prompt.js';
 import { lineBindUrl, lineAddFriendUrl, lineBasicId } from '../lib/line-link.js';
 import { handleRegistrationRequest } from '../lib/registration-api.js';
+import { stripRegisterLineTokens } from '../lib/registration.js';
 import { handleB2BRequest } from '../lib/b2b-api.js';
 import { handleImpactRequest } from '../lib/impact-api.js';
 import { publishBlockers, isPublishing, taipeiToday, PUBLIC_STATUSES, inviteLetterCheck, inviteLetterWarning } from '../lib/event-status.js';
@@ -79,6 +80,14 @@ function publishBlocked(res, missing) {
     code: 'publish_blocked',
     missing
   });
+}
+
+// 知識庫與邀請函裡的報名連結不能帶著某位同仁的 LINE 簽章（批次 174，見 lib/registration.js stripRegisterLineTokens）。
+// 存檔時就清掉：三個寫入入口（create／update／update_edit）都在組好整列之後呼叫這一支。
+function cleanContentLinks(row) {
+  row[3] = stripRegisterLineTokens(row[3]);
+  row[16] = stripRegisterLineTokens(row[16]);
+  return row;
 }
 
 // 活動前沒有邀請函（批次 171）：不擋，但一定要先看過後果——沒帶 ack_no_invite 就退回 409，
@@ -359,8 +368,14 @@ export default async function handler(req, res) {
         knowledge_base: str('knowledge_base', KB_MAX_LEN), press_contact: str('press_contact', 300),
         venue: str('venue', 200), event_time: str('event_time', 100), event_type: str('event_type', 40),
       };
-      const custom = !!ev.chips.trim() || (isPreEventMode(ev) && !!ev.invite_letter_chips.trim());
-      return res.status(200).json({ chips: effectiveChips(ev), custom, pre_event: isPreEventMode(ev) });
+      const pre = isPreEventMode(ev);
+      const custom = !!ev.chips.trim() || (pre && !!ev.invite_letter_chips.trim());
+      // 批次 174：活動前、沒填「活動前快速提問」、有填一般的快速問題 → 記者看到的是一般那組，但活動前米亞只用邀請函回答，
+      // 邀請函沒寫到的題目會答不出來。以前預覽把這種情況寫成「用你填的『活動前快速提問』」，等於說錯了是哪一組。
+      const source = pre
+        ? (ev.invite_letter_chips.trim() ? 'pre_custom' : ev.chips.trim() ? 'custom_in_pre' : 'pre_default')
+        : (ev.chips.trim() ? 'custom' : 'auto');
+      return res.status(200).json({ chips: effectiveChips(ev), custom, pre_event: pre, source });
     }
 
     // 後台助理（批次 141）：右下角的胖胖米亞。只有管理員密碼進得來；每次都是一次付費的 AI 呼叫，所以另外限流。
@@ -420,7 +435,7 @@ export default async function handler(req, res) {
         if (body.status !== undefined && !EVENT_STATUSES.includes(body.status)) {
           return res.status(400).json({ error: '狀態值不正確' });
         }
-        const updated = buildContentRow(existing, body);
+        const updated = cleanContentLinks(buildContentRow(existing, body));
         if (isPublishing(existing[4] || 'active', updated[4])) {
           const missing = publishBlockers(updated);
           if (missing.length) return publishBlocked(res, missing);
@@ -458,6 +473,7 @@ export default async function handler(req, res) {
           event_time || '', venue || '', event_type || '', press_contact || '', contacts || '',
           invite_letter || '', invite_letter_chips || ''
         ];
+        cleanContentLinks(newRow);
         // 直接以「進行中」建立也要過閘門，不能繞過去（後台畫面不會這樣送，但 API 是公開的入口）
         if (isPublishing('', initialStatus)) {
           const missing = publishBlockers(newRow);
@@ -495,6 +511,7 @@ export default async function handler(req, res) {
           invite_letter !== undefined ? invite_letter : (existing[16] || ''),
           invite_letter_chips !== undefined ? invite_letter_chips : (existing[17] || '')
         ];
+        cleanContentLinks(updated);
         if (isPublishing(existing[4] || 'active', updated[4])) {
           const missing = publishBlockers(updated);
           if (missing.length) return publishBlocked(res, missing);

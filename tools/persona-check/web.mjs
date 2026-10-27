@@ -236,6 +236,15 @@ console.log('\n── 主管：後台與米亞助理 ──');
   await page.waitForFunction(() => /有提供停車位嗎/.test(document.getElementById('chips-preview').textContent), null, { timeout: 5000 }).catch(() => {});
   const customTxt = await page.locator('#chips-preview').textContent();
   check('　 自己打了題目 → 預覽馬上換成「用你填的題目」那兩顆', /用你填的題目/.test(customTxt) && /有提供停車位嗎？/.test(customTxt) && !/這次活動的重點是什麼？/.test(customTxt), customTxt);
+  // 批次 174：活動前（填了邀請函）、沒填「活動前快速提問」→ 預覽講清楚是上面這組，而且邀請函沒寫到的會答不出來
+  await page.fill('#input-invite-letter', '親愛的媒體朋友：誠摯邀請蒞臨採訪。');
+  await page.waitForFunction(() => /沒填「活動前快速提問」/.test(document.getElementById('chips-preview').textContent), null, { timeout: 5000 }).catch(() => {});
+  const preTxt = await page.locator('#chips-preview').textContent();
+  check('★ 活動前、沒填「活動前快速提問」→ 預覽寫「先用上面這組」並警告邀請函沒寫到的會答不出來（不再說成「活動前快速提問」）',
+    /沒填「活動前快速提問」，先用上面這組/.test(preTxt) && /記者按了會得到「沒有資料」/.test(preTxt) && !/用你填的「活動前快速提問」/.test(preTxt), preTxt);
+  await page.locator('#chips-preview').scrollIntoViewIfNeeded();
+  await shot(page, 'boss-6b-chips-pre.png');
+  await page.fill('#input-invite-letter', '');
   await chipsBox.fill('');
   await page.evaluate(() => { modalBaseline = snapshotForm(); closeModal(); });
   await page.waitForFunction(() => getComputedStyle(document.getElementById('mia-fab')).display !== 'none', null, { timeout: 3000 }).catch(() => {});

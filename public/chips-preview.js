@@ -25,14 +25,24 @@
     function render(d) {
       box.textContent = '';
       var chips = (d && d.chips) || [];
-      var head = d && d.custom
-        ? (d.pre_event ? '記者現在看到的（活動前，用你填的「活動前快速提問」）：' : '記者現在看到的（用你填的題目）：')
-        : (d && d.pre_event ? '記者現在看到的（活動前，系統預設）：' : '記者現在看到的（系統依知識庫自動出題）：');
-      box.appendChild(el('div', 'cp-head', head));
+      // 批次 174：後端回 source 說清楚是哪一組；舊版後端沒有 source 就照原本的判斷
+      var HEADS = {
+        pre_custom: '記者現在看到的（活動前，用你填的「活動前快速提問」）：',
+        custom_in_pre: '記者現在看到的（活動前：沒填「活動前快速提問」，先用上面這組）：',
+        pre_default: '記者現在看到的（活動前，系統預設）：',
+        custom: '記者現在看到的（用你填的題目）：',
+        auto: '記者現在看到的（系統依知識庫自動出題）：'
+      };
+      var source = (d && d.source) || (d && d.custom ? (d.pre_event ? 'pre_custom' : 'custom') : (d && d.pre_event ? 'pre_default' : 'auto'));
+      box.appendChild(el('div', 'cp-head', HEADS[source] || HEADS.auto));
       var row = el('div', 'cp-row');
       chips.forEach(function (c) { row.appendChild(el('span', 'cp-chip', c)); });
       box.appendChild(row);
-      if (!(d && d.custom)) box.appendChild(el('div', 'cp-tip', '想自己決定題目，就在上面的欄位每行打一題。'));
+      if (source === 'custom_in_pre') {
+        box.appendChild(el('div', 'cp-tip cp-warn', '⚠️ 活動前米亞只用媒體邀請函回答：這幾題邀請函裡沒寫到的，記者按了會得到「沒有資料」。想換成活動前專用的題目（例如邀請函內容、報名方式），填下面的「活動前快速提問」；活動當天起自動換回上面這組。'));
+      } else if (source === 'auto' || source === 'pre_default') {
+        box.appendChild(el('div', 'cp-tip', '想自己決定題目，就在上面的欄位每行打一題。'));
+      }
     }
     function refresh() {
       var my = ++seq;
@@ -57,6 +67,7 @@
       '#' + opts.box + ' .cp-row{display:flex;flex-wrap:wrap;gap:6px}',
       '#' + opts.box + ' .cp-chip{display:inline-block;padding:5px 11px;border-radius:16px;border:1px solid #bfdbfe;background:#fff;color:#1d4ed8;font-size:.82rem;line-height:1.4}',
       '#' + opts.box + ' .cp-tip{font-size:.75rem;color:var(--muted,#64748b);margin-top:6px}',
+      '#' + opts.box + ' .cp-warn{color:#92400e;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:6px 9px;line-height:1.55}',
     ].join('\n');
     document.head.appendChild(style);
     // initial：欄位可能在這支載入之前就被填好了（edit.html 的資料是非同步讀回來的），載入時也算一次
