@@ -160,11 +160,25 @@ console.log('\n── 四、畫面 ──');
   check('編輯頁：邀請函那一張卡裡有「試問：記者會當天的答案」，連到測試前台（帶編輯碼）', edit.includes('id="sim-link"') && edit.includes('試問：記者會當天的答案') && edit.includes('&sim=day&code='));
   check('　 只在「活動還沒到、有邀請函」時顯示；其他情況藏起來', /simRow\.hidden = !\(date && left > 0 && v\('input-invite-letter'\)\)/.test(edit));
   check('　 說明寫得出：測試用、只有你看得到、不算統計、要先儲存', ['測試用的記者前台', '只有你看得到', '不會算進統計', '先按「儲存內容」'].every((t) => edit.includes(t)));
-  check('後台：同一顆按鈕，走 ensure_edit_code 取編輯碼再開測試前台', admin.includes('id="sim-btn"') && admin.includes('openSimDay()') && admin.includes('&sim=day&code='));
+  check('後台：同一顆按鈕，走 ensure_edit_code 取編輯碼再開測試前台', admin.includes('id="sim-btn"') && admin.includes('openSimDay(') && admin.includes('&sim=day&code='));
   check('　 後台沒存過的新活動（沒有 id）不顯示', /v\('edit-event-id'\)\)/.test(admin));
   check('記者前台：sim=day 只是把參數轉給後端，不自己決定內容', ev.includes("params.get('sim') === 'day'") && ev.includes('sim_day: true, edit_code: SIM_CODE') && ev.includes('&sim_day=1&code='));
   check('　 提示條寫明「記者看不到、不算統計」，媒體欄藏起來、不跳彈窗', ev.includes('id="sim-banner"') && ev.includes('這是測試，記者看不到，問答也不會算進統計') && /if \(SIM\) \{[\s\S]*?media-banner'\)\.style\.display = 'none'[\s\S]*?startConversation\(\)[\s\S]*?\} else \{[\s\S]*?showMediaModal\(event\)/.test(ev));
   check('　 試問的對話不存進瀏覽器、也不會接上記者那一份', /function saveChat\(\) \{\s*if \(!eventId \|\| SIM\) return;/.test(ev) && /function loadChat\(\) \{\s*if \(SIM\) return \[\];/.test(ev));
+}
+
+// ═══ 五、後台活動卡片的「更多」選單（批次 176）═══════════════════════════════
+console.log('\n── 五、後台活動卡片「更多」選單 ──');
+{
+  resetBook(row({ id: 'a1' }), row({ id: 'a2', invite: '' }));
+  const r = fakeRes();
+  await events({ method: 'GET', query: { action: 'list_admin' }, headers: { 'x-admin-password': 'pw' }, socket: {} }, r);
+  const byId = Object.fromEntries(r.body.events.map((e) => [e.id, e]));
+  check('★ list_admin 只給「有沒有邀請函」的旗標，不外送邀請函全文', byId.a1.has_invite === true && byId.a2.has_invite === false && !JSON.stringify(r.body).includes('誠摯邀請蒞臨採訪'));
+  const admin = read('public/index.html');
+  check('★ 更多選單：進行中＋有邀請函＋不是企業場＋活動還沒到 才列「試問：記者會當天的答案」',
+    /if \(ev\.status === 'active' && ev\.has_invite && !isBusinessCard\(ev\) && eventDateIso\(ev\) > todayTaipeiIso\(\)\) add\('microphone-2', '試問：記者會當天的答案', \(\) => openSimDay\(id\)\)/.test(admin));
+  check('　 編輯視窗與選單共用同一支 openSimDay(eventId, btn)', /async function openSimDay\(eventId, btn\)/.test(admin) && admin.includes("openSimDay(document.getElementById('edit-event-id').value, this)"));
 }
 
 console.log(`\n${fail ? '❌' : '✅'} 批次 175 測試：${pass} 通過，${fail} 失敗`);

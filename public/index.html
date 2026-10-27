@@ -821,7 +821,7 @@ details.adv[open] > summary { border-bottom:1px solid var(--border); margin-bott
       </div>
       <!-- 批次 175：同仁編輯頁（public/edit.html）同一顆按鈕。朱朱「無法測試記者會當天真實問答狀況」 -->
       <div class="form-group" id="sim-row" hidden>
-        <button type="button" class="btn btn-outline" id="sim-btn" onclick="openSimDay()"><i class="ti ti-microphone-2"></i> 試問：記者會當天的答案</button>
+        <button type="button" class="btn btn-outline" id="sim-btn" onclick="openSimDay(document.getElementById('edit-event-id').value, this)"><i class="ti ti-microphone-2"></i> 試問：記者會當天的答案</button>
         <div class="form-hint">想先看看記者會當天，米亞會怎麼回答？點這顆會開一個<b>測試用的記者前台</b>，用上面「活動知識庫」的新聞稿與照片回答。只有你看得到，記者現在問到的還是邀請函，問答也不會算進統計。剛改的內容要先儲存。</div>
       </div>
     </div>
@@ -1366,6 +1366,8 @@ function moreMenuItems(ev) {
   if (hasLine && (ev.status === 'ended' || pastActive)) add('qrcode', 'LINE QR', () => openLineQr(id));
   add('user-edit', '同仁編輯連結', () => copyEditLink(id));
   if (ev.status !== 'archived') add('microphone', '媒體訓練', () => openTraining(id));
+  // 批次 176：試問記者會當天的答案——跟編輯視窗同一個名字、同一條出現規則（進行中、活動還沒到、有邀請函、不是企業場）
+  if (ev.status === 'active' && ev.has_invite && !isBusinessCard(ev) && eventDateIso(ev) > todayTaipeiIso()) add('microphone-2', '試問：記者會當天的答案', () => openSimDay(id));
   if (ev.status === 'draft' || ev.status === 'active') add('chart-bar', '問答分析', () => showAnalyticsByEvent(id));
   if (ev.status === 'active' || ev.status === 'ended') add('download', '匯出問答 CSV', () => exportCSV(id));
   // 計畫成效是結案後才要交的東西：辦完（標為已結束）的活動才出現，進行中的活動選單不多佔一格（批次 152 易用性檢討）
@@ -2871,14 +2873,13 @@ async function copyEditLink(eventId, btn) {
 
 // 試問記者會當天的答案（批次 175）：跟 openTraining 同一個做法，先取該場的 edit_code 再開測試前台。
 // 測試前台由伺服器驗編輯碼，記者自己加參數開不起來。
-async function openSimDay() {
-  const eventId = document.getElementById('edit-event-id').value;
+async function openSimDay(eventId, btn) {
   if (!eventId) return;
-  const btn = document.getElementById('sim-btn');
-  const original = btn.innerHTML;
-  const status = document.getElementById('input-status').value;
+  const original = btn ? btn.innerHTML : '';
+  // 編輯視窗裡的按鈕以視窗當下的狀態為準（可能剛改了還沒存）；活動卡片的選單只列進行中的場次
+  const status = btn ? document.getElementById('input-status').value : 'active';
   if (status === 'draft') { toast('這場還沒發布，測試前台也開不起來。把狀態改成「進行中」並儲存後，就能試問。', 'error'); return; }
-  btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader"></i> 準備中…';
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader"></i> 準備中…'; }
   const win = window.open('about:blank', '_blank');
   try {
     const res = await authedFetch('/api/events', {
@@ -2895,7 +2896,7 @@ async function openSimDay() {
     if (win) win.close();
     toast('開啟測試前台失敗：' + e.message, 'error');
   }
-  btn.disabled = false; btn.innerHTML = original;
+  if (btn) { btn.disabled = false; btn.innerHTML = original; }
 }
 
 // 單場媒體訓練：先取該場的 edit_code，開成 /training?id=&code= 的連結。
