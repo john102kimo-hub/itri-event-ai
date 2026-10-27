@@ -20,6 +20,9 @@
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: var(--font); background: var(--bg); color: var(--text); height: 100dvh; display: flex; flex-direction: column; }
+  /* 批次 175：同仁「模擬記者會當天」的提示條，記者端不會出現 */
+  #sim-banner { background: #fff4d6; color: #7a4b00; border-bottom: 1px solid #f0d58a; padding: 8px 16px; font-size: 0.85rem; line-height: 1.5; flex-shrink: 0; }
+  #sim-banner[hidden] { display: none; }
 
   /* Header */
   #header {
@@ -463,6 +466,8 @@
   <div id="status-dot"></div>
 </div>
 
+<div id="sim-banner" hidden><b>🎤 模擬記者會當天</b>：現在問米亞，用的是活動當天記者會拿到的內容（新聞稿、照片）。這是測試，記者看不到，問答也不會算進統計。</div>
+
 <div id="media-banner">
   <label for="media-input"><i class="ti ti-id-badge"></i> 媒體：</label>
   <input id="media-input" type="text" placeholder="媒體／單位（必填）" maxlength="40" autocomplete="organization">
@@ -507,6 +512,11 @@
 <script>
 const params = new URLSearchParams(location.search);
 const eventId = params.get('id');
+// 批次 175：同仁從編輯頁按「試問當天答案」進來（?sim=day&code=編輯碼）。是不是模擬、有沒有權限都由伺服器驗編輯碼，
+// 這裡只是把參數轉給後端；記者自己加參數也只會得到「編輯碼不正確」。
+const SIM = params.get('sim') === 'day';
+const SIM_CODE = params.get('code') || '';
+const SIM_MEDIA = '（內部職員）';
 let hist = [];
 let eventColor = '#0F9E7A';
 let mediaName = '';       // 媒體／單位（必填）
@@ -589,14 +599,16 @@ async function init() {
 
   try {
     // 只取這一個活動（不再撈回全部活動清單，降低資訊外洩）
-    const res = await fetch(`/api/events?action=get_public&id=${encodeURIComponent(eventId)}`);
+    const res = await fetch(`/api/events?action=get_public&id=${encodeURIComponent(eventId)}` + (SIM ? `&sim_day=1&code=${encodeURIComponent(SIM_CODE)}` : ''));
     const data = await res.json().catch(() => ({}));
     const event = data.event;
 
     if (!event) {
       // 404 涵蓋三種情況：網址打錯、還沒發布（承辦人先把連結傳出來了）、已經下架。以前一律寫「此活動不存在」，
       // 拿到「還沒發布」連結的記者會以為連結壞了。三種情況刻意不分開講——分開講等於告訴外人這場草稿存在（批次 124）。
-      showError(res.status === 404 || res.ok
+      showError(SIM && res.status === 403
+        ? '編輯碼不正確，無法模擬記者會當天。\n請從編輯頁的按鈕重新開啟。'
+        : res.status === 404 || res.ok
         ? '這個活動頁目前沒有開放。\n可能還沒發布、已經下架，或網址不完整，\n請向提供連結的承辦人確認。'
         : '目前連不上活動資料，請稍後重新整理一次。');
       return;
@@ -661,8 +673,18 @@ async function init() {
     // 初始問候改到填寫媒體名稱後（confirmMediaModal）才顯示，避免重複
 
     document.getElementById('loading').style.display = 'none';
-    lockUntilMedia();
-    showMediaModal(event);
+    if (SIM) {
+      // 同仁自己試問：不問媒體名稱、不記在瀏覽器、問答記成「（內部職員）」（後端也會強制）
+      document.getElementById('sim-banner').hidden = false;
+      document.getElementById('media-banner').style.display = 'none';
+      _pendingEvent = event;
+      mediaName = SIM_MEDIA;
+      unlockChat();
+      startConversation();
+    } else {
+      lockUntilMedia();
+      showMediaModal(event);
+    }
   } catch (err) {
     // 以前直接把 err.message 印給記者看（「Failed to fetch」「Unexpected token <」）——
     // 記者看不懂，也不知道下一步該做什麼。原文留在 console 給除錯用。
@@ -853,11 +875,12 @@ const CHAT_LS_PREFIX = 'itri_chat_';
 const CHAT_TTL_MS = 12 * 3600 * 1000;
 const CHAT_KEEP = 40;                       // 最多留 40 則（20 輪），免得越存越大
 function saveChat() {
-  if (!eventId) return;
+  if (!eventId || SIM) return;   // 模擬的對話不存、也不會被記者那一份接上
   lsSet(CHAT_LS_PREFIX + eventId, JSON.stringify({ t: Date.now(), hist: hist.slice(-CHAT_KEEP) }));
 }
 function clearChat() { try { localStorage.removeItem(CHAT_LS_PREFIX + eventId); } catch (e) {} }
 function loadChat() {
+  if (SIM) return [];
   try {
     const d = JSON.parse(lsGet(CHAT_LS_PREFIX + eventId) || 'null');
     if (!d || !Array.isArray(d.hist) || Date.now() - d.t > CHAT_TTL_MS) return [];
@@ -1248,7 +1271,8 @@ async function sendMessage(text) {
         media_name: mediaName,
         reporter_name: personName,
         client_id: clientId(),
-        stream: true
+        stream: true,
+        ...(SIM ? { sim_day: true, edit_code: SIM_CODE } : {})
       })
     });
 
