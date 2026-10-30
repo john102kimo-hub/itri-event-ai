@@ -328,6 +328,10 @@ export const line = {
     // 批次 181：記者的「近期活動」清單改成圖像卡。大量既有測試問的是「記者看到的那份清單裡有什麼、點得到什麼」，
     // 所以預設把它攤平成文字＋按鈕記下來（viaFlex 標記、原始訊息放在 calendarFlex），舊斷言照樣驗內容；
     // 要驗卡片本身的測試設 state.rawCalendarFlex = true 拿原始 Flex。
+    // 批次 181：技術與洽案、近期新聞、產業趨勢、邀訪窗口也是圖像卡。既有測試驗的是那份文字的版面與內容（編號、分隔線、
+    // 信箱網址…），預設讓這幾種卡「送不出去」、走純文字退路，舊斷言照樣驗；要驗卡片本身的測試設 state.reporterCards = true。
+    const REPORTER_CARD = /^(工研院技術｜|近期工研院新聞|工研院新聞｜|IEK 產業趨勢|邀訪窗口：)/;
+    if (!state.reporterCards && (messages || []).some(m => m?.type === 'flex' && REPORTER_CARD.test(m.altText || ''))) return false;
     const calCard = (messages || []).find(m => m?.type === 'flex' && /^近期活動/.test(m.altText || ''));
     if (calCard && !state.rawCalendarFlex) {
       const texts = [];
