@@ -1,6 +1,6 @@
-// 批次 177：同仁新增活動「一步步帶我」、活動負責人、LINE 貼媒體邀請函、同仁傳照片、活動前一天提醒。
+// 批次 177：同仁新增活動「一步步帶我」、活動承辦人、LINE 貼媒體邀請函、同仁傳照片、活動前一天提醒。
 //   一、純函式：日期寫法、下一步問什麼、還缺哪些小節、提醒文字
-//   二、LINE 流程（同仁模式）：建活動→負責人→帶我→邀請函預覽與確認→已發布場次要確認→認領→自己填→照片
+//   二、LINE 流程（同仁模式）：建活動→承辦人→帶我→邀請函預覽與確認→已發布場次要確認→認領→自己填→照片
 //   三、活動前一天提醒（lib/event-remind.js）：收件人、去重、不缺不推、每月上限、dry、排程入口要密鑰
 // 跑真的 api/line.js，Sheets／LINE／模型用 test/fakes.mjs 的假版本。
 import { register } from 'node:module';
@@ -99,7 +99,7 @@ console.log('── 一、純函式 ──');
   check('　 　不是明天（今天、後天）、已結束、已封存 → 不提醒', [isoOffset(0), isoOffset(2)].every((d) => G.reminderItem({ ...base, 3: '', 5: d }, today) === null) && G.reminderItem({ ...base, 3: '', 4: 'ended' }, today) === null && G.reminderItem({ ...base, 3: '', 4: 'archived' }, today) === null);
   const msg = G.formatReminder([{ item: G.reminderItem({ ...base, 3: '', 12: '' }, today), link: 'https://x/edit?id=1&code=2' }, { item: G.reminderItem({ ...base, 3: '', 1: '第二場' }, today), link: 'https://x/edit?id=3&code=4' }]);
   check('★ 提醒文字：同一人兩場合成一則、附編輯連結、講清楚「當天 00:00 起改用新聞稿」', (msg.match(/明天辦/g) || []).length === 2 && msg.includes('https://x/edit?id=1&code=2') && msg.includes('https://x/edit?id=3&code=4') && /00:00/.test(msg) && /邀請函/.test(msg), msg);
-  check('　 沒有負責人時說明為什麼送到你這裡', /沒有負責人/.test(G.formatReminder([{ item: G.reminderItem({ ...base, 3: '' }, today), link: '' }], { unowned: true })));
+  check('　 沒有承辦人時說明為什麼送到你這裡', /沒有承辦人/.test(G.formatReminder([{ item: G.reminderItem({ ...base, 3: '' }, today), link: '' }], { unowned: true })));
 }
 
 check('★ 邀請函不在「自然語句改資料」的白名單（模型一句話判不到它）', !USER_EDITABLE.includes('invite_letter') && USER_EDITABLE.length === 5, USER_EDITABLE.join(','));
@@ -113,8 +113,8 @@ let out, created;
   await dm('U_c', '新增活動');
   out = await dm('U_c', '氫能應用成果展');
   created = state.events.at(-1);
-  check('★ 建活動：建立的人自動成為負責人（event_owners 多一列，不用另外綁定）', state.eventOwners.length === 1 && state.eventOwners[0][0] === created[0] && state.eventOwners[0][1] === 'U_c' && state.eventOwners[0][2] === '小華', JSON.stringify(state.eventOwners));
-  check('　 回覆講明「你是負責人」，沒有日期要說「沒辦法提醒你」', /你是這場的負責人/.test(textOf(out)) && /沒辦法提醒你/.test(textOf(out)), textOf(out));
+  check('★ 建活動：建立的人自動成為承辦人（event_owners 多一列，不用另外綁定）', state.eventOwners.length === 1 && state.eventOwners[0][0] === created[0] && state.eventOwners[0][1] === 'U_c' && state.eventOwners[0][2] === '小華', JSON.stringify(state.eventOwners));
+  check('★ 回覆講明承辦人已自動設成你、不用另外做什麼；要換人的話請對方點「🙋 我來承辦」；沒有日期要說「沒辦法提醒你」', /承辦人：已自動設成你，不用另外做什麼/.test(textOf(out)) && /其實是別人.*「🙋 我來承辦」/s.test(textOf(out)) && /沒辦法提醒你/.test(textOf(out)), textOf(out));
   check('★ 回覆：附編輯連結（想自己填也行）、問「要我一步步帶你嗎」', new RegExp(`/edit\\?id=${created[0]}&code=${created[10]}`).test(textOf(out)) && /一步步帶你/.test(textOf(out)), textOf(out));
   check('　 兩顆按鈕：一步步帶我／我自己填，最後是同仁選單，沒有職員功能', buttons(out).includes('帶我：氫能應用成果展') && buttons(out).includes('自己填：氫能應用成果展') && buttons(out).at(-1) === '同仁選單' && !buttons(out).some((t) => STAFF_ONLY.test(t)), JSON.stringify(buttons(out)));
 
@@ -195,7 +195,7 @@ console.log('\n── 已發布的場次：引導的寫入要先確認 ──');
 {
   const med = state.events.find((e) => e[0] === 'med');
   out = await dm('U_c', '帶我：智慧醫療解決方案記者會');
-  check('★ 對別人建的、沒負責人的場次按「帶我」→ 記成負責人並告訴他', /我把你記成這場的負責人/.test(textOf(out)) && state.eventOwners.some((r) => r[0] === 'med' && r[1] === 'U_c'), JSON.stringify([textOf(out), state.eventOwners]));
+  check('★ 對別人建的、沒承辦人的場次按「帶我」→ 記成承辦人並告訴他', /我把你記成這場的承辦人/.test(textOf(out)) && state.eventOwners.some((r) => r[0] === 'med' && r[1] === 'U_c'), JSON.stringify([textOf(out), state.eventOwners]));
   check('　 這場日期有了、沒邀請函 → 第一題是邀請函（不再問日期）', /媒體邀請函.*好了嗎/s.test(textOf(out)) && !/是哪一天辦/.test(textOf(out)), textOf(out));
   await dm('U_c', '先跳過');
   out = await dm('U_c', '台北國際會議中心');
@@ -204,16 +204,19 @@ console.log('\n── 已發布的場次：引導的寫入要先確認 ──');
   check('　 確認之後才寫，並給「繼續下一步」', med[12] === '台北國際會議中心' && buttons(out).includes('帶我：智慧醫療解決方案記者會'), JSON.stringify([med[12], buttons(out)]));
 }
 
-console.log('\n── 負責人：認領、活動卡、自己填 ──');
+console.log('\n── 承辦人：認領、活動卡、自己填 ──');
 {
   out = await dm('U_c2', '智慧醫療解決方案記者會');
-  check('活動卡顯示負責人；不是自己負責的有「🙋 我來負責」', /負責人：小華/.test(textOf(out)) && buttons(out).includes('負責：智慧醫療解決方案記者會'), textOf(out));
-  out = await dm('U_c2', '負責：智慧醫療解決方案記者會');
-  check('★ 「負責：」→ 換成自己，並通知管理員（誰把這場接走了）', state.eventOwners.at(-1)[0] === 'med' && state.eventOwners.at(-1)[1] === 'U_c2' && /由你負責/.test(textOf(out)) && sent.some((o) => o.to === 'U_admin' && /活動負責人變更/.test(o.text) && /小華/.test(o.text) && /小明/.test(o.text)), JSON.stringify(sent.map((o) => [o.to, o.text.slice(0, 40)])));
-  out = await dm('U_c2', '負責：智慧醫療解決方案記者會');
-  check('　 本來就是自己負責 → 說一聲，不重複寫', /本來就是你負責/.test(textOf(out)) && state.eventOwners.filter((r) => r[0] === 'med').length === 2);
+  check('活動卡顯示承辦人；不是自己承辦的有「🙋 我來承辦」', /承辦人：小華/.test(textOf(out)) && buttons(out).includes('承辦：智慧醫療解決方案記者會'), textOf(out));
+  out = await dm('U_c2', '承辦：智慧醫療解決方案記者會');
+  check('★ 「承辦：」→ 換成自己，並通知管理員（誰把這場接走了）', state.eventOwners.at(-1)[0] === 'med' && state.eventOwners.at(-1)[1] === 'U_c2' && /由你承辦/.test(textOf(out)) && sent.some((o) => o.to === 'U_admin' && /活動承辦人變更/.test(o.text) && /小華/.test(o.text) && /小明/.test(o.text)), JSON.stringify(sent.map((o) => [o.to, o.text.slice(0, 40)])));
+  out = await dm('U_c2', '承辦：智慧醫療解決方案記者會');
+  check('　 本來就是自己負責 → 說一聲，不重複寫', /本來就是你承辦/.test(textOf(out)) && state.eventOwners.filter((r) => r[0] === 'med').length === 2);
+  out = await dm('U_c', '負責：智慧醫療解決方案記者會');
+  check('　 舊按鈕（批次 177 上線時送出的「負責：」）仍然認得，效果等於「承辦：」', /由你承辦/.test(textOf(out)) && state.eventOwners.at(-1)[1] === 'U_c', textOf(out));
+  await dm('U_c2', '承辦：智慧醫療解決方案記者會');
   out = await dm('U_c2', '智慧醫療解決方案記者會');
-  check('　 活動卡：負責人是「你」，不再顯示「我來負責」', /負責人：你/.test(textOf(out)) && !buttons(out).includes('負責：智慧醫療解決方案記者會'), textOf(out));
+  check('　 活動卡：承辦人是「你」，不再顯示「我來承辦」', /承辦人：你/.test(textOf(out)) && !buttons(out).includes('承辦：智慧醫療解決方案記者會'), textOf(out));
 
   const soon = state.events.find((e) => e[0] === 'soon');
   out = await dm('U_c2', '自己填：奈米材料前瞻應用發表會');
@@ -225,7 +228,7 @@ console.log('\n── 負責人：認領、活動卡、自己填 ──');
 console.log('\n── 同仁傳照片 ──');
 {
   out = await image('U_c2');
-  check('★ 同仁傳照片 → 問「要加到哪一場」，自己負責的場次排最前面', /收到 1 張照片/.test(textOf(out)) && ['智慧醫療解決方案記者會', '奈米材料前瞻應用發表會'].includes(buttons(out)[0]) && buttons(out).slice(0, 2).sort().join() === ['智慧醫療解決方案記者會', '奈米材料前瞻應用發表會'].sort().join() && !buttons(out).some((t) => STAFF_ONLY.test(t)), JSON.stringify(buttons(out)));
+  check('★ 同仁傳照片 → 問「要加到哪一場」，自己承辦的場次排最前面', /收到 1 張照片/.test(textOf(out)) && ['智慧醫療解決方案記者會', '奈米材料前瞻應用發表會'].includes(buttons(out)[0]) && buttons(out).slice(0, 2).sort().join() === ['智慧醫療解決方案記者會', '奈米材料前瞻應用發表會'].sort().join() && !buttons(out).some((t) => STAFF_ONLY.test(t)), JSON.stringify(buttons(out)));
   out = await dm('U_c2', '智慧醫療解決方案記者會');
   check('　 點場次 → 照片加進那一場', /已把 1 張照片加進《智慧醫療解決方案記者會》/.test(textOf(out)) && state.photoUploads.length === 1 && state.photoUploads[0][0] === 'med', textOf(out));
   out = await image('U_reporter');
@@ -243,7 +246,7 @@ const evRow = (id, name, date, o = {}) => { const r = Array(18).fill(''); Object
   sent.length = 0;
   let r = await runRemindCron({ slot: 'evening' });
   const soon = state.events.find((e) => e[0] === 'soon');
-  check('★ 沒有負責人 → 推給管理員，並說明為什麼；附這場的編輯連結', r.sent === 1 && r.toAdmin === 1 && pushes().length === 1 && pushes()[0].to === 'U_admin' && /沒有負責人/.test(pushes()[0].text) && /奈米材料前瞻應用發表會/.test(pushes()[0].text) && /\/edit\?id=soon&code=code4/.test(pushes()[0].text), JSON.stringify([r, pushes().map((p) => p.text)]));
+  check('★ 沒有承辦人 → 推給管理員，並說明為什麼；附這場的編輯連結', r.sent === 1 && r.toAdmin === 1 && pushes().length === 1 && pushes()[0].to === 'U_admin' && /沒有承辦人/.test(pushes()[0].text) && /奈米材料前瞻應用發表會/.test(pushes()[0].text) && /\/edit\?id=soon&code=code4/.test(pushes()[0].text), JSON.stringify([r, pushes().map((p) => p.text)]));
   check('　 提醒內容：還缺地點、新聞聯絡人、議程等（正式新聞稿那一欄有字，但沒有議程／受訪者／貴賓小節）', /還缺：/.test(pushes()[0].text) && /地點/.test(pushes()[0].text) && /新聞聯絡人/.test(pushes()[0].text) && /議程/.test(pushes()[0].text), pushes()[0]?.text);
   check('　 發送紀錄寫進 event_reminders（活動 id、活動日期、種類、收件人、sent）', state.eventReminders.length === 1 && state.eventReminders[0][1] === 'soon' && state.eventReminders[0][2] === soon[5] && state.eventReminders[0][3] === 'eve' && state.eventReminders[0][4] === 'U_admin' && state.eventReminders[0][5] === 'sent', JSON.stringify(state.eventReminders));
   sent.length = 0;
@@ -258,13 +261,13 @@ const evRow = (id, name, date, o = {}) => { const r = Array(18).fill(''); Object
   reset(); state.staff.push(colleagueRow('U_c', '小華')); state.eventOwners.push(['soon', 'U_c', '小華', 't', 'create']); await fresh();
   sent.length = 0;
   const r = await runRemindCron({ slot: 'evening' });
-  check('★ 有負責人（而且還是同仁）→ 推給他、不是管理員', r.sent === 1 && r.toAdmin === 0 && pushes()[0].to === 'U_c' && !/沒有負責人/.test(pushes()[0].text), JSON.stringify(pushes().map((p) => [p.to, p.text.slice(0, 30)])));
+  check('★ 有承辦人（而且還是同仁）→ 推給他、不是管理員', r.sent === 1 && r.toAdmin === 0 && pushes()[0].to === 'U_c' && !/沒有承辦人/.test(pushes()[0].text), JSON.stringify(pushes().map((p) => [p.to, p.text.slice(0, 30)])));
 }
 {
   reset(); state.staff.push(['U_c', '小華', 't', 'revoked', '', 'colleague']); state.eventOwners.push(['soon', 'U_c', '小華', 't', 'create']); await fresh();
   sent.length = 0;
   const r = await runRemindCron({ slot: 'evening' });
-  check('★ 負責人已退出同仁模式 → 改推給管理員（這場不能悄悄沒人提醒）', r.toAdmin === 1 && pushes()[0].to === 'U_admin' && /沒有負責人/.test(pushes()[0].text), JSON.stringify(pushes().map((p) => p.to)));
+  check('★ 承辦人已退出同仁模式 → 改推給管理員（這場不能悄悄沒人提醒）', r.toAdmin === 1 && pushes()[0].to === 'U_admin' && /沒有承辦人/.test(pushes()[0].text), JSON.stringify(pushes().map((p) => p.to)));
 }
 {
   reset(); state.staff.push(colleagueRow('U_c', '小華'));

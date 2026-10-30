@@ -102,7 +102,7 @@ function setupMorning({ owned = true } = {}) {
 {
   setupMorning(); sent.length = 0;
   let r = await runRemindCron({ slot: 'morning' });
-  check('★ 早上：三種各一則，都推給負責人（不是管理員）', r.sent === 3 && JSON.stringify(r.byKind) === JSON.stringify({ day: 1, week: 1, after: 1 }) && pushes().length === 3 && pushes().every((p) => p.to === 'U_c'), JSON.stringify([r, pushes().map((p) => p.to)]));
+  check('★ 早上：三種各一則，都推給承辦人（不是管理員）', r.sent === 3 && JSON.stringify(r.byKind) === JSON.stringify({ day: 1, week: 1, after: 1 }) && pushes().length === 3 && pushes().every((p) => p.to === 'U_c'), JSON.stringify([r, pushes().map((p) => p.to)]));
   check('　 優先順序：當天 → 前一週 → 隔天（額度不夠時前面的先送）', /今天辦/.test(pushes()[0].text) && /一週後辦/.test(pushes()[1].text) && /昨天辦完了/.test(pushes()[2].text), pushes().map((p) => p.text.slice(0, 12)).join('|'));
   check('★ 前一週那則帶著「貼邀請函」按鈕（同仁模式認得「邀請函：活動名稱」）；其餘兩則沒有', pushes()[1].quickReply.some((c) => c.text === '邀請函：一週後的展') && pushes()[0].quickReply.length === 0 && pushes()[2].quickReply.length === 0, JSON.stringify(pushes().map((p) => p.quickReply)));
   check('　 發送紀錄多了三列，種類分別是 day／week／after', JSON.stringify(state.eventReminders.map((x) => x[3]).sort()) === JSON.stringify(['after', 'day', 'week']), JSON.stringify(state.eventReminders));
@@ -118,13 +118,13 @@ function setupMorning({ owned = true } = {}) {
 {
   setupMorning({ owned: false }); sent.length = 0;
   const r = await runRemindCron({ slot: 'morning' });
-  check('★ 沒有負責人的場次：早上這三種都不推（也不轉給管理員——既有活動大多沒有負責人，會讓朱朱被多推三則）', r.sent === 0 && pushes().length === 0 && r.skipped.some((t) => /只送給負責人/.test(t)), JSON.stringify(r));
-  check('　 摘要說明是因為沒有負責人', r.skipped.filter((t) => /沒有可以推的負責人/.test(t)).length === 3, JSON.stringify(r.skipped));
+  check('★ 沒有承辦人的場次：早上這三種都不推（也不轉給管理員——既有活動大多沒有承辦人，會讓朱朱被多推三則）', r.sent === 0 && pushes().length === 0 && r.skipped.some((t) => /只送給承辦人/.test(t)), JSON.stringify(r));
+  check('　 摘要說明是因為沒有承辦人', r.skipped.filter((t) => /沒有可以推的承辦人/.test(t)).length === 3, JSON.stringify(r.skipped));
 }
 {
   setupMorning(); state.staff.length = 0; state.staff.push(['U_c', '小華', 't', 'revoked', '', 'colleague']); sent.length = 0;
   const r = await runRemindCron({ slot: 'morning' });
-  check('★ 負責人已退出 → 不推給他，也不轉給管理員', r.sent === 0 && pushes().length === 0, JSON.stringify(r));
+  check('★ 承辦人已退出 → 不推給他，也不轉給管理員', r.sent === 0 && pushes().length === 0, JSON.stringify(r));
 }
 {
   setupMorning(); sent.length = 0;
@@ -180,12 +180,12 @@ function setupMorning({ owned = true } = {}) {
   check('★ 同一人同一種有兩場 → 合成一則（省推播則數）', r.sent === 2 && pushes().length === 1 && /甲展/.test(pushes()[0].text) && /乙展/.test(pushes()[0].text), JSON.stringify(pushes().map((p) => p.text.slice(0, 60))));
 }
 {
-  // 前一天（批次 177）仍然在沒有負責人時推給管理員——這條不能因為這批而變
+  // 前一天（批次 177）仍然在沒有承辦人時推給管理員——這條不能因為這批而變
   reset(); state.staff.push(colleagueRow('U_c'));
   state.events.length = 0; state.events.push(evRow('e1', '明天的展', isoOffset(1)));
   sent.length = 0;
   const r = await runRemindCron({ slot: 'evening' });
-  check('★ 前一天：沒有負責人 → 照舊推給管理員，不放「貼邀請函」按鈕（管理員不一定是同仁）', r.toAdmin === 1 && pushes()[0].to === 'U_admin' && pushes()[0].quickReply.length === 0, JSON.stringify(r));
+  check('★ 前一天：沒有承辦人 → 照舊推給管理員，不放「貼邀請函」按鈕（管理員不一定是同仁）', r.toAdmin === 1 && pushes()[0].to === 'U_admin' && pushes()[0].quickReply.length === 0, JSON.stringify(r));
 }
 
 console.log('\n── 排程入口與說明 ──');
