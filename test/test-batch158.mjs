@@ -81,7 +81,7 @@ console.log('\n── 二、頁面 ──');
   check('　 提醒綁定碼只有自己能用；說明要看到「綁定完成」（跟米亞實際的回覆一致）', /請不要轉貼給別人/.test(html) && /米亞回覆「綁定完成」/.test(html) && /綁定完成/.test(read('lib/b2b-line.js')));
   check('　 伺服器給的文字都過 esc()（連結、那句話）', /href="\$\{esc\(url\)\}"/.test(html) && /\$\{esc\(text\)\}/.test(html) && /href="\$\{esc\(add\)\}"/.test(html));
   const vj = JSON.parse(read('vercel.json'));
-  check('沒有新增排程（7 個）、rewrite（17 條）、Function（api/ 11 支）', vj.crons.length === 7 && vj.rewrites.length === 17 && fs.readdirSync(path.join(ROOT, 'api')).filter((f) => f.endsWith('.js')).length === 11);
+  check('沒有新增排程（維持 9 個，批次 177 多了 cron_remind 一天兩班）、rewrite（17 條）、Function（api/ 11 支）', vj.crons.length === 9 && vj.rewrites.length === 17 && fs.readdirSync(path.join(ROOT, 'api')).filter((f) => f.endsWith('.js')).length === 11);
 }
 console.log(`\n結果：${pass} 通過、${fail} 失敗`);
 process.exit(fail ? 1 : 0);

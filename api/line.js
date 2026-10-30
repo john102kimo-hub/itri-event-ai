@@ -52,6 +52,7 @@ import { matchEventByName, buildWelcomeFlex } from '../lib/menu.js';
 import { listOpenCampaigns, parseRegBindText, parseRegBindCheck, welcomeButtonLabel } from '../lib/registration.js';
 import { autoSyncRegistrationMenu } from '../lib/richmenu-sync.js';
 import { runTeachQueueCron, parseQueueCommand } from '../lib/teach-queue.js';
+import { runRemindCron } from '../lib/event-remind.js';
 import {
   isPasscodeMatch, isColleaguePasscodeMatch, isStaffAuthenticated, isColleagueAuthenticated, authenticateStaff, COLLEAGUE, isCreateEventAsk, internalModeEnabled
 } from '../lib/staff.js';
@@ -174,11 +175,20 @@ async function handleEvent(ev) {
       }
       return;
     }
-    // 批次 138：同仁傳照片——同仁模式沒有「LINE 加照片」，照片請到編輯頁。不能落到記者那句「我看不到圖片」。
+    // 批次 138：同仁傳照片——不能落到記者那句「我看不到圖片」。
+    // 批次 177：照片現在跟職員一樣可以直接傳（問是哪一場、自己負責的排前面）；檔案（Word、PDF）還是請到編輯頁。
     if ((ev.message?.type === 'image' || ev.message?.type === 'file') && await isColleagueAuthenticated(userId)) {
       markColleague();
+      if (ev.message.type === 'image') {
+        if (rateLimited(userId)) {
+          await replyOrPush(replyToken, userId, '傳得太快了，請稍候片刻再傳。', COLLEAGUE_HOME_CHIPS);
+          return;
+        }
+        await handleStaffImage(replyToken, userId, ev.message.id);
+        return;
+      }
       await replyOrPush(replyToken, userId,
-        '照片、新聞稿、邀請函請到編輯頁上傳 🙏 點「修改活動」選一場，活動卡上有編輯頁連結。',
+        '檔案我這邊還不能直接讀 🙏 新聞稿、邀請函的檔案請到編輯頁（點「修改活動」選一場，活動卡上有連結），新聞稿 Word 檔可以用知識庫上方的「從 Word 檔匯入」。照片可以直接傳給我。',
         COLLEAGUE_HOME_CHIPS);
       return;
     }
@@ -601,7 +611,7 @@ export default async function handler(req, res) {
   // Vercel Cron（GET）：一定要帶 CRON_SECRET，沒設定就一律拒絕——這兩個入口會動到 LINE 帳號的選單、
   // 或對管理員推播（批次 88、139）。
   const cronAction = req.method === 'GET' ? req.query?.action : '';
-  if (cronAction === 'cron_menu' || cronAction === 'cron_teach') {
+  if (cronAction === 'cron_menu' || cronAction === 'cron_teach' || cronAction === 'cron_remind') {
     const secret = process.env.CRON_SECRET;
     const bearer = String(req.headers?.authorization || '').replace(/^Bearer\s+/i, '');
     const a = Buffer.from(bearer), b = Buffer.from(secret || '');
@@ -609,6 +619,8 @@ export default async function handler(req, res) {
     try {
       // cron_menu：報名結束後把圖文選單換回原本那套（批次 88）
       // cron_teach：掃昨天以來的問答，把疑似沒答好的題目推給朱朱（批次 139，見 lib/teach-queue.js）
+      // cron_remind：活動前一天傍晚，提醒負責人補還缺的資料（批次 177，見 lib/event-remind.js）；加 &dry=1 只看會推給誰、不推
+      if (cronAction === 'cron_remind') return res.status(200).json(await runRemindCron({ dry: req.query?.dry === '1' }));
       return res.status(200).json(cronAction === 'cron_menu' ? await autoSyncRegistrationMenu() : await runTeachQueueCron());
     } catch (e) {
       console.error(`排程 ${cronAction} 失敗:`, e.message);
