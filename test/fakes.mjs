@@ -325,6 +325,31 @@ export const line = {
   // 測試要驗得到影片那則的網址，不能只看有沒有送出去。
   async replyOrPushMessages(replyToken, userId, messages) {
     if (state.flexFails) return false; // 批次 178：測「Flex 送不出去 → 退回純文字」
+    // 批次 181：記者的「近期活動」清單改成圖像卡。大量既有測試問的是「記者看到的那份清單裡有什麼、點得到什麼」，
+    // 所以預設把它攤平成文字＋按鈕記下來（viaFlex 標記、原始訊息放在 calendarFlex），舊斷言照樣驗內容；
+    // 要驗卡片本身的測試設 state.rawCalendarFlex = true 拿原始 Flex。
+    // 批次 181：技術與洽案、近期新聞、產業趨勢、邀訪窗口也是圖像卡。既有測試驗的是那份文字的版面與內容（編號、分隔線、
+    // 信箱網址…），預設讓這幾種卡「送不出去」、走純文字退路，舊斷言照樣驗；要驗卡片本身的測試設 state.reporterCards = true。
+    const REPORTER_CARD = /^(工研院技術｜|近期工研院新聞|工研院新聞｜|IEK 產業趨勢|邀訪窗口：)/;
+    if (!state.reporterCards && (messages || []).some(m => m?.type === 'flex' && REPORTER_CARD.test(m.altText || ''))) return false;
+    const calCard = (messages || []).find(m => m?.type === 'flex' && /^近期活動/.test(m.altText || ''));
+    if (calCard && !state.rawCalendarFlex) {
+      const texts = [];
+      const taps = [];
+      const walk = (n) => {
+        if (Array.isArray(n)) return n.forEach(walk);
+        if (!n || typeof n !== 'object') return;
+        if (n.action?.type === 'message') taps.push(n.action.text);
+        if (n.type === 'text') texts.push(n.text);
+        else Object.values(n).forEach(walk);
+      };
+      walk(calCard.contents);
+      const intro = (messages || []).filter(m => m?.type === 'text').map(m => m.text);
+      const flat = texts.map(t => (t === '即將舉行' ? '【近期活動】' : /^最近辦過/.test(t) ? t.replace(/^最近辦過（/, '【最近辦過】（') : t));
+      const nav = (calCard.quickReply?.items || []).map(i => ({ label: i.action.label, text: i.action.text }));
+      sent.push({ kind: 'text', text: [...intro, flat.join('\n')].join('\n\n'), quickReply: [...taps, ...nav], to: userId, push: replyToken === null, viaFlex: true, calendarFlex: messages });
+      return true;
+    }
     sent.push({ kind: 'flex', messages, text: (messages || []).filter(m => m?.type === 'text').map(m => m.text).join('\n') });
     return true;
   },
