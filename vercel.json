@@ -159,6 +159,14 @@
       "schedule": "10 2 * * *"
     },
     {
+      "path": "/api/line?action=cron_remind",
+      "schedule": "0 9 * * *"
+    },
+    {
+      "path": "/api/line?action=cron_remind",
+      "schedule": "30 9 * * *"
+    },
+    {
       "path": "/api/events?action=b2b_cron",
       "schedule": "0 1 * * 1-5"
     }

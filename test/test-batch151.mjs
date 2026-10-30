@@ -180,7 +180,7 @@ console.log('\n── 六、頁面與部署 ──');
   check('後台：活動「更多」選單有入口、有說明、連結用 textContent 放', /計畫成效唯讀連結/.test(idx) && /impact_admin_share/.test(idx) && /getElementById\('impact-url'\)\.textContent = url/.test(idx));
   const fns = fs.readdirSync(path.join(ROOT, 'api')).filter((f) => f.endsWith('.js'));
   check('★ api/ 還是 11 支（Vercel Hobby 上限 12；impact_ 掛在 api/events.js）', fns.length === 11);
-  check('　 沒有新增排程（crons 維持 7 個）', vercel.crons.length === 7);
+  check('　 沒有新增排程（crons 維持 9 個（批次 177 多了 cron_remind 一天兩班））', vercel.crons.length === 9);
 }
 
 console.log(`\n${fail ? '❌' : '✅'} 批次 151 測試：${pass} 通過，${fail} 失敗`); process.exit(fail ? 1 : 0);

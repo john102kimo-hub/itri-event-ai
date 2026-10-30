@@ -158,7 +158,9 @@ reset(); state.staff.push(colleagueRow('U_c')); await fresh();
 
   await fresh();
   const out = await image('U_c');
-  check('★ 同仁傳照片 → 請到編輯頁，不走職員的「加到哪一場」（沒有照片被收進暫存）', /編輯頁/.test(textOf(out)) && (state.photoInbox || []).length === 0 && texts(out).includes('修改活動') && !texts(out).some((t) => STAFF_ONLY.test(t)), JSON.stringify([textOf(out), state.photoInbox]));
+  // 批次 177：同仁現在可以直接傳照片（跟職員一樣先問是哪一場）；原本這裡驗的是「請到編輯頁」。
+  // 沒變的是：同仁看到的按鈕裡不能出現任何職員功能（批次 177 的行為測試在 test-batch177.mjs）。
+  check('★ 同仁傳照片 → 問「要加到哪一場」（照片進暫存），按鈕沒有職員功能', /收到 1 張照片/.test(textOf(out)) && (state.photoInbox || []).length === 1 && !texts(out).some((t) => STAFF_ONLY.test(t)), JSON.stringify([textOf(out), state.photoInbox]));
 }
 
 // ═══ 三、四件事 ═══════════════════════════════════════════════════════════════
@@ -178,7 +180,8 @@ process.env.LINE_ADMIN_USER_ID = 'U_admin';
   const created = state.events[state.events.length - 1];
   check('★ 打名稱 → 建好一場草稿（狀態 draft，名稱就是同仁打的）', state.events.length === before + 1 && created[1] === '氫能應用成果展' && created[4] === 'draft', JSON.stringify(created));
   check('★ 回覆附編輯頁連結（不需要後台密碼）、講明記者還看不到', new RegExp(`/edit\\?id=${created[0]}&code=${created[10]}`).test(textOf(out)) && /記者還看不到/.test(textOf(out)), textOf(out));
-  check('　 按鈕：看這場／回同仁選單，沒有職員功能', texts(out).includes('氫能應用成果展') && ENDS_HOME(out) && !texts(out).some((t) => STAFF_ONLY.test(t)), JSON.stringify(texts(out)));
+  // 批次 177：建好之後的按鈕改成「一步步帶我／我自己填」（原本是活動名稱）；仍然回同仁選單、沒有職員功能
+  check('　 按鈕：一步步帶我／我自己填／回同仁選單，沒有職員功能', texts(out).includes('帶我：氫能應用成果展') && texts(out).includes('自己填：氫能應用成果展') && ENDS_HOME(out) && !texts(out).some((t) => STAFF_ONLY.test(t)), JSON.stringify(texts(out)));
   check('★ 通知管理員有同仁新增活動（朱朱「反正我後台可以看」＋事後通知）', sent.some((o) => o.to === 'U_admin' && o.push && /同仁新增了活動/.test(o.text) && /氫能應用成果展/.test(o.text)), JSON.stringify(sent.map((o) => [o.to, o.text])));
   const newId = created[0], newCode = created[10];
 
@@ -294,7 +297,8 @@ reset(); state.staff.push(colleagueRow('U_c')); await fresh();
   await fresh();
   out = await dm('U_c', '使用說明');
   const help = textOf(out);
-  check('★ 使用說明：四件事一件一行，不提 GEO、後台數據、教米亞、設定圖文選單', help.split('\n').filter((l) => l.startsWith('・')).length === 4 && /新增活動/.test(help) && /修改活動/.test(help) && /發布/.test(help) && /媒體訓練/.test(help) && !/GEO|後台數據|記住：|設定圖文選單/.test(help), help);
+  // 批次 177：四件事之外多了「照片」「提醒」兩行（新增活動的延伸），仍然一件一行、不提職員功能
+  check('★ 使用說明：一件事一行（四件事＋照片＋提醒），不提 GEO、後台數據、教米亞、設定圖文選單', help.split('\n').filter((l) => l.startsWith('・')).length === 6 && /新增活動/.test(help) && /修改活動/.test(help) && /發布/.test(help) && /媒體訓練/.test(help) && /照片/.test(help) && /提醒/.test(help) && !/GEO|後台數據|記住：|設定圖文選單/.test(help), help);
   check('★ 說明有「🚪 退出同仁模式」按鈕（回報：同仁模式沒有退出——以前只有文字寫了，沒有按鈕）；按下去真的退得出去', /退出同仁模式/.test(help) && texts(out).includes('退出同仁模式'), JSON.stringify(texts(out)));
 }
 

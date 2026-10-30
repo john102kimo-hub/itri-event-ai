@@ -173,6 +173,8 @@ export function reset() {
   state.qaAppended = [];     // 批次 175：LINE／網頁問答真的 append 進 qa_log 的列（要設 GOOGLE_SPREADSHEET_ID 才會寫）
   state.teachQueue = [];     // 批次 139：teach_queue!A2:J 的列
   state.sheetLatencyMs = 0;  // 批次 80：>0 時每次讀寫都延遲，讓同時進來的兩個請求真的交錯（測競態用）
+  state.eventOwners = [];    // 批次 177：event_owners 的列 [活動 id, LINE ID, 姓名, 時間, 來源]
+  state.eventReminders = []; // 批次 177：event_reminders 的列 [發送時間, 活動 id, 活動日期, 種類, 收件人, 結果]
   state.photoInbox = [];     // 批次 80：line_photo_inbox 的列 [LINE ID, messageId, 時戳, 已用]
   state.photoUploads = [];   // 批次 79：saveEventPhoto() 被呼叫的紀錄 [eventId, messageId]
   state.imagePushes = [];    // 批次 83：pushImages() 被呼叫的紀錄（群組裡不該再有）
@@ -213,6 +215,8 @@ export const sheets = {
     if (range.startsWith('teach_queue!')) return (state.teachQueue || []).map(r => [...r]); // 批次 139
     if (range.startsWith('event_changes!')) return (state.changes || []).map(r => [...r]);
     if (range.startsWith('line_photo_inbox!')) return (state.photoInbox || []).map(r => [...r]);
+    if (range.startsWith('event_owners!')) return (state.eventOwners || []).map(r => [...r]);       // 批次 177
+    if (range.startsWith('event_reminders!')) return (state.eventReminders || []).map(r => [...r]); // 批次 177
     return [];
   },
   async appendRows(range, rows) {
@@ -236,6 +240,8 @@ export const sheets = {
     if (range.startsWith('events!')) state.events.push(...rows.map(r => [...r]));
     if (range.startsWith('event_changes!')) (state.changes ||= []).push(...rows.map(r => [...r]));
     if (range.startsWith('line_photo_inbox!')) (state.photoInbox ||= []).push(...rows.map(r => [...r]));
+    if (range.startsWith('event_owners!')) (state.eventOwners ||= []).push(...rows.map(r => [...r]));
+    if (range.startsWith('event_reminders!')) (state.eventReminders ||= []).push(...rows.map(r => [...r]));
   },
   async updateRange(range, values) {
     await lag();
