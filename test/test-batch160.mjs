@@ -128,7 +128,7 @@ console.log('\n── 四、沒設定 ／ 結構 ──');
   const line = read('api/line.js');
   check('取消綁定排在「#業務 綁定」之後、職員模式之前（職員、管理員自己的 LINE 綁了成員也能取消）', /handleB2BBind\(replyToken, userId, b2bBind\);[\s\S]{0,200}isUnbindAsk\(text\) && await handleB2BUnbind\(replyToken, userId\)[\s\S]{0,200}isStaffAuthenticated\(userId\)/.test(line));
   const vj = JSON.parse(read('vercel.json'));
-  check('沒有新增排程（維持 9 個，批次 177 多了 cron_remind 一天兩班）、rewrite（17 條）、Function（api/ 11 支）', vj.crons.length === 9 && vj.rewrites.length === 17 && fs.readdirSync(path.join(ROOT, 'api')).filter((f) => f.endsWith('.js')).length === 11);
+  check('沒有新增排程（維持 10 個，批次 177、178 多了 cron_remind 三班）、rewrite（17 條）、Function（api/ 11 支）', vj.crons.length === 10 && vj.rewrites.length === 17 && fs.readdirSync(path.join(ROOT, 'api')).filter((f) => f.endsWith('.js')).length === 11);
 }
 console.log(`\n結果：${pass} 通過、${fail} 失敗`);
 process.exit(fail ? 1 : 0);

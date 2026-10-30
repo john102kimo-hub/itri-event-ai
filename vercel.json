@@ -160,6 +160,10 @@
     },
     {
       "path": "/api/line?action=cron_remind",
+      "schedule": "30 0 * * *"
+    },
+    {
+      "path": "/api/line?action=cron_remind",
       "schedule": "0 9 * * *"
     },
     {

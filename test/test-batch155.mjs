@@ -113,7 +113,7 @@ console.log('\n── 五、結構 ──');
   check('鍵盤：方向鍵換頁；拖滑桿時左右鍵不換頁；Esc 關閉', /ArrowRight/.test(src) && /tag === 'INPUT'/.test(src) && /k === 'Escape'/.test(src));
   check('關掉簡報會還原網址、焦點與頁面捲動', /replaceState\(null, '', location\.pathname \+ location\.search\)/.test(src) && /document\.body\.style\.overflow = deck\.prevOverflow/.test(src) && /opener\.focus/.test(src));
   const vj = JSON.parse(read('vercel.json'));
-  check('沒有新增排程（維持 9 個，批次 177 多了 cron_remind 一天兩班）、rewrite（17 條）', vj.crons.length === 9 && vj.rewrites.length === 17, `${vj.crons.length}/${vj.rewrites.length}`);
+  check('沒有新增排程（維持 10 個，批次 177、178 多了 cron_remind 三班）、rewrite（17 條）', vj.crons.length === 10 && vj.rewrites.length === 17, `${vj.crons.length}/${vj.rewrites.length}`);
   check('沒有新增 Function（api/ 仍是 11 支，Hobby 上限 12）', fs.readdirSync(path.join(ROOT, 'api')).filter(f => f.endsWith('.js')).length === 11);
   check('簡報沒有寫死任何成效數字（程式裡沒有「N 題／N 家／N 場」這種具體數字句）', !/['"][^'"]*\b\d{2,}\s*(題|家媒體|則|場)/.test(src.replace(/\/\/.*$/gm, '')));
 }

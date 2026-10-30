@@ -208,7 +208,7 @@ console.log('\n── 八、頁面與結構 ──');
   check('★ 說清楚只會帶公司名稱、草稿客戶打不開、要發布', /只會帶公司名稱/.test(pg) && /客戶現在還打不開/.test(pg));
   check('★ 連結用 textContent 放（不經過 innerHTML）', /code\.textContent = url/.test(pg));
   const fns = fs.readdirSync(path.join(ROOT, 'api')).filter((f) => f.endsWith('.js'));
-  check('★ api/ 還是 11 支（Vercel Hobby 上限 12）；沒有新增排程', fns.length === 11 && JSON.parse(read('vercel.json')).crons.length === 9);
+  check('★ api/ 還是 11 支（Vercel Hobby 上限 12）；沒有新增排程', fns.length === 11 && JSON.parse(read('vercel.json')).crons.length === 10);
 }
 
 console.log(`\n${fail ? '❌' : '✅'} 批次 153 測試：${pass} 通過，${fail} 失敗`); process.exit(fail ? 1 : 0);

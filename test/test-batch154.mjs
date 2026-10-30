@@ -40,7 +40,7 @@ console.log('\n── 四、結構 ──');
 {
   const vercel = JSON.parse(read('vercel.json'));
   const fns = fs.readdirSync(path.join(ROOT, 'api')).filter((f) => f.endsWith('.js'));
-  check('★ api/ 仍是 11 支；排程仍是 9 個（批次 177 多了 cron_remind 一天兩班）；rewrites 仍是 17 條（/b2b 批次 119 就有了）', fns.length === 11 && vercel.crons.length === 9 && vercel.rewrites.length === 17);
+  check('★ api/ 仍是 11 支；排程仍是 10 個（批次 177、178 多了 cron_remind 三班）；rewrites 仍是 17 條（/b2b 批次 119 就有了）', fns.length === 11 && vercel.crons.length === 10 && vercel.rewrites.length === 17);
   check('/b2b 的安全標頭（不可被嵌入）本來就有', /b2b\|inquiry/.test(read('vercel.json')));
 }
 

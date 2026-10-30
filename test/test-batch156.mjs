@@ -123,7 +123,7 @@ console.log('\n── 四、編輯頁與 /b2b 引導（結構；畫面另用 Chr
 console.log('\n── 五、結構 ──');
 {
   const vj = JSON.parse(read('vercel.json'));
-  check('沒有新增排程（維持 9 個，批次 177 多了 cron_remind 一天兩班）、rewrite（17 條）、Function（api/ 11 支）', vj.crons.length === 9 && vj.rewrites.length === 17 && fs.readdirSync(path.join(ROOT, 'api')).filter((f) => f.endsWith('.js')).length === 11);
+  check('沒有新增排程（維持 10 個，批次 177、178 多了 cron_remind 三班）、rewrite（17 條）、Function（api/ 11 支）', vj.crons.length === 10 && vj.rewrites.length === 17 && fs.readdirSync(path.join(ROOT, 'api')).filter((f) => f.endsWith('.js')).length === 11);
   check('b2b 建專屬頁用企業場範本（不是新聞範本）', /BUSINESS_KB_TEMPLATE, 'draft'/.test(read('lib/b2b.js')));
 }
 
