@@ -62,6 +62,9 @@ function chips(out) {
 const texts = (out) => chips(out).map((c) => c.text);
 const labels = (out) => chips(out).map((c) => c.label);
 const textOf = (out) => out.filter((s) => s.kind === 'text').map((o) => o.text).join('\n---\n');
+// 批次 178：同仁活動卡是 Flex 圖像卡。字、按鈕（卡上的 message 與 uri）從訊息 JSON 取
+const cardOf = (out) => out.filter((s) => s.kind === 'flex').map((o) => JSON.stringify(o.messages)).join('\n');
+const cardTaps = (out) => [...cardOf(out).matchAll(/"type":"message","label":"[^"]*","text":"([^"]*)"/g)].map((m) => m[1]);
 const HOME = '同仁選單';
 const HOME_ALL = ['新增活動', '修改活動', '媒體訓練', '使用說明', '退出同仁模式']; // 首頁、說明、聽不懂：整套入口（跟職員的 STAFF_HOME_CHIPS 同一個做法）
 const ENDS_HOME = (out) => texts(out)[texts(out).length - 1] === HOME || JSON.stringify(texts(out)) === JSON.stringify(HOME_ALL);
@@ -191,10 +194,17 @@ process.env.LINE_ADMIN_USER_ID = 'U_admin';
   check('　 說明講的是能改哪五欄、其他用編輯頁', /名稱、日期、時間、地點、新聞聯絡人/.test(textOf(out)) && /編輯頁/.test(textOf(out)), textOf(out));
 
   out = await dm('U_c', '智慧醫療解決方案記者會');
-  const card = textOf(out);
-  check('★ 點活動名稱 → 活動卡：附「編輯頁」與「活動網頁」兩條連結', /\/edit\?id=med&code=code3/.test(card) && /\/event\?id=med/.test(card), card);
-  check('　 卡上有還缺什麼、接著怎麼說', /還缺：/.test(card) && /接著直接說要改什麼/.test(card), card);
-  check('　 卡上的按鈕：媒體訓練、修改活動、回同仁選單（沒有催填、數據）', texts(out).includes('訓練：智慧醫療解決方案記者會') && texts(out).includes('修改活動') && ENDS_HOME(out) && !texts(out).some((t) => STAFF_ONLY.test(t)), JSON.stringify(texts(out)));
+  const card = cardOf(out);
+  check('★ 點活動名稱 → 圖像活動卡：編輯頁與活動網頁是按鈕（網址不再露在文字裡）', out.some((s) => s.kind === 'flex') && /"uri":"[^"]*\/edit\?id=med&code=code3"/.test(card) && /"uri":"[^"]*\/event\?id=med"/.test(card), card);
+  check('　 卡上有還缺什麼、接著怎麼說', /未填/.test(card) && /接著直接說要改什麼/.test(card), card);
+  check('　 卡上的按鈕：媒體訓練；快速回覆：修改別場、回同仁選單（沒有催填、數據）', cardTaps(out).includes('訓練：智慧醫療解決方案記者會') && texts(out).includes('修改活動') && ENDS_HOME(out) && ![...cardTaps(out), ...texts(out)].some((t) => STAFF_ONLY.test(t)) && !/催填|數據/.test(card), JSON.stringify([cardTaps(out), texts(out)]));
+
+  // 批次 178：Flex 送不出去（舊版 LINE、格式被拒）→ 退回純文字版，內容與按鈕不能少
+  state.flexFails = true;
+  out = await dm('U_c', '智慧醫療解決方案記者會');
+  state.flexFails = false;
+  check('★ Flex 送不出去 → 退回純文字活動卡：還缺什麼、兩條連結、訓練按鈕都在', !out.some((s) => s.kind === 'flex') && /還缺：/.test(textOf(out)) && /\/edit\?id=med&code=code3/.test(textOf(out)) && texts(out).includes('訓練：智慧醫療解決方案記者會'), JSON.stringify([textOf(out), texts(out)]));
+  out = await dm('U_c', '智慧醫療解決方案記者會');
 
   // 接著不講哪一場
   out = await dm('U_c', '地點改成南港展覽館');
@@ -229,7 +239,7 @@ process.env.LINE_ADMIN_USER_ID = 'U_admin';
   state.events.push(['rdy', '先進製程成果發表', '#0F9E7A', '【新聞稿】先進製程成果：良率提升與量產時程說明。', 'draft', isoOffset(10), '', '', '', '工研院', 'codeR', '', '南港展覽館', '', '王小明 0912-345-678', '', '', '']);
   await fresh(); // 活動列有快取
   out = await dm('U_c', '先進製程成果發表');
-  check('　 草稿、必填齊了 → 活動卡出現「🚀 發布」；草稿沒有活動網頁連結（記者看不到，點開也是找不到）', texts(out).includes('發布：先進製程成果發表') && /\/edit\?id=rdy/.test(textOf(out)) && !/\/event\?id=rdy/.test(textOf(out)), JSON.stringify([texts(out), textOf(out)]));
+  check('　 草稿、必填齊了 → 活動卡出現「🚀 發布」；草稿沒有活動網頁連結（記者看不到，點開也是找不到）', cardTaps(out).includes('發布：先進製程成果發表') && /\/edit\?id=rdy/.test(cardOf(out)) && !/\/event\?id=rdy/.test(cardOf(out)), JSON.stringify([cardTaps(out), cardOf(out)]));
   out = await dm('U_c', '發布：先進製程成果發表');
   check('★ 按發布 → 先確認（確認／取消兩顆）', /要發布《先進製程成果發表》嗎/.test(textOf(out)) && texts(out).length === 2 && texts(out).includes('🚀 確認發布'), JSON.stringify([textOf(out), texts(out)]));
   out = await dm('U_c', '🚀 確認發布');

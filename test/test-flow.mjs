@@ -3164,6 +3164,11 @@ check('　 同一視窗內真的在問活動 → 照樣回', out.length > 0, JSO
 // ── 情境 76：職員模式第一批小修（批次 76，盤點實測到的十個問題）──────────────
 {
   const labelsOf = o => (o?.quickReply || []).map(c => (typeof c === 'object' && c ? c.text : c));
+
+  // 批次 178：「活動與進度」是 Flex 圖像卡。字與可點的活動名稱從訊息 JSON 取，快速回覆在最後一則訊息上
+  const ovText = o => (o?.kind === 'flex' ? JSON.stringify(o.messages) : (o?.text || ''));
+  const ovChips = o => ((o?.messages || []).at(-1)?.quickReply?.items || []).map(i => i.action?.text);
+  const ovTaps = o => [...ovText(o).matchAll(/"action":\{"type":"message","label":"[^"]*","text":"([^"]*)"\}/g)].map(m => m[1]);
   // 批次 125：「整套職員入口」（每則 12 顆）改成「最後一顆是🏠 職員選單」——一按就是全部功能（見
   // lib/line-runtime.js staffChips()），要守的「每一則都回得去」沒變
   const hasStaffEntries = o => labelsOf(o)[labelsOf(o).length - 1] === '職員選單';
@@ -3222,10 +3227,10 @@ check('　 同一視窗內真的在問活動 → 照樣回', out.length > 0, JSO
     !/到後台按/.test(created) && /改成「進行中」/.test(created), created);
   check('　 沒給日期 → 寫「未定」', /日期：未定/.test(created), created);
   out = await send('最近有哪些活動', 'U_staff');   // 同一個模組實例：60 秒快取還在
-  check('★ 剛建好的活動馬上就在清單上（不用等 60 秒快取過期）', /眺望2027產業發展趨勢研討會/.test(out[0]?.text || ''), out[0]?.text);
-  check('★ 沒填日期的活動顯示「日期未定」，不是建立當天', /眺望2027產業發展趨勢研討會　🔒 未發布\n　日期未定/.test(out[0]?.text || ''), out[0]?.text);
-  check('★ 清單按鈕列得到還沒有新聞稿的草稿', labelsOf(out[0]).includes('眺望2027產業發展趨勢研討會'), JSON.stringify(labelsOf(out[0])));
-  check('　 清單也帶職員選單', hasStaffEntries(out[0]), JSON.stringify(labelsOf(out[0])));
+  check('★ 剛建好的活動馬上就在清單上（不用等 60 秒快取過期）', /眺望2027產業發展趨勢研討會/.test(ovText(out[0])), ovText(out[0]));
+  check('★ 沒填日期的活動顯示「日期未定」，不是建立當天', /日期未定・🔒 未發布/.test(ovText(out[0])), ovText(out[0]));
+  check('★ 清單列得到、點得到還沒有新聞稿的草稿', ovTaps(out[0]).includes('眺望2027產業發展趨勢研討會'), JSON.stringify(ovTaps(out[0])));
+  check('　 清單也帶職員選單', ovChips(out[0]).at(-1) === '職員選單', JSON.stringify(ovChips(out[0])));
   out = await send('眺望2027產業發展趨勢研討會', 'U_staff');
   // 批次 77 起點名稱看到的是活動卡（Flex），卡上有編輯頁按鈕
   check('點那場草稿 → 活動卡（狀態與編輯頁），不是一句「沒有資料」的 AI 回答',
@@ -3250,6 +3255,11 @@ check('　 同一視窗內真的在問活動 → 照樣回', out.length > 0, JSO
 // ── 情境 77：活動卡、活動與進度、催填訊息（批次 77，職員模式第二批）──────────────
 {
   const labelsOf = o => (o?.quickReply || []).map(c => (typeof c === 'object' && c ? c.text : c));
+
+  // 批次 178：「活動與進度」是 Flex 圖像卡。字與可點的活動名稱從訊息 JSON 取，快速回覆在最後一則訊息上
+  const ovText = o => (o?.kind === 'flex' ? JSON.stringify(o.messages) : (o?.text || ''));
+  const ovChips = o => ((o?.messages || []).at(-1)?.quickReply?.items || []).map(i => i.action?.text);
+  const ovTaps = o => [...ovText(o).matchAll(/"action":\{"type":"message","label":"[^"]*","text":"([^"]*)"\}/g)].map(m => m[1]);
   const flexOf = o => JSON.stringify(o?.messages || []);
   const es = await import(new URL(`../lib/event-status.js?v=${modSeq}`, import.meta.url).href);
 
@@ -3286,6 +3296,21 @@ check('　 同一視窗內真的在問活動 → 照樣回', out.length > 0, JSO
   check('總覽不列封存與已經辦完的', !/封存掉的活動|上個月辦完/.test(ov.text), ov.text);
   check('總覽寫出每場還缺什麼、快到的標 ⚠️', /⚠️ 必填 0／4，還缺：日期|⚠️ 必填 1／4，還缺：地點、新聞聯絡人、新聞稿/.test(ov.text) && /1 場快到了還沒填齊/.test(ov.text), ov.text);
 
+  // 批次 178：圖像版總覽與同仁活動卡（純函式）
+  {
+    const card = es.buildProgressOverviewFlex(rows, '2026-09-23');
+    const js = JSON.stringify(card?.flex || {});
+    check('★ 總覽 Flex：每場一列、整列點了＝打活動名稱；跟純文字版列同一批場次', card && card.names.length === es.formatProgressOverview(rows, '2026-09-23').names.length && card.names.every(n => js.includes(`"type":"message","label":"看這一場","text":"${n}"`)), js.slice(0, 300));
+    check('　 紅黃綠點與「2/4」進度、altText 寫得出場數', /🔴|🟡|🟢/.test(js) && /\d\/\d/.test(js) && /近期 \d+ 場/.test(card.flex.altText), card?.flex?.altText);
+    check('　 沒有近期場次 → null（呼叫端改發那句文字）', es.buildProgressOverviewFlex([], '2026-09-23') === null);
+    const cc = es.eventChecklist(row({ 4: 'draft', 5: '2026-09-25', 12: '南港展覽館' }), '2026-09-23');
+    const cf = es.buildColleagueCardFlex(cc, { ownerLabel: '你', links: { edit: 'https://x/edit?id=x&code=c', preview: 'https://x/event?id=x' }, guideLeft: ['invite', 'contact'], canPublish: false, canClaim: false });
+    const cj = JSON.stringify(cf);
+    check('★ 同仁卡：狀態寫明「記者還看不到」、四格進度條、填了的顯示內容、沒填的寫「未填」', /記者還看不到/.test(cj) && (cj.match(/"height":"6px"/g) || []).length === 4 && /南港展覽館/.test(cj) && /未填/.test(cj), cj.slice(0, 400));
+    check('　 同仁卡：主按鈕是「帶我完成」、編輯頁是按鈕（網址在 uri，不在可見文字裡）、沒有催填／數據', /"style":"primary"[^}]*"label":"👣 帶我完成"|"label":"👣 帶我完成"/.test(cj) && /"type":"uri","label":"✏️ 開啟編輯頁","uri":"https:\/\/x\/edit\?id=x&code=c"/.test(cj) && !/催填|數據/.test(cj) && !/"text":"https:/.test(cj), cj);
+    check('　 同仁卡：草稿沒有「記者看到的頁面」；必填齊了且能發布 → 主按鈕換成「發布」', !/記者看到的頁面/.test(cj) && /"label":"🚀 發布"/.test(JSON.stringify(es.buildColleagueCardFlex(cc, { canPublish: true, links: {} }))));
+  }
+
   const nudge = es.formatNudgeMessage(es.eventChecklist(row({ 5: '2026-10-10', 12: '南港' }), '2026-09-23'), 'https://x/edit?id=x&code=c');
   check('催填訊息寫出缺什麼、附編輯連結', /必填還缺：新聞聯絡人、新聞稿/.test(nudge) && nudge.includes('https://x/edit?id=x&code=c'), nudge);
   check('催填訊息是寫給被轉傳的人看的：不出現後台、草稿、編輯碼這類內部用語', !/後台|草稿|draft|編輯碼|職員/.test(nudge), nudge);
@@ -3294,12 +3319,16 @@ check('　 同一視窗內真的在問活動 → 照樣回', out.length > 0, JSO
   reset(); await freshModule();
   state.staff.push(['U_staff', '', '2026-08-27', '', '']);
   out = await send('活動與進度', 'U_staff');
-  check('★ 「活動與進度」→ 總覽，寫出每場還缺什麼', /【活動與進度】/.test(out[0]?.text || '') && /還缺：/.test(out[0]?.text || ''), out[0]?.text);
-  check('　 按鈕是活動名稱＋職員選單（批次 125 起不再接整套入口）', labelsOf(out[0]).includes('智慧醫療解決方案記者會') && labelsOf(out[0]).at(-1) === '職員選單' && !labelsOf(out[0]).includes('新增活動'), JSON.stringify(labelsOf(out[0])));
+  check('★ 「活動與進度」→ 圖像總覽，寫出每場還缺什麼', out[0]?.kind === 'flex' && /活動與進度/.test(ovText(out[0])) && /還缺：/.test(ovText(out[0])), ovText(out[0]));
+  check('　 每一列點得到那一場、快速回覆只剩職員選單（批次 125 起不再接整套入口）', ovTaps(out[0]).includes('智慧醫療解決方案記者會') && ovChips(out[0]).at(-1) === '職員選單' && !ovChips(out[0]).includes('新增活動'), JSON.stringify(labelsOf(out[0])));
+  state.flexFails = true;
+  out = await send('活動與進度', 'U_staff');
+  state.flexFails = false;
+  check('★ 總覽 Flex 送不出去 → 退回純文字清單（【活動與進度】＋活動名稱按鈕）', out[0]?.kind === 'text' && /【活動與進度】/.test(out[0]?.text || '') && labelsOf(out[0]).includes('智慧醫療解決方案記者會'), JSON.stringify(out));
   out = await send('最近有哪些活動', 'U_staff');
-  check('職員打「最近有哪些活動」也是同一份總覽', /【活動與進度】/.test(out[0]?.text || ''), out[0]?.text);
+  check('職員打「最近有哪些活動」也是同一份總覽', /活動與進度/.test(ovText(out[0])) && out[0]?.kind === 'flex', ovText(out[0]));
   out = await send('哪幾場還沒填完', 'U_staff');
-  check('「哪幾場還沒填完」字面就認得（不用等模型）', /【活動與進度】/.test(out[0]?.text || ''), out[0]?.text);
+  check('「哪幾場還沒填完」字面就認得（不用等模型）', /活動與進度/.test(ovText(out[0])) && out[0]?.kind === 'flex', ovText(out[0]));
 
   // 「更新活動」→ 選哪一場
   out = await send('更新活動', 'U_staff');
@@ -3522,7 +3551,8 @@ check('　 同一視窗內真的在問活動 → 照樣回', out.length > 0, JSO
 
   // (2) 活動與進度也不列過期的草稿、已結束的
   out = await send('活動與進度', 'U_staff');
-  check('★ 活動與進度不列過期的草稿', !/上個月沒發的草稿活動/.test(out[0]?.text || ''), out[0]?.text);
+  const ovAll = out[0]?.kind === 'flex' ? JSON.stringify(out[0].messages) : (out[0]?.text || '');
+  check('★ 活動與進度不列過期的草稿（而且真的有出總覽，不是空的）', /活動與進度/.test(ovAll) && !/上個月沒發的草稿活動/.test(ovAll), ovAll);
 
   // 查成效是活動後的事：過期的要列
   out = await send('查活動後台數據', 'U_staff');
