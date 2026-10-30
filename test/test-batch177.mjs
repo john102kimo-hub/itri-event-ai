@@ -51,6 +51,9 @@ const buttons = (out) => {
   const last = out.filter((s) => s.kind === 'text' && !s.push).at(-1);
   return (last?.quickReply || []).map((c) => (typeof c === 'object' ? c.text ?? c.label : c));
 };
+// 批次 178：同仁活動卡是 Flex。字與卡上按鈕從訊息 JSON 取（按鈕＝快速回覆＋卡上的 message 按鈕）
+const cardOf = (out) => out.filter((s) => s.kind === 'flex').map((o) => JSON.stringify(o.messages)).join('\n');
+const cardTaps = (out) => [...cardOf(out).matchAll(/"type":"message","label":"[^"]*","text":"([^"]*)"/g)].map((m) => m[1]);
 const STAFF_ONLY = /職員選單|設定圖文選單|記憶清單|GEO|成效數據|退出職員模式|催填|更多功能|查活動後台數據/;
 async function cron(action, { secret = 'cronsecret', query = {} } = {}) {
   let status = 0, body = null;
@@ -207,13 +210,13 @@ console.log('\n── 已發布的場次：引導的寫入要先確認 ──');
 console.log('\n── 負責人：認領、活動卡、自己填 ──');
 {
   out = await dm('U_c2', '智慧醫療解決方案記者會');
-  check('活動卡顯示負責人；不是自己負責的有「🙋 我來負責」', /負責人：小華/.test(textOf(out)) && buttons(out).includes('負責：智慧醫療解決方案記者會'), textOf(out));
+  check('活動卡顯示負責人；不是自己負責的有「🙋 我來負責」', /負責人：小華/.test(cardOf(out)) && cardTaps(out).includes('負責：智慧醫療解決方案記者會'), cardOf(out));
   out = await dm('U_c2', '負責：智慧醫療解決方案記者會');
   check('★ 「負責：」→ 換成自己，並通知管理員（誰把這場接走了）', state.eventOwners.at(-1)[0] === 'med' && state.eventOwners.at(-1)[1] === 'U_c2' && /由你負責/.test(textOf(out)) && sent.some((o) => o.to === 'U_admin' && /活動負責人變更/.test(o.text) && /小華/.test(o.text) && /小明/.test(o.text)), JSON.stringify(sent.map((o) => [o.to, o.text.slice(0, 40)])));
   out = await dm('U_c2', '負責：智慧醫療解決方案記者會');
   check('　 本來就是自己負責 → 說一聲，不重複寫', /本來就是你負責/.test(textOf(out)) && state.eventOwners.filter((r) => r[0] === 'med').length === 2);
   out = await dm('U_c2', '智慧醫療解決方案記者會');
-  check('　 活動卡：負責人是「你」，不再顯示「我來負責」', /負責人：你/.test(textOf(out)) && !buttons(out).includes('負責：智慧醫療解決方案記者會'), textOf(out));
+  check('　 活動卡：負責人是「你」，不再顯示「我來負責」', /負責人：你/.test(cardOf(out)) && !cardTaps(out).includes('負責：智慧醫療解決方案記者會'), cardOf(out));
 
   const soon = state.events.find((e) => e[0] === 'soon');
   out = await dm('U_c2', '自己填：奈米材料前瞻應用發表會');
@@ -319,7 +322,7 @@ const evRow = (id, name, date, o = {}) => { const r = Array(18).fill(''); Object
   check('　 密鑰對、dry=1 → 200，回摘要、沒有推播', c.status === 200 && c.body?.dry === true && c.body.sent === 1 && pushes().length === 0, JSON.stringify(c));
   const vj = JSON.parse(readFileSync(new URL('../vercel.json', import.meta.url), 'utf8'));
   const rem = vj.crons.filter((x) => x.path === '/api/line?action=cron_remind');
-  // 批次 178 多了早上那班（UTC 00:30＝台灣 08:30）；傍晚兩班（17:00、17:30）不變
+  // 批次 179 多了早上那班（UTC 00:30＝台灣 08:30）；傍晚兩班（17:00、17:30）不變
   check('★ vercel.json：傍晚兩班（17:00、17:30 台灣時間）仍在，都是一天一次的寫法', ['0 9 * * *', '30 9 * * *'].every((t) => rem.some((x) => x.schedule === t)), JSON.stringify(rem));
 }
 
