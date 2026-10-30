@@ -228,7 +228,8 @@ LINE 統一窗口會讀「所有場次」。**`events` 表裡一定會有草稿�
 | 83–91 | [08-batch-083.md](docs/batches/08-batch-083.md) |
 | 92–116 | [09-batch-092.md](docs/batches/09-batch-092.md) |
 | 117～140 | [10-batch-117.md](docs/batches/10-batch-117.md) |
-| 141 起（最新） | [11-batch-141.md](docs/batches/11-batch-141.md) |
+| 141～177 | [11-batch-141.md](docs/batches/11-batch-141.md) |
+| 178 起（最新） | [12-batch-178.md](docs/batches/12-batch-178.md) |
 
 **新的一批怎麼記**：見 [CLAUDE.md](CLAUDE.md) 第 5 條——往 `docs/batches/` 最新那份後面接，並在 `docs/batches/README.md` 補一行索引；
 最新那份超過約 900 行就開下一份。**這份文件不要再往下接批次紀錄**，否則兩個月後又是一份讀不完的文件（`test/test-docs.mjs` 會擋行數）。

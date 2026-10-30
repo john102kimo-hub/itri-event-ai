@@ -82,7 +82,8 @@ for (const { who, uid, row, prefix } of IDENTITIES) {
     out = await dm(uid, '修改活動');
     check(L('　 「修改活動」→ 列出活動'), /要改哪一場/.test(textOf(out)), textOf(out));
     out = await dm(uid, '智慧醫療解決方案記者會');
-    check(L('　 點活動 → 活動卡'), /《智慧醫療解決方案記者會》/.test(textOf(out)), textOf(out));
+    // 批次 178：同仁活動卡是 Flex 圖像卡，活動名稱在標頭裡（不是文字訊息）
+    check(L('　 點活動 → 活動卡'), out.some((s) => s.kind === 'flex' && /智慧醫療解決方案記者會/.test(JSON.stringify(s.messages))), JSON.stringify(out).slice(0, 300));
     out = await dm(uid, '地點改成南港展覽館');
   } else {
     // 職員模式沒有活動卡（點活動名稱是問答），改資料一律連場次一起講
