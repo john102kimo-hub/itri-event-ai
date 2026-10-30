@@ -117,7 +117,7 @@ let out, created;
   out = await dm('U_c', '氫能應用成果展');
   created = state.events.at(-1);
   check('★ 建活動：建立的人自動成為負責人（event_owners 多一列，不用另外綁定）', state.eventOwners.length === 1 && state.eventOwners[0][0] === created[0] && state.eventOwners[0][1] === 'U_c' && state.eventOwners[0][2] === '小華', JSON.stringify(state.eventOwners));
-  check('　 回覆講明「你是負責人」，沒有日期要說「沒辦法提醒你」', /你是這場的負責人/.test(textOf(out)) && /沒辦法提醒你/.test(textOf(out)), textOf(out));
+  check('★ 回覆講明負責人已自動設成你、不用另外做什麼；要換人的話請對方點「🙋 我來負責」；沒有日期要說「沒辦法提醒你」', /負責人：已自動設成你，不用另外做什麼/.test(textOf(out)) && /其實是別人.*「🙋 我來負責」/s.test(textOf(out)) && /沒辦法提醒你/.test(textOf(out)), textOf(out));
   check('★ 回覆：附編輯連結（想自己填也行）、問「要我一步步帶你嗎」', new RegExp(`/edit\\?id=${created[0]}&code=${created[10]}`).test(textOf(out)) && /一步步帶你/.test(textOf(out)), textOf(out));
   check('　 兩顆按鈕：一步步帶我／我自己填，最後是同仁選單，沒有職員功能', buttons(out).includes('帶我：氫能應用成果展') && buttons(out).includes('自己填：氫能應用成果展') && buttons(out).at(-1) === '同仁選單' && !buttons(out).some((t) => STAFF_ONLY.test(t)), JSON.stringify(buttons(out)));
 
@@ -244,29 +244,29 @@ const evRow = (id, name, date, o = {}) => { const r = Array(18).fill(''); Object
 {
   reset(); state.staff.push(colleagueRow('U_c', '小華')); await fresh();
   sent.length = 0;
-  let r = await runRemindCron();
+  let r = await runRemindCron({ slot: 'evening' });
   const soon = state.events.find((e) => e[0] === 'soon');
   check('★ 沒有負責人 → 推給管理員，並說明為什麼；附這場的編輯連結', r.sent === 1 && r.toAdmin === 1 && pushes().length === 1 && pushes()[0].to === 'U_admin' && /沒有負責人/.test(pushes()[0].text) && /奈米材料前瞻應用發表會/.test(pushes()[0].text) && /\/edit\?id=soon&code=code4/.test(pushes()[0].text), JSON.stringify([r, pushes().map((p) => p.text)]));
   check('　 提醒內容：還缺地點、新聞聯絡人、議程等（正式新聞稿那一欄有字，但沒有議程／受訪者／貴賓小節）', /還缺：/.test(pushes()[0].text) && /地點/.test(pushes()[0].text) && /新聞聯絡人/.test(pushes()[0].text) && /議程/.test(pushes()[0].text), pushes()[0]?.text);
   check('　 發送紀錄寫進 event_reminders（活動 id、活動日期、種類、收件人、sent）', state.eventReminders.length === 1 && state.eventReminders[0][1] === 'soon' && state.eventReminders[0][2] === soon[5] && state.eventReminders[0][3] === 'eve' && state.eventReminders[0][4] === 'U_admin' && state.eventReminders[0][5] === 'sent', JSON.stringify(state.eventReminders));
   sent.length = 0;
-  r = await runRemindCron();
+  r = await runRemindCron({ slot: 'evening' });
   check('★ 同一場同一個活動日期只提醒一次（一天排兩班，第二班不會重複推）', r.sent === 0 && pushes().length === 0 && state.eventReminders.length === 1, JSON.stringify(r));
   state.events.find((e) => e[0] === 'soon')[5] = isoOffset(1); // 同一天，不變
   sent.length = 0;
-  r = await runRemindCron({ now: new Date(Date.now() + 86400000) });
+  r = await runRemindCron({ slot: 'evening', now: new Date(Date.now() + 86400000) });
   check('　 　隔天再跑：活動變成「今天」，不再提醒', r.candidates === 0 && pushes().length === 0, JSON.stringify(r));
 }
 {
   reset(); state.staff.push(colleagueRow('U_c', '小華')); state.eventOwners.push(['soon', 'U_c', '小華', 't', 'create']); await fresh();
   sent.length = 0;
-  const r = await runRemindCron();
+  const r = await runRemindCron({ slot: 'evening' });
   check('★ 有負責人（而且還是同仁）→ 推給他、不是管理員', r.sent === 1 && r.toAdmin === 0 && pushes()[0].to === 'U_c' && !/沒有負責人/.test(pushes()[0].text), JSON.stringify(pushes().map((p) => [p.to, p.text.slice(0, 30)])));
 }
 {
   reset(); state.staff.push(['U_c', '小華', 't', 'revoked', '', 'colleague']); state.eventOwners.push(['soon', 'U_c', '小華', 't', 'create']); await fresh();
   sent.length = 0;
-  const r = await runRemindCron();
+  const r = await runRemindCron({ slot: 'evening' });
   check('★ 負責人已退出同仁模式 → 改推給管理員（這場不能悄悄沒人提醒）', r.toAdmin === 1 && pushes()[0].to === 'U_admin' && /沒有負責人/.test(pushes()[0].text), JSON.stringify(pushes().map((p) => p.to)));
 }
 {
@@ -274,7 +274,7 @@ const evRow = (id, name, date, o = {}) => { const r = Array(18).fill(''); Object
   state.events.push(evRow('b1', '第二場明天', isoOffset(1), { 3: '', 4: 'active' }));
   state.eventOwners.push(['soon', 'U_c', '小華', 't', 'create'], ['b1', 'U_c', '小華', 't', 'create']); await fresh();
   sent.length = 0;
-  const r = await runRemindCron();
+  const r = await runRemindCron({ slot: 'evening' });
   check('★ 同一人明天有兩場 → 合成一則（省推播則數）', r.sent === 2 && pushes().length === 1 && /奈米材料前瞻應用發表會/.test(pushes()[0].text) && /第二場明天/.test(pushes()[0].text), JSON.stringify(pushes().map((p) => p.text.slice(0, 60))));
 }
 {
@@ -288,18 +288,18 @@ const evRow = (id, name, date, o = {}) => { const r = Array(18).fill(''); Object
     evRow('biz', '企業專屬頁', isoOffset(1), { 3: '', 13: '客戶參訪' })
   ); await fresh();
   sent.length = 0;
-  const r = await runRemindCron();
+  const r = await runRemindCron({ slot: 'evening' });
   check('★ 沒缺東西就不推；草稿即使資料齊全也提醒（還沒發布）；今天／已結束／企業場不提醒', r.candidates === 1 && pushes().length === 1 && /草稿但資料齊全/.test(pushes()[0].text) && !/資料齊全的發表會/.test(pushes()[0].text.replace('草稿但資料齊全', '')) && /未發布/.test(pushes()[0].text), JSON.stringify([r, pushes().map((p) => p.text)]));
 }
 {
   reset(); await fresh(); sent.length = 0;
-  const r = await runRemindCron({ dry: true });
+  const r = await runRemindCron({ slot: 'evening', dry: true });
   check('★ dry：算得出會推幾場、但不推、不寫紀錄', r.dry && r.sent === 1 && pushes().length === 0 && state.eventReminders.length === 0, JSON.stringify(r));
 }
 {
   reset(); await fresh(); sent.length = 0;
   process.env.REMIND_MONTHLY_MAX = '0';
-  const r = await runRemindCron();
+  const r = await runRemindCron({ slot: 'evening' });
   delete process.env.REMIND_MONTHLY_MAX;
   check('★ 每月上限（REMIND_MONTHLY_MAX）：設 0 就整個停掉，並說原因', r.sent === 0 && pushes().length === 0 && r.skipped.some((t) => /上限/.test(t)), JSON.stringify(r));
   // 已用掉的筆數算進本月
@@ -307,7 +307,7 @@ const evRow = (id, name, date, o = {}) => { const r = Array(18).fill(''); Object
   process.env.REMIND_MONTHLY_MAX = '2';
   const ym = new Date().toLocaleString('sv-SE', { timeZone: 'Asia/Taipei' }).slice(0, 7);
   state.eventReminders.push([`${ym}-01 17:00:00`, 'o1', '2026-01-01', 'eve', 'U_x', 'sent'], [`${ym}-02 17:00:00`, 'o2', '2026-01-01', 'eve', 'U_x', 'sent']);
-  const r2 = await runRemindCron();
+  const r2 = await runRemindCron({ slot: 'evening' });
   delete process.env.REMIND_MONTHLY_MAX;
   check('　 本月已經推了 2 筆、上限 2 → 這次不推', r2.sent === 0 && pushes().length === 0, JSON.stringify(r2));
 }
@@ -318,11 +318,12 @@ const evRow = (id, name, date, o = {}) => { const r = Array(18).fill(''); Object
   c = await cron('cron_remind', { secret: 'wrong' });
   check('　 密鑰錯 → 401', c.status === 401);
   sent.length = 0;
-  c = await cron('cron_remind', { query: { dry: '1' } });
+  c = await cron('cron_remind', { query: { dry: '1', slot: 'evening' } });
   check('　 密鑰對、dry=1 → 200，回摘要、沒有推播', c.status === 200 && c.body?.dry === true && c.body.sent === 1 && pushes().length === 0, JSON.stringify(c));
   const vj = JSON.parse(readFileSync(new URL('../vercel.json', import.meta.url), 'utf8'));
   const rem = vj.crons.filter((x) => x.path === '/api/line?action=cron_remind');
-  check('★ vercel.json：每天兩班（17:00、17:30 台灣時間），都是一天一次的寫法', rem.length === 2 && rem.map((x) => x.schedule).sort().join() === '0 9 * * *,30 9 * * *', JSON.stringify(rem));
+  // 批次 179 多了早上那班（UTC 00:30＝台灣 08:30）；傍晚兩班（17:00、17:30）不變
+  check('★ vercel.json：傍晚兩班（17:00、17:30 台灣時間）仍在，都是一天一次的寫法', ['0 9 * * *', '30 9 * * *'].every((t) => rem.some((x) => x.schedule === t)), JSON.stringify(rem));
 }
 
 console.log(`\n${fail ? '❌' : '✅'} 批次 177 測試：${pass} 通過，${fail} 失敗`);

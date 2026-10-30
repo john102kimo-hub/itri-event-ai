@@ -128,7 +128,7 @@ console.log('\n── 四、畫面與結構 ──');
   const visible = ['public/index.html', 'public/b2b.html', 'public/edit.html', 'public/registrations.html', 'lib/b2b-api.js', 'lib/b2b-line.js'].map((f) => [f, read(f).replace(/<!--[\s\S]*?-->/g, '').split('\n').filter((l) => /業發處/.test(l) && !/^\s*(\/\/|\/\*|\*|<!--)/.test(l) && !/(\/\/|<!--).*業發處/.test(l))]).filter(([, ls]) => ls.length);
   check('★ 使用者看得到的文字不再叫「業發處」（註解與紀錄不算）', visible.length === 0, JSON.stringify(visible).slice(0, 400));
   const vj = JSON.parse(read('vercel.json'));
-  check('沒有新增排程（維持 9 個，批次 177 多了 cron_remind 一天兩班）、rewrite（17 條）、Function（api/ 11 支）', vj.crons.length === 9 && vj.rewrites.length === 17 && fs.readdirSync(path.join(ROOT, 'api')).filter((f) => f.endsWith('.js')).length === 11);
+  check('沒有新增排程（維持 10 個，批次 177、179 多了 cron_remind 三班）、rewrite（17 條）、Function（api/ 11 支）', vj.crons.length === 10 && vj.rewrites.length === 17 && fs.readdirSync(path.join(ROOT, 'api')).filter((f) => f.endsWith('.js')).length === 11);
 }
 
 console.log(`\n結果：${pass} 通過、${fail} 失敗`);

@@ -619,8 +619,8 @@ export default async function handler(req, res) {
     try {
       // cron_menu：報名結束後把圖文選單換回原本那套（批次 88）
       // cron_teach：掃昨天以來的問答，把疑似沒答好的題目推給朱朱（批次 139，見 lib/teach-queue.js）
-      // cron_remind：活動前一天傍晚，提醒負責人補還缺的資料（批次 177，見 lib/event-remind.js）；加 &dry=1 只看會推給誰、不推
-      if (cronAction === 'cron_remind') return res.status(200).json(await runRemindCron({ dry: req.query?.dry === '1' }));
+      // cron_remind：活動前後的提醒（批次 177、179，見 lib/event-remind.js）：早上做前一週／當天／隔天，傍晚做前一天；加 &dry=1 只看會推給誰、不推，&slot=morning|evening 指定時段
+      if (cronAction === 'cron_remind') return res.status(200).json(await runRemindCron({ dry: req.query?.dry === '1', slot: req.query?.slot }));
       return res.status(200).json(cronAction === 'cron_menu' ? await autoSyncRegistrationMenu() : await runTeachQueueCron());
     } catch (e) {
       console.error(`排程 ${cronAction} 失敗:`, e.message);

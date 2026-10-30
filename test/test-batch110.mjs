@@ -256,7 +256,7 @@ check('記者公開頁（/event、/register）維持可被嵌入（沒有擋 ifr
 // 批次 127 加了 /reg-status（報名狀況唯讀頁，搭在 api/events.js 上，functions 不變）
 // 批次 151 加了 /impact（計畫成效唯讀頁，同樣搭在 api/events.js 上，functions 不變）
 // 批次 121 加了 /t/:id、/n/:id（批次 122 再加 /i/:id）三條短網址 rewrite（搭在 api/event-page.js 上，functions 不變）
-check('原有的 rewrites、functions、crons 沒被動到', vercel.rewrites.length === 17 && Object.keys(vercel.functions).length === 7 && vercel.crons.length === 9); // 批次 139 多了每天一次的 cron_teach；批次 140 多了 api/media.js 的 maxDuration（名片辨識是視覺 AI 呼叫）
+check('原有的 rewrites、functions、crons 沒被動到', vercel.rewrites.length === 17 && Object.keys(vercel.functions).length === 7 && vercel.crons.length === 10); // 批次 139 多了每天一次的 cron_teach；批次 140 多了 api/media.js 的 maxDuration（名片辨識是視覺 AI 呼叫）
 
 /* ───────── 七、CDN 資源的 SRI、.gitignore、CI ───────── */
 console.log('\n── 七、供應鏈與工程衛生 ──');

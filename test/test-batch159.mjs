@@ -137,7 +137,7 @@ console.log('\n── 四、頁面與結構 ──');
   check('　 Email 是空的（只有電話的洽案）不產生壞掉的 mailto 連結', /\$\{q\.email \? `<a href="mailto:/.test(html));
   check('　 表單裡伺服器給的文字（技術領域選項、承辦人名）都過 esc()', /<option value="\$\{esc\(t\)\}">/.test(html) && /<option value="\$\{esc\(m\.id\)\}">\$\{esc\(m\.name\)\}/.test(html));
   const vj = JSON.parse(read('vercel.json'));
-  check('沒有新增排程（維持 9 個，批次 177 多了 cron_remind 一天兩班）、rewrite（17 條）、Function（api/ 11 支）', vj.crons.length === 9 && vj.rewrites.length === 17 && fs.readdirSync(path.join(ROOT, 'api')).filter((f) => f.endsWith('.js')).length === 11);
+  check('沒有新增排程（維持 10 個，批次 177、179 多了 cron_remind 三班）、rewrite（17 條）、Function（api/ 11 支）', vj.crons.length === 10 && vj.rewrites.length === 17 && fs.readdirSync(path.join(ROOT, 'api')).filter((f) => f.endsWith('.js')).length === 11);
 }
 console.log(`\n結果：${pass} 通過、${fail} 失敗`);
 process.exit(fail ? 1 : 0);

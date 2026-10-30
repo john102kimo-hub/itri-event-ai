@@ -160,7 +160,7 @@ console.log('\n── 四、頁面與結構 ──');
   const rg = read('public/registrations.html');
   check('報名編輯頁：有「關聯活動」欄位，存檔帶 event_id（空字串＝解除）', /id="e-event"/.test(rg) && /event_id: \$\('e-event'\)\.value\.trim\(\)/.test(rg));
   const fns = fs.readdirSync(path.join(ROOT, 'api')).filter((f) => f.endsWith('.js'));
-  check('★ api/ 還是 11 支（Vercel Hobby 上限 12）；沒有新增排程', fns.length === 11 && JSON.parse(read('vercel.json')).crons.length === 9);
+  check('★ api/ 還是 11 支（Vercel Hobby 上限 12）；沒有新增排程', fns.length === 11 && JSON.parse(read('vercel.json')).crons.length === 10);
 }
 
 console.log(`\n${fail ? '❌' : '✅'} 批次 152 測試：${pass} 通過，${fail} 失敗`); process.exit(fail ? 1 : 0);
