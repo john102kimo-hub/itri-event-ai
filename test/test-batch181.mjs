@@ -62,7 +62,7 @@ console.log('── 一、純函式 ──');
   const card = buildCalendarFlex(cards, { notes: ['（備註一）', '（備註二）'] });
   const js = jsonOf(card);
   check('★ 每場一列：即將舉行、最近辦過、日期未定的都在', card && ['五天後有資料的發表會', '十天後只有基本資料', '三天前辦過的記者會', '還沒定日期的論壇'].every((n) => js.includes(n)), js.slice(0, 200));
-  check('　 有資料的整列可點（點了＝打活動名稱）；只有基本資料的不能點、寫「僅基本資料」', js.includes('"action":{"type":"message","label":"問這一場","text":"五天後有資料的發表會"}') && !js.includes('"text":"十天後只有基本資料"}') && /僅基本資料/.test(js), js.slice(0, 200));
+  check('　 有資料的整列可點（點了＝打活動名稱）；只有基本資料的不能點、寫「僅基本資料」', js.includes('"action":{"type":"message","label":"五天後有資料的發表會","text":"五天後有資料的發表會"}') && !js.includes('"text":"十天後只有基本資料"}') && /僅基本資料/.test(js), js.slice(0, 200));
   check('　 日期方塊：月份與日、星期與倒數；沒日期寫「未定」', /還有 5 天/.test(js) && /週[日一二三四五六]/.test(js) && /"text":"未定"/.test(js));
   check('　 備註一則一行放在底部；altText 寫得出場數（通知與聊天列表只看得到它）', /（備註一）/.test(js) && /（備註二）/.test(js) && /近期活動：即將舉行 \d+ 場/.test(card.altText), card?.altText);
   check('★ 沒有任何場次 → null（呼叫端照舊發那句文字）', buildCalendarFlex([]) === null && buildCalendarFlex(null) === null);
@@ -79,8 +79,8 @@ reset(); await fresh();
   const msg = flex?.messages?.[flex.messages.length - 1];
   check('★ 1 對 1 問「最近有哪些活動」→ 圖像卡（不是文字清單）', !!flex && msg?.type === 'flex' && /近期活動/.test(msg.altText) && !out.some((o) => o.kind === 'text' && /【近期活動】/.test(o.text)), jsonOf(out).slice(0, 300));
   const chips = (msg?.quickReply?.items || []).map((i) => i.action.text);
-  check('　 快速回覆只剩五顆固定入口（活動改由卡上每一列點）', JSON.stringify(chips) === JSON.stringify(['產業趨勢分析', '問技術與洽案', '媒體邀訪需求', '找真人', '使用說明']), JSON.stringify(chips));
-  check('　 卡上有點得到的活動列、底部提醒媒體邀訪需求窗口', /"label":"問這一場"/.test(jsonOf(msg)) && /媒體邀訪需求/.test(jsonOf(msg)), jsonOf(msg).slice(0, 200));
+  check('　 快速回覆只剩「找真人」（批次 182：活動與其他功能都在卡片上的按鈕）', JSON.stringify(chips) === JSON.stringify(['找真人']), JSON.stringify(chips));
+  check('　 卡上有點得到的活動列、底部提醒媒體邀訪需求窗口', /"type":"message","label":"智慧醫療解決方案記者會","text":"智慧醫療解決方案記者會"/.test(jsonOf(msg)) && /媒體邀訪需求/.test(jsonOf(msg)), jsonOf(msg).slice(0, 200));
 
   out = await dm('U_r', '回首頁');
   const f2 = out.find((o) => o.kind === 'flex');
@@ -93,7 +93,8 @@ reset(); await fresh();
   check('★ Flex 送不出去 → 退回純文字清單＋活動名稱按鈕（跟批次 181 之前一樣）', !out.some((o) => o.kind === 'flex') && /【近期活動】/.test(t?.text || '') && (t?.quickReply || []).some((c) => /智慧醫療解決方案記者會/.test(typeof c === 'object' ? c.text : c)), jsonOf(out).slice(0, 300));
 
   out = await group('C_g', 'U_r', '最近有哪些活動');
-  check('★ 群組維持文字（回覆要引用原問題，Flex 的送法不帶引用）', !out.some((o) => o.kind === 'flex') && out.some((o) => o.kind === 'text' && /【近期活動】/.test(o.text)), jsonOf(out).slice(0, 300));
+  // 批次 182：回首頁那張卡含其他功能的按鈕，群組也要看得到（清單不經過模型，不需要引用原問題）
+  check('★ 群組也送圖像卡（批次 182）：其他功能的按鈕在卡上', !!out.find((o) => o.kind === 'flex') && /"text":"問技術與洽案"/.test(JSON.stringify(out.find((o) => o.kind === 'flex').messages)) && /"text":"找真人"/.test(JSON.stringify(out.find((o) => o.kind === 'flex')?.messages || [])), jsonOf(out).slice(0, 300));
   state.rawCalendarFlex = false;
 }
 

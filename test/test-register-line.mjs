@@ -119,11 +119,13 @@ check('★ 選單那一格寫明是哪個活動的報名（不是籠統的「媒
   check('選單那一格的字塞得進圖上的格子（標題 ≤ 8 個全形字寬、副標 ≤ 12）', width(REG_MENU_TILE.label) <= 8 && width(REG_MENU_TILE.sub) <= 12, `${width(REG_MENU_TILE.label)} / ${width(REG_MENU_TILE.sub)}`);
 }
 check('報名版的名稱與原本的不同（LINE 那邊用名稱找選單）', REPORTER_MENU_REG.name !== REPORTER_MENU.name && REPORTER_MENU_REG.key !== REPORTER_MENU.key);
-check('歡迎卡沒開報名時完全不變（2 顆按鈕）', buildWelcomeFlex().contents.footer.contents.length === 2);
+// 批次 182：歡迎卡把所有功能放成按鈕（主按鈕＋三列兩顆一列）；沒開報名時沒有報名那顆
+const welcomeTexts = (w) => { const out = []; (function walk(n) { if (Array.isArray(n)) return n.forEach(walk); if (!n || typeof n !== 'object') return; if (n.action?.type === 'message') out.push(n.action.text); Object.values(n).forEach(walk); })(w.contents.footer); return out; };
+check('歡迎卡沒開報名時沒有報名按鈕、功能按鈕都在', !welcomeTexts(buildWelcomeFlex()).includes('我要報名') && welcomeTexts(buildWelcomeFlex()).length === 7 && buildWelcomeFlex().contents.footer.contents[0].style === 'primary');
 {
   const w = buildWelcomeFlex('', { registration: true });
-  const texts = w.contents.footer.contents.map((b) => b.action.text);
-  check('歡迎卡開報名時多一顆，而且排第一、是主按鈕', JSON.stringify(texts) === JSON.stringify(['我要報名', '最近有哪些活動', '使用說明']) && w.contents.footer.contents[0].style === 'primary' && w.contents.footer.contents[1].style === 'secondary');
+  const texts = welcomeTexts(w);
+  check('歡迎卡開報名時多一顆，而且排第一、是主按鈕（其餘功能照舊都在）', texts[0] === '我要報名' && texts.length === 8 && texts.includes('最近有哪些活動') && texts.includes('使用說明') && w.contents.footer.contents[0].style === 'primary' && w.contents.footer.contents[1].style === 'secondary');
   for (const t of texts) check(`歡迎卡按鈕「${t}」認得`, detectMetaIntent(t) !== null);
   check('歡迎卡沒有簡稱時，按鈕寫「活動報名（1 分鐘）」', w.contents.footer.contents[0].action.label === '📝 活動報名（1 分鐘）', w.contents.footer.contents[0].action.label);
   const w2 = buildWelcomeFlex('', { registration: R.welcomeButtonLabel({ short_name: '眺望2027場次' }) });
@@ -149,7 +151,7 @@ const sessionsAround = (days) => `Z1｜${ymd(days)}｜09:00-11:00｜測試場次
 seed(); guardAi(); await fresh();
 {
   let out = await follow();
-  check('加好友：歡迎卡照舊只有 2 顆按鈕', out[0]?.kind === 'flex' && out[0].messages[0].contents.footer.contents.length === 2);
+  check('加好友：歡迎卡把所有功能放成按鈕（批次 182）、沒有報名那顆', out[0]?.kind === 'flex' && welcomeTexts(out[0].messages[0]).length === 7 && !welcomeTexts(out[0].messages[0]).includes('我要報名'));
   out = await say('我要報名');
   check('★ 一個報名活動都沒有 → 不攔：不回「目前沒有開放報名」、不回卡片，交給原本的路徑（這裡是路由，所以有去問 AI）',
     !/目前沒有開放報名/.test(out[0]?.text || '') && !flexOf(out) && aiCalls >= 1, JSON.stringify(out).slice(0, 300) + ' ai=' + aiCalls);
@@ -171,7 +173,7 @@ seed({ campaigns: [campaignRow({ id: 'just-shut', title: '剛截止的活動', s
 {
   const out = await say('我要報名');
   check('剛截止（場次還沒辦）→ 老實說已截止，附上活動聯絡人', out[0]?.kind === 'text' && /《剛截止的活動》的報名已經截止了/.test(out[0].text) && /朱則瑋/.test(out[0].text) && /0934-267-766/.test(out[0].text), JSON.stringify(out));
-  check('這則是固定程式回覆：不呼叫 AI、帶整排按鈕', aiCalls === 0 && out[0].quickReply.length >= 5);
+  check('這則是固定程式回覆：不呼叫 AI、帶按鈕（批次 182：最多 4 顆、有回首頁與找真人）', aiCalls === 0 && out[0].quickReply.length >= 2 && out[0].quickReply.length <= 4);
 }
 seed({ campaigns: [campaignRow({ id: 'late', title: '過了截止時間的活動', status: 'open', closes_at: '2020-01-01', sessions_text: sessionsAround(+3), contact: '' })] }); guardAi(); await fresh();
 {
@@ -194,8 +196,8 @@ seed({ campaigns: [campaignRow()] }); guardAi(); await fresh();
 const UID = 'Ureporter0001';
 {
   let out = await follow();
-  const btn = out[0].messages[0].contents.footer.contents.map((b) => b.action.text);
-  check('加好友：歡迎卡多了「我要報名」，排第一', btn[0] === '我要報名' && btn.length === 3, JSON.stringify(btn));
+  const btn = welcomeTexts(out[0].messages[0]);
+  check('加好友：歡迎卡多了「我要報名」，排第一（批次 182：其餘功能都在卡上）', btn[0] === '我要報名' && btn.length === 8, JSON.stringify(btn));
 
   out = await say('我要報名', UID);
   const flex = flexOf(out);
@@ -209,7 +211,7 @@ const UID = 'Ureporter0001';
   check('卡片上有活動名稱、日期範圍與場數', JSON.stringify(b.header).includes('眺望2027') && JSON.stringify(b.header).includes('10/28（三） – 10/29（四）') && JSON.stringify(b.header).includes('共 3 場'), JSON.stringify(b.header));
   check('altText 是一句有用的話（鎖定畫面只看得到這行）', /活動報名/.test(flex.altText) && flex.altText.length < 400);
   check('卡片小標沒有簡稱時是「📝 活動報名」', JSON.stringify(b.header).includes('📝 活動報名'), JSON.stringify(b.header));
-  check('卡片底下掛著整排導覽按鈕', (flex.quickReply?.items || []).length >= 5);
+  check('卡片底下掛著導覽按鈕（批次 182：最近活動、回首頁、找真人三顆，其他功能在回首頁那張卡）', (flex.quickReply?.items || []).length === 3 && flex.quickReply.items.some((i) => i.action.text === '回首頁'));
   check('繁體字：卡片文字沒有簡體字', !/[们这们个报么对话]/.test(JSON.stringify(flex)));
   check('不呼叫 AI', aiCalls === 0);
   check('沒寫入任何報名資料（點卡片才是開始填）', bookRegs().length === 0);
@@ -306,7 +308,7 @@ seed({ campaigns: [campaignRow()], regs: [regRow()] }); guardAi(); await fresh()
   check('那一列寫進了 LINE userId 與綁定時間', bookRegs()[0][10] === UID && /^\d{4}-/.test(bookRegs()[0][15]));
   const lu = S.book.line_users.find((r) => r[0] === UID);
   check('自報的媒體名稱同時記進 line_users（之後米亞不用再問「貴媒體名稱」）', lu && lu[2] === '經濟日報', JSON.stringify(S.book.line_users));
-  check('回覆帶整排按鈕', out[0].quickReply.length >= 5);
+  check('回覆帶導覽按鈕（批次 182：三顆）', out[0].quickReply.length === 3);
   out = await say('＃報名 rabcde', UID);
   check('再送一次（全形井號、小寫）→ 「早就連結好了」，不重複寫', /早就連結好了/.test(out[0]?.text || '') && bookRegs().length === 1);
   out = await say('#報名 RABCDE', 'Uintruder001');

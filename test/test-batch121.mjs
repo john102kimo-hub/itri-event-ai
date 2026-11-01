@@ -206,8 +206,10 @@ console.log('\n── 五、1 對 1：問技術與洽案 ──');
 seed(); await fresh();
 {
   let out = await dm('U1', '問技術與洽案');
-  check('按「問技術與洽案」→ 先問哪個領域，附六大領域按鈕與範例關鍵字', texts(out).length === 1 && /想找工研院哪方面的技術/.test(out[0].text)
-    && chips(out).filter((c) => /^技術領域：/.test(c.text)).length === 6 && chipTexts(out).includes('技術關鍵字：電池'), JSON.stringify(chips(out)));
+  // 批次 182：六大領域是卡片上的按鈕（一次全部看得到），範例關鍵字寫在卡片的說明裡，快速回覆只剩回首頁、找真人
+  check('按「問技術與洽案」→ 先問哪個領域，六大領域是卡片上的按鈕、說明裡有範例關鍵字', texts(out).length === 1 && /想找工研院哪方面的技術/.test(out[0].text) && /電池、機器人、AI 晶片/.test(out[0].text)
+    && chips(out).filter((c) => /^技術領域：/.test(c.text)).length === 6 && out[0].viaFlex === true, JSON.stringify(chips(out)));
+  check('　 快速回覆沒有領域那一排：卡片之外只剩「回首頁」「找真人」', JSON.stringify((out[0].calendarFlex.at(-1).quickReply.items || []).map((i) => i.action.text)) === JSON.stringify(['回首頁', '找真人']));
   check('　 沒有跑模型、沒有查官網（還沒給關鍵字）', !hasAnswer(out));
   check('　 按鈕 label 都在 LINE 的 20 字內、總數在 13 顆內', chips(out).every((c) => c.label.length <= 20) && chips(out).length <= 13, JSON.stringify(chips(out).map((c) => c.label.length)));
 
@@ -249,8 +251,8 @@ seed(); await fresh();
   await dm('U1', '問技術與洽案');
   out = await dm('U1', '量子火箭引擎');
   t = allText(out);
-  check('★ 查無資料 → 老實說沒有，不硬掰技術；給六個領域按鈕、窗口與「找真人」',
-    /沒有找到跟「量子火箭引擎」相關的技術/.test(t) && /找真人/.test(t) && /朱則瑋/.test(t) && chips(out).filter((c) => /^技術領域：/.test(c.text)).length === 6, t);
+  check('★ 查無資料 → 老實說沒有，不硬掰技術；給「換個領域」、窗口與「找真人」',
+    /沒有找到跟「量子火箭引擎」相關的技術/.test(t) && /找真人/.test(t) && /朱則瑋/.test(t) && chipTexts(out).includes('問技術與洽案') && chipTexts(out).includes('找真人') && chips(out).length <= 4, t + JSON.stringify(chipTexts(out)));
   check('　 沒有導去「產業趨勢」（批次 94：技術找不到不鬼打牆）', !chips(out).some((c) => /趨勢/.test(c.label)), JSON.stringify(chips(out).map((c) => c.label)));
 
   state.techFetchFail = true; tech.__clearTechCache();
@@ -284,7 +286,7 @@ seed(); await fresh();
   check('按「近期工研院新聞」→ 標題＋日期導言＋短網址，不經過模型', /📰 近期工研院新聞\n共 \d+ 則/.test(t) && /① 工研院攜AMRA打造足型機器人新標準/.test(t) && /📅 2026\/08\/20\n\n機器人應用落地/.test(t)
     && /🔗 https:\/\/itri-event-ai\.vercel\.app\/n\/\d+/.test(t) && !hasAnswer(out), t);
   check('　 不含官網長網址', !/ListStyle\.aspx|MmmID/.test(t), t);
-  check('　 提示可以打關鍵字，並附範例按鈕（固定句型）', /直接輸入關鍵字/.test(t) && chipTexts(out).includes('新聞關鍵字：半導體'), JSON.stringify(chipTexts(out)));
+  check('　 提示可以打關鍵字（批次 182：範例按鈕拿掉，按鈕只留下一步）', /直接輸入關鍵字/.test(t) && chips(out).length <= 4 && chipTexts(out).includes('找真人'), JSON.stringify(chipTexts(out)));
   check('　 旗標已記下，等關鍵字', state.bindings.get('U2')?.note === 'await_news_query', state.bindings.get('U2')?.note);
 
   out = await dm('U2', '機器人');
@@ -464,7 +466,7 @@ console.log('\n── 九、出口：繁體字、長度、按鈕上限 ──');
   check('每則的快速回覆都在 13 顆內、label 在 20 字內', all.every((o) => (o.quickReply || []).length <= 13 && (o.quickReply || []).every((c) => String(c.label || c).length <= 20)),
     JSON.stringify(all.map((o) => (o.quickReply || []).length)));
   // 版面（批次 123）：手機上好讀——項目之間有分隔線、信箱與網址各占一行（才好點）、每行不過長
-  const lists = all.filter((o) => /^(🔬|📰)/.test(o.text));
+  const lists = all.filter((o) => /^(🔬|📰)[^\n]+\n共 \d+ [項則]/.test(o.text)); // 批次 182：領域選單那張卡的標題也是 🔬 開頭，不算清單
   check('★ 技術／新聞清單：開頭兩行是「標題」「共 N 項（則）・第 a–b 項（則）」，下面接分隔線', lists.length >= 3 && lists.every((o) => /^(🔬|📰)[^\n]+\n共 \d+ [項則]・第 \d+–\d+ [項則]\n\n──────────\n/.test(o.text)), lists.map((o) => o.text.slice(0, 60)).join(' | '));
   check('　 每一項都以線收尾（5 項就有 5 條收尾線，加上開頭那條）', lists.every((o) => (o.text.match(/──────────/g) || []).length === (o.text.match(/🔗 /g) || []).length + 1));
   check('　 信箱獨立一行（✉️ 開頭），網址獨立一行（🔗 開頭），不跟別的字擠在一起', lists.filter((o) => /^🔬/.test(o.text)).every((o) => o.text.split('\n').filter((l) => /@itri\.org\.tw/.test(l)).every((l) => /^✉️ \S+$/.test(l)) && o.text.split('\n').filter((l) => /https:\/\//.test(l)).every((l) => /^🔗 \S+$/.test(l))));
