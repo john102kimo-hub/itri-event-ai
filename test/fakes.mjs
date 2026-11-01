@@ -330,16 +330,18 @@ export const line = {
     // 要驗卡片本身的測試設 state.rawCalendarFlex = true 拿原始 Flex。
     // 批次 181：技術與洽案、近期新聞、產業趨勢、邀訪窗口也是圖像卡。既有測試驗的是那份文字的版面與內容（編號、分隔線、
     // 信箱網址…），預設讓這幾種卡「送不出去」、走純文字退路，舊斷言照樣驗；要驗卡片本身的測試設 state.reporterCards = true。
-    const REPORTER_CARD = /^(工研院技術｜|近期工研院新聞|工研院新聞｜|IEK 產業趨勢|邀訪窗口：)/;
+    const REPORTER_CARD = /^(工研院技術｜|近期工研院新聞|工研院新聞｜|IEK 產業趨勢|邀訪窗口：(?!想找))/;
     if (!state.reporterCards && (messages || []).some(m => m?.type === 'flex' && REPORTER_CARD.test(m.altText || ''))) return false;
-    const calCard = (messages || []).find(m => m?.type === 'flex' && /^近期活動/.test(m.altText || ''));
+    // 批次 182：選單與選項（領域、窗口、完整新聞稿、這場可以問什麼）也改成卡片上的按鈕。同樣攤平成「文字＋可點的按鈕」，
+    // 舊斷言驗的是「記者眼前有哪些按鈕可以點」，卡片上的按鈕與快速回覆都算。
+    const calCard = (messages || []).find(m => m?.type === 'flex' && /^(近期活動|產業趨勢：|技術與洽案：|邀訪窗口：想找|完整新聞稿：|《.+》可以問的題目)/.test(m.altText || ''));
     if (calCard && !state.rawCalendarFlex) {
       const texts = [];
       const taps = [];
       const walk = (n) => {
         if (Array.isArray(n)) return n.forEach(walk);
         if (!n || typeof n !== 'object') return;
-        if (n.action?.type === 'message') taps.push(n.action.text);
+        if (n.action?.type === 'message') taps.push({ label: n.action.label, text: n.action.text });
         if (n.type === 'text') texts.push(n.text);
         else Object.values(n).forEach(walk);
       };

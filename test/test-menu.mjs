@@ -140,8 +140,10 @@ const flex = buildWelcomeFlex('工研院');
 eq(flex.type, 'flex', 'Flex 訊息型別');
 eq(typeof flex.altText === 'string' && flex.altText.length > 0 && flex.altText.length <= 400, true, 'altText 存在且長度合法');
 eq(flex.contents.type, 'bubble', 'bubble 結構');
-const btnTexts = flex.contents.footer.contents.map(b => b.action.text);
-eq(btnTexts, ['最近有哪些活動', '使用說明'], '按鈕送出的文字');
+// 批次 182：所有功能按鈕都在這張卡上（兩顆一列的在 box 裡），把整張卡的 message 按鈕攤平來看
+const btnTexts = [];
+(function walk(n) { if (Array.isArray(n)) return n.forEach(walk); if (!n || typeof n !== 'object') return; if (n.action?.type === 'message') btnTexts.push(n.action.text); Object.values(n).forEach(walk); })(flex.contents.footer);
+eq(btnTexts, ['最近有哪些活動', '問技術與洽案', '近期工研院新聞', '產業趨勢分析', '媒體邀訪需求', '找真人', '使用說明'], '按鈕送出的文字（所有功能都在卡上）');
 // 按鈕送出的字一定要能被自己的意圖判斷認出來，不然按了沒反應
 for (const t of btnTexts) eq(detectMetaIntent(t) !== null, true, `歡迎卡按鈕「${t}」要能被 detectMetaIntent 認出`);
 

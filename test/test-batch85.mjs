@@ -103,7 +103,7 @@ seed(); await fresh();
   check('★ 反問「想要哪一場的完整新聞稿」，不是兜底的「不太確定」', /想要哪一場的完整新聞稿/.test(t?.text || '') && !/不太確定/.test(t?.text || ''), t?.text);
   check('每一場一顆「給我《…》的完整新聞稿」按鈕（含最近辦過的）',
     btn.includes('給我《晶鏈高峰論壇測試場》的完整新聞稿') && btn.includes('給我《五天後的綠能論壇》的完整新聞稿'), JSON.stringify(btn));
-  check('按鈕顯示的是活動名稱（不是整句）', (t?.quickReply || []).some((i) => typeof i === 'object' && i.label === '晶鏈高峰論壇測試場'));
+  check('按鈕顯示的是活動名稱（不是整句）', (t?.quickReply || []).some((i) => typeof i === 'object' && i.label === '晶鏈高峰論壇測試場') || JSON.stringify(t?.calendarFlex || '').includes('"label":"晶鏈高峰論壇測試場"'));
   check('反問那則也找得到「找真人」', btn.includes('找真人'), JSON.stringify(btn));
   check('沒有呼叫模型答題（還不知道是哪一場）', !out.some((o) => o.kind === 'answer'));
 

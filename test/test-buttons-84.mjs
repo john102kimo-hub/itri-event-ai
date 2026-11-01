@@ -58,6 +58,22 @@ function lastButtons(out) {
   return (m?.quickReply?.items || []).map((i) => ({ label: i.action?.label, text: i.action?.text }));
 }
 
+// 批次 182：按鈕分兩種——快速回覆（一次只看得到兩三顆、要左右滑，記者不知道可以滑，所以最多 4 顆）與卡片上的按鈕
+// （全部直接看得到）。fakes 把圖像卡攤平成文字訊息，原始卡片放在 calendarFlex。
+function lastMessageOf(out) { return out.filter((s) => s.kind === 'text' || s.kind === 'flex').at(-1); }
+function chipsOf(out) {
+  const last = lastMessageOf(out);
+  if (!last) return null;
+  const raw = last.calendarFlex ? (last.calendarFlex.at(-1).quickReply?.items || []).map((i) => ({ label: i.action?.label, text: i.action?.text })) : null;
+  return raw || lastButtons(out);
+}
+function cardButtonsOf(out) {
+  const last = lastMessageOf(out);
+  const found = [];
+  (function walk(n) { if (Array.isArray(n)) return n.forEach(walk); if (!n || typeof n !== 'object') return; if (n.action?.type === 'message' && n.type !== 'action') found.push({ label: n.action.label, text: n.action.text }); Object.values(n).forEach(walk); })((last?.calendarFlex || last?.messages || []).map((m) => m.contents).filter(Boolean));
+  return found;
+}
+
 let pass = 0, fail = 0;
 function check(label, cond, detail) {
   if (cond) { pass++; console.log(`✅ ${label}`); }
@@ -67,9 +83,9 @@ function check(label, cond, detail) {
 // 功能按鈕：送出的字 → 唯一允許的顯示字
 const NAV_LABELS = {
   '回首頁': ['🏠 回首頁'],
-  '最近有哪些活動': ['📅 最近活動', '📅 其他活動', '📅 某一場的窗口', '📅 某一場活動窗口'],
-  '產業趨勢分析': ['📊 產業趨勢'],
-  '問技術與洽案': ['🔬 問技術與洽案'],
+  '最近有哪些活動': ['📅 最近活動', '📅 其他活動', '📅 某一場的窗口', '📅 某一場活動窗口', '📅 某一場活動的窗口', '📅 看最近有哪些活動'],
+  '產業趨勢分析': ['📊 產業趨勢', '📊 換個領域'],
+  '問技術與洽案': ['🔬 問技術與洽案', '🔬 技術與洽案', '🔬 換個領域'], // 批次 182：卡片上寫短一點、技術結果底下寫「換個領域」（同一個動作，換成這一步看得懂的字）
   '近期工研院新聞': ['📰 近期新聞'],
   '媒體邀訪需求': ['📞 邀訪窗口'],
   '找真人': ['🙋 找真人'],
@@ -98,7 +114,7 @@ async function walk(where) {
   const A = where === 'group' ? 'Cwalk1' : 'Uwalk1';
   const B = where === 'group' ? 'Cwalk2' : 'Uwalk2';
   const C = where === 'group' ? 'Cwalk3' : 'Uwalk3';
-  const run = async (name, out) => steps.push({ where, name, out, btn: lastButtons(out) });
+  const run = async (name, out) => steps.push({ where, name, out, btn: chipsOf(out), card: cardButtonsOf(out) });
   await run(where === 'group' ? '入群自我介紹' : '加好友', await lifecycle(where, A, where === 'group' ? 'join' : 'follow'));
   if (where === 'group') await run('只叫米亞', await say(where, A, '米亞'));
   await run('最近有哪些活動', await say(where, A, P + '最近有哪些活動'));
@@ -123,13 +139,15 @@ await walk('group');
 
 for (const s of steps) {
   const tag = `${s.where === 'group' ? '群組' : '1 對 1'}「${s.name}」`;
-  check(`${tag}：最後一則有按鈕（${s.btn ? s.btn.length : 0} 顆）`, s.btn && s.btn.length >= 4, JSON.stringify(s.out.map((o) => o.kind + ':' + String(o.text || '').slice(0, 20))));
-  const bad = (s.btn || []).filter((b) => NAV_LABELS[b.text] && !NAV_LABELS[b.text].includes(b.label));
+  const all = [...(s.btn || []), ...(s.card || [])];
+  // 批次 182：快速回覆最多 4 顆（記者不知道可以左右滑）、至少 1 顆（沒有死路）
+  check(`${tag}：快速回覆 1～4 顆（${s.btn ? s.btn.length : 0} 顆）`, s.btn && s.btn.length >= 1 && s.btn.length <= 4, JSON.stringify(s.out.map((o) => o.kind + ':' + String(o.text || '').slice(0, 20))) + JSON.stringify((s.btn || []).map((b) => b.label)));
+  const bad = all.filter((b) => NAV_LABELS[b.text] && !NAV_LABELS[b.text].includes(b.label));
   check(`${tag}：功能按鈕的字跟其他回覆一致`, bad.length === 0, JSON.stringify(bad));
   if (s.name !== '找真人') {
-    check(`${tag}：找得到「🙋 找真人」`, (s.btn || []).some((b) => b.text === '找真人'), JSON.stringify((s.btn || []).map((b) => b.label)));
+    // 找真人在快速回覆或卡片上（回首頁那張卡底下也有）都算「看得到」
+    check(`${tag}：找得到「🙋 找真人」`, all.some((b) => b.text === '找真人'), JSON.stringify(all.map((b) => b.label)));
   }
-  check(`${tag}：不超過 LINE 的 13 顆上限`, (s.btn || []).length <= 13, `${(s.btn || []).length}`);
 }
 
 // ── 二、第一次點活動（1 對 1）：補問媒體名稱那則不能把按鈕蓋掉 ─────────────────
@@ -141,7 +159,7 @@ console.log('\n── 二、1 對 1 第一次點活動：答案之後的補問�
   check('★ 補問那則帶著「略過」＋這場的整排按鈕', s.btn?.[0]?.text === '略過' && s.btn.some((b) => b.text === '回首頁') && s.btn.some((b) => b.text === '找真人'),
     JSON.stringify(s.btn?.map((b) => b.label)));
   const sw = steps.find((x) => x.where === 'dm' && x.name === '換一場');
-  check('★ 1 對 1 換場確認有這場的按鈕（原本一顆都沒有）', /已為您換到/.test(sw.out[0]?.text || '') && sw.out[0]?.quickReply?.length >= 6, JSON.stringify(sw.out[0]));
+  check('★ 1 對 1 換場確認有這場的按鈕（原本一顆都沒有；批次 182：還能問什麼、回首頁、找真人）', /已為您換到/.test(sw.out[0]?.text || '') && sw.out[0]?.quickReply?.length >= 3 && sw.out[0].quickReply.length <= 4, JSON.stringify(sw.out[0]));
 }
 
 // ── 三、「選單」把按鈕叫回來 ─────────────────────────────────────────────────
@@ -149,16 +167,16 @@ console.log('\n── 三、打「選單」叫回按鈕 ──');
 {
   reset(); await fresh();
   let out = await say('group', 'Cmenu', '選單');
-  check('★ 群組裡沒 @、沒寫米亞，只打「選單」也回（按鈕被別人的訊息收掉時用）', lastButtons(out)?.length >= 6, JSON.stringify(out));
+  check('★ 群組裡沒 @、沒寫米亞，只打「選單」也回（按鈕被別人的訊息收掉時用）', lastButtons(out)?.length >= 3, JSON.stringify(out));
   out = await say('group', 'Cmenu2', '今天中午吃什麼');
   check('反面：一般閒聊照樣安靜', out.length === 0, JSON.stringify(out));
   out = await say('dm', 'Umenu', '半導體先進封裝技術發表會');
   out = await say('dm', 'Umenu', '選單');
   const b = lastButtons(out) || [];
-  // 批次 104：預設快速提問改成依知識庫算（semi 是 3 題：重點／時間地點／聯絡人），整排從 11 顆變 9 顆
-  check('1 對 1 正在問某一場時，「選單」給的是那場的整排', b.some((x) => x.text === '回首頁') && b.some((x) => x.text === '這次活動的重點是什麼？') && b.length >= 9 && /半導體先進封裝/.test(out.at(-1)?.text || ''), JSON.stringify(out.at(-1)));
+  // 批次 182：整排題目收進「還能問什麼」，按鈕只剩這顆＋回首頁＋找真人
+  check('1 對 1 正在問某一場時，「選單」給的是那場的三顆（還能問什麼、回首頁、找真人）', b.map((x) => x.text).join() === '還能問什麼,回首頁,找真人' && /半導體先進封裝/.test(out.at(-1)?.text || ''), JSON.stringify(out.map((o) => o.text)))
   out = await say('dm', 'Umenu2', '米亞');
-  check('1 對 1 只打「米亞」也叫得出按鈕', (lastButtons(out) || []).length >= 6, JSON.stringify(out));
+  check('1 對 1 只打「米亞」也叫得出按鈕', (lastButtons(out) || []).length >= 3, JSON.stringify(out));
 }
 
 // ── 四、「問技術與洽案」的領域與範例按鈕：群組裡別人按也會動 ─────────────────────────
@@ -166,10 +184,10 @@ console.log('\n── 四、問技術與洽案的一鍵按鈕 ──');
 {
   reset(); await fresh();
   let out = await say('group', 'Ctech', '米亞 問技術與洽案');
-  const ex = (lastButtons(out) || []).find((b) => b.label === '電池');
-  check('「問技術與洽案」附上六大領域按鈕與一鍵範例（電池／機器人／AI 晶片）',
-    !!ex && ex.text === '技術關鍵字：電池' && (lastButtons(out) || []).filter((b) => /^技術領域：/.test(b.text)).length === 6,
-    JSON.stringify(lastButtons(out)));
+  // 批次 182：六大領域是卡片上的按鈕（一次全部看得到）、快速回覆只剩回首頁與找真人；範例關鍵字寫在卡片說明裡
+  check('「問技術與洽案」：六大領域是卡片上的按鈕，快速回覆只有回首頁、找真人',
+    cardButtonsOf(out).filter((b) => /^技術領域：/.test(b.text)).length === 6 && (chipsOf(out) || []).map((b) => b.text).join() === '回首頁,找真人' && /電池、機器人、AI 晶片/.test(out.at(-1)?.text || ''),
+    JSON.stringify([cardButtonsOf(out), chipsOf(out)]));
   // 另一位成員按範例（旗標綁的是發問的那個人），不 @
   sent.length = 0;
   await handler(post([{ type: 'message', replyToken: 'rt' + (++seq), source: { type: 'group', groupId: 'Ctech', userId: 'Uother' }, message: { type: 'text', id: 'm' + seq, text: '技術關鍵字：電池' } }]), res);
@@ -186,10 +204,10 @@ console.log('\n── 四、問技術與洽案的一鍵按鈕 ──');
 console.log('\n── 五、按鈕上的字修正 ──');
 {
   const s = steps.find((x) => x.where === 'dm' && x.name === '產業趨勢分析');
-  check('★ 按「產業趨勢分析」不再冒出「工研院的有哪些技術」這顆', !(s.btn || []).some((b) => /有哪些/.test(b.label)), JSON.stringify(s.btn?.map((b) => b.label)));
+  check('★ 按「產業趨勢分析」不再冒出「工研院的有哪些技術」這顆', ![...(s.btn || []), ...(s.card || [])].some((b) => /有哪些/.test(b.label)), JSON.stringify(s.btn?.map((b) => b.label)));
   const c = steps.find((x) => x.where === 'dm' && x.name === '媒體邀訪需求');
-  check('邀訪窗口選單裡「活動名稱」改成看得懂的「📅 某一場活動窗口」（批次 97）', (c.btn || []).some((b) => b.label === '📅 某一場活動窗口') && !(c.btn || []).some((b) => b.label === '活動名稱'),
-    JSON.stringify(c.btn?.map((b) => b.label)));
+  check('邀訪窗口選單裡「活動名稱」改成看得懂的「📅 某一場活動窗口」（批次 97）', (c.card || []).some((b) => b.label === '📅 某一場活動的窗口') && ![...(c.btn || []), ...(c.card || [])].some((b) => b.label === '活動名稱'),
+    JSON.stringify(c.card?.map((b) => b.label)));
 }
 
 console.log(`\n${fail ? '❌' : '✅'} 批次 84 按鈕測試：${pass} 通過，${fail} 失敗`);

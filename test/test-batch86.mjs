@@ -53,7 +53,7 @@ bind('Cwx');
   check('★ 回寫死的天氣俏皮話（跟沒綁定時同一句）', /天氣預報我真的答不出來/.test(texts(out)), texts(out));
   check('★ 不呼叫模型、不算成一題提問', !out.some((o) => o.kind === 'answer'), JSON.stringify(out.map((o) => o.kind)));
   check('★ 後面沒有接「官網有相關報導」', !/官網新聞中心|相關報導/.test(texts(out)), texts(out));
-  check('按鈕是這場的整排（還在問這場）', qr(out)[0] === '回首頁' && qr(out).includes('重點'), JSON.stringify(qr(out)));
+  check('按鈕：還能問什麼、回首頁、找真人（批次 182 起題目收進「還能問什麼」那張卡）', qr(out).includes('回首頁') && qr(out).includes('找真人') && qr(out).includes('還能問什麼') && qr(out).length <= 4, JSON.stringify(qr(out)));
 }
 {
   const out = await g('Cwx', 'U朱', '米亞 活動當天如果下雨會照常舉行嗎？');
