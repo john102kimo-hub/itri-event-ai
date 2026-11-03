@@ -11,7 +11,7 @@ process.env.ANTHROPIC_API_KEY = 'test';
 process.env.GOOGLE_SPREADSHEET_ID = 'sheet';
 delete process.env.LINE_ADMIN_USER_ID;
 
-const handler = (await import('../api/line.js')).default;
+let handler = (await import('../api/line.js?v=0')).default;
 const res = { status() { return this; }, json() { return this; }, end() { return this; }, setHeader() { return this; }, send() { return this; } };
 function post(events) {
   const body = JSON.stringify({ events });
@@ -41,6 +41,30 @@ const out = await dm('Ureporter1', '低信心單一候選 半導體的場次');
 const all = JSON.stringify(out);
 check('只有一個候選、沒把握：不再反問「這幾場的哪一場」', !all.includes('這幾場的哪一場'), all);
 check('直接回答那一場', out.some(s => s.kind === 'answer'), all);
+
+// ── 只打日期：那天有活動就直接答，不要記者再打全名 ──
+const start = new Date(Date.now() + 3 * 86400000);
+const later = new Date(Date.now() + 9 * 86400000);   // 活動第七天，只寫在知識庫議程裡
+const M = later.getMonth() + 1, D = later.getDate();
+const MULTI = `【議程】\n${M}/${D} 上午 生醫論壇\n${M}/${D} 下午 健康照護論壇\n講者：王小明`;
+reset();
+state.events.length = 0;
+state.events.push(
+  ['semi', '眺望研討會', '#0F9E7A', MULTI, 'active', isoOffset(3), '', '', '', '工研院', 'code_semi', '10:00', '南港', '研討會', '', '', '', ''],
+  ['med', '另一場醫療記者會', '#0F9E7A', KB, 'active', isoOffset(20), '', '', '', '工研院', 'code_med', '10:00', '南港', '記者會', '', '', '', '']
+);
+handler = (await import('../api/line.js?v=1')).default;   // 換一份新的，不吃上一段留在記憶體的活動快取
+const formats = [`${M}/${D}(二)的研討會`, `${M}月${D}日有什麼場次`, `${M}-${D}`, `${later.getFullYear()}/${String(M).padStart(2, '0')}/${String(D).padStart(2, '0')} 研討會`, `${M}.${D}的研討會`];
+for (const f of formats) {
+  const o = await dm('Ud' + f.length + Math.random(), f);
+  check(`日期「${f}」→ 直接答眺望，不反問`, o.some(x => x.kind === 'answer') && !JSON.stringify(o).includes('哪一場'), JSON.stringify(o).slice(0, 300));
+}
+const none = await dm('Ud-none', `${M}/${D === 28 ? 27 : D + 1} 的研討會`);
+check('那天沒有活動：不亂跳一場', !none.some(x => x.kind === 'answer'), JSON.stringify(none).slice(0, 300));
+const same = await dm('Ud-first', `${start.getMonth() + 1}/${start.getDate()}的研討會`);
+check('活動日期欄位那天也認得', same.some(x => x.kind === 'answer'), JSON.stringify(same).slice(0, 300));
+const m30 = await dm('Ud-30', `${M}/${D}0 的研討會`);
+check('11/3 不會誤中 11/30', !m30.some(x => x.kind === 'answer'), JSON.stringify(m30).slice(0, 300));
 
 console.log(`\n${pass} 通過、${fail} 失敗`);
 process.exit(fail ? 1 : 0);
