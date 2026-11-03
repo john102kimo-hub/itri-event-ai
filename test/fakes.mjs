@@ -499,6 +499,8 @@ function looksLikeTopicFollowUp(text, topicAnswer) {
 
 function fakeReporterRoute(text, currentEventHint, topicHint, topicAnswer, groupChatter = false) {
   const ids = matchEventIds(text);
+  // 批次 184：模擬「只猜到一個候選、但沒把握」（記者只打日期＋「研討會」，路由挑得出唯一一場卻不敢說 high）。
+  if (/低信心單一候選/.test(text) && ids.length === 1) return { intent: 'qa', event_ids: ids, confidence: 'low' };
   // 批次 83：群組裡沒被叫到的訊息，路由會多收到一段「群組成員彼此也在聊天」的提示
   // （lib/router.js GROUP_CHATTER_HINT）。這裡模擬模型照那段提示做：問「你／你們」私事、
   // 行程的判 other。只是夠測試用的近似，不是在測模型判得準不準。
