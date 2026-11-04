@@ -27,6 +27,7 @@
 3. **[LINE-PLAN.md](LINE-PLAN.md)**——長期規格：定位、資料模型、七個會害你重做的坑、LINE 的意圖、prompt 規則、不要做的事。
 4. **[docs/batches/README.md](docs/batches/README.md)**——每一批改動的來龍去脈（為什麼這樣改、踩到什麼坑）。程式碼註解寫「批次 N」就到這裡找。
 5. AI 能見度：[GEO_SETUP.md](GEO_SETUP.md)（怎麼設定）、[GEO-METHOD.md](GEO-METHOD.md)（測量方法與依據）。[FIX-PLAN.md](FIX-PLAN.md) 是已完成的工單紀錄。
+6. **[docs/dev-harness.md](docs/dev-harness.md)**——開發護欄（批次 186）：hooks（簡體字、金鑰、真實資料、提交前跑測試）、skills（寫批次紀錄、上線前盤點、新增活動檢查）、MCP 伺服器、評測流程。
 
 ## 開發與驗證
 
@@ -50,6 +51,8 @@ GitHub Actions（`.github/workflows/test.yml`）每個 PR 與 main 推送都會�
 | `tools/grounding-backtest` | 把後台匯出的真實問答丟進去，量「答案出口檢查」（`ANSWER_GROUNDING`）的誤報率，決定要不要打開（批次 132；真實問答含個資，別 commit） |
 | `tools/model-ab` | 同一批問題比兩個模型的答案（**會花真的錢**） |
 | `tools/time-travel` | `SHIFT_DAYS` 用的時間位移 |
+| `tools/eval` | **固定評測**：改 prompt／換模型前後各跑一次，比較有沒有退步。20 題題庫、程式評分（硬性＝使用者實際看到的、軟性＝模型原始輸出）。`--provider mock` 不花錢，打真模型會花錢（批次 186） |
+| `tools/mcp-itri` | **MCP 伺服器**：讓 Claude Code 唯讀查活動與問答；預設指向虛構範例資料，不碰真資料（批次 186，見 `tools/mcp-itri/README.md`） |
 | `tools/guide-video` | 使用說明影片與米亞的聲音（見 CLAUDE.md 第 3、4 條） |
 
 ## 動手前先記住
