@@ -47,3 +47,14 @@ LINE 對「只有影像軌的 mp4」是收下請求回 200、之後靜靜不顯�
 `LINE-PLAN.md` 現在只放**長期有效的規格**（定位、資料模型、七個坑、意圖、prompt 規則、不要做的事、人類待辦），
 **不要再往它後面接批次紀錄**——它曾經長到 6,700 行、單次讀不完，每一批又只有動到相關地方才需要讀。
 `test/test-docs.mjs` 會擋行數與索引漏列。
+
+## 6. 開發護欄（hooks、skills）會擋你，不是壞掉
+
+`.claude/settings.json` 的 hooks 把第 1、2 條用在開發過程（批次 186，細節在 `docs/dev-harness.md`）：
+
+- **改完檔案**：`.js`／`.mjs` 語法錯誤、**這次新寫進去的**簡體字，會請你立刻改。
+- **`git commit` 之前**：擋 `.env`、`*.local.json`、後台匯出的 `*-qa-日期.csv`、疑似金鑰、新增的簡體字；動到程式就先跑 `node test/run-all.mjs`（約 1.5 分鐘），沒全過不給提交。
+
+被擋了就照訊息修，**不要繞過**。刻意要寫簡體字（偵測樣式、舉例）才在同一行加 `zhtw-ok`；只有測試要臨時跳過時用 `SKIP_COMMIT_TESTS=1`。
+
+`.claude/skills/` 有 `batch-log`（第 5 條的記帳）、`pre-release-audit`、`new-event-checklist`；`.mcp.json` 的 MCP 伺服器是**唯讀**的，預設只查虛構範例資料。

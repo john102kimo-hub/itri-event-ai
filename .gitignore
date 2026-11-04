@@ -23,3 +23,6 @@ tools/grounding-backtest/*.real.csv
 *.local.csv
 *-qa-????-??-??.csv
 qa-export-????-??-??.csv
+
+# 評測結果（批次 186）：含模型的實際輸出，不進 repo。基準檔要比較時自己留在本機。
+tools/eval/results/

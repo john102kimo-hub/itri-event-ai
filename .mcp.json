@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "itri-event-ai": {
+      "command": "node",
+      "args": [
+        "tools/mcp-itri/server.mjs"
+      ],
+      "env": {
+        "MCP_ITRI_FIXTURE": "tools/mcp-itri/fixture.sample.json"
+      }
+    }
+  }
+}
