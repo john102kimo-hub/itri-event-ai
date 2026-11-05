@@ -26,6 +26,8 @@
 
 **臨時跳過測試**（只跳測試，其餘照擋）：`SKIP_COMMIT_TESTS=1 git commit -m …`。
 
+**這是護欄，不是安全邊界**（批次 187）：目的是防「不小心」，刻意繞過（別名、`sh -c`、先改 `.gitignore` 再 add、把動作拆成多個指令）擋不住。更強的防線在 GitHub 端（secret scanning、push protection），到 repo 設定確認有沒有開。已經涵蓋 `git add -f`（連被 `.gitignore` 忽略的檔案也加進去）的情形。
+
 **hook 自己壞掉**：一律放行並在 stderr 留一行，不擋工作；只有「確定違規」才擋。
 
 **完全關掉**：刪掉 `.claude/settings.json` 的 `hooks` 區塊，或在 `.claude/settings.local.json`（不進 repo）覆蓋。
@@ -59,4 +61,4 @@
 
 ## 驗證
 
-`test/test-hooks.mjs`（16 項）、`test/test-mcp-itri.mjs`（15 項）、`test/test-eval-harness.mjs`（23 項），都在 `npm test` 裡、不需要金鑰。評分器另外做過破壞性驗證：把檢查弄壞，對應的測試會變紅。
+`test/test-hooks.mjs`（23 項）、`test/test-mcp-itri.mjs`（15 項）、`test/test-eval-harness.mjs`（23 項），都在 `npm test` 裡、不需要金鑰。評分器另外做過破壞性驗證：把檢查弄壞，對應的測試會變紅。

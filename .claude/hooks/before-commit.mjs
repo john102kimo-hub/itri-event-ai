@@ -24,7 +24,7 @@ async function main() {
   if (!isGitCommit(cmd)) return 0;
 
   const cwd = path.resolve(input.cwd || process.cwd());
-  const { names, added } = collectChanges(cwd, stagesFiles(cmd));
+  const { names, added } = collectChanges(cwd, stagesFiles(cmd), cmd);
   if (!names.length && !added.size) return 0;
 
   const problems = [];

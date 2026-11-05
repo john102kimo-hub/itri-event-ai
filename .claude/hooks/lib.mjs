@@ -115,7 +115,7 @@ export function parseAddedLines(diffText) {
  * 這次 commit 會帶走的變更。includeWorktree＝指令裡有 `git add` 或 `commit -a`：hook 在指令執行**之前**跑，
  * 那時還沒 add，光看 staged 會漏掉（`git add -A && git commit` 是最常見的寫法），所以把工作區的改動與新檔也算進來。
  */
-export function collectChanges(cwd, includeWorktree) {
+export function collectChanges(cwd, includeWorktree, cmd = '') {
   const added = parseAddedLines(git(cwd, ['diff', '--cached', '-U0', '--no-color', '--no-ext-diff', '--diff-filter=ACMR']));
   const names = new Set(git(cwd, ['diff', '--cached', '--name-only', '--diff-filter=ACMR', '-z']).split('\0').filter(Boolean));
   if (includeWorktree) {
@@ -125,16 +125,50 @@ export function collectChanges(cwd, includeWorktree) {
     for (const f of git(cwd, ['diff', '--name-only', '--diff-filter=ACMR', '-z']).split('\0').filter(Boolean)) names.add(f);
     for (const f of git(cwd, ['ls-files', '--others', '--exclude-standard', '-z']).split('\0').filter(Boolean)) {
       names.add(f);
-      try {
-        const abs = path.join(cwd, f);
-        if (fs.statSync(abs).size > 1_000_000) continue;
-        const buf = fs.readFileSync(abs);
-        if (buf.includes(0)) continue; // 二進位檔
-        added.set(f, buf.toString('utf8').split('\n').map((text, i) => ({ line: i + 1, text })));
-      } catch { /* 讀不到就略過 */ }
+      readAsAdded(cwd, f, added);
+    }
+    // 批次 187：`git add -f` 會把被 .gitignore 忽略的檔案也加進去（.env 就是這樣被帶走的）。被忽略的檔案不在上面的「未追蹤」清單裡，
+    // 所以要另外查。指名了路徑就查那幾個（連內容一起看，才抓得到裡面的金鑰）；`-A`／`.` 這種「全部」只看檔名（node_modules 之類不讀內容）。
+    if (forceAdds(cmd)) {
+      const specs = addPathspecs(cmd).filter((p) => p !== '.' && p !== './');
+      const named = specs.length > 0;
+      // 同一個指令裡才建立檔案（`printf x > .env && git add -f .env && git commit`）：hook 檢查的當下檔案還不存在，
+      // 讀不到內容，但指令寫出來的路徑本身就能比對檔名規則。
+      for (const sp of specs) names.add(sp.replace(/^\.\//, ''));
+      const ignored = git(cwd, ['ls-files', '--others', '--ignored', '--exclude-standard', '-z', ...(named ? ['--', ...specs] : ['--directory'])]).split('\0').filter(Boolean);
+      for (const f of ignored) {
+        names.add(f);
+        if (named && !f.endsWith('/')) readAsAdded(cwd, f, added);
+      }
     }
   }
   return { names: [...names], added };
+}
+
+/** 把整個檔案當成「新增的行」讀進來（給未追蹤、被強制加入的檔案用）。太大或二進位就略過。 */
+function readAsAdded(cwd, f, added) {
+  try {
+    const abs = path.join(cwd, f);
+    if (fs.statSync(abs).size > 1_000_000) return;
+    const buf = fs.readFileSync(abs);
+    if (buf.includes(0)) return; // 二進位檔
+    added.set(f, buf.toString('utf8').split('\n').map((text, i) => ({ line: i + 1, text })));
+  } catch { /* 讀不到就略過 */ }
+}
+
+/** 指令裡有 `git add -f`／`--force`／`-fA`（連被 .gitignore 忽略的檔案也加進去） */
+export const forceAdds = (cmd) => /\bgit\s+(?:-[Cc]\s+\S+\s+)*add\b[^|;&\n]*\s(?:-[a-zA-Z]*f[a-zA-Z]*|--force)(?=\s|$)/.test(String(cmd));
+
+/** 從 `git add …` 抓出路徑參數（不含選項與引號）。只認得用空白隔開的簡單寫法；`-A`、`.` 這類「全部」會得到空陣列或 '.'。 */
+export function addPathspecs(cmd) {
+  const out = [];
+  for (const m of String(cmd).matchAll(/\bgit\s+(?:-[Cc]\s+\S+\s+)*add\b([^|;&\n]*)/g)) {
+    for (const tok of m[1].split(/\s+/).filter(Boolean)) {
+      if (tok.startsWith('-')) continue;
+      out.push(tok.replace(/^['"]|['"]$/g, ''));
+    }
+  }
+  return out;
 }
 
 export const isGitCommit = (cmd) => /\bgit\s+(?:-[Cc]\s+\S+\s+)*commit\b/.test(cmd) && !/--dry-run/.test(cmd);
