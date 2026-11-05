@@ -348,10 +348,12 @@ export default async function handler(req, res) {
         const existing = (await readRange('media_roster!A2:N')).map(parseRow);
         const byId = new Map(existing.map((r) => [r.id, r]));
         let created = 0, updated = 0, defaulted = 0;
+        const importedIds = []; // 這一批 CSV 裡的 id，給畫面做匯入後自動盤查
 
         for (const cells of parsed.slice(1)) {
           const id = cells[idx('id')] || '';
           if (!id) continue;
+          importedIds.push(id);
           const incoming = {
             id, name: cells[idx('name')] || '', outlet: cells[idx('outlet')] || '',
             beat: (idx('beat') >= 0 ? cells[idx('beat')] || '' : '') || defaultBeat,
@@ -394,7 +396,16 @@ export default async function handler(req, res) {
           ...Array.from({ length: height - rowsOut.length }, blank)];
         if (height) await updateRange(`media_roster!A2:N${height + 1}`, full);
 
-        return res.status(200).json({ success: true, created, updated, total: all.length, ...(defaultBeat ? { default_beat: defaultBeat, defaulted } : {}) });
+        return res.status(200).json({ success: true, created, updated, total: all.length, ids: importedIds, ...(defaultBeat ? { default_beat: defaultBeat, defaulted } : {}) });
+      }
+
+      // 匯入後自動盤查（批次 191）：管理員，會對外查新聞，所以不開放給同仁連結。一次只做一小批，回 remaining 讓畫面接著打。
+      if (action === 'import_check') {
+        if (!requireAdmin(req, res, password)) return;
+        const ids = Array.isArray(body.ids) ? body.ids.map((x) => String(x).slice(0, 30)).slice(0, 500) : [];
+        if (!ids.length) return res.status(400).json({ error: '沒有要盤查的記者' });
+        const { checkImported } = await import('../lib/media-tracker.js');
+        return res.status(200).json({ success: true, ...(await checkImported({ ids })) });
       }
 
       // 核准／不核准同仁送來的 mail 修改（批次 145）
