@@ -157,6 +157,7 @@
     <button onclick="doSearch()">查詢</button>
   </div>
   <div id="search-results"></div>
+  <a id="jump-all" href="#admin-panel" style="display:none;font-size:.85rem;color:var(--primary-dark);margin-bottom:12px">↓ 管理全部名單（搜尋、改路線、批次標離職／刪除）</a>
 
   <!-- 批次 140：名片翻拍 -->
   <div class="card" id="card-card">
@@ -205,6 +206,29 @@
   <div id="list"></div>
 
   <div class="admin-panel" id="admin-panel" style="display:none">
+    <h3>全部名單管理</h3>
+    <p class="desc">看得到所有記者，可以搜尋、篩選、逐筆改路線與聯絡資料，或勾選多筆一次標離職／改路線／刪除。路線選單改了就立刻儲存。</p>
+    <div class="row" style="flex-wrap:wrap;gap:8px;margin-bottom:8px">
+      <input id="all-q" type="text" placeholder="搜尋姓名、媒體、mail、電話" style="flex:1;min-width:180px" onkeydown="if(event.key==='Enter')loadAll(1)">
+      <select id="all-beat" onchange="loadAll(1)"><option value="">全部路線</option></select>
+      <select id="all-status" onchange="loadAll(1)"><option value="active">在職</option><option value="left">已離職</option><option value="all">全部</option></select>
+      <button onclick="loadAll(1)">搜尋</button>
+    </div>
+    <div class="row" style="flex-wrap:wrap;gap:8px;margin-bottom:8px;align-items:center">
+      <label style="font-size:.85rem"><input type="checkbox" id="all-sel" onchange="allSelect(this.checked)"> 全選本頁</label>
+      <select id="bulk-beat"><option value="">（清空路線）</option></select>
+      <button onclick="bulkDo('beat')">改路線</button>
+      <button onclick="bulkDo('left')">標離職</button>
+      <button onclick="bulkDo('active')">恢復在職</button>
+      <button onclick="bulkDo('delete')" style="color:var(--danger)">刪除</button>
+      <span id="all-info" style="font-size:.8rem;color:var(--muted)"></span>
+    </div>
+    <div id="all-list"></div>
+    <div class="row" style="justify-content:center;gap:12px;margin:10px 0 24px">
+      <button onclick="loadAll(ALL.page-1)" id="all-prev">上一頁</button>
+      <span id="all-page" style="font-size:.85rem"></span>
+      <button onclick="loadAll(ALL.page+1)" id="all-next">下一頁</button>
+    </div>
     <div id="mailreq-box" style="display:none">
       <h3>同仁送來的 mail 修改（等你核准）</h3>
       <p class="desc">同仁用共用連結要換掉名單裡已經有的 mail 時，不會直接生效，要你在這裡核准——連結外流的話，別人沒辦法把邀請函改寄到自己的信箱。</p>
@@ -232,6 +256,11 @@
       <button onclick="genLink(false)">產生連結</button>
       <button onclick="genLink(true)">換一條</button>
     </div>
+
+    <h3>盤查既有待確認的記者</h3>
+    <p class="desc">一鍵查「待確認」名單裡每位記者近 120 天的署名報導。只有疑似已換媒體的會列出來建議刪除，其他的不動、不用逐筆確認；28 天內查過的會跳過。</p>
+    <div class="row"><button class="primary" id="pending-btn" onclick="checkPending()">一鍵盤查待確認記者</button></div>
+    <div id="pending-result" style="font-size:.85rem"></div>
 
     <h3>匯出全部名單</h3>
     <p class="desc">下載整份記者名單（含已離職／轉線、路線、受邀次數），用 Excel 打開即可。</p>
@@ -319,7 +348,8 @@ function enterApp(r){
   document.getElementById('admin-panel').style.display = admin ? 'block' : 'none';
   document.getElementById('back-admin').style.display = admin ? 'inline-block' : 'none';
   render(r);
-  if(admin) loadMailRequests();
+  if(admin){ loadMailRequests(); loadAll(1); }
+  const jump = document.getElementById('jump-all'); if(jump) jump.style.display = admin ? 'inline-block' : 'none';
 }
 
 // ── 批次 145：同仁送來、等核准的 mail 修改（只有管理員看得到）──────────────────
@@ -500,8 +530,8 @@ async function doSeed(){
 
 // 批次 191：匯入後自動盤查。每次呼叫只查一小批（後端有時間上限），回 remaining 就接著打，直到查完。
 // 只有「疑似換媒體」會被建議刪除；查不到署名（silent）證據太弱，不建議刪除，只報數量。
-async function autoCheck(ids){
-  const box = document.getElementById('check-result');
+async function autoCheck(ids, boxId){
+  const box = document.getElementById(boxId || 'check-result');
   const total = ids.length;
   let left = ids, ok = 0, silent = 0, unclear = 0, skipped = 0, fails = 0, stuck = 0;
   const suggest = [];
@@ -526,6 +556,15 @@ async function autoCheck(ids){
       (s.link ? ` <a href="${esc(s.link)}" target="_blank" rel="noopener">證據</a>` : '') + '</label>').join('') + '</div>' +
     '<button class="primary" onclick="applySuggest()">把勾選的標為已離職</button> <span id="suggest-result"></span>';
 }
+async function checkPending(){
+  const box = document.getElementById('pending-result'), btn = document.getElementById('pending-btn');
+  btn.disabled = true; box.textContent = '正在找出要盤查的記者…';
+  const r = await call('pending_ids');
+  if(r.error){ box.textContent = r.error; btn.disabled = false; return; }
+  if(!r.ids.length){ box.textContent = '沒有需要盤查的記者（待確認的都在 28 天內查過了）。'; btn.disabled = false; return; }
+  await autoCheck(r.ids, 'pending-result');
+  btn.disabled = false;
+}
 async function applySuggest(){
   const ids = [...document.querySelectorAll('#suggest-list .sg:checked')].map(c => c.value);
   const out = document.getElementById('suggest-result');
@@ -537,6 +576,94 @@ async function applySuggest(){
   }
   out.textContent = `已標為離職 ${n} 位（不是刪除，名單裡仍查得到，可在待確認名單恢復在職）`;
   render(await call('list'));
+}
+
+
+// ── 批次 193：全部名單管理 ───────────────────────────────────────────────────
+const ALL = {page:1, pages:1, rows:[]};
+function fillAllSelects(beats, counts){
+  const b = document.getElementById('all-beat'); if(!b) return;
+  const cur = b.value;
+  const label = k => k==='__none' ? '未填路線' : k;
+  const keys = [...beats, ...Object.keys(counts).filter(k => k!=='__none' && !beats.includes(k)), '__none'];
+  b.innerHTML = '<option value="">全部路線</option>' + keys.map(k => `<option value="${esc(k)}">${esc(label(k))}（${counts[k]||0}）</option>`).join('');
+  b.value = cur;
+  const bb = document.getElementById('bulk-beat');
+  if(bb && bb.options.length <= 1) beats.forEach(x => { const o = document.createElement('option'); o.value = x; o.textContent = x; bb.appendChild(o); });
+}
+async function loadAll(page){
+  page = Math.max(1, page||1);
+  const q = document.getElementById('all-q').value.trim();
+  const beat = document.getElementById('all-beat').value, status = document.getElementById('all-status').value;
+  const r = await call('all', {q, beat, status, page, size: 50});
+  if(r.error){ toast(r.error); return; }
+  ALL.page = r.page; ALL.pages = r.pages; ALL.rows = r.rows;
+  fillAllSelects(r.beats, r.beatCounts);
+  document.getElementById('all-sel').checked = false;
+  document.getElementById('all-info').textContent = `符合 ${r.total} 位（名單共 ${r.all} 位、在職 ${r.active} 位）`;
+  document.getElementById('all-page').textContent = `第 ${r.page} / ${r.pages} 頁`;
+  document.getElementById('all-prev').disabled = r.page <= 1;
+  document.getElementById('all-next').disabled = r.page >= r.pages;
+  const list = document.getElementById('all-list');
+  if(!r.rows.length){ list.innerHTML = '<div class="empty">沒有符合的記者</div>'; return; }
+  list.innerHTML = r.rows.map(x => {
+    const opts = ['', ...r.beats, ...(x.beat && !r.beats.includes(x.beat) ? [x.beat] : [])]
+      .map(b => `<option value="${esc(b)}" ${b===x.beat?'selected':''}>${esc(b||'（未填路線）')}</option>`).join('');
+    const left = x.status === 'left';
+    return `<div class="rec" id="ar-${esc(x.id)}" style="padding:12px;${left?'opacity:.6':''}">
+      <div style="display:flex;gap:10px;align-items:flex-start">
+        <input type="checkbox" class="all-chk" value="${esc(x.id)}" style="margin-top:5px">
+        <div style="flex:1;min-width:0">
+          <div class="rec-name">${esc(x.name)} ${left?'<span class="rec-flag flag-stale">已離職</span>':''}</div>
+          <div class="rec-outlet">${esc(x.outlet)}　${esc(x.email)}　${esc(x.phone)}</div>
+          <div class="rec-meta" style="margin:4px 0 8px">受邀 ${x.invited_count} 次${x.last_invited?'，最近 '+esc(x.last_invited):''}${x.note?'　'+esc(x.note):''}</div>
+          <div style="display:flex;flex-wrap:wrap;gap:8px">
+            <select onchange="allSetBeat('${esc(x.id)}',this.value)">${opts}</select>
+            <button onclick="allEdit('${esc(x.id)}')">編輯聯絡資料</button>
+            <button onclick="allToggle('${esc(x.id)}','${left?'active':'left'}')">${left?'恢復在職':'標離職'}</button>
+          </div>
+          <div id="ae-${esc(x.id)}"></div>
+        </div>
+      </div></div>`;
+  }).join('');
+}
+function allSelect(on){ document.querySelectorAll('.all-chk').forEach(c => c.checked = on); }
+async function allSetBeat(id, beat){
+  const r = await call('update', {id, beat}, 'POST');
+  toast(r.error ? r.error : '路線已儲存');
+}
+async function allToggle(id, mark){
+  const r = await call('update', {id, mark}, 'POST');
+  if(r.error){ toast(r.error); return; }
+  loadAll(ALL.page);
+}
+function allEdit(id){
+  const x = ALL.rows.find(r => r.id === id); if(!x) return;
+  const box = document.getElementById('ae-'+id);
+  if(box.innerHTML){ box.innerHTML = ''; return; }
+  box.innerHTML = `<div style="display:grid;gap:6px;margin-top:8px">
+    <input id="ae-n-${esc(id)}" value="${esc(x.name)}" placeholder="姓名">
+    <input id="ae-o-${esc(id)}" value="${esc(x.outlet)}" placeholder="媒體">
+    <input id="ae-e-${esc(id)}" value="${esc(x.email)}" placeholder="mail">
+    <input id="ae-p-${esc(id)}" value="${esc(x.phone)}" placeholder="電話">
+    <div><button class="primary" onclick="allSaveContact('${esc(id)}')">儲存</button> <button onclick="allEdit('${esc(id)}')">取消</button></div></div>`;
+}
+async function allSaveContact(id){
+  const g = k => document.getElementById(`ae-${k}-${id}`).value;
+  const r = await call('update_contact', {id, name:g('n'), outlet:g('o'), email:g('e'), phone:g('p')}, 'POST');
+  if(r.error){ toast(r.error); return; }
+  toast('已儲存'); loadAll(ALL.page);
+}
+async function bulkDo(op){
+  const ids = [...document.querySelectorAll('.all-chk:checked')].map(c => c.value);
+  if(!ids.length){ toast('請先勾選記者'); return; }
+  const beat = document.getElementById('bulk-beat').value;
+  const label = {beat: beat ? `改成「${beat}」` : '清空路線', left:'標為已離職', active:'恢復在職', delete:'刪除（無法復原）'}[op];
+  if(!confirm(`確定要把選的 ${ids.length} 位${label}嗎？`)) return;
+  const r = await call('bulk', {ids, op, beat}, 'POST');
+  if(r.error){ toast(r.error); return; }
+  toast(`已處理 ${r.affected} 位`);
+  loadAll(ALL.page);
 }
 
 // 匯出全部名單（批次 124）：後端早就有 action=export，畫面上一直沒有按鈕。走 header 帶密碼、用 Blob 下載，

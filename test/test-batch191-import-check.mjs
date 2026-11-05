@@ -72,3 +72,61 @@ assert.deepEqual(r.o.ids, ['N1', 'N2'], 'seed 回傳這一批的 id，畫面拿�
 assert.equal((await call({ action: 'import_check', code: 'staffcode1', ids: ['N1'] })).code, 401, '同仁連結不能觸發對外查詢');
 assert.equal((await call({ action: 'import_check', password: 'pw', ids: [] }, { 'x-admin-password': 'pw' })).code, 400);
 console.log('批次 191 匯入後自動盤查：全部通過');
+
+// ═══ 批次 192：一鍵盤查既有待確認（pending_ids）═══
+reset();
+const old = (d) => new Date(Date.now() - d * 86400000).toISOString();
+book.media_roster = [['id'],
+  ['P1', '甲甲', '聯合報', '', '', '', 0, 0, 0, '', 'active', '', '', ''],            // 路線空白 → 待確認
+  ['P2', '乙乙', '經濟日報', '經濟部線', '', '', 0, 0, 0, '', 'active', '', '', ''],  // 沒受邀紀錄 → 待確認
+  ['P3', '丙丙', '工商時報', '', '', '', 0, 0, 0, '', 'left', '', '', ''],            // 離職 → 不查
+  ['P4', '丁丁', '中央社', '', '', '', 0, 0, 0, '', 'active', '', '', ''],            // 剛查過 → 跳過
+  ['P5', '戊戊戊戊戊戊', '上報', '', '', '', 0, 0, 0, '', 'active', '', '', ''],      // 非個人 → 跳過
+  ['P6', '己己', '自由時報', '', '', '', 0, 0, 0, '', 'active', '', '', ''],          // 已標疑似換媒體 → 人還沒處理，不重查
+];
+book.media_watch = [['id'],
+  ['P4', old(3), 'ok', 1, '', 0, '', '[]', '1'],
+  ['P6', old(60), 'moved', 0, '工商時報', 2, '', '[]', '1']];
+const get = async (q, headers = {}) => {
+  let code = 200, o;
+  const res = { setHeader() {}, status(c) { code = c; return res; }, json(x) { o = x; return res; }, send(x) { o = x; return res; }, end() { return res; } };
+  await media({ method: 'GET', query: q, headers, body: {}, socket: { remoteAddress: '9.9.9.9' } }, res);
+  return { code, o };
+};
+assert.equal((await get({ action: 'pending_ids', code: 'x' })).code, 401, '同仁連結不能觸發');
+const pend = await get({ action: 'pending_ids' }, { 'x-admin-password': 'pw' });
+assert.deepEqual(pend.o.ids.sort(), ['P1', 'P2'], '只含待確認、在職、像個人、近期沒查過、沒被標疑似換媒體的');
+console.log('批次 192 一鍵盤查待確認：全部通過');
+
+// ═══ 批次 193：全部名單管理（all／bulk）═══
+reset();
+book.media_roster = [['id'],
+  ['A1', '甲甲', '聯合報', '經濟部線', 'a@x.com', '0911', 2, 0, 0, '', 'active', '', '', ''],
+  ['A2', '乙乙', '經濟日報', '', 'b@x.com', '0922', 0, 0, 0, '', 'active', '', '', ''],
+  ['A3', '丙丙', '工商時報', '半導體', 'c@x.com', '', 0, 0, 0, '', 'left', '', '', ''],
+  ['A4', '丁丁', '中央社', '台北工研院線', 'd@x.com', '', 0, 0, 0, '', 'active', '', '', '']];
+const adm = { 'x-admin-password': 'pw' };
+assert.equal((await get({ action: 'all', code: 'x' })).code, 401, '全部名單含 mail，不開放同仁連結');
+let a = (await get({ action: 'all' }, adm)).o;
+assert.equal(a.total, 3, '預設只看在職');
+assert.equal(a.all, 4); assert.equal(a.active, 3);
+assert.equal(a.rows.find((x) => x.id === 'A1').email, 'a@x.com', '管理員看得到 mail');
+assert.equal((await get({ action: 'all', status: 'left' }, adm)).o.rows[0].id, 'A3');
+assert.equal((await get({ action: 'all', status: 'all' }, adm)).o.total, 4);
+assert.deepEqual((await get({ action: 'all', beat: '__none' }, adm)).o.rows.map((x) => x.id), ['A2'], '未填路線');
+assert.deepEqual((await get({ action: 'all', q: 'b@x' }, adm)).o.rows.map((x) => x.id), ['A2'], '可搜 mail');
+assert.equal((await get({ action: 'all', size: 10 }, adm)).o.size, 10);
+
+assert.equal((await call({ action: 'bulk', code: 'staffcode1', ids: ['A1'], op: 'delete' })).code, 401);
+assert.equal((await call({ action: 'bulk', password: 'pw', ids: ['A1'], op: 'beat', beat: '亂填' }, adm)).code, 400, '路線只收三線');
+assert.equal((await call({ action: 'bulk', password: 'pw', ids: [], op: 'left' }, adm)).code, 400);
+let b = await call({ action: 'bulk', password: 'pw', ids: ['A1', 'A2'], op: 'beat', beat: '新竹工研院線' }, adm);
+assert.equal(b.o.affected, 2);
+assert.equal(book.media_roster.find((r) => r[0] === 'A2')[3], '新竹工研院線');
+b = await call({ action: 'bulk', password: 'pw', ids: ['A4'], op: 'left' }, adm);
+assert.equal(book.media_roster.find((r) => r[0] === 'A4')[10], 'left');
+b = await call({ action: 'bulk', password: 'pw', ids: ['A3', 'ZZ'], op: 'delete' }, adm);
+assert.equal(b.o.affected, 1, '不存在的 id 不算');
+assert.ok(!book.media_roster.some((r) => r[0] === 'A3'), '刪掉就不在了');
+assert.equal(book.media_roster.filter((r) => r[0] && r[0] !== 'id').length, 3, '其他人完好');
+console.log('批次 193 全部名單管理：全部通過');

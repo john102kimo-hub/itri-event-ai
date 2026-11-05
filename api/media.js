@@ -243,6 +243,43 @@ export default async function handler(req, res) {
         });
       }
 
+      // 一鍵盤查待確認的記者（批次 192）：回傳要查的 id。管理員專用（查詢會對外查新聞）。
+      // 排除：已離職、已被標疑似換媒體（人還沒處理，不重查）、姓名不像個人、28 天內查過的。
+      if (action === 'pending_ids') {
+        if (!requireAdmin(req, res, password)) return;
+        const { loadWatch, RECHECK_DAYS } = await import('../lib/media-tracker.js');
+        const watch = new Map((await loadWatch()).map((w) => [w.id, w]));
+        const recent = (id) => { const t = watch.get(id)?.checked_at; return t && Date.now() - new Date(t).getTime() < RECHECK_DAYS * 86400000; };
+        const rows = (await safeRead('media_roster!A2:N')).map(parseRow);
+        const ids = rows.filter((r) => needsReview(r) && r.id && r.name.length >= 2 && r.name.length <= 5
+          && watch.get(r.id)?.verdict !== 'moved' && !recent(r.id)).sort((a, b) => priority(b) - priority(a)).map((r) => r.id);
+        return res.status(200).json({ ids, total: ids.length });
+      }
+
+      // 全部名單管理（批次 193）：管理員看得到全部記者（含 mail、電話），可搜尋、篩選、分頁。
+      if (action === 'all') {
+        if (!requireAdmin(req, res, password)) return;
+        const kw = String(q || '').trim().toLowerCase();
+        const beat = String(req.query.beat || ''), status = String(req.query.status || 'active');
+        const size = Math.min(200, Math.max(10, Number(req.query.size) || 50));
+        const rows = (await safeRead('media_roster!A2:N')).map(parseRow);
+        const hit = rows.filter((r) => (!kw || [r.name, r.outlet, r.email, r.phone].some((v) => String(v).toLowerCase().includes(kw)))
+          && (!beat || (beat === '__none' ? !r.beat : r.beat === beat))
+          && (status === 'all' || (status === 'left' ? r.status === 'left' : r.status !== 'left')));
+        const pages = Math.max(1, Math.ceil(hit.length / size));
+        const page = Math.min(pages, Math.max(1, Number(req.query.page) || 1));
+        const beatCounts = {};
+        rows.filter((r) => r.status !== 'left').forEach((r) => { const k = r.beat || '__none'; beatCounts[k] = (beatCounts[k] || 0) + 1; });
+        return res.status(200).json({
+          total: hit.length, page, pages, size, all: rows.length, active: rows.filter((r) => r.status !== 'left').length,
+          beats: BEATS, beatCounts,
+          rows: hit.slice((page - 1) * size, page * size).map((r) => ({
+            id: r.id, name: r.name, outlet: r.outlet, beat: r.beat, email: r.email, phone: r.phone,
+            status: r.status, invited_count: r.invited_count, last_invited: r.last_invited, note: r.note,
+          })),
+        });
+      }
+
       if (action === 'search') {
         const auth = await authorize({ code, password }, req);
         if (!auth.ok) return res.status(auth.status).json({ error: auth.msg });
@@ -397,6 +434,33 @@ export default async function handler(req, res) {
         if (height) await updateRange(`media_roster!A2:N${height + 1}`, full);
 
         return res.status(200).json({ success: true, created, updated, total: all.length, ids: importedIds, ...(defaultBeat ? { default_beat: defaultBeat, defaulted } : {}) });
+      }
+
+      // 批次處理（批次 193）：標離職／恢復在職／改路線／刪除。管理員專用。整份一次寫回（跟 seed 同一個理由：
+      // 不要「先清空再寫」，兩步寫法在第二步失敗時整份名單歸零）。刪除是真的刪掉那幾列；要保留紀錄請用「標離職」。
+      if (action === 'bulk') {
+        if (!requireAdmin(req, res, password)) return;
+        const ids = new Set((Array.isArray(body.ids) ? body.ids : []).map((x) => String(x)).slice(0, 1000));
+        const op = String(body.op || '');
+        if (!ids.size) return res.status(400).json({ error: '沒有選任何記者' });
+        if (!['left', 'active', 'beat', 'delete'].includes(op)) return res.status(400).json({ error: '不認得的操作' });
+        const beat = String(body.beat || '').trim();
+        if (op === 'beat' && beat && !BEATS.includes(beat)) return res.status(400).json({ error: '路線請從選項裡挑' });
+        const rows = (await readRange('media_roster!A2:N')).map(parseRow); // 讀失敗就停，不要拿空名單去覆蓋
+        let n = 0;
+        const kept = [];
+        for (const r of rows) {
+          if (!ids.has(r.id)) { kept.push(r); continue; }
+          n++;
+          if (op === 'delete') continue;
+          if (op === 'left') r.status = 'left'; else if (op === 'active') r.status = 'active'; else r.beat = beat;
+          r.updated_at = now(); r.updated_by = String(body.updated_by || '').slice(0, 20);
+          kept.push(r);
+        }
+        const out = kept.map((r) => [r.id, r.name, r.outlet, r.beat, r.email, r.phone, r.invited_count, r.confirmed_count, r.declined_count, r.last_invited, r.status, r.note, r.updated_at, r.updated_by]);
+        const height = Math.max(rows.length, out.length), blank = () => new Array(14).fill('');
+        if (height) await updateRange(`media_roster!A2:N${height + 1}`, [...out, ...Array.from({ length: height - out.length }, blank)]);
+        return res.status(200).json({ success: true, affected: n, total: kept.length });
       }
 
       // 匯入後自動盤查（批次 191）：管理員，會對外查新聞，所以不開放給同仁連結。一次只做一小批，回 remaining 讓畫面接著打。
