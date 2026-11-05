@@ -137,7 +137,7 @@ const call = async (method, q, body = {}, headers = {}) => {
   return { code, out };
 };
 const ago = (d) => new Date(Date.now() - d * 86400000).toLocaleDateString('sv-SE', { timeZone: 'Asia/Taipei' });
-let r = await call('POST', {}, { action: 'seed', password: 'pw', csv: ['id,name,outlet,beat,invited_count,last_invited', `R1,王大明,經濟日報,財經／產業,5,${ago(30)}`, `R2,李小華,聯合報,生醫,3,${ago(20)}`].join('\n') }, { 'x-admin-password': 'pw' });
+let r = await call('POST', {}, { action: 'seed', password: 'pw', csv: ['id,name,outlet,beat,invited_count,last_invited', `R1,王大明,經濟日報,經濟部線,5,${ago(30)}`, `R2,李小華,聯合報,新竹工研院線,3,${ago(20)}`].join('\n') }, { 'x-admin-password': 'pw' });
 assert.equal(r.code, 200);
 
 // 排程入口：沒帶或帶錯 CRON_SECRET 一律拒絕（會打外部網站、會推播）
@@ -160,7 +160,7 @@ assert.equal(r.out.needsReview[0].id, 'R1', '疑似換媒體的排最前面');
 assert.ok(!r.out.needsReview.find((x) => x.id === 'R2')?.watch, '沒事的人不掛標記');
 
 // 同仁按「還在跑」→ 標記收掉
-r = await call('POST', {}, { action: 'update', code: 'staffcode1', id: 'R1', beat: '財經／產業' });
+r = await call('POST', {}, { action: 'update', code: 'staffcode1', id: 'R1', beat: '經濟部線' });
 assert.equal(r.code, 200);
 r = await call('GET', { action: 'list', code: 'staffcode1' });
 assert.ok(!r.out.needsReview.find((x) => x.id === 'R1')?.watch, '按過還在跑就不再掛標記');

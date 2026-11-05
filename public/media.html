@@ -248,6 +248,11 @@
       <select id="seed-beat"><option value="">不指定（照 CSV 的 beat 欄）</option></select>
       <span class="desc" style="margin:0">CSV 沒寫路線的人會套這個；已經有路線的人不會被改。</span>
     </div>
+    <div class="row" style="margin-bottom:8px">
+      <label for="csv-file" style="font-size:.85rem">或直接上傳檔案</label>
+      <input type="file" id="csv-file" accept=".csv,.txt,text/csv" onchange="loadCsvFile(this)">
+      <span class="desc" style="margin:0">Excel 請先另存成 CSV；內容會先放進下方方框，確認後再按「匯入」。</span>
+    </div>
     <textarea id="csv-input" placeholder="id,name,outlet,beat,email,phone,invited_count,confirmed_count,declined_count,last_invited&#10;R0101,吳雅婷,三立新聞,,a@b.com,0912345678,86,3,4,2025-08-20"></textarea>
     <div class="row">
       <button class="primary" onclick="doSeed()">匯入</button>
@@ -407,7 +412,7 @@ function pickBeat(id, el, beat){
 async function confirmRec(id){
   // 還沒有路線的人，要先點一個路線才能確認（批次 124）——不然按了「資料正確」，路線照樣是空的，
   // 下次打開又排在待確認最前面，等於白按。
-  if(!recBeats[id] && !pendingBeat[id]){ toast('請先點他現在跑的路線（不確定就選「一般」），再按確認'); return; }
+  if(!recBeats[id] && !pendingBeat[id]){ toast('請先點他現在跑的線（台北工研院線／新竹工研院線／經濟部線），再按確認'); return; }
   const r = await call('update', {id, beat: pendingBeat[id]}, 'POST');
   if(r.error){ toast(r.error); return; }
   document.getElementById(`rec-${id}`).classList.add('done');
@@ -455,6 +460,25 @@ async function genLink(regenerate){
   if(r.error){ toast(r.error); return; }
   const url = `${location.origin}${location.pathname}?code=${r.code}`;
   document.getElementById('staff-link').textContent = url;
+}
+
+// 批次 190：隨時上傳檔案。Excel 另存的 CSV 在台灣常是 Big5，UTF-8 讀出亂碼（�）就改用 Big5 重讀。
+async function loadCsvFile(input){
+  const out = document.getElementById('seed-result');
+  const f = input.files && input.files[0];
+  if(!f) return;
+  if(/\.xlsx?$/i.test(f.name)){ out.textContent = '請先在 Excel 另存成 CSV（UTF-8）再上傳'; input.value = ''; return; }
+  if(f.size > 5 * 1024 * 1024){ out.textContent = '檔案超過 5MB，請分批上傳'; input.value = ''; return; }
+  try{
+    const buf = await f.arrayBuffer();
+    let text = new TextDecoder('utf-8').decode(buf);
+    if(text.includes('�')) text = new TextDecoder('big5').decode(buf);
+    text = text.replace(/^﻿/, '');
+    document.getElementById('csv-input').value = text;
+    const lines = text.split(/\r?\n/).filter(l => l.trim()).length;
+    out.textContent = `已讀入「${f.name}」，共 ${Math.max(lines - 1, 0)} 列資料；確認後按「匯入」`;
+  }catch(e){ out.textContent = '讀檔失敗：' + e.message; }
+  input.value = ''; // 同一個檔案改過再選一次也要觸發
 }
 
 async function doSeed(){

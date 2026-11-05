@@ -19,23 +19,23 @@ const call = async (body) => {
 const row = (id) => book.media_roster.find((r) => r[0] === id);
 
 // 1. 沒有 beat 欄的 CSV + 統一路線 → 全部套用
-let r = await call({ action: 'seed', csv: 'id,name,outlet\nN1,王大明,經濟日報\nN2,李小華,工商時報', default_beat: '財經／產業' });
+let r = await call({ action: 'seed', csv: 'id,name,outlet\nN1,王大明,經濟日報\nN2,李小華,工商時報', default_beat: '經濟部線' });
 assert.equal(r.code, 200);
 assert.equal(r.out.defaulted, 2);
-assert.equal(r.out.default_beat, '財經／產業');
-assert.equal(row('N1')[3], '財經／產業');
-assert.equal(row('N2')[3], '財經／產業');
+assert.equal(r.out.default_beat, '經濟部線');
+assert.equal(row('N1')[3], '經濟部線');
+assert.equal(row('N2')[3], '經濟部線');
 
 // 2. CSV 自己寫了路線的優先，沒寫的才套統一路線
-r = await call({ action: 'seed', csv: 'id,name,outlet,beat\nN3,陳甲,電子時報,半導體\nN4,林乙,數位時報,', default_beat: 'AI／資通訊' });
-assert.equal(row('N3')[3], '半導體');
-assert.equal(row('N4')[3], 'AI／資通訊');
+r = await call({ action: 'seed', csv: 'id,name,outlet,beat\nN3,陳甲,電子時報,新竹工研院線\nN4,林乙,數位時報,', default_beat: '台北工研院線' });
+assert.equal(row('N3')[3], '新竹工研院線');
+assert.equal(row('N4')[3], '台北工研院線');
 assert.equal(r.out.defaulted, 1);
 
 // 3. ★ 名單裡已經有路線的人不會被統一路線改掉（人工填的優先）；還空白的才補
-r = await call({ action: 'seed', csv: 'id,name,outlet\nN1,王大明,經濟日報\nN5,新人,中央社', default_beat: '生醫' });
-assert.equal(row('N1')[3], '財經／產業', '已有路線不被覆蓋');
-assert.equal(row('N5')[3], '生醫');
+r = await call({ action: 'seed', csv: 'id,name,outlet\nN1,王大明,經濟日報\nN5,新人,中央社', default_beat: '新竹工研院線' });
+assert.equal(row('N1')[3], '經濟部線', '已有路線不被覆蓋');
+assert.equal(row('N5')[3], '新竹工研院線');
 assert.equal(r.out.defaulted, 1, '只算真的套用到的人');
 
 // 4. 不指定 → 跟以前一樣，路線留空，回應不帶 default 欄位
