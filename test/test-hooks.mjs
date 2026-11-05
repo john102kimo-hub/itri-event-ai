@@ -7,6 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import * as hookLib from '../.claude/hooks/lib.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const BEFORE = path.join(root, '.claude/hooks/before-commit.mjs');
@@ -89,6 +90,48 @@ t('不在 repo 裡／沒有變更：放行', () => {
 t('壞掉的輸入不會讓 hook 擋工作', () => {
   const r = spawnSync(process.execPath, [BEFORE], { input: 'not json', encoding: 'utf8' });
   assert.equal(r.status, 0);
+});
+
+// ── 強制加入被 .gitignore 忽略的檔案（批次 187：真的 Claude Code 實測發現的漏洞）──
+// hook 在指令執行「之前」跑；`git add -f .env && git commit` 那一刻 .env 還沒被加入，又因為被忽略，不在「未追蹤」清單裡，
+// 以前整個漏掉，.env 真的被提交了。
+function ignoredRepo() {
+  const d = repo(); put(d, '.gitignore', '.env\n*.log\n'); sh(d, 'add', '.'); sh(d, 'commit', '-q', '-m', 'ignore', '--no-verify');
+  return d;
+}
+t('★ 單一指令 git add -f .env && git commit → 擋（以前會漏）', () => {
+  const d = ignoredRepo(); put(d, '.env', 'ANTHROPIC_API_KEY=x\n');
+  const r = commit(d, 'git add -f .env && git commit -m env'); assert.equal(r.code, 2); assert.match(r.err, /\.env/);
+});
+t('★ git add -f -A（連被忽略的一起加）→ 擋；-fA 寫法也一樣', () => {
+  for (const cmd of ['git add -f -A && git commit -m x', 'git add -fA && git commit -m x', 'git add --force . && git commit -m x']) {
+    const d = ignoredRepo(); put(d, '.env', 'X=1\n');
+    assert.equal(commit(d, cmd).code, 2, cmd);
+  }
+});
+t('★ 被忽略的檔案裡有金鑰，用 git add -f 指名加入 → 擋', () => {
+  const d = ignoredRepo(); put(d, 'notes.log', `key=${FAKE_KEY}\n`);
+  const r = commit(d, 'git add -f notes.log && git commit -m x'); assert.equal(r.code, 2); assert.match(r.err, /Anthropic/);
+});
+t('★ 同一個指令裡才建立 .env 再強制加入（檢查當下檔案還不存在）→ 照樣用檔名擋', () => {
+  const d = ignoredRepo();
+  assert.equal(commit(d, "printf 'X=1' > .env && git add -f .env && git commit -m x").code, 2);
+  assert.equal(commit(d, "git add -f ./.env && git commit -m x").code, 2);
+});
+t('不誤擋：被忽略但沒有敏感內容的檔案（普通 .log）用 -f 加入 → 放行', () => {
+  const d = ignoredRepo(); put(d, 'build.log', 'hello\n');
+  assert.equal(commit(d, 'git add -f build.log && git commit -m x').code, 0);
+});
+t('不誤擋：沒有 -f 時，被忽略的 .env 本來就不會被加入 → 放行', () => {
+  const d = ignoredRepo(); put(d, '.env', 'X=1\n'); put(d, 'docs/ok.md', '一般文件\n');
+  assert.equal(commit(d, 'git add -A && git commit -m x').code, 0);
+});
+t('forceAdds／addPathspecs：認得 -f、--force、-fA、-C 目錄、串在別的指令後面；路徑參數抓得對；沒有 -f 就不算', () => {
+  for (const c of ['git add -f .env', 'git add --force a b', 'git add -fA', 'git -C x add -f y', 'echo hi && git add -f .env && git commit -m x']) assert.ok(hookLib.forceAdds(c), c);
+  for (const c of ['git add .env', 'git add -A', 'git commit -m "-f"', 'git status']) assert.ok(!hookLib.forceAdds(c), c);
+  assert.deepEqual(hookLib.addPathspecs('git add -f .env x.log'), ['.env', 'x.log']);
+  assert.deepEqual(hookLib.addPathspecs("git add -f -- .env 'y.log' && git commit -m z"), ['.env', 'y.log']);
+  assert.deepEqual(hookLib.addPathspecs('git add -fA'), []);
 });
 
 // ── after-edit ──
