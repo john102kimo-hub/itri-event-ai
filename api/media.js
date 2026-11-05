@@ -10,6 +10,7 @@
 // POST {action:'add',code,name,outlet,email,beat?,phone?,title?} → 新增一位記者（批次 137，不用編 id、不用貼 CSV）
 // POST {action:'card_scan',code,image}  → 名片翻拍：AI 讀出姓名／媒體／mail／電話，並比對名單裡是不是已經有這個人（批次 140）
 // POST card_match（不呼叫 AI）           → 同仁改過讀出來的欄位後，重新比對一次
+// GET  ?action=watch_cron              → 排程（Vercel Cron，Bearer CRON_SECRET）：每月抽一批主流媒體記者，查署名、標出疑似換媒體（見 lib/media-tracker.js）
 // POST {action:'update_contact',code,id,name?,outlet?,email?,phone?,title?,mark?} → 用名片上的新資料更新既有記者（批次 140）
 //                                        同仁要「換掉」既有的 mail 不會直接生效，先排進 media_mail_requests 等管理員核准（批次 145）
 //
@@ -26,6 +27,7 @@
 // 誠實邊界：這裡不猜記者現在跑什麼路線，只把「太久沒受邀」「從沒填過路線」的人
 // 排到前面讓人判斷，是否還在職、路線是什麼，一律由人工按一下確認。
 
+import { timingSafeEqual } from 'node:crypto';
 import { readRange, appendRows, updateRange, ensureSheets } from '../lib/sheets.js';
 import { adminAttempt, requireAdmin, passwordFrom, codeMatches, authFailed } from '../lib/auth.js';
 import { generateShareCode } from '../lib/ids.js';
@@ -193,6 +195,17 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
 
   try {
+    // 排程：主流媒體記者「疑似換媒體」追蹤。跟 api/line.js 的排程入口同一條規矩：一定要帶 CRON_SECRET，
+    // 沒設定就一律拒絕（這個入口會打外部網站、會對管理員推播）。
+    if (req.method === 'GET' && req.query?.action === 'watch_cron') {
+      const secret = process.env.CRON_SECRET;
+      const bearer = String(req.headers?.authorization || '').replace(/^Bearer\s+/i, '');
+      const a = Buffer.from(bearer), b = Buffer.from(secret || '');
+      if (!secret || a.length !== b.length || !timingSafeEqual(a, b)) return res.status(401).json({ error: 'unauthorized' });
+      const { runWatchCron } = await import('../lib/media-tracker.js');
+      return res.status(200).json(await runWatchCron());
+    }
+
     await loadSettings();
 
     if (req.method === 'GET') {
@@ -206,7 +219,12 @@ export default async function handler(req, res) {
         if (!auth.ok) return res.status(auth.status).json({ error: auth.msg });
 
         const rows = (await safeRead('media_roster!A2:N')).map(parseRow);
-        const review = rows.filter(needsReview).sort((a, b) => priority(b) - priority(a));
+        // 疑似換媒體的追蹤結果（lib/media-tracker.js）掛在記者旁邊；讀不到就當沒有，不影響原本的名單
+        const { loadWatch } = await import('../lib/media-tracker.js');
+        const watchById = new Map((await loadWatch()).map((w) => [w.id, w]));
+        const isMoved = (r) => r.status !== 'left' && watchById.get(r.id)?.verdict === 'moved';
+        const review = rows.filter((r) => needsReview(r) || isMoved(r))
+          .sort((a, b) => (isMoved(b) - isMoved(a)) || (priority(b) - priority(a)));
         const active = rows.filter((r) => r.status !== 'left');
 
         return res.status(200).json({
@@ -219,6 +237,8 @@ export default async function handler(req, res) {
             id: r.id, name: r.name, outlet: r.outlet, beat: r.beat,
             invited_count: r.invited_count, last_invited: r.last_invited,
             daysSince: daysSince(r.last_invited),
+            watch: isMoved(r) ? (({ other_source, other_count, latest_at, evidence, checked_at }) =>
+              ({ other_source, other_count, latest_at, evidence, checked_at }))(watchById.get(r.id)) : null,
           })),
         });
       }
@@ -532,6 +552,11 @@ export default async function handler(req, res) {
           rec.invited_count, rec.confirmed_count, rec.declined_count, rec.last_invited,
           rec.status, rec.note, rec.updated_at, rec.updated_by,
         ]]);
+        // 人按了「還在跑，資料正確」（或恢復在職），就把「疑似換媒體」的提醒收掉；失敗不影響這次更新本身
+        if (mark !== 'left') {
+          const { dismissWatch } = await import('../lib/media-tracker.js');
+          await dismissWatch(id).catch((e) => console.error('收掉追蹤提醒失敗:', e.message));
+        }
         return res.status(200).json({ success: true });
       }
 

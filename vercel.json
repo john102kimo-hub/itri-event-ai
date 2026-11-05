@@ -173,6 +173,10 @@
     {
       "path": "/api/events?action=b2b_cron",
       "schedule": "0 1 * * 1-5"
+    },
+    {
+      "path": "/api/media?action=watch_cron",
+      "schedule": "0 2 1 * *"
     }
   ]
 }
