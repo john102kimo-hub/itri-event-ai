@@ -327,6 +327,10 @@ export default async function handler(req, res) {
         if (!requireAdmin(req, res, password)) return;
         const { csv } = body;
         if (!csv || !csv.trim()) return res.status(400).json({ error: '沒有收到 CSV 內容' });
+        // 這一批統一的路線（可選）：CSV 沒有 beat 欄、或那一格是空的，就套這個。已經有路線的人不會被改
+        // （既有的人工填寫優先，CSV 自己寫的 beat 也優先）。只收選單上那幾個，跟 update 同一條規矩。
+        const defaultBeat = String(body.default_beat || '').trim();
+        if (defaultBeat && !BEATS.includes(defaultBeat)) return res.status(400).json({ error: '路線請從選項裡挑' });
         await ensureSheets(SHEETS);
 
         const parsed = parseCsv(csv);
@@ -343,14 +347,14 @@ export default async function handler(req, res) {
         // 路線、離職標記、備註全部被別人的資料覆蓋。讀不到就停下來請他再試一次。
         const existing = (await readRange('media_roster!A2:N')).map(parseRow);
         const byId = new Map(existing.map((r) => [r.id, r]));
-        let created = 0, updated = 0;
+        let created = 0, updated = 0, defaulted = 0;
 
         for (const cells of parsed.slice(1)) {
           const id = cells[idx('id')] || '';
           if (!id) continue;
           const incoming = {
             id, name: cells[idx('name')] || '', outlet: cells[idx('outlet')] || '',
-            beat: idx('beat') >= 0 ? cells[idx('beat')] || '' : '',
+            beat: (idx('beat') >= 0 ? cells[idx('beat')] || '' : '') || defaultBeat,
             email: idx('email') >= 0 ? cells[idx('email')] || '' : '',
             phone: idx('phone') >= 0 ? cells[idx('phone')] || '' : '',
             invited_count: idx('invited_count') >= 0 ? Number(cells[idx('invited_count')]) || 0 : 0,
@@ -359,6 +363,8 @@ export default async function handler(req, res) {
             last_invited: idx('last_invited') >= 0 ? cells[idx('last_invited')] || '' : '',
           };
           const prior = byId.get(id);
+          // 這一筆最後真的用到「統一路線」（CSV 自己沒寫、名單裡也還沒有路線）才算，回報給畫面
+          if (defaultBeat && incoming.beat === defaultBeat && !(prior && prior.beat)) defaulted++;
           if (prior) {
             // 既有的路線／狀態／備註是人工填的，匯入不覆蓋；只補資料本身（受邀次數等）
             byId.set(id, {
@@ -388,7 +394,7 @@ export default async function handler(req, res) {
           ...Array.from({ length: height - rowsOut.length }, blank)];
         if (height) await updateRange(`media_roster!A2:N${height + 1}`, full);
 
-        return res.status(200).json({ success: true, created, updated, total: all.length });
+        return res.status(200).json({ success: true, created, updated, total: all.length, ...(defaultBeat ? { default_beat: defaultBeat, defaulted } : {}) });
       }
 
       // 核准／不核准同仁送來的 mail 修改（批次 145）

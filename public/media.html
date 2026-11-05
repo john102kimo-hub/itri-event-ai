@@ -243,6 +243,11 @@
       其餘可選：<code>beat,email,phone,invited_count,confirmed_count,declined_count,last_invited</code>（YYYY-MM-DD）。
       同一個 id 再貼一次是「更新」不是「重複新增」；已經人工填過的路線不會被覆蓋。
     </p>
+    <div class="row" style="margin-bottom:8px">
+      <label for="seed-beat" style="font-size:.85rem">這一批統一的路線</label>
+      <select id="seed-beat"><option value="">不指定（照 CSV 的 beat 欄）</option></select>
+      <span class="desc" style="margin:0">CSV 沒寫路線的人會套這個；已經有路線的人不會被改。</span>
+    </div>
     <textarea id="csv-input" placeholder="id,name,outlet,beat,email,phone,invited_count,confirmed_count,declined_count,last_invited&#10;R0101,吳雅婷,三立新聞,,a@b.com,0912345678,86,3,4,2025-08-20"></textarea>
     <div class="row">
       <button class="primary" onclick="doSeed()">匯入</button>
@@ -457,9 +462,11 @@ async function doSeed(){
   const out = document.getElementById('seed-result');
   if(!csv.trim()){ out.textContent = '請先貼上內容'; return; }
   out.textContent = '匯入中…';
-  const r = await call('seed', {csv}, 'POST');
+  const default_beat = document.getElementById('seed-beat').value;
+  const r = await call('seed', {csv, default_beat}, 'POST');
   if(r.error){ out.textContent = r.error; return; }
-  out.textContent = `完成：新增 ${r.created} 筆、更新 ${r.updated} 筆，目前共 ${r.total} 筆`;
+  out.textContent = `完成：新增 ${r.created} 筆、更新 ${r.updated} 筆，目前共 ${r.total} 筆` +
+    (r.default_beat ? `；其中 ${r.defaulted} 位套用了路線「${r.default_beat}」` : '');
   const list = await call('list');
   render(list);
 }
@@ -482,7 +489,7 @@ async function doExport(){
 // ── 批次 137：新增記者 ───────────────────────────────────────────────────────
 let beatsList = [];
 function fillBeatSelects(){
-  ['add-beat','pick-beat'].forEach(id => {
+  ['add-beat','pick-beat','seed-beat'].forEach(id => {
     const el = document.getElementById(id);
     if(!el || el.options.length > 1) return; // 已經填過就不重填（選到一半不要被洗掉）
     beatsList.forEach(b => { const o = document.createElement('option'); o.value = b; o.textContent = b; el.appendChild(o); });
