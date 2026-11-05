@@ -43,7 +43,7 @@ book.geo_runs = [['date'], [new Date().toLocaleDateString('sv-SE', { timeZone: '
 // ═══ 一、提議 ═════════════════════════════════════════════════════════════════
 console.log('\n── 一、提議（不執行）──');
 {
-  let r = await A.buildProposal({ kind: 'add_reporter', name: '陈新人', outlet: '经济日报', email: ' New＠Ctee.com.tw ', beat: '財經／產業' });
+  let r = await A.buildProposal({ kind: 'add_reporter', name: '陈新人', outlet: '经济日报', email: ' New＠Ctee.com.tw ', beat: '經濟部線' });
   check('新增記者：產生確認卡，欄位由程式組出；簡體字轉繁體、mail 修成小寫半形；請求是 /api/media add',
     r.ok && r.proposal.kind === 'add_reporter' && r.proposal.request.url === '/api/media' && r.proposal.request.body.action === 'add'
     && r.proposal.request.body.email === 'new@ctee.com.tw' && r.proposal.request.body.name === '陳新人' && r.proposal.request.body.outlet === '經濟日報'
@@ -57,10 +57,10 @@ console.log('\n── 一、提議（不執行）──');
     !(await A.buildProposal({ kind: 'add_reporter', outlet: 'y', email: 'a@b.com' })).ok && !(await A.buildProposal({ kind: 'add_reporter', name: 'x', outlet: 'y' })).ok
     && !(await A.buildProposal({ kind: 'add_reporter', name: 'x', outlet: 'y', email: 'abc@def' })).ok && !(await A.buildProposal({ kind: 'add_reporter', name: 'x', outlet: 'y', email: 'a@b.com', beat: '亂寫' })).ok);
 
-  r = await A.buildProposal({ kind: 'update_reporter', id: 'R2', mark: 'active', beat: '生醫' });
+  r = await A.buildProposal({ kind: 'update_reporter', id: 'R2', mark: 'active', beat: '新竹工研院線' });
   check('修改記者：卡上寫出是誰、路線怎麼變、在職狀態；請求是 /api/media update',
-    r.ok && r.proposal.fields.some((f) => /林小美（聯合報）/.test(f.value)) && r.proposal.fields.some((f) => /（未填） → 生醫/.test(f.value)) && r.proposal.request.body.action === 'update' && r.proposal.request.body.mark === 'active', JSON.stringify(r));
-  check('　 找不到 id、沒有要改的、mark 亂填 → 不產生卡', !(await A.buildProposal({ kind: 'update_reporter', id: 'ZZ', beat: '生醫' })).ok
+    r.ok && r.proposal.fields.some((f) => /林小美（聯合報）/.test(f.value)) && r.proposal.fields.some((f) => /（未填） → 新竹工研院線/.test(f.value)) && r.proposal.request.body.action === 'update' && r.proposal.request.body.mark === 'active', JSON.stringify(r));
+  check('　 找不到 id、沒有要改的、mark 亂填 → 不產生卡', !(await A.buildProposal({ kind: 'update_reporter', id: 'ZZ', beat: '新竹工研院線' })).ok
     && !(await A.buildProposal({ kind: 'update_reporter', id: 'R1' })).ok && !(await A.buildProposal({ kind: 'update_reporter', id: 'R1', mark: 'deleted' })).ok);
 
   r = await A.buildProposal({ kind: 'create_event_draft', name: '新品發表會', event_time: '14:00', venue: '台北' });
