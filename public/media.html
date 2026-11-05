@@ -50,6 +50,10 @@
   .rec-flag{font-size:.72rem;font-weight:700;padding:3px 9px;border-radius:20px;white-space:nowrap}
   .flag-stale{background:#fef2f2;color:var(--danger)}
   .flag-nobeat{background:#fffbeb;color:#92400e}
+  .flag-moved{background:#fff7ed;color:#c2410c}
+  .watch-note{background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;padding:10px 12px;font-size:.82rem;line-height:1.6;margin-bottom:12px}
+  .watch-note a{color:#c2410c;word-break:break-all}
+  .watch-note .hint{color:var(--muted);font-size:.75rem;margin-top:4px}
   .rec-meta{font-size:.78rem;color:var(--muted);margin-bottom:12px}
 
   .beat-row{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}
@@ -358,6 +362,14 @@ function render(data){
     const flags = [];
     if(!r.beat) flags.push('<span class="rec-flag flag-nobeat">沒有路線</span>');
     if(r.daysSince===null || r.daysSince>365) flags.push('<span class="rec-flag flag-stale">太久沒受邀</span>');
+    // 追蹤結果（lib/media-tracker.js）：用新聞署名推測他換了媒體，附證據連結給人判斷
+    if(r.watch) flags.unshift('<span class="rec-flag flag-moved">疑似換媒體</span>');
+    const watchNote = r.watch ? `
+      <div class="watch-note">
+        近期署名出現在「${esc(r.watch.other_source)}」${esc(r.watch.other_count)} 篇，名單上的「${esc(r.outlet)}」查不到。
+        ${(r.watch.evidence||[]).slice(0,3).map(e=>/^https?:\/\//.test(e.l||'') ? `<div>・<a href="${esc(e.l)}" target="_blank" rel="noopener noreferrer">${esc(e.t||'相關報導')}</a>（${esc(e.s)} ${esc(e.d)}）</div>` : '').join('')}
+        <div class="hint">這是用新聞署名推測，同名的人也會被誤判。請看過報導再按「已離職／轉線」，或按「還在跑」維持原狀。</div>
+      </div>` : '';
     const beats = (data.beats||[]).map(b =>
       `<div class="beat-chip ${b===r.beat?'on':''}" onclick="pickBeat('${r.id}',this,'${b}')">${b}</div>`
     ).join('');
@@ -368,6 +380,7 @@ function render(data){
         <div>${flags.join(' ')}</div>
       </div>
       <div class="rec-meta">受邀過 ${r.invited_count} 次・${daysLabel(r.daysSince)}</div>
+      ${watchNote}
       <div class="beat-row" id="beats-${r.id}">${beats}</div>
       <div class="action-row">
         <button class="btn btn-confirm" onclick="confirmRec('${r.id}')">✓ 還在跑，資料正確</button>
