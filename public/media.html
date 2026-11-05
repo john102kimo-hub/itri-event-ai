@@ -258,6 +258,8 @@
       <button class="primary" onclick="doSeed()">匯入</button>
       <span id="seed-result" style="font-size:.8rem;color:var(--muted)"></span>
     </div>
+    <p class="desc" style="margin-top:8px">匯入後會自動查每位記者近 120 天的署名報導。只有「疑似已換媒體」的會列在下面建議刪除，其他的直接留在名單，不用逐筆確認。</p>
+    <div id="check-result" style="font-size:.85rem"></div>
   </div>
 </div>
 
@@ -493,6 +495,48 @@ async function doSeed(){
     (r.default_beat ? `；其中 ${r.defaulted} 位套用了路線「${r.default_beat}」` : '');
   const list = await call('list');
   render(list);
+  if(r.ids && r.ids.length) autoCheck(r.ids);
+}
+
+// 批次 191：匯入後自動盤查。每次呼叫只查一小批（後端有時間上限），回 remaining 就接著打，直到查完。
+// 只有「疑似換媒體」會被建議刪除；查不到署名（silent）證據太弱，不建議刪除，只報數量。
+async function autoCheck(ids){
+  const box = document.getElementById('check-result');
+  const total = ids.length;
+  let left = ids, ok = 0, silent = 0, unclear = 0, skipped = 0, fails = 0, stuck = 0;
+  const suggest = [];
+  box.innerHTML = '盤查中…';
+  while(left.length){
+    const r = await call('import_check', {ids: left}, 'POST');
+    if(r.error){ box.textContent = '盤查中斷：' + r.error + '（名單已匯入，沒有受影響）'; return; }
+    ok += r.ok; silent += r.silent; unclear += r.unclear; skipped += r.skipped; suggest.push(...r.suggest_delete);
+    // 沒有任何進展（例如 Google 暫時擋）連續兩輪就收工，不要無限重試
+    if(r.checked === 0 && r.skipped === 0) stuck++; else stuck = 0;
+    fails += r.failed;
+    left = r.remaining || [];
+    box.textContent = `盤查中… ${total - left.length} / ${total}`;
+    if(stuck >= 2) break;
+  }
+  const summary = `完成：近期仍有署名 ${ok} 位、查無署名 ${silent} 位（證據不足，保留）、無法判斷 ${unclear} 位` +
+    (skipped ? `、非個人帳號略過 ${skipped} 位` : '') + (left.length ? `、<b>未查完 ${left.length} 位</b>（可再匯入一次續查）` : '');
+  if(!suggest.length){ box.innerHTML = summary + '。<br><b>沒有建議刪除的</b>，全部已在名單裡。'; return; }
+  box.innerHTML = summary + `。<br><b>建議刪除 ${suggest.length} 位</b>（近期署名出現在別家、原媒體查不到；只是推測，勾掉的會保留）：` +
+    '<div id="suggest-list">' + suggest.map(s => `<label style="display:block;margin:4px 0">
+      <input type="checkbox" class="sg" value="${esc(s.id)}" checked> ${esc(s.name)}（${esc(s.outlet)}）→ 近期在「${esc(s.other_source)}」${s.other_count} 篇` +
+      (s.link ? ` <a href="${esc(s.link)}" target="_blank" rel="noopener">證據</a>` : '') + '</label>').join('') + '</div>' +
+    '<button class="primary" onclick="applySuggest()">把勾選的標為已離職</button> <span id="suggest-result"></span>';
+}
+async function applySuggest(){
+  const ids = [...document.querySelectorAll('#suggest-list .sg:checked')].map(c => c.value);
+  const out = document.getElementById('suggest-result');
+  if(!ids.length){ out.textContent = '沒有勾選'; return; }
+  let n = 0;
+  for(const id of ids){
+    const r = await call('update', {id, mark: 'left'}, 'POST');
+    if(!r.error) n++;
+  }
+  out.textContent = `已標為離職 ${n} 位（不是刪除，名單裡仍查得到，可在待確認名單恢復在職）`;
+  render(await call('list'));
 }
 
 // 匯出全部名單（批次 124）：後端早就有 action=export，畫面上一直沒有按鈕。走 header 帶密碼、用 Blob 下載，
