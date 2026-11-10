@@ -68,13 +68,18 @@ export const saveEventPhoto = (...a) => photo.saveEventPhoto(...a);`
   if (url.includes('?stub=line')) {
     return {
       format: 'module', shortCircuit: true,
+      // 批次 195：真的 lib/line.js 在「訊息送出成功」時 markReplied()（lib/route-trace.js 靠它決定要不要補 route_log）；
+      // 假的版本不經過那段，這裡補上同樣的標記（送不出去＝回 false 的不算），才測得到 route_log。
+      // './route-trace.js' 以這支假檔案的位置解析，?v=N 的版本標記會跟著往下傳（見上面的 resolve()）。
       source: `import { line } from ${JSON.stringify(FAKES)};
+import { markReplied } from './route-trace.js';
+const marked = async (p) => { const r = await p; if (r !== false) markReplied(); return r; };
 export { readRawBody, verifySignature, isBotMentioned, stripMentionText } from ${JSON.stringify(url.replace('?stub=line', '?real=1'))};
-export const replyOrPush = (...a) => line.replyOrPush(...a);
-export const replyOrPushMessages = (...a) => line.replyOrPushMessages(...a);
+export const replyOrPush = (...a) => marked(line.replyOrPush(...a));
+export const replyOrPushMessages = (...a) => marked(line.replyOrPushMessages(...a));
 export const startLoading = (...a) => line.startLoading(...a);
 export const pushImages = (...a) => line.pushImages(...a);
-export const replyTextWithImages = (...a) => line.replyTextWithImages(...a);
+export const replyTextWithImages = (...a) => marked(line.replyTextWithImages(...a));
 export const createRichMenu = (...a) => line.createRichMenu(...a);
 export const uploadRichMenuImage = (...a) => line.uploadRichMenuImage(...a);
 export const setDefaultRichMenu = (...a) => line.setDefaultRichMenu(...a);
@@ -84,8 +89,8 @@ export const linkRichMenuToUser = (...a) => line.linkRichMenuToUser(...a);
 export const pushChartImage = (...a) => line.pushChartImage(...a);
 export const unlinkRichMenuFromUser = (...a) => line.unlinkRichMenuFromUser(...a);
 export const getProfile = (...a) => line.getProfile(...a);
-export const replyMessage = (...a) => line.replyOrPush(null, null, ...a);
-export const pushMessage = (...a) => line.replyOrPush(null, ...a);`
+export const replyMessage = (...a) => marked(line.replyOrPush(null, null, ...a));
+export const pushMessage = (...a) => marked(line.replyOrPush(null, ...a));`
     };
   }
   return next(url, context);

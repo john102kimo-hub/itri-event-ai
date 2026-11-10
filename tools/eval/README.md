@@ -50,3 +50,22 @@ ANTHROPIC_API_KEY=… node tools/eval/run.mjs --baseline tools/eval/results/befo
 - 題庫只有 20 題、一個虛構活動：抓得到**退步**，不代表沒退步的地方就沒問題。
 - 程式評分抓得到「答案裡有沒有編造的數字」，抓不到「措辭好不好」「有沒有答到重點」——那要人看。
 - 只有這支會花錢；`npm test` 永遠只跑 mock。
+
+## 聲明稿／回應說明題庫（批次 196）
+
+`tools/eval/cases/statement.json`（標準答案 `mock-statement.json`）：虛構的「敏感新聞回應說明」場次，三類題目——**口徑外追問**（院方說明範圍外，不能講成「沒有資料」）、**連續追問**（上一題也答不出來，要更短）、**資料沒寫**。
+
+```bash
+node tools/eval/run.mjs --cases tools/eval/cases/statement.json --provider mock --mock tools/eval/mock-statement.json
+ANTHROPIC_API_KEY=… node tools/eval/run.mjs --cases tools/eval/cases/statement.json --save tools/eval/results/statement-before.json
+```
+
+題目可以帶 `history`（上一輪對話）、`prev_no_data: true`（模擬「上一題也答不出來」，系統會多一句不要重複的提示）、`max_lines`（連續追問的行數上限）。新增的硬性檢查：
+
+| 檢查 | 意思 |
+|---|---|
+| `honest_no_data`（改了定義） | 以前是「答案裡要出現『沒有資料』這類字」；現在是**程式判得出這一題是 no_data**（模型標了 `[[NO_DATA]]`，或句型像沒資料）。沒有編造由 `grounded`／`exclude` 負責 |
+| `no_false_handoff` | 模型自己寫「已轉給同仁」「幫您轉達」「轉介」就是假承諾或多餘的一句——轉告是不是真的、要不要轉介的詢問，都是程式接的（批次 197：先問記者要不要，回「是」才通知） |
+| `out_of_scope_wording` | 口徑外的題目（`expect_out_of_scope`），回覆裡不能有「沒有資料」「無法確認」「無可奉告」 |
+| `short_reply` | 連續追問的題目（`max_lines`）比第一題短 |
+| `out_of_scope_marker`（軟性） | 口徑外的關鍵詞有填「口徑外」（程式靠它接上院方固定說法） |

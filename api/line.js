@@ -45,6 +45,7 @@
 // 依賴只往下走：store／format／chitchat → runtime → nodata／register → reporter → staff-mode／group → 這支。
 
 import { timingSafeEqual } from 'crypto';
+import { runTraced, setTrace } from '../lib/route-trace.js';
 import { toTraditionalTW } from '../lib/zh-tw.js';
 import { readRawBody, verifySignature, replyOrPushMessages, startLoading, isBotMentioned } from '../lib/line.js';
 import { buildCalendarCards, buildCalendarCardsFor, routeIntent } from '../lib/router.js';
@@ -58,7 +59,7 @@ import {
 } from '../lib/staff.js';
 import { isBusinessEvent } from '../lib/audience.js';
 import { parseB2BBind, handleB2BBind, isUnbindAsk, handleB2BUnbind, isPartnershipAsk, handlePartnershipAsk } from '../lib/b2b-line.js';
-import { sanitize } from '../lib/line-format.js';
+import { sanitize, EVENT_UNAVAILABLE_TEXT } from '../lib/line-format.js';
 import {
   CHITCHAT_FIXED_REPLIES, detectBoundChitchat, looksLikeNameOrSkip, mediaFromGreeting, mediaNameOf, nonTextReply
 } from '../lib/line-chitchat.js';
@@ -74,7 +75,7 @@ import { pinGenericTechQueryToEvent } from '../lib/line-nodata.js';
 import { handleRegBind, resolveMetaIntent } from '../lib/line-register.js';
 import {
   answerIndustryTrend, answerNewsQuery, answerQuestion, fullTextPickEvent, handleContactTopicMessage,
-  handleMetaIntent, handleNewsQueryMessage, handleTechNewsPick, handleTechQueryMessage, handleTrendQueryMessage, handleUnbound, isFullTextAsk,
+  handleHandoffReply, handleMetaIntent, handleNewsQueryMessage, handleTechNewsPick, handleTechQueryMessage, handleTrendQueryMessage, handleUnbound, isFullTextAsk,
   sendCalendarReply
 } from '../lib/line-reporter.js';
 import { applyStaffMenu, applyColleagueMenu, handleStaffImage, handleStaffMessage } from '../lib/line-staff-mode.js';
@@ -369,16 +370,22 @@ async function handleEvent(ev) {
   const pickedFullText = await fullTextPickEvent(text);
   if (pickedFullText) {
     await upsertBinding(userId, pickedFullText.id, '');
+    setTrace({ intent: 'qa', event_ids: [pickedFullText.id], confidence: 'high', context: 'button', path: 'full_text_pick' });
     await answerQuestion(replyToken, userId, pickedFullText, await getStoredMediaName(userId), '給我完整新聞稿', { memory: true });
     return;
   }
 
   const binding = await getBinding(userId);
 
+  // 米亞剛問了「要不要轉介真人」，記者整句回「是」或「不用」（批次 197）。一定要排在 resolveMetaIntent() 之前：
+  // 「好」會被當成收尾語（courtesy）而不是「是」。沒有待回覆的詢問、或不是整句「是／不用」就照舊往下走。
+  if (await handleHandoffReply(replyToken, userId, text)) return;
+
   // 活動列表／換一場／使用說明——不管有沒有綁定都要先攔，見 handleMetaIntent() 的說明
   const metaIntent = await resolveMetaIntent(text);
   if (metaIntent) {
     console.log(`[line] meta intent=${metaIntent} user=${userId} q="${text.slice(0, 40)}"`);
+    setTrace({ path: `meta:${String(metaIntent).slice(0, 30)}` }); // 批次 195：規則層直接處理，沒問路由
     await handleMetaIntent(replyToken, userId, text, metaIntent, binding);
     return;
   }
@@ -433,7 +440,7 @@ async function handleEvent(ev) {
 
   const event = await getEventById(binding.event_id);
   if (!isUsable(event)) {
-    await replyOrPush(replyToken, userId, '這場活動目前無法問答，請洽現場工作人員。');
+    await replyOrPush(replyToken, userId, EVENT_UNAVAILABLE_TEXT);
     return;
   }
 
@@ -468,6 +475,7 @@ async function handleEvent(ev) {
   // 不補查官網、不寫 qa_log。
   const boundChitchat = detectBoundChitchat(text);
   if (boundChitchat) {
+    setTrace({ path: 'chitchat' });
     // 招呼裡自報了媒體（批次 124，同 lib/line-reporter.js sendFallbackGuide()）：記下來、招呼語帶上稱呼
     const media = boundChitchat === 'greet' ? mediaFromGreeting(text) : '';
     if (media) await setMediaName(userId, sanitize(media, 40));
@@ -501,6 +509,9 @@ async function handleEvent(ev) {
       await routeIntent(text, buildCalendarCardsFor(await getAllEventRows(), event.id),
         { currentEventId: event.id, ...(await recentTopicContext(userId)) }),
       text, event.id);
+
+  // 批次 195：路由結果記進這則事件的 trace，寫 qa_log／route_log 時讀出來（lib/route-trace.js）
+  setTrace({ intent: routed.intent, event_ids: routed.event_ids || [], confidence: routed.confidence || '', context: 'bound', path: routed.intent });
 
   // 綁定中，但這題其實是在問「有哪些場次」——不動原本的活動綁定，只列清單（跟
   // handleMetaIntent() 的 calendar 分支同一支，見 sendCalendarReply()）。
@@ -543,6 +554,7 @@ async function handleEvent(ev) {
       await upsertBinding(userId, target.id, '');
       answerEvent = target;
       switchNotice = `🔄 已切換到《${target.name}》：\n`;
+      setTrace({ context: 'switch' });
     }
   }
 
@@ -673,7 +685,12 @@ export default async function handler(req, res) {
       const store = requestCtx.getStore();
       if (store) store.quoteToken = ev?.message?.quoteToken || null;
       try {
-        await handleEvent(ev);
+        // 批次 195：每則事件各開一份 trace（路由結果、有沒有回、有沒有進 qa_log），結束時補 route_log
+        const isText = ev?.type === 'message' && ev.message?.type === 'text';
+        await runTraced(
+          { scope: ev?.source?.type === 'user' ? '1:1' : 'group', question: isText ? String(ev.message.text || '') : '' },
+          () => handleEvent(ev)
+        );
       } catch (e) {
         // 單一事件出錯不能讓整支回 500——LINE 收到非 2xx 會重送整批 webhook，
         // 容易在配額耗盡或 Anthropic 暫時出狀況時觸發重試風暴、雪上加霜。

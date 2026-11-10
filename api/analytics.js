@@ -25,11 +25,11 @@ import { requireAdmin } from '../lib/auth.js';
 import { readQaRowsWithoutAnswers } from '../lib/qa-log.js';
 import { readEventRows } from '../lib/events-table.js';
 import { isBusinessEvent } from '../lib/audience.js';
-import { UNANSWERED_RE } from '../lib/teach-queue.js';
+import { isUnansweredRow } from '../lib/teach-queue.js';
 import { countTopics } from '../lib/qa-topics.js';
 import { buildReportScope, REPORT_WINDOW_DAYS } from '../lib/report-scope.js';
 
-// 「AI 這題疑似沒答到」的判斷（UNANSWERED_RE）住在 lib/teach-queue.js：待教清單（批次 139）要用同一條規則，
+// 「AI 這題疑似沒答到」的判斷（isUnansweredRow()，批次 195 起先看 qa_log J 欄的 answer_status）住在 lib/teach-queue.js：待教清單（批次 139）要用同一條規則，
 // 兩邊各寫一份遲早會判得不一樣。
 const previewOf = (a, n = 140) => String(a || '').replace(/\s+/g, ' ').trim().slice(0, n);
 
@@ -152,9 +152,9 @@ export default async function handler(req, res) {
     const n = parseInt(req.query.answer_row, 10);
     if (!Number.isInteger(n) || n < 2) return res.status(400).json({ error: 'answer_row 不正確' });
     try {
-      const row = (await readRange(`qa_log!A${n}:I${n}`))[0];
+      const row = (await readRange(`qa_log!A${n}:J${n}`))[0];
       if (!row || !row[1] || row[1] === '[deleted]' || row[6] === '1') return res.status(404).json({ error: '找不到這筆問答' });
-      return res.status(200).json({ row_num: n, time: row[0] || '', question: row[4] || '', answer: row[5] || '', unanswered: UNANSWERED_RE.test(row[5] || '') });
+      return res.status(200).json({ row_num: n, time: row[0] || '', question: row[4] || '', answer: row[5] || '', unanswered: isUnansweredRow(row) });
     } catch (err) {
       return res.status(500).json({ error: err.message });
     }
@@ -167,7 +167,7 @@ export default async function handler(req, res) {
   try {
     // I 欄＝記者姓名（批次 105），舊資料是空的。儀表板的摘要版用不到 AI 回答全文（F 欄），
     // 跳過那一欄（批次 117，見 lib/qa-log.js）；完整版要算「疑似沒答到」與預覽，照舊整張讀。
-    const rawRows = summaryOnly ? await readQaRowsWithoutAnswers() : await readRange('qa_log!A2:I');
+    const rawRows = summaryOnly ? await readQaRowsWithoutAnswers() : await readRange('qa_log!A2:J');
     // 保留原始 row_num（sheet 第幾列，row 2 = index 0）
     const rowsWithNum = rawRows.map((r, i) => ({ r, rowNum: i + 2 }));
 
@@ -292,10 +292,10 @@ export default async function handler(req, res) {
 
     return res.status(200).json({
       ...base,
-      unanswered_count: filtered.filter(({ r }) => UNANSWERED_RE.test(r[5] || '')).length,
+      unanswered_count: filtered.filter(({ r }) => isUnansweredRow(r)).length,
       recent: filtered.slice(-limit).reverse().map(({ r, rowNum }) => ({
         time: r[0], event_id: r[1], event: r[2], media: r[3], reporter: r[8] || '', question: r[4],
-        answer_preview: previewOf(r[5]), unanswered: UNANSWERED_RE.test(r[5] || ''),
+        answer_preview: previewOf(r[5]), unanswered: isUnansweredRow(r),
         row_num: rowNum, source: r[7] || 'web'
       }))
     });

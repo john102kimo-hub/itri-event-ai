@@ -733,6 +733,20 @@ details.adv[open] > summary { border-bottom:1px solid var(--border); margin-bott
             style="font-size:0.85rem;font-family:ui-monospace,Menlo,Consolas,monospace"></textarea>
           <div class="form-hint" style="margin-top:8px" id="contacts-directory-status"></div>
         </div>
+        <div class="section-block" id="org-kb-block">
+          <div class="section-header">
+            <h2><i class="ti ti-building"></i> 機構資料：工研院一般公開資料（沒綁定活動時回答機構題）</h2>
+            <button class="btn btn-primary" onclick="saveOrgKb()"><i class="ti ti-device-floppy"></i> 儲存機構資料</button>
+          </div>
+          <div class="form-hint" style="margin-bottom:12px">
+            記者沒綁定任何一場活動、問「怎麼申請採訪」「工研院有幾個所」這類機構本身的事時，米亞只根據這份資料回答，並註明出處與更新日期；綁定某一場時，這一場的資料沒寫到才會用（企業場與聲明稿類敏感場次不用）。<br>
+            <b>每一條一行，開頭寫更新日期</b>，後面用「｜」接內容，例如 <code>2026-05-01｜採訪申請：請洽傳播處新聞聯絡人，電話…</code>。同一條要換行，下一行直接接著寫（不用日期）。<b>不要放</b>會變的數字、規則、未公開的東西。上限 6,000 字。<br>
+            超過 180 天沒更新、或沒標日期的條目，下面會列出來；過期的機構資料等於替工研院講錯話，請定期複查。
+          </div>
+          <textarea class="form-control" id="input-org-kb" rows="12" placeholder="2026-05-01｜採訪申請：…" style="font-size:0.85rem;font-family:ui-monospace,Menlo,Consolas,monospace"></textarea>
+          <div class="form-hint" style="margin-top:8px" id="org-kb-status"></div>
+          <div id="org-kb-warn" style="margin-top:8px;font-size:0.85rem"></div>
+        </div>
       </div>
     </div>
   </div>
@@ -874,8 +888,11 @@ details.adv[open] > summary { border-bottom:1px solid var(--border); margin-bott
             <option value="技術媒合會"></option>
             <option value="客戶參訪"></option>
             <option value="技術交流會"></option>
+            <option value="聲明稿"></option>
+            <option value="敏感新聞回應說明"></option>
           </datalist>
           <div class="form-hint">選「企業說明會／技術媒合會／客戶參訪／技術交流會」＝企業場：活動頁問公司名稱、AI 不報價，不算進媒體統計，也不在米亞給記者的活動清單裡</div>
+          <div class="form-hint">選「聲明稿／敏感新聞回應說明」＝敏感場次：米亞答不出來時固定回「這部分我們暫無回應，主要仍以聲明稿內容為主」、每一題都默默通知公關、不補查官網、不帶別場資料；請在知識庫補一段【口徑外的問題】（院方的固定說法）與【常見問答 Q&amp;A】</div>
         </div>
         <div class="form-group">
           <label><i class="ti ti-building"></i> 主辦單位</label>
@@ -1107,7 +1124,7 @@ function showView(name) {
   closeMore();
   window.scrollTo?.(0, 0);
   if (name === 'analytics') loadAnalytics();
-  if (name === 'contacts') loadContactsDirectory();
+  if (name === 'contacts') { loadContactsDirectory(); loadOrgKb(); }
 }
 
 // ── 全域技術窗口分工 ──────────────────────────────────────
@@ -1143,6 +1160,55 @@ async function saveContactsDirectory() {
     if (!res.ok) throw new Error(data.error || '儲存失敗');
     statusEl.textContent = '已儲存';
     toast('邀訪窗口分工已儲存');
+  } catch (e) {
+    statusEl.textContent = '儲存失敗：' + e.message;
+  }
+}
+
+// ── 機構資料（批次 198）──────────────────────────────────────
+const ORG_KB_LIMIT = 6000;
+function renderOrgKbStats(stats) {
+  const st = document.getElementById('org-kb-status');
+  const warn = document.getElementById('org-kb-warn');
+  if (!stats) { warn.innerHTML = ''; return; }
+  st.textContent = `共 ${stats.total} 條，${stats.length} / ${stats.limit} 字` + (stats.newest ? `，最近更新 ${stats.newest}` : '');
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const parts = [];
+  if (stats.stale.length) parts.push(`<div style="color:#b45309">⚠️ 超過 180 天沒更新（${stats.stale.length} 條）：<br>${stats.stale.map((x) => `・${esc(x.date)}（${x.days} 天前）${esc(x.preview)}`).join('<br>')}</div>`);
+  if (stats.undated.length) parts.push(`<div style="color:#b45309">⚠️ 沒標更新日期（${stats.undated.length} 條）：<br>${stats.undated.map((x) => `・${esc(x)}`).join('<br>')}</div>`);
+  warn.innerHTML = parts.join('');
+}
+async function loadOrgKb() {
+  const statusEl = document.getElementById('org-kb-status');
+  statusEl.textContent = '載入中…';
+  try {
+    const res = await authedFetch('/api/events?action=org_kb');
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || '載入失敗');
+    document.getElementById('input-org-kb').value = data.content || '';
+    renderOrgKbStats(data.stats);
+  } catch (e) {
+    statusEl.textContent = '載入失敗：' + e.message;
+  }
+}
+async function saveOrgKb() {
+  const statusEl = document.getElementById('org-kb-status');
+  const content = document.getElementById('input-org-kb').value;
+  if (content.length > ORG_KB_LIMIT) {
+    statusEl.textContent = `內容 ${content.length} 字，超過上限 ${ORG_KB_LIMIT} 字，請刪減後再存`;
+    return;
+  }
+  statusEl.textContent = '儲存中…';
+  try {
+    const res = await authedFetch('/api/events', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'org_kb_save', password: state.password, content })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || '儲存失敗');
+    renderOrgKbStats(data.stats);
+    toast('機構資料已儲存');
   } catch (e) {
     statusEl.textContent = '儲存失敗：' + e.message;
   }

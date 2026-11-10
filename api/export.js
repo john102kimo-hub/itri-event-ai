@@ -25,7 +25,7 @@ export default async function handler(req, res) {
   const { event_id } = req.query;
 
   try {
-    const rows = await readRange('qa_log!A2:I');
+    const rows = await readRange('qa_log!A2:Q'); // J～Q＝批次 195 的決策紀錄（lib/route-trace.js）
     // 已刪除的問答（G 欄標記，或舊資料殘留的 B 欄 [deleted]）不該出現在結案報告的匯出檔裡。
     // 同仁在 LINE 職員模式下的試問也一樣要濾掉——這份 CSV 是結案報告的附件，混進自己人的測試
     // 等於在正式文件裡灌水。
@@ -36,9 +36,12 @@ export default async function handler(req, res) {
     const filtered = event_id ? valid.filter(r => r[1] === event_id) : valid;
 
     // 批次 105：媒體與姓名分兩欄（I 欄是姓名；舊資料沒有，留空）
-    const headers = ['時間', '活動ID', '活動名稱', '媒體名稱', '姓名', '記者問題', 'AI回答'];
+    // 批次 195：後面八欄是這一題的決策紀錄（舊資料是空的）：答題狀態、路由意圖、路由場次、把握度、場次怎麼選到、資料來源、沒資料關鍵詞、出口檢查標記
+    const headers = ['時間', '活動ID', '活動名稱', '媒體名稱', '姓名', '記者問題', 'AI回答',
+      '答題狀態', '路由意圖', '路由場次', '路由把握度', '場次怎麼選到', '資料來源', '沒資料關鍵詞', '出口檢查標記'];
     const csvRows = [headers, ...filtered.map(r => [
-      r[0] || '', r[1] || '', r[2] || '', r[3] || '', r[8] || '', r[4] || '', r[5] || ''
+      r[0] || '', r[1] || '', r[2] || '', r[3] || '', r[8] || '', r[4] || '', r[5] || '',
+      r[9] || '', r[10] || '', r[11] || '', r[12] || '', r[13] || '', r[14] || '', r[15] || '', r[16] || ''
     ])];
 
     const csv = csvRows.map(row => row.map(csvCell).join(',')).join('\r\n');

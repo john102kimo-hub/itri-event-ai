@@ -16,6 +16,8 @@ import { readEventRows } from '../lib/events-table.js';
 import { logAiUsage } from '../lib/ai-usage.js';
 import { isRefusal, logRefusal, refusalReply, postAnthropic, buildSonnetRetryBody, SONNET_RETRY_MODEL, dropRefusedTurns, looksEnglish, REFUSAL_MIDWAY_ZH, REFUSAL_MIDWAY_EN } from '../lib/ai-refusal.js';
 import { checkAnswerGrounding, stripDisclaimer } from '../lib/answer-grounding.js';
+import { answerStatusOf, qaExtraCells, ensureQaLogHeader } from '../lib/route-trace.js';
+import { UNANSWERED_RE } from '../lib/teach-queue.js';
 
 // 批次 120：Haiku 4.5 → Haiku 5.5。5.5 預設會開 adaptive thinking（4.5 不會），記者要的是聊天速度的回應，
 // 所以下面 body 明確送 thinking:{type:'disabled'}（5.5 在 effort medium 以下接受）。不送 temperature 等取樣參數（5.5 會 400）。
@@ -220,7 +222,7 @@ const sanitize = (s, max) => String(s || '').replace(/\s+/g, ' ').trim().slice(0
 // 把這輪問答寫進 qa_log。串流模式下是在「文字已經全部送到瀏覽器之後」才呼叫——
 // 記者已經讀得到完整答案，但 Function 還沒 res.end()，所以寫入照樣有完整執行時間，
 // 不會重蹈當年 fire-and-forget 被凍結、寫到一半消失的覆轍。
-async function logQA({ event_id, eventName, media_name, reporter_name, question, reply }) {
+async function logQA({ event_id, eventName, media_name, reporter_name, question, reply, refused = false }) {
   if (!process.env.GOOGLE_SPREADSHEET_ID || !question) return;
   const timestamp = new Date().toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' });
   try {
@@ -229,10 +231,14 @@ async function logQA({ event_id, eventName, media_name, reporter_name, question,
     // 後台會把這筆資料當成已刪除。
     // I 欄（批次 105）：記者姓名。網頁彈窗拆成「媒體」「姓名」兩欄後，D 欄只放媒體，這樣
     // 後台的「服務媒體家數」才數得準（舊版一整串「媒體 人名」去重，同一家會被算成好幾家）。
-    await appendRows('qa_log!A:I', [[
+    // J～Q（批次 195）：這一題是怎麼答的。網頁沒有路由，intent 固定 qa；狀態用跟後台「疑似答不出來」同一條判斷（UNANSWERED_RE），
+    // 網頁的 prompt 沒有 NO_DATA 標記，也不補查官網。
+    await ensureQaLogHeader();
+    await appendRows('qa_log!A:Q', [[
       timestamp, event_id, eventName,
       sanitize(media_name, 40) || '（未填寫）', sanitize(question, 2000), reply, '', 'web',
-      sanitize(reporter_name, 40)
+      sanitize(reporter_name, 40),
+      ...qaExtraCells({ status: answerStatusOf({ refused, noData: UNANSWERED_RE.test(reply) }), kb: 'kb', scope: 'web' })
     ]]);
   } catch (e) {
     console.error('Sheets 寫入失敗:', e.message);
@@ -416,7 +422,7 @@ export default async function handler(req, res) {
           if (note) reply += '\n\n' + note;
         }
       }
-      await logQA({ ...logCtx, reply });
+      await logQA({ ...logCtx, reply, refused: refusedFixed });
       return res.status(200).json({ reply });
     }
 
@@ -517,7 +523,7 @@ export default async function handler(req, res) {
     res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
     res.flush?.();
 
-    await logQA({ ...logCtx, reply: brokenMidway ? reply + '\n' + STREAM_BROKEN_MSG : reply });
+    await logQA({ ...logCtx, reply: brokenMidway ? reply + '\n' + STREAM_BROKEN_MSG : reply, refused: fixedTail });
     return res.end();
   } catch (err) {
     console.error('chat 失敗:', err?.name, err?.message);

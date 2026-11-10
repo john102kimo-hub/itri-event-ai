@@ -602,7 +602,7 @@ for (const [label, bad] of [
   state.fallbackReply = bad;
   out = await send('隨便問一句跟任何主題都不相關的話');
   check(`智慧兜底輸出${label} → 退回固定兜底文案，四條路都講到，不會把壞輸出丟給記者`,
-    out.at(-1)?.kind === 'text' && /不太確定該從哪邊幫您找答案/.test(out.at(-1).text) &&
+    out.at(-1)?.kind === 'text' && /我手上沒有對得上的資料/.test(out.at(-1).text) &&
     ['活動名稱', '產業趨勢', '工研院', '媒體邀訪需求'].every(x => out.at(-1).text.includes(x)),
     JSON.stringify(out.at(-1)));
 }

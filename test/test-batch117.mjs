@@ -127,7 +127,7 @@ for (const [f, re] of [
   check(`${f}：改用 readQaRowsWithoutAnswers()，不再整張讀 qa_log`, /readQaRowsWithoutAnswers\(\)/.test(t) && !re.test(t));
 }
 check('api/analytics.js：儀表板摘要版跳過 F 欄；完整版（要算「疑似沒答到」）照舊整張讀',
-  /summaryOnly \? await readQaRowsWithoutAnswers\(\) : await readRange\('qa_log!A2:I'\)/.test(src('api/analytics.js')));
+  /summaryOnly \? await readQaRowsWithoutAnswers\(\) : await readRange\('qa_log!A2:J'\)/.test(src('api/analytics.js')));
 globalThis.setTimeout = realSetTimeout;
 
 /* ───────── 三之後：假試算表＋假 LINE ───────── */

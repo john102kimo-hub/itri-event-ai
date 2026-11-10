@@ -171,6 +171,9 @@ export function reset() {
   state.changes = [];
   state.qaLog = [];          // 批次 139：qa_log!A2:I 的列
   state.qaAppended = [];     // 批次 175：LINE／網頁問答真的 append 進 qa_log 的列（要設 GOOGLE_SPREADSHEET_ID 才會寫）
+  state.orgKb = '';          // 批次 198：org_kb 分頁那一格的內容（空字串＝沒填，整個機制不影響原有行為）
+  state.failPushTo = '';     // 批次 196：非空＝推播給這個 LINE ID 會失敗
+  state.routeLog = [];       // 批次 195：route_log 的列 [時間, 1:1/group, intent, 場次, 把握度, 路徑, 問題前 60 字]
   state.teachQueue = [];     // 批次 139：teach_queue!A2:J 的列
   state.sheetLatencyMs = 0;  // 批次 80：>0 時每次讀寫都延遲，讓同時進來的兩個請求真的交錯（測競態用）
   state.eventOwners = [];    // 批次 177：event_owners 的列 [活動 id, LINE ID, 姓名, 時間, 來源]
@@ -211,6 +214,7 @@ export const sheets = {
     }
     if (range.startsWith('contacts_directory!')) return state.contactsDirectory ? [[state.contactsDirectory]] : [];
     if (range.startsWith('bot_memory!')) return state.memories.map(r => [...r]);
+    if (range.startsWith('org_kb!')) return state.orgKb ? [[state.orgKb]] : []; // 批次 198：機構資料（一格存整份）
     if (range.startsWith('qa_log!')) return (state.qaLog || []).map(r => [...r]);          // 批次 139：待教清單掃的問答紀錄
     if (range.startsWith('teach_queue!')) return (state.teachQueue || []).map(r => [...r]); // 批次 139
     if (range.startsWith('event_changes!')) return (state.changes || []).map(r => [...r]);
@@ -222,6 +226,7 @@ export const sheets = {
   async appendRows(range, rows) {
     await lag();
     if (range.startsWith('qa_log!')) state.qaAppended.push(...rows.map(r => [...r]));
+    if (range.startsWith('route_log!')) (state.routeLog ||= []).push(...rows.map(r => [...r])); // 批次 195
     if (range.startsWith('line_users!')) {
       for (const r of rows) state.bindings.set(r[0], {
         event_id: r[1], media_name: r[2], bound_at: Number(r[3]), note: r[5],
@@ -311,6 +316,7 @@ export const sheets = {
 export const line = {
   // quoteToken：批次 83 起群組回答會引用記者那一則問題，測試要驗得到「引用了哪一則」。
   async replyOrPush(replyToken, userId, text, quickReplyItems, opts = {}) {
+    if (replyToken === null && state.failPushTo && state.failPushTo === userId) return { ok: false }; // 批次 196：模擬推播給這位失敗（對方封鎖、額度用完）
     // to：批次 78 起要驗「通知是推給管理員、不是推給改資料的人」
     sent.push({ kind: 'text', text, quickReply: quickReplyItems || [], to: userId, push: replyToken === null, quoteToken: opts?.quoteToken || null });
     return true;
