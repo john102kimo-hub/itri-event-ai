@@ -341,7 +341,7 @@ out('\n── 三、拒答：Haiku 被攔下 → Sonnet 5.5 重答（非串流�
   const en = await run({ q: 'What is the annual capacity?', plan: [refusalJson(), refusalJson()] });
   check('　 記者用英文問：固定句是英文', en.body.reply === refusalReply({ contact: '王小明 03-1111111', english: true }) && /^I'm unable to answer/.test(en.body.reply), en.body.reply);
   const plain = await run({ event: 'plain', plan: [refusalJson(), refusalJson()] });
-  check('　 活動沒填新聞聯絡人：只說「洽新聞聯絡人」', plain.body.reply === '這一題我這邊沒辦法回答，建議洽新聞聯絡人。', plain.body.reply);
+  check('　 活動沒填新聞聯絡人：只說「洽新聞聯絡人」', plain.body.reply === '這一題我這邊沒辦法回答，我寧可不亂講。趕稿的話，請直接洽新聞聯絡人。', plain.body.reply);
   const simp = await run({ event: 'simp', plan: [refusalJson(), refusalJson()] });
   check('★ 固定句過繁體出口：後台貼進來的聯絡人是簡體（发言人）→ 送出去是繁體（發言人）', simp.body.reply.includes('發言人') && !simp.body.reply.includes('发') && simp.qa === simp.body.reply, simp.body.reply);
 }

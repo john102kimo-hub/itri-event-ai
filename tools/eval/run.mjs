@@ -26,7 +26,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { formatEventBasics, formatImages, systemPromptFor } from '../../lib/prompt.js';
-import { lineExtraRules } from '../../lib/line-format.js';
+import { lineExtraRules, LINE_NO_DATA_RULE } from '../../lib/line-format.js';
+import { REPEAT_NO_DATA_HINT } from '../../lib/no-data-handoff.js';
 import { ZH_TW_RULE } from '../../lib/zh-tw.js';
 import { resolveRelativeDates } from '../mcp-itri/server.mjs';
 import { gradeAnswer } from './checks.mjs';
@@ -50,11 +51,12 @@ export const shownTextFor = (event, q) => [`${event.knowledge_base}${formatImage
 
 export function buildSystem(event, profile) {
   const extra = profile === 'line' ? lineExtraRules(event) : [];
-  return [systemPromptFor(event, extra), ZH_TW_RULE, formatEventBasics(event)].filter(Boolean).join('\n');
+  // 跟正式站一致：LINE 的活動問答傳自己的「答不出來」講法（lib/line-reporter.js answerQuestion()）；網頁版不傳
+  return [systemPromptFor(event, extra, profile === 'line' ? { noDataRule: LINE_NO_DATA_RULE } : {}), ZH_TW_RULE, formatEventBasics(event)].filter(Boolean).join('\n');
 }
 
-async function askAnthropic({ system, q, model, thinking }) {
-  const body = { model, max_tokens: 2048, system: [{ type: 'text', text: system }], messages: [{ role: 'user', content: q }], ...(thinking ? { thinking } : {}) };
+async function askAnthropic({ system, q, history = [], model, thinking }) {
+  const body = { model, max_tokens: 2048, system: [{ type: 'text', text: system }], messages: [...history, { role: 'user', content: q }], ...(thinking ? { thinking } : {}) };
   for (let attempt = 0; attempt < 2; attempt++) {
     const res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST', signal: AbortSignal.timeout(90_000),
@@ -86,7 +88,7 @@ export async function runEval({ casesFile = 'tools/eval/cases/core.json', provid
     for (let i = 0; i < runs; i++) {
       let raw, error = null;
       try {
-        raw = provider === 'mock' ? (mocks[spec.id] ?? '') : await askAnthropic({ system, q: spec.q, model: useModel, thinking: useThinking });
+        raw = provider === 'mock' ? (mocks[spec.id] ?? '') : await askAnthropic({ system: spec.prev_no_data ? `${system}\n${REPEAT_NO_DATA_HINT}` : system, q: spec.q, history: spec.history || [], model: useModel, thinking: useThinking });
       } catch (e) { error = e.message; }
       if (error) { results.push({ pass: false, error, final: '', failed: ['api_error'], softFailed: [], details: { api_error: error } }); continue; }
       const g = await gradeAnswer({ raw, shownText: shownTextFor(event, spec.q), spec, profile });

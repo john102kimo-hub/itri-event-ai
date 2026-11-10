@@ -16,8 +16,10 @@ async function loadNoData() {
   }
   return nodata;
 }
-const FALLBACK_NO_DATA_RE = /(沒有|未|查不到|找不到).{0,10}(資料|內容|資訊|名單|說明)|沒有提到|未提及|沒有這方面|手上沒有|不在.{0,6}資料/;
+const FALLBACK_NO_DATA_RE = /(沒有|未|查不到|找不到).{0,10}(資料|內容|資訊|名單|說明)|沒有提到|未提及|沒有這方面|手上沒有|不在.{0,6}資料|尚[無未]有?.{0,8}(?:資料|資訊|名單)|資料還沒寫到|還沒寫到|對外的說明就到|不方便替院方/;
 
+const FALSE_HANDOFF_RE = /已(?:經)?(?:幫您|為您|替您)?轉(?:給|達|告|交)|幫您轉達|(?:我)?會(?:幫您)?轉達|轉介/;
+const OUT_OF_SCOPE_BANNED_RE = /我沒有資料|沒有資料|無法確認|無可奉告/;
 const MARKDOWN_RES = [/\*\*[^*\n]+\*\*/, /^\s{0,3}#{1,6}\s+\S/m, /```/, /^\s*\|.+\|\s*$/m, /^\s*\|?\s*:?-{3,}:?\s*\|/m, /\[[^\]\n]+\]\([^)\n]+\)/];
 const MARKER_RE = /\[\[\s*NO_DATA|^\s*NO_DATA\s*[:：]/im;
 const DISCLAIMER_RE = /僅供參考|for reference only|reference only/i;
@@ -62,7 +64,23 @@ export async function gradeAnswer({ raw, shownText, spec = {}, profile = 'line' 
   for (const s of spec.exclude || []) add(`exclude:${s}`, 'hard', !final.includes(s), `答案不該出現「${s}」`);
   if (spec.expect_no_data) {
     const re = (await loadNoData()).NO_DATA_PHRASE_RE || FALLBACK_NO_DATA_RE;
-    add('honest_no_data', 'hard', re.test(body), '資料裡沒有的東西，答案沒有老實說「沒有資料」（可能在編造）');
+    // 批次 196：以前是「答案裡要出現『沒有資料』這類字」；答不出來的講法改了（資料還沒寫到、院方的說明就到這裡），
+    // 判準改成跟正式站一樣：程式判得出這一題是 no_data（模型標了 [[NO_DATA]] 關鍵詞，或回覆的句型像沒資料）。
+    // 「沒有編造內容」由 grounded（數字、網址、英文名詞查得到來源）與 exclude 負責。
+    const keyword = (await loadNoData()).extractNoDataKeyword?.(String(raw ?? ''))?.keyword || '';
+    add('honest_no_data', 'hard', !!keyword || re.test(body), '資料裡沒有的東西，程式判不出這一題答不出來（沒有標記、句型也不像沒資料）——可能在編造');
+    // 「已轉給同仁」「幫您轉達」「是否幫您轉介」都是程式接的（lib/no-data-handoff.js），模型自己寫就是假承諾或多餘的一句
+    add('no_false_handoff', 'hard', !FALSE_HANDOFF_RE.test(body), '模型自己寫了「已轉給同仁」「幫您轉達」「轉介」這類話（轉告是不是真的、要不要轉介的詢問，都是程式接的）');
+    // 口徑外（院方說明範圍外的追問，見 tools/eval/cases/statement.json）：不能把它講成「沒有資料」「無法確認」「無可奉告」——
+    // 院方當然有資料，這幾個詞被截圖會變成「工研院裝傻」
+    if (spec.expect_out_of_scope) {
+      add('out_of_scope_wording', 'hard', !OUT_OF_SCOPE_BANNED_RE.test(body), '口徑外的題目，回覆裡出現了「沒有資料」「無法確認」「無可奉告」');
+      add('out_of_scope_marker', 'soft', keyword === '口徑外', '口徑外的題目，模型沒有把 [[NO_DATA:口徑外]] 的關鍵詞填對（程式靠它接上院方的固定說法）');
+    }
+    if (spec.max_lines) {
+      const lines = body.split('\n').map((l) => l.trim()).filter(Boolean).length;
+      add('short_reply', 'hard', lines <= spec.max_lines, `連續追問應該更短（至多 ${spec.max_lines} 行），實際 ${lines} 行`);
+    }
   }
   if (spec.expect_lang === 'en') add('lang_en', 'hard', cjkRatio(body) < 0.1, '記者用英文問，答案卻是中文');
   if (spec.expect_lang === 'zh') add('lang_zh', 'hard', cjkRatio(body) > 0.3, '記者用中文問，答案卻不是中文');

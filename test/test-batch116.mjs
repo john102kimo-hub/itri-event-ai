@@ -306,7 +306,7 @@ console.log('\n── 九、記者名單 CSV 匯出 ──');
   const mediaApi = (await import('../api/media.js?instance=C')).default;
   const up = await call(mediaApi, { method: 'POST', body: { action: 'update', code: 'sharecode', id: '1', beat: '=HYPERLINK("https://evil.example","點我")' } });
   check('★ 共用連結寫路線：只收選單上的那幾個', up.statusCode === 400 && S.book.media_roster[1][3] === '', JSON.stringify(up.body));
-  check('選單上的路線照常寫得進去', (await call(mediaApi, { method: 'POST', body: { action: 'update', code: 'sharecode', id: '1', beat: '半導體' } })).statusCode === 200 && S.book.media_roster[1][3] === '半導體');
+  check('選單上的路線照常寫得進去', (await call(mediaApi, { method: 'POST', body: { action: 'update', code: 'sharecode', id: '1', beat: '經濟部線' } })).statusCode === 200 && S.book.media_roster[1][3] === '經濟部線');
   const ex = await call(mediaApi, { method: 'GET', query: { action: 'export' }, headers: { 'x-admin-password': 'correct-horse' } });
   check('★ 匯出：= 開頭的儲存格補單引號，Excel 不會當成公式', String(ex.body).includes(`"'=1+1"`), String(ex.body).split('\r\n')[1]);
 }

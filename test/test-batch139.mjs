@@ -118,7 +118,7 @@ console.log('\n── 二、發現疑似沒答好的題目 ──');
   s = TQ.findSuspects([qa(5, '停車位在哪裡', NO_DATA, { event: 'a', name: 'A' }), qa(4, '停車位在哪裡', NO_DATA, { event: 'b', name: 'B' })]);
   check('　 不同場的同一句話是兩題（答案是各場自己的）', s.length === 2);
 
-  check('★ 「疑似答不出來」只有一份規則：後台用的跟這裡是同一條', (await import('node:fs')).readFileSync(new URL('../api/analytics.js', import.meta.url), 'utf8').includes("import { UNANSWERED_RE } from '../lib/teach-queue.js'"));
+  check('★ 「疑似答不出來」只有一份規則：後台用的跟這裡是同一條', (await import('node:fs')).readFileSync(new URL('../api/analytics.js', import.meta.url), 'utf8').includes("import { isUnansweredRow } from '../lib/teach-queue.js'"));
 }
 
 // ═══ 三、排程 ═════════════════════════════════════════════════════════════

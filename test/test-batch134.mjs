@@ -84,12 +84,12 @@ console.log('\n── 一、isRefusal／refusalCategory／logRefusal ──');
 /* ───────── 二、refusalReply ───────── */
 console.log('\n── 二、refusalReply：給使用者的固定句 ──');
 {
-  check('中文有聯絡人：這一題我這邊沒辦法回答，建議直接洽新聞聯絡人：{contact}。',
-    R.refusalReply({ contact: '王小明 0912-345-678' }) === '這一題我這邊沒辦法回答，建議直接洽新聞聯絡人：王小明 0912-345-678。', R.refusalReply({ contact: '王小明 0912-345-678' }));
-  check('　 沒給參數 → 「建議洽新聞聯絡人」', R.refusalReply() === '這一題我這邊沒辦法回答，建議洽新聞聯絡人。', R.refusalReply());
+  check('中文有聯絡人：這一題我這邊沒辦法回答，我寧可不亂講。趕稿的話，直接洽新聞聯絡人比較快：{contact}。',
+    R.refusalReply({ contact: '王小明 0912-345-678' }) === '這一題我這邊沒辦法回答，我寧可不亂講。趕稿的話，直接洽新聞聯絡人比較快：王小明 0912-345-678。', R.refusalReply({ contact: '王小明 0912-345-678' }));
+  check('　 沒給參數 → 「建議洽新聞聯絡人」', R.refusalReply() === '這一題我這邊沒辦法回答，我寧可不亂講。趕稿的話，請直接洽新聞聯絡人。', R.refusalReply());
   check('　 contact 是空白／換行 → 當作沒有', R.refusalReply({ contact: '  \n ' }) === R.refusalReply() && R.refusalReply({ contact: null }) === R.refusalReply());
-  check('　 contact 結尾已經有句點／頓號 → 不會變成「。。」', R.refusalReply({ contact: '王小明 02-2345-6789。' }) === '這一題我這邊沒辦法回答，建議直接洽新聞聯絡人：王小明 02-2345-6789。');
-  check('　 多行的聯絡人用「、」接成一行（LINE 一句話裡不換行）', R.refusalReply({ contact: '王小明 0912\n李小華 0987' }) === '這一題我這邊沒辦法回答，建議直接洽新聞聯絡人：王小明 0912、李小華 0987。', R.refusalReply({ contact: '王小明 0912\n李小華 0987' }));
+  check('　 contact 結尾已經有句點／頓號 → 不會變成「。。」', R.refusalReply({ contact: '王小明 02-2345-6789。' }) === '這一題我這邊沒辦法回答，我寧可不亂講。趕稿的話，直接洽新聞聯絡人比較快：王小明 02-2345-6789。');
+  check('　 多行的聯絡人用「、」接成一行（LINE 一句話裡不換行）', R.refusalReply({ contact: '王小明 0912\n李小華 0987' }) === '這一題我這邊沒辦法回答，我寧可不亂講。趕稿的話，直接洽新聞聯絡人比較快：王小明 0912、李小華 0987。', R.refusalReply({ contact: '王小明 0912\n李小華 0987' }));
   check('　 聯絡人裡的 * ` ~ 被拿掉（不留 Markdown 的符號）', !/[*`~]/.test(R.refusalReply({ contact: '**王小明** `0912`' })), R.refusalReply({ contact: '**王小明** `0912`' }));
   check('　 過長的聯絡人有上限，不會把一整頁塞進回覆', R.refusalReply({ contact: '字'.repeat(500) }).length < 200);
 
@@ -116,10 +116,10 @@ console.log('\n── 二、refusalReply：給使用者的固定句 ──');
   const looksSimilar = [
     '這一題我這邊沒辦法回答，因為新聞稿沒有提到。\n內容僅供參考，以工研院官網新聞稿或發言為準。',
     '這一題我這邊沒辦法回答得很精確，不過新聞稿提到年產能 500 台。',
-    '這一題我這邊沒辦法回答，建議洽新聞聯絡人。但新聞稿有提到預計 2027 年量產。',
+    '這一題我這邊沒辦法回答，我寧可不亂講。趕稿的話，請直接洽新聞聯絡人。但新聞稿有提到預計 2027 年量產。',
     "I'm unable to answer this one. Because the press release does not mention it.",
     "I'm unable to answer this one. Please contact the press contact directly. The press release says 500 units.",
-    '這一題我這邊沒辦法回答，建議直接洽新聞聯絡人：' + '字'.repeat(300) + '。'
+    '這一題我這邊沒辦法回答，我寧可不亂講。趕稿的話，直接洽新聞聯絡人比較快：' + '字'.repeat(300) + '。'
   ];
   check('★ 開頭一樣、但後面是模型自己寫的話（正常答案）→ 不是拒答固定句（整句比對，不是只比開頭）', looksSimilar.every((t) => !R.isRefusalReply(t)), JSON.stringify(looksSimilar.filter((t) => R.isRefusalReply(t))));
   check('　 固定句後面多接任何一段字（企業免責句、官網連結、提醒）就不是「整句」了——所以呼叫端必須在接上那些之前判斷',

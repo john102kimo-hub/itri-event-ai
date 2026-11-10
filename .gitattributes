@@ -1,0 +1,18 @@
+# 文字檔一律 LF（不論在 Windows 或 Mac 簽出），避免測試用正則切原始碼時被 \r 擋住
+* text=auto eol=lf
+
+# 二進位檔不要動
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.webp binary
+*.pdf  binary
+*.ttf  binary
+*.otf  binary
+*.woff binary
+*.woff2 binary
+*.mp4  binary
+*.wav  binary
+*.mp3  binary
+*.ico  binary

@@ -123,3 +123,38 @@ await say('U_boss2', '四足機器人那場成效');
 await say('U_boss2', 'GEO 簡報給我');
 await say('U_boss2', '下週有什麼要注意的');
 await say('U_boss2', '辛苦了');
+
+// ═══ 5. 追問型記者（批次 196、197）：答不出來時，先問「要不要轉介真人」，回「是」才通知 ═══
+// 看的是「答不出來」那一段：模型只寫接住與能說的；界線與詢問由程式接（朱朱給的原文）；管理員有沒有收到推播（回「是」之前不該有）；
+// 第二則是不是比第一則短且不重複。AI 回答是假的（用 state.answerText 模擬模型照新規則寫的樣子）。
+reset(); await fresh();
+process.env.LINE_ADMIN_USER_ID = 'Uadmin';
+await fresh();
+const STMT = '關於研究員甲資格案的回應說明';
+const today = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Taipei' });
+state.events.push(['stmt', STMT, '#0F9E7A',
+  ['【活動名稱】' + STMT, '【新聞稿全文】', '本院已依內部規定啟動審議程序，審議期間不對個案作進一步評論。', '【口徑外的問題】', '本案處理到哪一階段、後續是否有進一步處置，院方尚未對外說明；如有進一步消息，將於官網公告。'].join('\n'),
+  'active', today, '', '', '', '工研院', 'c-stmt', '10:00', '線上發布', '敏感新聞回應說明', '公關組 王小明 02-1234-5678', '', '', '']);
+const DISC = '\n內容僅供參考，以工研院官網新聞稿或發言為準。';
+
+H('角色五：一般活動——資料沒寫，先問要不要轉介，回「是」才通知');
+state.routeForce = () => ({ intent: 'qa', event_ids: ['semi'], confidence: 'high' });
+state.answerText = '了解，您想確認的是現場有沒有停車位。\n[[NO_DATA:停車]]' + DISC;
+await say('U_press', '半導體先進封裝技術發表會有提供停車嗎', { note: '第一次問：預期接住＋「目前尚未有這部分資料，是否幫您轉介公關同仁?」，還沒有推播' });
+await say('U_press', '要，請轉介', { note: '按下按鈕：預期通知管理員，並回「我已經通知公關同仁了」' });
+await say('U_press', '那有接駁車嗎', { note: '再問一題答不出來' });
+await say('U_press', '不用了', { note: '婉拒：預期一句收尾、不通知' });
+
+H('角色五之二：聲明稿（敏感新聞回應說明）——「這部分我們暫無回應」，公關默默收到通知');
+state.routeForce = () => ({ intent: 'qa', event_ids: ['stmt'], confidence: 'high' });
+state.answerText = '了解，您想確認的是後續會不會有進一步處理。\n[[NO_DATA:口徑外]]' + DISC;
+await say('U_press2', `${STMT}：所以不會撤銷研究員甲的資格？`, { note: '第一次問' });
+state.answerText = '這部分剛剛已經說明過了。\n[[NO_DATA:口徑外]]' + DISC;
+await say('U_press2', '所以還在討論中？', { note: '追問：預期更短、不重貼整段' });
+
+H('角色五之三：群組裡 @ 米亞——只有被問的那個人回「是」才算');
+state.routeForce = () => ({ intent: 'qa', event_ids: ['semi'], confidence: 'high' });
+state.answerText = '了解，您想確認的是現場有沒有停車位。\n[[NO_DATA:停車]]' + DISC;
+await say('U_g1', '@米亞 半導體先進封裝技術發表會有提供停車嗎', { group: 'Cpress', mention: true });
+await say('U_g2', '@米亞 是', { group: 'Cpress', mention: true, note: '別人回「是」：不算' });
+await say('U_g1', '@米亞 是', { group: 'Cpress', mention: true, note: '被問的人回「是」：通知，說法不承諾在群組回' });

@@ -225,7 +225,7 @@ resetRefusalFallbacks();
 {
   const CONTACT = '王小明 03-1111111';
   let r = await ask({ plan: [any(refusalRes())], contact: CONTACT, eventId: 'semi' });
-  check('★ 拒答（中文提問、有聯絡人）→ 固定句，一字不差等於 refusalReply()', r.reply === refusalReply({ contact: CONTACT }) && r.reply === '這一題我這邊沒辦法回答，建議直接洽新聞聯絡人：王小明 03-1111111。', r.reply);
+  check('★ 拒答（中文提問、有聯絡人）→ 固定句，一字不差等於 refusalReply()', r.reply === refusalReply({ contact: CONTACT }) && r.reply === '這一題我這邊沒辦法回答，我寧可不亂講。趕稿的話，直接洽新聞聯絡人比較快：王小明 03-1111111。', r.reply);
   check('　 只打一次 API，不重答（再問一次多半還是被攔）', r.calls.length === 1);
   check('★ 不是 reportAiFailure：沒有通知管理員、沒有「Anthropic API 錯誤」的 error log', adminPushes().length === 0 && !r.logs.some((l) => l.startsWith('Anthropic API 錯誤')), J(r.logs));
   check('★ log 用 [ai-refusal]，記下哪一條路、哪個模型、什麼分類、哪一場', r.logs.includes('[ai-refusal] where=LINE 問答 model=claude-sonnet-5-5 category=cyber event=semi'), J(r.logs));
@@ -237,7 +237,7 @@ resetRefusalFallbacks();
   check('　 英文固定句經過繁體出口也沒被改（撇號、英文字不受影響），下游的 isRefusalReply() 照樣認得', isRefusalReply(r.reply) === true, r.reply);
 
   r = await ask({ plan: [any(refusalRes())] });
-  check('沒有聯絡人（沒傳 contact）→ 「建議洽新聞聯絡人。」，log 的場次是「-」', r.reply === '這一題我這邊沒辦法回答，建議洽新聞聯絡人。' && r.logs.includes('[ai-refusal] where=LINE 問答 model=claude-sonnet-5-5 category=cyber event=-'), r.reply + J(r.logs));
+  check('沒有聯絡人（沒傳 contact）→ 「建議洽新聞聯絡人。」，log 的場次是「-」', r.reply === '這一題我這邊沒辦法回答，我寧可不亂講。趕稿的話，請直接洽新聞聯絡人。' && r.logs.includes('[ai-refusal] where=LINE 問答 model=claude-sonnet-5-5 category=cyber event=-'), r.reply + J(r.logs));
 
   r = await ask({ plan: [any(refusalRes())], q: 'What is the yield rate?' });
   check('　 英文提問、沒有聯絡人 → 英文版「Please contact the press contact directly.」', r.reply === refusalReply({ english: true }) && r.reply.endsWith('Please contact the press contact directly.'), r.reply);
@@ -295,8 +295,8 @@ const REFUSAL_RE = /這一題我這邊沒辦法回答/;
   check('★ 官網補查那一支被拒答 → 退回只附連結（不說「找到了：」、也不把拒答固定句接在後面）',
     /工研院官網新聞中心有相關報導，您可以直接看原文/.test(t) && !/找到了：/.test(t) && !REFUSAL_RE.test(t) && /itri-event-ai\.vercel\.app\/n\/\d+/.test(t), t.slice(0, 400));
   check('　 原本那句誠實的「我沒有資料」還在、[[NO_DATA]] 標記沒外流', /這部分我沒有資料/.test(t) && !/NO_DATA/.test(t));
-  check('　 補查那一支的拒答有記 [ai-refusal]（where=LINE 問答、場次是「-」），而且沒有通知管理員',
-    r.logs.some((l) => /^\[ai-refusal\] where=LINE 問答 model=claude-sonnet-5-5 category=general_harms event=-$/.test(l)) && adminPushes().length === 0, J(r.logs.filter((l) => l.includes('ai-refusal'))));
+  check('　 補查那一支的拒答有記 [ai-refusal]（where=LINE 問答、場次是「-」），而且沒有通知管理員（批次 196 起「這一題答不出來」本來就會通知公關，那則不算；這裡驗的是拒答不會觸發金鑰／額度警報）',
+    r.logs.some((l) => /^\[ai-refusal\] where=LINE 問答 model=claude-sonnet-5-5 category=general_harms event=-$/.test(l)) && adminPushes().filter((x) => !/有人問了米亞答不出來/.test(x.text || '')).length === 0, J(r.logs.filter((l) => l.includes('ai-refusal'))));
   check('　 補查退回的原因寫在 log（[line] 補查官網：模型拒答，退回只附連結）', r.logs.some((l) => l.startsWith('[line] 補查官網：模型拒答，退回只附連結')), J(r.logs.filter((l) => l.includes('補查'))));
 }
 {

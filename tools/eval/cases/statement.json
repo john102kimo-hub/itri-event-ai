@@ -1,0 +1,74 @@
+{
+  "_說明": "聲明稿／回應說明（敏感場次）題庫（批次 196，docs/mia-answer-quality-handoff-20261110.md 工單 B6）。活動與人名全是虛構（11/10 截圖的真人姓名一律不要放進來）。三類題目：口徑外追問（院方說明範圍外，不能講成「沒有資料」）、連續追問（上一題也答不出來，要更短、不重複同一套話）、資料沒寫（這場該有但新聞稿沒寫）。用法同 core.json：node tools/eval/run.mjs --cases tools/eval/cases/statement.json",
+  "event": {
+    "name": "（範例）關於研究員甲資格案的回應說明",
+    "organizer": "工研院",
+    "event_type": "敏感新聞回應說明",
+    "knowledge_base": "【活動名稱】（範例）關於研究員甲資格案的回應說明\n\n【新聞稿全文】\n工研院今日就外界關注之研究員甲資格案發布說明：本院已依內部規定啟動審議程序，審議期間不對個案作進一步評論。\n\n【常見問答 Q&A】\nQ：本院是否已有結論？\nA：目前審議程序進行中，尚無結論。\n\n【口徑外的問題】\n本案處理到哪一階段、後續是否有進一步處置，院方尚未對外說明；如有進一步消息，將於官網公告。",
+    "event_date": "{{today-1}}",
+    "event_time": "10:00",
+    "venue": "線上發布",
+    "press_contact": "公關組 王小明 02-1234-5678"
+  },
+  "cases": [
+    {
+      "id": "stmt-facts",
+      "tag": "facts",
+      "q": "院方今天發布了什麼說明？",
+      "include": [
+        "審議程序"
+      ]
+    },
+    {
+      "id": "stmt-conclusion",
+      "tag": "facts",
+      "q": "目前有結論了嗎？",
+      "include": [
+        "尚無結論"
+      ]
+    },
+    {
+      "id": "out-of-scope-revoke",
+      "tag": "out-of-scope",
+      "q": "所以不會撤銷研究員甲的資格？",
+      "expect_no_data": true,
+      "expect_out_of_scope": true
+    },
+    {
+      "id": "out-of-scope-pending",
+      "tag": "out-of-scope",
+      "q": "所以還在討論中？",
+      "expect_no_data": true,
+      "expect_out_of_scope": true
+    },
+    {
+      "id": "out-of-scope-followup",
+      "tag": "follow-up",
+      "q": "所以還在討論中？",
+      "history": [
+        {
+          "role": "user",
+          "content": "所以不會撤銷研究員甲的資格？"
+        },
+        {
+          "role": "assistant",
+          "content": "了解，您想確認的是後續會不會有進一步處理。目前院方對外的說明是審議程序進行中，尚無結論。"
+        }
+      ],
+      "prev_no_data": true,
+      "expect_no_data": true,
+      "expect_out_of_scope": true,
+      "max_lines": 3
+    },
+    {
+      "id": "written-missing",
+      "tag": "no-data",
+      "q": "新聞稿有提到審議預計多久完成嗎？",
+      "expect_no_data": true,
+      "exclude": [
+        "個月",
+        "週內"
+      ]
+    }
+  ]
+}

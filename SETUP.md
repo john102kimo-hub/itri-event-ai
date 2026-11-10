@@ -52,6 +52,7 @@
 | `LINE_COLLEAGUE_PASSCODE` | **同仁模式**的密語（選填，批次 138）。給一般同事用：登入後只有「新增活動、修改活動（含發布）、媒體訓練連結」三件事，看不到 GEO、後台數據、教米亞。沒設定＝同仁模式整個停用。性質跟職員密語一樣是一次性口令；收回權限一樣是到 `line_staff` 分頁刪列（F 欄 `role` 寫 `colleague` 的那些）。設定後要用職員帳號在 LINE 打一次「設定圖文選單」，同仁才看得到那三格選單。 |
 | `LINE_ADMIN_USER_ID` | 你自己的 LINE userId（`U` 開頭一長串）。設定後，**每次有新的人講對密語登入，你的 LINE 都會收到通知**（含對方顯示名稱與 userId），密語外流被亂用時才有機會第一時間發現。不知道自己的 userId 沒關係——先不設定，自己對官方帳號講一次密語，機器人會直接把你的 userId 回給你，抄下來設定進去即可。 |
 | `REMIND_MONTHLY_MAX` | **活動提醒**每月最多推幾筆（選填，批次 177、179，預設 60）。提醒是 LINE 推播，跟記者那邊共用每月額度（reply 不算，push 才算）；設 `0` 就整個停掉。前一週與隔天那兩種只用到這個上限的 70%，額度緊的時候先讓位。沒有負責人的場次，「前一天」那種會推給 `LINE_ADMIN_USER_ID`（其餘三種只送給負責人）；那個變數沒設就不推（只記在排程回傳的摘要裡）。排程用 `CRON_SECRET`（同上）。 |
+| `NODATA_NOTIFY_EVENT_PER_HOUR`／`NODATA_NOTIFY_SENSITIVE_PER_HOUR`／`NODATA_NOTIFY_PER_DAY` | **米亞答不出來時通知公關**的上限（選填，批次 196、197；朱朱 11/10 確認）：一般場次是記者回「是」（米亞問了要不要轉介真人）才通知，敏感場次（聲明稿、敏感新聞回應說明）每一題答不出來都默默通知：每場每小時最多通知幾次（預設 5）、敏感場次（聲明稿、回應說明）每場每小時（預設 20）、全站每天（預設 30）；設 `0`＝不推。同一個對話 10 分鐘內只通知一次（敏感場次不受這條限制）。通知對象是 `LINE_ADMIN_USER_ID`，有活動負責人（`event_owners`）一併通知。推播額度全帳號共用（記者、業發處、提醒都在用），超過上限就只記不推，`qa_log` 的 `answer_status` 照記。計數放在各執行個體的記憶體裡，實際上限最多是設定值乘以同時運作的執行個體數。 |
 | `REMIND_OFF` | 單獨關掉某幾種提醒（選填，批次 179），逗號分隔：`week`（前一週，沒邀請函）、`eve`（前一天）、`day`（當天早上，新聞稿沒貼）、`after`（隔天，沒照片）。例如 `week,after`。不用重新部署排程。 |
 
 **收回某人的職員權限**：到 Google 試算表的 `line_staff` 分頁，把那個人的那一列刪掉即可，下次他講密語會被視為第一次登入（重新走一次通知流程）。
@@ -142,11 +143,12 @@ AI 不報價（答案裡有背景資料沒有的金額，整則換成固定回�
 6. 在 A1~F1 填入標題：`timestamp` `event_id` `event_name` `media_name` `question` `answer`
    - G 欄留給系統標記刪除用（後台按「刪除」時會在這欄寫 `1`，不用手動填、也不用管它）
    - H 欄 `source`（`web` 網頁問的、`line` LINE 問的）、I 欄 `reporter_name`（記者姓名，批次 105 起）是系統自動寫的，標題可以補上方便自己看，不補也不影響功能（程式照欄位位置讀寫）。
+   - J～Q 欄（批次 195）是每一題的決策紀錄，系統第一次寫入時會自動補上標題，不用手動建：`answer_status`（`answered`／`no_data`／`no_data_news`／`refused`／`contact`）、`intent`、`routed_event_ids`、`confidence`、`context_source`（`1:1/route` 這種：1 對 1 或群組／怎麼選到這場）、`kb_source`、`no_data_keyword`、`grounding_flags`。後台「疑似答不出來」先看 `answer_status`；舊資料沒有這幾欄，才退回比對回答裡的措辭。
    - **D 欄 `media_name` 只放「媒體」**，姓名另外放 I 欄——後台的「服務媒體家數」只數 D 欄、同一家媒體的不同記者併成一家。舊資料常是「經濟日報 王小明」一整串放在 D 欄，統計時會自動拆開（不改動試算表裡的原始內容）；要整理成兩欄，後台「問答分析」每一列的「✎ 媒體」可以分別改。
 7. 其餘分頁不用手動建立——第一次用到相關功能時，系統會自動建好並補上表頭：
    `exposure`（露出上傳）、`geo_prompts`／`geo_runs`／`geo_events`／`geo_settings`（AI 能見度）、`media_roster`／`media_settings`／`media_mail_requests`（記者名單健檢；最後一個是同仁送來、等管理員核准的 mail 修改，批次 145）、`assistant_memory`（後台米亞的記憶，批次 142）、
-   `line_users`（LINE 綁定與對話狀態）、`line_staff`（職員模式）、`line_photo_inbox`（LINE 傳來的照片暫存）、`bot_memory`（教米亞的記憶）、`teach_queue`（待教清單：每天掃問答、推給 `LINE_ADMIN_USER_ID`，批次 139）、
-   `contacts_directory`（全域技術窗口分工）、`event_changes`（LINE 職員改資料的紀錄，可復原）、`event_owners`（活動負責人，批次 177）、`event_reminders`（活動前一天提醒的發送紀錄，批次 177）、`events_trash`（刪除活動前的備份）、
+   `route_log`（米亞有回、但沒進 `qa_log` 的訊息：路由判成什麼、走了哪條路，批次 195）、`line_users`（LINE 綁定與對話狀態）、`line_staff`（職員模式）、`line_photo_inbox`（LINE 傳來的照片暫存）、`bot_memory`（教米亞的記憶）、`teach_queue`（待教清單：每天掃問答、推給 `LINE_ADMIN_USER_ID`，批次 139）、
+   `contacts_directory`（全域技術窗口分工）、`org_kb`（機構資料：沒綁定活動時回答「怎麼申請採訪」這類機構題，後台「記者與邀訪」編輯，批次 198；分頁是空的就完全不影響現有行為）、`event_changes`（LINE 職員改資料的紀錄，可復原）、`event_owners`（活動負責人，批次 177）、`event_reminders`（活動前一天提醒的發送紀錄，批次 177）、`events_trash`（刪除活動前的備份）、
    `training_log`（媒體訓練演練分數）、`reg_campaigns`／`registrations`（媒體報名）。
    **只有 `events` 與 `qa_log` 要手動建**（上面第 3～6 步）。
 

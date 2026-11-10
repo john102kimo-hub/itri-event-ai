@@ -108,10 +108,10 @@ const iso = (d) => new Date(Date.now() - d * 86400000).toLocaleDateString('sv-SE
   let r = await call('POST', {}, { action: 'seed', csv: seed }, A);
   check('（準備）匯入三位記者', r.code === 200 && r.out.created === 3, JSON.stringify(r.out));
 
-  r = await call('POST', {}, { action: 'add', code: 'staffcode1', name: '  陳新人 ', outlet: '經濟日報', email: ' New＠Ctee.com.tw ', beat: '財經／產業', updated_by: '朱朱' });
+  r = await call('POST', {}, { action: 'add', code: 'staffcode1', name: '  陳新人 ', outlet: '經濟日報', email: ' New＠Ctee.com.tw ', beat: '經濟部線', updated_by: '朱朱' });
   const row = book.media_roster.find((x) => x[1] === '陳新人');
   check('★ 新增一位記者：姓名、媒體、mail 就能存；id 系統編（N0001），狀態在職，mail 已整理成小寫半形',
-    r.code === 200 && r.out.id === 'N0001' && row && row[0] === 'N0001' && row[2] === '經濟日報' && row[3] === '財經／產業' && row[4] === 'new@ctee.com.tw' && row[10] === 'active' && row[13] === '朱朱', JSON.stringify({ r: r.out, row }));
+    r.code === 200 && r.out.id === 'N0001' && row && row[0] === 'N0001' && row[2] === '經濟日報' && row[3] === '經濟部線' && row[4] === 'new@ctee.com.tw' && row[10] === 'active' && row[13] === '朱朱', JSON.stringify({ r: r.out, row }));
   check('　 同仁共用連結也能新增（不用管理員密碼）', r.code === 200);
   r = await call('POST', {}, { action: 'add', password: 'pw', name: '第二位', outlet: '工商時報', email: 'two@ctee.com.tw' }, A);
   check('　 第二位的 id 接著編 N0002；沒選路線就是空的（會出現在待確認名單裡讓同仁補）', r.out.id === 'N0002' && book.media_roster.find((x) => x[0] === 'N0002')[3] === '');

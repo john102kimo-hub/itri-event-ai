@@ -15,6 +15,8 @@
 // POST {action:'ensure_edit_code',id}  → 確保該活動有 edit_code（沒有就補上），回傳
 // GET  ?action=contacts_directory                 → 全域技術窗口分工原始文字（後台編輯用）
 // POST {action:'contacts_directory_save',content} → 整份覆蓋儲存
+// GET  ?action=org_kb                             → 機構資料原文＋字數／過期條目統計（後台編輯用，批次 198）
+// POST {action:'org_kb_save',content}             → 整份覆蓋儲存（上限 6,000 字）
 // ── 媒體報名（批次 88）：action 一律以 reg_ 開頭，整段交給 lib/registration-api.js ──
 //   （Vercel Hobby 的 Function 上限 12 支已用 11 支，所以搭在這支上，不另開新檔）
 // ── 業發處合作洽詢（批次 119）：action 一律以 b2b_ 開頭，整段交給 lib/b2b-api.js（資料在另一本試算表）──
@@ -23,6 +25,7 @@ import { readRange, appendRows, updateRange, ensureSheets, listSheets, batchUpda
 import { generateId, generateEditCode } from '../lib/ids.js';
 import { del } from '@vercel/blob';
 import { CONTACTS_DIR_RANGE, ensureContactsDirectorySheet } from '../lib/contacts-directory.js';
+import { readOrgKbForAdmin, saveOrgKb, orgKbStats } from '../lib/org-kb.js';
 import { resolveEventContent, isPreEventMode, simulateEventDay } from '../lib/prompt.js';
 import { lineBindUrl, lineAddFriendUrl, lineBasicId } from '../lib/line-link.js';
 import { handleRegistrationRequest } from '../lib/registration-api.js';
@@ -174,6 +177,17 @@ export default async function handler(req, res) {
         await ensureContactsDirectorySheet(ensureSheets, updateRange);
         const dirRows = await readRange(CONTACTS_DIR_RANGE);
         return res.status(200).json({ content: dirRows[0]?.[0] || '' });
+      } catch (err) {
+        return res.status(500).json({ error: err.message });
+      }
+    }
+
+    // 機構資料（母資料庫 v1，批次 198）：一樣跟活動表無關，獨立處理完就回傳。
+    if (action === 'org_kb') {
+      if (!requireAdmin(req, res, password)) return;
+      try {
+        const content = await readOrgKbForAdmin();
+        return res.status(200).json({ content, stats: orgKbStats(content) });
       } catch (err) {
         return res.status(500).json({ error: err.message });
       }
@@ -413,6 +427,11 @@ export default async function handler(req, res) {
       // 全域技術窗口分工：整份文字直接覆蓋儲存，跟 events!P 那組窗口分工同一套
       // 「textarea 整段貼上存檔」邏輯，不做逐行 CRUD——同仁常常是整批調整（換人、
       // 加新單位），一次貼過去比一格一格改方便，也不用另外做欄位對應的表單 UI。
+      if (action === 'org_kb_save') {
+        if (!requireAdmin(req, res)) return;
+        const r = await saveOrgKb(body.content);
+        return r.error ? res.status(400).json({ error: r.error }) : res.status(200).json(r);
+      }
       if (action === 'contacts_directory_save') {
         const { content } = body;
         if (!requireAdmin(req, res)) return;
