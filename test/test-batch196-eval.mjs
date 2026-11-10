@@ -37,8 +37,8 @@ await t('標準答案全部通過硬性檢查，也沒有軟性失敗', async ()
 });
 await t('runEval 跑聲明稿題庫（mock）：6／6 通過', async () => {
   const r = await runEval({ casesFile: 'tools/eval/cases/statement.json', provider: 'mock', mock: 'tools/eval/mock-statement.json' });
-  assert.equal(r.summary.passed, 6);
-  assert.equal(r.summary.total, 6);
+  assert.equal(r.summary.passed, 7);
+  assert.equal(r.summary.total, 7);
 });
 
 // ── 故意寫壞的答案要被抓到 ──

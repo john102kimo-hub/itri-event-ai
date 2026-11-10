@@ -145,6 +145,13 @@ let r = replyOf(out);
 check('★ 資料沒寫：模型寫接住那句，程式接上「目前尚未有這部分資料，是否幫您轉介公關同仁?」；標記沒外流', r.includes('了解，您想確認的是停車資訊。') && r.includes(OFFER_BLANK) && !/NO_DATA/.test(r), r);
 check('★ 這時候還沒通知任何人（先問記者要不要）；也沒有說「已轉給」', alerts().length === 0 && !/已經|已轉|通知公關/.test(r), JSON.stringify(sent.filter((s) => s.push).map((s) => s.to)));
 check('★ 純粹答不出來的短回覆不寫警語（朱朱決定省略）', !/僅供參考/.test(r), r);
+// 批次 201：「純粹答不出來」改看有沒有可引用的內容（數字、網址、長度），不再是 80 字。門檻與案例來自 11/10 真模型評測：接住加一兩句背景有時 100～130 字。
+check('★ isPureNoDataBody：真模型評測裡那種 100～130 字、沒有數字與網址的「接住＋背景」→ 純粹答不出來（省略警語）',
+  H.isPureNoDataBody('你想確認的是院方會不會撤銷研究員甲的資格，這點我沒辦法替院方回答或做任何推測。目前說明裡提到的是：本院已依內部規定啟動審議程序，審議期間不對個案作進一步評論。\n\n本案處理到哪一階段、後續是否有進一步處置，院方尚未對外說明；如有進一步消息，將於官網公告。'));
+check('　 有數字（日期、時間、人數）、有網址或 email → 不算，警語保留',
+  !H.isPureNoDataBody('了解，您想確認的是時間。說明發布在 11/9 上午。') && !H.isPureNoDataBody('細節請看 https://www.itri.org.tw/news') && !H.isPureNoDataBody('請寄信到 press@itri.org.tw 詢問。') && !H.isPureNoDataBody('出席的有３８國代表。'));
+check('　 太長（超過 140 字）→ 不算，有實質內容的部分回答照舊保留警語', !H.isPureNoDataBody('這是一段很長的說明。'.repeat(20)) && H.PURE_NO_DATA_MAX_CHARS === 140);
+check('　 空字串、沒給 → 當純粹（沒有任何可引用的內容）', H.isPureNoDataBody('') && H.isPureNoDataBody(undefined));
 check('　 1 對 1 多一顆「要，請轉介」按鈕（點下去等於回「是」）', /要，請轉介/.test(chipsOf(out)), chipsOf(out));
 check('　 qa_log：answer_status 是 no_data、關鍵詞「停車」', lastQa()[9] === 'no_data' && lastQa()[15] === '停車', JSON.stringify(lastQa().slice(8)));
 check('　 這句詢問不進對話歷史（記下的是模型那段話，加上「問過了」的記號）', !/轉介/.test(state.bindings.get('U1')?.lastTurn || '') && /"o":1/.test(state.bindings.get('U1')?.lastTurn || ''), state.bindings.get('U1')?.lastTurn);

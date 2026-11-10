@@ -1,5 +1,5 @@
 {
-  "_說明": "聲明稿／回應說明（敏感場次）題庫（批次 196，docs/mia-answer-quality-handoff-20261110.md 工單 B6）。活動與人名全是虛構（11/10 截圖的真人姓名一律不要放進來）。三類題目：口徑外追問（院方說明範圍外，不能講成「沒有資料」）、連續追問（上一題也答不出來，要更短、不重複同一套話）、資料沒寫（這場該有但新聞稿沒寫）。用法同 core.json：node tools/eval/run.mjs --cases tools/eval/cases/statement.json",
+  "_說明": "聲明稿／回應說明（敏感場次）題庫（批次 196，docs/mia-answer-quality-handoff-20261110.md 工單 B6）。活動與人名全是虛構（11/10 截圖的真人姓名一律不要放進來）。三類題目：口徑外追問（院方說明範圍外，不能講成「沒有資料」）、連續追問（上一題也答不出來，要更短、不重複同一套話）、資料沒寫（這場該有但新聞稿沒寫）。用法同 core.json：node tools/eval/run.mjs --cases tools/eval/cases/statement.json 批次 201：11/10 真模型評測顯示「所以還在討論中？」新聞稿與問答其實答得出來（審議程序進行中、尚無結論），模型照實答是對的，不該被要求答成口徑外；改成 grounded-pending（答得出來的題，只檢查沒有編造、沒有「沒有資料」那類講法），口徑外題目換成新聞稿與口徑段落都沒給出的「審議結果什麼時候公布」。⚠️ 換掉的兩題與新增的 grounded-pending 還沒用真模型跑過。",
   "event": {
     "name": "（範例）關於研究員甲資格案的回應說明",
     "organizer": "工研院",
@@ -37,14 +37,14 @@
     {
       "id": "out-of-scope-pending",
       "tag": "out-of-scope",
-      "q": "所以還在討論中？",
+      "q": "審議結果預計什麼時候公布？",
       "expect_no_data": true,
       "expect_out_of_scope": true
     },
     {
       "id": "out-of-scope-followup",
       "tag": "follow-up",
-      "q": "所以還在討論中？",
+      "q": "那審議結果什麼時候會公布？",
       "history": [
         {
           "role": "user",
@@ -59,6 +59,19 @@
       "expect_no_data": true,
       "expect_out_of_scope": true,
       "max_lines": 3
+    },
+    {
+      "id": "grounded-pending",
+      "tag": "facts",
+      "q": "所以還在討論中？",
+      "include": [
+        "審議"
+      ],
+      "exclude": [
+        "沒有資料",
+        "無法確認",
+        "無可奉告"
+      ]
     },
     {
       "id": "written-missing",
