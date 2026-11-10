@@ -304,7 +304,7 @@ console.log('\n── 六、記者名單健檢：管理員密碼不進網址、�
       const isAdmin = (opts.headers || {})['X-Admin-Password'] === 'Secret-Pw1';
       return { json: async () => (isAdmin && adminOk ? { totalActive: 1, needsReview: [] } : { error: '這條連結已失效，請向承辦人索取新的' }) };
     };
-    const api = new Function('document', 'fetch', 'sessionStorage', 'render', `let S = { pwd:'', code:'', role:'staff' }; ${fnSource(MEDIA, 'call')} ${fnSource(MEDIA, 'unlock')} ${fnSource(MEDIA, 'enterApp')} ${fnSource(MEDIA, 'loadMailRequests')}; return { unlock, S: () => S };`)(document, fetch, sessionStorage, () => {});
+    const api = new Function('document', 'fetch', 'sessionStorage', 'render', 'loadAll', `let S = { pwd:'', code:'', role:'staff' }; ${fnSource(MEDIA, 'call')} ${fnSource(MEDIA, 'unlock')} ${fnSource(MEDIA, 'enterApp')} ${fnSource(MEDIA, 'loadMailRequests')}; return { unlock, S: () => S };`)(document, fetch, sessionStorage, () => {}, () => {});
     return { api, els, store };
   };
   let t = mkUnlock(true);
@@ -328,7 +328,7 @@ console.log('\n── 六、記者名單健檢：管理員密碼不進網址、�
     { r1: '', r2: '半導體' }, {}, (m) => toasts.push(m), async (a, body) => { posts.push(body); return {}; },
     { getElementById: () => ({ classList: { add() {} }, remove() {} }) }, () => {});
   await confirmRec('r1');
-  check('★ 沒有路線的人按「資料正確」：先請他點路線，不送出（不然路線還是空的，下次又排在最前面）', posts.length === 0 && /請先點他現在跑的路線/.test(toasts[0] || ''), toasts[0]);
+  check('★ 沒有路線的人按「資料正確」：先請他點路線，不送出（不然路線還是空的，下次又排在最前面）', posts.length === 0 && /請先點他現在跑的線/.test(toasts[0] || ''), toasts[0]);
   await confirmRec('r2');
   check('　 已經有路線的照常確認', posts.length === 1 && posts[0].id === 'r2');
 
@@ -354,7 +354,7 @@ console.log('\n── 六、記者名單健檢：管理員密碼不進網址、�
   r = await call('GET', { action: 'list' }, {}, A);
   check('★ 按過「還在跑，資料正確」的 R1 不再出現（以前只淡出畫面，下次打開又排第一個，確認等於白做）', !ids(r).includes('R1'), ids(r));
   check('　 沒點路線就確認的 R2 還在（路線還是空的，資料不算完整）', ids(r).includes('R2'));
-  await call('POST', {}, { action: 'update', id: 'R2', beat: '財經／產業' }, A);
+  await call('POST', {}, { action: 'update', id: 'R2', beat: '經濟部線' }, A);
   r = await call('GET', { action: 'list' }, {}, A);
   check('　 補了路線之後 R2 也離開待確認', ids(r) === '', ids(r));
   // 一年前確認過的又會回來
