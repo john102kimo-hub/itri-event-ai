@@ -66,6 +66,19 @@ console.log('\n── 一、解析、過期、prompt 那一塊 ──');
   const mixed = O.formatOrgBlock(half);
   check('★ 填好一條、其餘還沒填：只有填好的那條會進 prompt，待填的不會；後台統計分開算', /採訪申請請洽傳播處/.test(mixed) && !/待填/.test(mixed) && O.orgKbStats(half).total === 1 && O.orgKbStats(half).pending.length === 2, mixed);
   check('　 【待核對】也不使用，拿掉標記才生效', O.formatOrgBlock('2026-11-10｜【待核對】工研院成立於 1973 年。') === '' && /成立於 1973 年/.test(O.formatOrgBlock('2026-11-10｜工研院成立於 1973 年。')));
+  // 第二版（docs/org-kb-draft-v2-20261110.md，批次 202）：每一條都寫好句子，但一樣要朱朱核對過才生效
+  const md2 = fs.readFileSync(new URL('../docs/org-kb-draft-v2-20261110.md', import.meta.url), 'utf8');
+  const draft2 = md2.split('```')[1].trim();
+  const entries2 = O.parseOrgKb(draft2);
+  check('★ 預擬第二版：每一條都帶標記、都有日期——整份貼進去米亞一條都不會用；字數在上限內',
+    entries2.length >= 40 && entries2.every(O.isPending) && entries2.every((e) => e.date) && O.formatOrgBlock(draft2) === '' && draft2.length <= O.ORG_KB_MAX_LEN, `${entries2.length} 條 ${draft2.length} 字`);
+  // 批次 203：標記拿掉了、空格卻忘了填——不能讓米亞把「電話＿＿」照念出去
+  const blank = '2026-11-10｜採訪申請：請洽傳播處，電話＿＿。\n2026-11-10｜報導更正：請寄 __ 信箱。\n2026-11-10｜課程：見 https://college.itri.org.tw/a_b 。';
+  const blankBlock = O.formatOrgBlock(blank);
+  check('★ 拿掉標記但還留著空格（＿＿／__）的條目不使用、列在待處理；網址裡的單一底線不受影響',
+    !/採訪申請|報導更正/.test(blankBlock) && /a_b/.test(blankBlock) && O.orgKbStats(blank).total === 1 && O.orgKbStats(blank).pending.length === 2, blankBlock);
+  check('　 空格填好就生效', /電話 03-000-0000/.test(O.formatOrgBlock('2026-11-10｜採訪申請：請洽傳播處，電話 03-000-0000。')));
+  check('　 第二版留空格（＿＿）的條目一定標【待填】，不會只標【待核對】就被誤拿掉', entries2.filter((e) => /＿/.test(e.text)).every((e) => /【待填】/.test(e.text)));
 }
 
 // ═══ 二、LINE 端到端 ══════════════════════════════════════════════════════════

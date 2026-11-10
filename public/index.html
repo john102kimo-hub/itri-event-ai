@@ -735,7 +735,7 @@ details.adv[open] > summary { border-bottom:1px solid var(--border); margin-bott
         </div>
         <div class="section-block" id="org-kb-block">
           <div class="section-header">
-            <h2><i class="ti ti-building"></i> 機構資料：工研院一般公開資料（沒綁定活動時回答機構題）</h2>
+            <h2><i class="ti ti-building"></i> 機構資料：工研院一般公開資料（沒綁定活動、或問題超出活動內容時使用）</h2>
             <button class="btn btn-primary" onclick="saveOrgKb()"><i class="ti ti-device-floppy"></i> 儲存機構資料</button>
           </div>
           <div class="form-hint" style="margin-bottom:12px">
@@ -1174,7 +1174,7 @@ function renderOrgKbStats(stats) {
   st.textContent = `共 ${stats.total} 條，${stats.length} / ${stats.limit} 字` + (stats.newest ? `，最近更新 ${stats.newest}` : '');
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const parts = [];
-  if (stats.pending && stats.pending.length) parts.push(`<div style="color:#6b7280">📝 還沒填完／待核對（${stats.pending.length} 條，<b>米亞不會使用</b>；填好後把「【待填…】」整段換成內容、日期改成當天）：<br>${stats.pending.map((x) => `・${esc(x)}`).join('<br>')}</div>`);
+  if (stats.pending && stats.pending.length) parts.push(`<div style="color:#6b7280">📝 還沒填完／待核對（${stats.pending.length} 條，<b>米亞不會使用</b>；要生效須拿掉「【待填】／【待核對】」標記，而且不能留「＿＿」空格，日期改成當天）：<br>${stats.pending.map((x) => `・${esc(x)}`).join('<br>')}</div>`);
   if (stats.stale.length) parts.push(`<div style="color:#b45309">⚠️ 超過 180 天沒更新（${stats.stale.length} 條）：<br>${stats.stale.map((x) => `・${esc(x.date)}（${x.days} 天前）${esc(x.preview)}`).join('<br>')}</div>`);
   if (stats.undated.length) parts.push(`<div style="color:#b45309">⚠️ 沒標更新日期（${stats.undated.length} 條）：<br>${stats.undated.map((x) => `・${esc(x)}`).join('<br>')}</div>`);
   warn.innerHTML = parts.join('');
