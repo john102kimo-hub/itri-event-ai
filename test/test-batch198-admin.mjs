@@ -67,10 +67,13 @@ check('　 剛好 6,000 字可以存', r.statusCode === 200 && exactly.length ==
 r = await call('POST', {}, { action: 'org_kb_save', content: '' });
 check('　 存空字串＝清空（回到沒填的狀態）', r.statusCode === 200 && r.body.stats.total === 0);
 
+r = await call('POST', {}, { action: 'org_kb_save', content: `2026-11-10｜【待填：採訪申請流程】怎麼申請。\n${iso(-1)}｜已填好的一條。` });
+check('★ 預擬版的「【待填】」條目：存得進去，統計分開列（pending），不算進會被使用的條數', r.statusCode === 200 && r.body.stats.total === 1 && r.body.stats.pending.length === 1 && /採訪申請流程/.test(r.body.stats.pending[0]), JSON.stringify(r.body.stats));
+
 // 後台頁面
 const html = fs.readFileSync(path.join(ROOT, 'public/index.html'), 'utf8');
 check('後台頁面：「記者與邀訪」有機構資料編輯區，載入與儲存打 org_kb／org_kb_save，並列出過期與沒標日期的條目',
-  html.includes('id="input-org-kb"') && html.includes('/api/events?action=org_kb') && html.includes("action: 'org_kb_save'") && html.includes('超過 180 天沒更新') && html.includes('沒標更新日期') && /loadOrgKb\(\)/.test(html));
+  html.includes('id="input-org-kb"') && html.includes('/api/events?action=org_kb') && html.includes("action: 'org_kb_save'") && html.includes('超過 180 天沒更新') && html.includes('沒標更新日期') && html.includes('米亞不會使用') && /loadOrgKb\(\)/.test(html));
 check('　 頁面上限寫的跟後端一致（6000）', /ORG_KB_LIMIT = 6000/.test(html));
 
 console.log(`\n${fail ? '❌' : '✅'} 批次 198（機構資料・後台）測試：${pass} 通過，${fail} 失敗`);

@@ -1174,6 +1174,7 @@ function renderOrgKbStats(stats) {
   st.textContent = `共 ${stats.total} 條，${stats.length} / ${stats.limit} 字` + (stats.newest ? `，最近更新 ${stats.newest}` : '');
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const parts = [];
+  if (stats.pending && stats.pending.length) parts.push(`<div style="color:#6b7280">📝 還沒填完／待核對（${stats.pending.length} 條，<b>米亞不會使用</b>；填好後把「【待填…】」整段換成內容、日期改成當天）：<br>${stats.pending.map((x) => `・${esc(x)}`).join('<br>')}</div>`);
   if (stats.stale.length) parts.push(`<div style="color:#b45309">⚠️ 超過 180 天沒更新（${stats.stale.length} 條）：<br>${stats.stale.map((x) => `・${esc(x.date)}（${x.days} 天前）${esc(x.preview)}`).join('<br>')}</div>`);
   if (stats.undated.length) parts.push(`<div style="color:#b45309">⚠️ 沒標更新日期（${stats.undated.length} 條）：<br>${stats.undated.map((x) => `・${esc(x)}`).join('<br>')}</div>`);
   warn.innerHTML = parts.join('');
