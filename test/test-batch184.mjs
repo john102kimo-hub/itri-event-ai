@@ -44,8 +44,11 @@ check('只有一個候選、沒把握：不再反問「這幾場的哪一場」'
 check('直接回答那一場', out.some(s => s.kind === 'answer'), all);
 
 // ── 只打日期：那天有活動就直接答，不要記者再打全名 ──
-const start = new Date(Date.now() + 3 * 86400000);
-const later = new Date(Date.now() + 9 * 86400000);   // 活動第七天，只寫在知識庫議程裡
+// 批次 202：日期一律用台北時間算（跟 fakes.mjs isoOffset() 同一把尺）。原本用機器的當地時間，在 UTC 的機器上
+// 台北凌晨 0～8 點這段會跟活動資料差一天，「活動日期欄位那天也認得」固定紅——提交前的檢查在那個時段整批被擋。
+const tpe = (days) => { const [y, m, d] = isoOffset(days).split('-').map(Number); return { getFullYear: () => y, getMonth: () => m - 1, getDate: () => d }; };
+const start = tpe(3);
+const later = tpe(9);   // 活動第七天，只寫在知識庫議程裡
 const M = later.getMonth() + 1, D = later.getDate();
 const MULTI = `【議程】\n${M}/${D} 上午 生醫論壇\n${M}/${D} 下午 健康照護論壇\n講者：王小明`;
 reset();
