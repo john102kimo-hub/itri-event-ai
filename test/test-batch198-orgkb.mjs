@@ -129,7 +129,7 @@ let r = replyOf(out);
 const orgCall = out.find((s) => s.kind === 'answer');
 check('★ 沒綁定問機構題：用機構資料回答（system prompt 帶著機構資料，不帶任何活動），答案照模型的回答',
   /王小明/.test(r) && /【機構一般資料】/.test(orgCall?.sys || '') && /採訪申請/.test(orgCall?.sys || ''), `${r}\n${(orgCall?.sys || '').slice(0, 200)}`);
-check('★ 出處是程式接的：「📌 出處：工研院一般公開資料（機構資料最近更新：…）」', r.includes(`📌 出處：工研院一般公開資料（機構資料最近更新：${iso(-30)}）`), r);
+check('★ 批次 208：回答裡不再接「📌 出處」那一行', !/📌|出處：|機構資料最近更新/.test(r), r);
 check('　 不寫 qa_log（不是一場活動的提問，後台題數不灌水）；route_log 記 org_faq',
   state.qaAppended.length === 0 && state.routeLog.length === 1 && state.routeLog[0][2] === 'org_faq' && state.routeLog[0][5] === 'org_faq', JSON.stringify(state.routeLog));
 check('　 過期條目在 prompt 裡標「超過半年沒更新」（程式算的）', /超過半年沒更新\）工研院共有/.test(orgCall?.sys || ''));
@@ -227,6 +227,18 @@ check('★ 這一場與機構資料都沒有：照工單 B 的講法（接住＋
   state.routeForce = toOrg;
   const got = await R.routeIntent('請問怎麼申請採訪？', [{ id: 'semi', name: '半導體先進封裝技術發表會', date: new Date(), has_kb: true }], {});
   check('路由：org_faq 是合法的意圖（不會被當成 other 丟掉）', got.intent === 'org_faq', JSON.stringify(got));
+}
+
+// ── 批次 208：出處／更新日期那種單獨成行的註記，出口整行拿掉 ──
+{
+  const { stripOrgSourceNote } = await import('../lib/org-kb.js');
+  const dirty = '想洽談授權，請撥客服專線。\n\n（以上是工研院一般公開資料，更新日期 2026-11-10）\n\n📌 出處：工研院一般公開資料（機構資料最近更新：2026-11-11）';
+  check('★ 批次 208：「（以上是…更新日期…）」與「📌 出處」兩行都拿掉，正文留著', stripOrgSourceNote(dirty) === '想洽談授權，請撥客服專線。', stripOrgSourceNote(dirty));
+  const stale = '這是工研院一般公開資料，超過半年沒更新，請向新聞聯絡人確認。';
+  check('　 「超過半年沒更新，請確認」的提醒留著', stripOrgSourceNote(stale) === stale);
+  const inline = '這是工研院一般公開資料：採訪申請請洽傳播處新聞聯絡人，需提前三個工作天提出，詳細流程以官網公告為準，電話請見官網。';
+  check('　 正文裡夾著這個詞的長句不動', stripOrgSourceNote(inline) === inline);
+  check('　 空字串、沒有註記的文字不出錯', stripOrgSourceNote('') === '' && stripOrgSourceNote('你好') === '你好');
 }
 
 console.log(`\n${fail ? '❌' : '✅'} 批次 198（機構資料）測試：${pass} 通過，${fail} 失敗`);
