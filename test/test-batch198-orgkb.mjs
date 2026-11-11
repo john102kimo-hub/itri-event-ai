@@ -229,5 +229,17 @@ check('★ 這一場與機構資料都沒有：照工單 B 的講法（接住＋
   check('路由：org_faq 是合法的意圖（不會被當成 other 丟掉）', got.intent === 'org_faq', JSON.stringify(got));
 }
 
+// ── 批次 208：出處／更新日期那種單獨成行的註記，出口整行拿掉 ──
+{
+  const { stripOrgSourceNote } = await import('../lib/org-kb.js');
+  const dirty = '想洽談授權，請撥客服專線。\n\n（以上是工研院一般公開資料，更新日期 2026-11-10）\n\n📌 出處：工研院一般公開資料（機構資料最近更新：2026-11-11）';
+  check('★ 批次 208：「（以上是…更新日期…）」與「📌 出處」兩行都拿掉，正文留著', stripOrgSourceNote(dirty) === '想洽談授權，請撥客服專線。', stripOrgSourceNote(dirty));
+  const stale = '這是工研院一般公開資料，超過半年沒更新，請向新聞聯絡人確認。';
+  check('　 「超過半年沒更新，請確認」的提醒留著', stripOrgSourceNote(stale) === stale);
+  const inline = '這是工研院一般公開資料：採訪申請請洽傳播處新聞聯絡人，需提前三個工作天提出，詳細流程以官網公告為準，電話請見官網。';
+  check('　 正文裡夾著這個詞的長句不動', stripOrgSourceNote(inline) === inline);
+  check('　 空字串、沒有註記的文字不出錯', stripOrgSourceNote('') === '' && stripOrgSourceNote('你好') === '你好');
+}
+
 console.log(`\n${fail ? '❌' : '✅'} 批次 198（機構資料）測試：${pass} 通過，${fail} 失敗`);
 process.exit(fail ? 1 : 0);
