@@ -1419,7 +1419,8 @@ reset(); await freshModule();
 state.itriHtml = '';
 out = await send('新聞關鍵字：這個技術官網完全沒報導過');
 check('查無資料時老實說查不到，不會硬答或裝死',
-  out.length === 1 && out[0]?.kind === 'text' && /沒有找到跟「這個技術官網完全沒報導過」直接相關的報導/.test(out[0].text),
+  // 批次 204：這串字是一句話、不是題目，查不到時不放進「」裡複誦
+  out.length === 1 && out[0]?.kind === 'text' && /沒有找到跟這個題目直接相關的報導/.test(out[0].text) && !/「這個技術官網完全沒報導過」/.test(out[0].text),
   JSON.stringify(out));
 check('查無資料時沒有呼叫 Anthropic 硬答（跟「抓取失敗」不同，查無資料不需要問 AI）',
   !out.some(o => o.kind === 'answer'), JSON.stringify(out));
