@@ -187,7 +187,7 @@
 <div id="gate"><div id="gate-box">
   <h1>📝 活動報名</h1>
   <p>請輸入管理員密碼</p>
-  <input id="gate-input" type="password" placeholder="管理員密碼" autocomplete="current-password" onkeydown="if(event.key==='Enter')unlock()">
+  <input id="gate-input" type="password" placeholder="管理員密碼（同仁請從同仁專區進入）" autocomplete="current-password" onkeydown="if(event.key==='Enter')unlock()">
   <button class="btn" style="width:100%;justify-content:center;padding:13px" onclick="unlock()">進入</button>
   <div id="gate-err"></div>
 </div></div>
@@ -376,7 +376,7 @@
 
 <script>
 'use strict';
-let PWD = '', STAFF = sessionStorage.getItem('itri_staff_key') || '', LIST = [], LINK_ALL = '', DATA = null, CUR = '', TAB = 'over', FSESS = '', editSessId = '', INCLUDE_TEST = false;
+let PWD = '', STAFF = localStorage.getItem('itri_staff_key') || '', LIST = [], LINK_ALL = '', DATA = null, CUR = '', TAB = 'over', FSESS = '', editSessId = '', INCLUDE_TEST = false;
 let ROSTER_HIT = null, ROSTER_SEQ = 0, ROSTER_T = 0;
 let MENU = null, formMode = 'edit', sessMode = 'rows', routeSeq = 0, sessLineMap = [], optLineMap = [], LOADED_ID = '';
 const TABS = ['over', 'list', 'share', 'set'];
@@ -411,7 +411,7 @@ async function unlock() {
   catch (e) { $('gate-err').textContent = e.status === 401 ? '密碼錯誤' : e.message; }
 }
 function enter() { $('gate').style.display = 'none'; $('page').style.display = 'block'; route(); }
-function relock() { if (STAFF && !PWD) { document.body.innerHTML = '<p style="padding:60px 20px;text-align:center">同仁連結已失效或不正確，請向管理員重新索取。</p>'; return; } sessionStorage.removeItem('itri_pwd'); $('gate').style.display = 'flex'; $('page').style.display = 'none'; $('gate-err').textContent = '登入已失效，請重新輸入密碼'; }
+function relock() { if (STAFF && !PWD) { document.body.innerHTML = '<p style="padding:60px 20px;text-align:center">同仁金鑰已失效或不正確，請回 <a href="/staff">同仁專區</a> 重新輸入。</p>'; localStorage.removeItem('itri_staff_key'); return; } sessionStorage.removeItem('itri_pwd'); $('gate').style.display = 'flex'; $('page').style.display = 'none'; $('gate-err').textContent = '登入已失效，請重新輸入密碼'; }
 
 function parseHash() {
   const [path, q] = location.hash.replace(/^#\/?/, '').split('?');
