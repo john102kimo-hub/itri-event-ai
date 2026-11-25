@@ -17,6 +17,9 @@
 // POST {action:'contacts_directory_save',content} → 整份覆蓋儲存
 // GET  ?action=org_kb                             → 機構資料原文＋字數／過期條目統計（後台編輯用，批次 198）
 // POST {action:'org_kb_save',content}             → 整份覆蓋儲存（上限 6,000 字）
+// ── 同仁專屬連結（批次 209，不需管理員密碼，改驗環境變數 STAFF_LINK_KEY；見 lib/staff-link.js）──
+// GET  ?action=staff_list              → 活動清單＋各場編輯連結（header X-Staff-Key）
+// POST {action:'staff_create',name,event_date?,venue?} → 新增一場未發布草稿
 // ── 媒體報名（批次 88）：action 一律以 reg_ 開頭，整段交給 lib/registration-api.js ──
 //   （Vercel Hobby 的 Function 上限 12 支已用 11 支，所以搭在這支上，不另開新檔）
 // ── 業發處合作洽詢（批次 119）：action 一律以 b2b_ 開頭，整段交給 lib/b2b-api.js（資料在另一本試算表）──
@@ -41,6 +44,7 @@ import { requireAdmin, passwordFrom, codeMatches, authBlocked, authFailed, tooMa
 import { runAssistant } from '../lib/assistant.js';
 import { addMemory, forgetMemory } from '../lib/assistant-memory.js';
 import { createLimiter, clientIp } from '../lib/rate-limit.js';
+import { handleStaffList, handleStaffCreate } from '../lib/staff-link.js';
 
 // 跟 events 的 knowledge_base 同一個上限理由：Google Sheets 單一儲存格上限約 5 萬字元，
 // 這份清單目前十幾行遠遠用不到，留餘裕只是避免同仁哪天貼了整份含備註的原始文件進來。
@@ -169,6 +173,8 @@ export default async function handler(req, res) {
     if (typeof action === 'string' && action.startsWith('b2b_')) return handleB2BRequest(req, res);
     // 計畫成效唯讀連結（批次 151）：一樣在讀活動表之前交出去，自己驗連結碼或管理員密碼。
     if (typeof action === 'string' && action.startsWith('impact_')) return handleImpactRequest(req, res);
+    // 同仁專屬連結（批次 209）：自己驗 STAFF_LINK_KEY，不需要管理員密碼；只有清單與新增草稿兩支
+    if (action === 'staff_list') return handleStaffList(req, res);
 
     // 全域技術窗口分工：跟活動表無關，不需要先讀 events，獨立處理完就回傳。
     if (action === 'contacts_directory') {
@@ -382,6 +388,7 @@ export default async function handler(req, res) {
     }
     if (typeof action === 'string' && action.startsWith('b2b_')) return handleB2BRequest(req, res);
     if (typeof action === 'string' && action.startsWith('impact_')) return handleImpactRequest(req, res);
+    if (action === 'staff_create') return handleStaffCreate(req, res);
 
     // 快速提問預覽（批次 147）：編輯畫面上即時顯示「記者現在會看到哪幾顆快速提問」，跟網頁、LINE 用同一支 effectiveChips()。
     // 不需要密碼：只拿送進來的欄位算一次（純函式，不讀試算表、不呼叫 AI），沒有任何資料可以外洩；

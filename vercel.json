@@ -29,6 +29,10 @@
       "destination": "/registrations.html"
     },
     {
+      "source": "/staff",
+      "destination": "/staff.html"
+    },
+    {
       "source": "/reg-status",
       "destination": "/reg-status.html"
     },
@@ -84,7 +88,7 @@
       ]
     },
     {
-      "source": "/(reg-status|reg-status\\.html|impact|impact\\.html)",
+      "source": "/(reg-status|reg-status\\.html|impact|impact\\.html|staff|staff\\.html)",
       "headers": [
         {
           "key": "X-Robots-Tag",
@@ -97,7 +101,7 @@
       ]
     },
     {
-      "source": "/(admin|geo|report|registrations|reg-status|impact|edit|training|b2b|inquiry|index\\.html|geo\\.html|report\\.html|registrations\\.html|reg-status\\.html|impact\\.html|edit\\.html|training\\.html|media\\.html|b2b\\.html|inquiry\\.html)",
+      "source": "/(admin|geo|report|registrations|staff|reg-status|impact|edit|training|b2b|inquiry|index\\.html|geo\\.html|report\\.html|registrations\\.html|staff\\.html|reg-status\\.html|impact\\.html|edit\\.html|training\\.html|media\\.html|b2b\\.html|inquiry\\.html)",
       "headers": [
         {
           "key": "X-Frame-Options",
