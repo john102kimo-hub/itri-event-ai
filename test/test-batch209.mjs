@@ -67,8 +67,8 @@ await seed();
 {
   const noPw = await post({ action: 'reg_admin_add', c: 'tw', name: '陳小華', outlet: '聯合報', email: 'a@b.com', sessions: ['A1'] });
   check('★ 沒密碼不能代報名（401），也沒寫進去', noPw.statusCode === 401 && regRows().length === 0);
-  const staffOnly = await post({ action: 'reg_admin_add', c: 'tw', name: '陳小華', outlet: '聯合報', email: 'a@b.com', sessions: ['A1'] }, { 'x-staff-key': STAFF_KEY });
-  check('★ 同仁連結的金鑰不能代報名（只認管理員密碼）', staffOnly.statusCode === 401 && regRows().length === 0);
+  const badKey = await post({ action: 'reg_admin_add', c: 'tw', name: '陳小華', outlet: '聯合報', email: 'a@b.com', sessions: ['A1'] }, { 'x-staff-key': STAFF_KEY + 'x' });
+  check('★ 錯的同仁金鑰不能代報名', badKey.statusCode === 401 && regRows().length === 0);
 }
 {
   const r = await add();
@@ -170,15 +170,14 @@ seedEvents();
 {
   // 同仁金鑰只開這兩支：其他管理員動作一律不認
   const probes = [
-    ['GET', { action: 'list_admin' }], ['GET', { action: 'get', id: 'e1' }], ['GET', { action: 'org_kb' }], ['GET', { action: 'reg_admin_list' }],
-    ['GET', { action: 'reg_export', c: 'tw' }], ['GET', { action: 'contacts_directory' }]
+    ['GET', { action: 'list_admin' }], ['GET', { action: 'get', id: 'e1' }], ['GET', { action: 'org_kb' }], ['GET', { action: 'reg_export', c: 'tw' }], ['GET', { action: 'reg_admin_menu_status' }], ['GET', { action: 'contacts_directory' }]
   ];
   let allBlocked = true;
   for (const [, q] of probes) { const r = await get(q, sk); if (r.statusCode !== 401) allBlocked = false; }
-  for (const b of [{ action: 'create', name: 'x' }, { action: 'archive', id: 'e1' }, { action: 'delete', id: 'e1' }, { action: 'org_kb_save', content: 'x' }, { action: 'reg_admin_update', reg_id: 'R1', note: 'x' }, { action: 'assistant_chat', messages: [] }]) {
+  for (const b of [{ action: 'create', name: 'x' }, { action: 'archive', id: 'e1' }, { action: 'delete', id: 'e1' }, { action: 'org_kb_save', content: 'x' }, { action: 'reg_admin_menu_reset' }, { action: 'reg_admin_menu_sync', c: '*' }, { action: 'assistant_chat', messages: [] }]) {
     const r = await post(b, sk); if (r.statusCode !== 401) allBlocked = false;
   }
-  check('★ 同仁金鑰打不開任何管理員功能（清單、知識庫、報名名單、匯出、封存、刪除都 401）', allBlocked);
+  check('★ 同仁金鑰打不開任何管理員功能（清單、知識庫、匯出個資、LINE 選單、封存、刪除都 401）', allBlocked);
 }
 {
   // 猜錯限流：同一來源錯太多次先擋
@@ -213,18 +212,55 @@ seedEvents();
   check('strictDate：真日期收、假日期／亂格式不收', SL.strictDate('2026-12-25') === '2026-12-25' && SL.strictDate('2026-02-30') === '' && SL.strictDate('12/25') === '' && SL.strictDate(null) === '');
 }
 
+console.log('\n── 二之二、同仁金鑰的報名權限與記者名單（批次 210）──');
+await seed();
+{
+  const staffAdd = await post({ action: 'reg_admin_add', c: 'tw', name: '同仁代填', outlet: '中時', email: 's@e.com', sessions: ['A1'] }, sk);
+  check('同仁金鑰可以代記者報名', staffAdd.statusCode === 200, JSON.stringify(staffAdd.body));
+  const lst = await get({ action: 'reg_admin_list', c: 'tw' }, sk);
+  check('同仁金鑰可以看報名名單', lst.statusCode === 200 && lst.body.stats.people === 1);
+  const exp = await get({ action: 'reg_export', c: 'tw' }, sk);
+  check('★ 同仁金鑰不能匯出（整批個資）', exp.statusCode === 401);
+  const wrong = await get({ action: 'reg_admin_list', c: 'tw' }, { 'x-staff-key': 'nope' });
+  check('★ 錯的金鑰看不到名單', wrong.statusCode === 401);
+}
+{
+  book.media_roster = [['id', 'name', 'outlet', 'beat', 'email', 'phone'],
+    ['N0001', '王大明', '經濟日報', '', 'wang@ed.com', '0912345678', 0, 0, 0, '', 'active'],
+    ['N0002', '王離職', '舊報', '', 'old@x.com', '', 0, 0, 0, '', 'left']];
+  const q1 = await get({ action: 'reg_admin_roster_search', q: '王' }, { 'x-admin-password': 'pw' });
+  check('記者名單查詢：打姓名帶出單位、Email、電話，已離職的不列', q1.statusCode === 200 && q1.body.matches.length === 1 && q1.body.matches[0].outlet === '經濟日報' && q1.body.matches[0].email === 'wang@ed.com' && q1.body.matches[0].phone === '0912-345-678', JSON.stringify(q1.body));
+  const q2 = await get({ action: 'reg_admin_roster_search', q: 'ED.COM' }, sk);
+  check('用 Email 片段也找得到（不分大小寫），同仁金鑰可用', q2.body.matches.length === 1);
+  const q3 = await get({ action: 'reg_admin_roster_search', q: '王' });
+  check('★ 沒帶任何憑證不能查記者名單', q3.statusCode === 401);
+  const add1 = await admin({ action: 'reg_admin_roster_add', name: '新記者', outlet: '自由時報', email: 'New@LTN.com', phone: '0922-111-222' });
+  const rows = book.media_roster.slice(1);
+  const nr = rows[rows.length - 1];
+  check('不在名單的加入名單：新增一列、id 接號、Email 小寫、狀態 active', add1.statusCode === 200 && nr[0] === 'N0003' && nr[4] === 'new@ltn.com' && nr[10] === 'active', JSON.stringify(nr));
+  const add2 = await admin({ action: 'reg_admin_roster_add', name: '新記者', outlet: '自由時報', email: 'new@ltn.com' });
+  check('同一個 Email 再加入 → already，不重複', add2.body.already === true && book.media_roster.length === 4);
+  check('加入名單缺 Email → 400', (await admin({ action: 'reg_admin_roster_add', name: 'x', outlet: 'y', email: '' })).statusCode === 400);
+  const both = await admin({ action: 'reg_admin_add', c: 'tw', name: '李新人', outlet: '蘋果', email: 'lee@a.com', sessions: ['B1'], add_to_roster: true });
+  check('代報名時勾「同時加入名單」：報名成功並加入名單', both.statusCode === 200 && both.body.roster?.ok === true && book.media_roster.some((r) => r[4] === 'lee@a.com'), JSON.stringify(both.body));
+  const ov = await get({ action: 'reg_admin_list', c: 'tw' }, { 'x-admin-password': 'pw' });
+  check('名單外的報名在後台標 no，加入名單後同一人標 yes', ov.body.regs.find((g) => g.email === 's@e.com')?.roster === 'no' && ov.body.regs.find((g) => g.email === 'lee@a.com')?.roster === 'yes', JSON.stringify(ov.body.regs.map((g) => [g.email, g.roster])));
+}
+
 // ═══ 三、頁面與路由 ═══════════════════════════════════════════════════
 console.log('\n── 三、頁面 ──');
 {
   const fs = await import('node:fs');
   const page = fs.readFileSync(new URL('../public/staff.html', import.meta.url), 'utf8');
+  const reg = fs.readFileSync(new URL('../public/registrations.html', import.meta.url), 'utf8');
   const vercel = JSON.parse(fs.readFileSync(new URL('../vercel.json', import.meta.url), 'utf8'));
   check('/staff 有改寫到 staff.html', vercel.rewrites.some((r) => r.source === '/staff' && r.destination === '/staff.html'));
   check('/staff 不給搜尋引擎、不被快取（noindex＋no-store）', JSON.stringify(vercel.headers).includes('staff|staff\\\\.html') && /noindex/.test(page));
   check('頁面：金鑰讀自網址 # 後面、用 header 送出，不放網址參數', /location\.hash/.test(page) && /X-Staff-Key/.test(page) && !/\?k=|&k=/.test(page));
   check('頁面讀完就把金鑰從網址列清掉', /history\.replaceState/.test(page));
+  check('代報名對話框接記者名單：打字查名單、點選帶入、不在名單提示加入；名單外的列有「建議加入名單」', /rosterSuggest/.test(reg) && /建議加入名單/.test(reg) && /reg_admin_roster_search/.test(reg));
+  check('/staff 有快速前往：活動編輯、新增報名、報名名單', /\/registrations#\/new/.test(page) && /新增／編輯活動/.test(page));
   check('Function 數量沒增加（沒有新的 api/*.js）', fs.readdirSync(new URL('../api/', import.meta.url)).filter((f) => f.endsWith('.js')).length === 11);
-  const reg = fs.readFileSync(new URL('../public/registrations.html', import.meta.url), 'utf8');
   check('後台名單有「代記者報名」按鈕與對話框，打 reg_admin_add', /openAdd\(\)/.test(reg) && /id="m-add"/.test(reg) && /reg_admin_add/.test(reg));
 }
 

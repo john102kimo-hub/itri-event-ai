@@ -29,18 +29,32 @@
   .pill.draft { background: #fef3c7; color: var(--warn); }
   .pill.active { background: #d1fae5; color: #065f46; }
   .tip { background: #f0fdf9; border: 1px solid #b7ebd9; border-radius: 10px; padding: 10px 12px; font-size: .85rem; margin-top: 12px; }
+  .quick { display: flex; gap: 10px; flex-wrap: wrap; }
+  .quick .btn { padding: 10px 14px; font-size: .92rem; }
   #bad { display: none; text-align: center; padding: 60px 16px; }
   @media (max-width: 640px) { .row { grid-template-columns: 1fr; } .ev { flex-direction: column; align-items: flex-start; } }
 </style>
 </head>
 <body>
 <div class="wrap">
-  <div id="bad"><h1>這條連結不能用</h1><p class="muted">連結不完整、已失效，或已被管理員停用。請向管理員重新索取同仁專屬連結。</p></div>
+  <div id="bad"><h1>同仁專區</h1><p class="muted">請輸入同仁金鑰（向管理員索取，或直接點管理員給你的專屬連結）。這台裝置只需要輸入一次。</p>
+    <div style="max-width:340px;margin:14px auto 0;text-align:left"><label for="k-in">同仁金鑰</label><input id="k-in" type="password" autocomplete="off" onkeydown="if(event.key==='Enter')saveKey()"></div>
+    <div style="margin-top:12px"><button class="btn" onclick="saveKey()">進入</button></div><div class="err" id="k-err"></div></div>
   <div id="app" hidden>
     <h1>同仁專區</h1>
-    <div class="muted">新增活動、進入各場活動的編輯頁。不需要後台密碼。</div>
+    <div class="muted">新增／編輯活動、活動報名都在這裡。不需要後台密碼。</div>
 
     <div class="card">
+      <h2>快速前往</h2>
+      <div class="quick">
+        <a class="btn outline" href="#act">📅 新增／編輯活動</a>
+        <a class="btn outline" href="/registrations#/new">📝 新增活動報名</a>
+        <a class="btn outline" href="/registrations">👥 活動報名名單／代記者報名</a>
+      </div>
+      <div class="muted" style="margin-top:8px">AI 能見度追蹤、AI 主管問答訓練、匯出報名名單、LINE 選單等功能仍需管理員處理。</div>
+    </div>
+
+    <div class="card" id="act">
       <h2>新增活動</h2>
       <div class="row">
         <div><label for="n-name">活動名稱</label><input id="n-name" maxlength="100" autocomplete="off" placeholder="例：2026 春季技術說明會"></div>
@@ -53,7 +67,8 @@
     </div>
 
     <div class="card">
-      <h2>所有活動 <span class="muted" id="count"></span></h2>
+      <h2>編輯活動 <span class="muted" id="count"></span></h2>
+      <div class="muted" style="margin-bottom:6px">點活動右邊的「編輯內容」。剛新增的活動也在這裡（未發布）。</div>
       <div id="list" class="muted">載入中…</div>
     </div>
   </div>
@@ -64,8 +79,15 @@ const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const STATUS = { draft: '未發布', active: '進行中', ended: '已結束' };
 // 金鑰在網址 # 後面（不會被送到伺服器）；讀到後存在這個分頁的 sessionStorage，並把網址列上的金鑰清掉
-let KEY = new URLSearchParams(location.hash.replace(/^#/, '')).get('k') || sessionStorage.getItem('itri_staff_key') || '';
-if (KEY) { sessionStorage.setItem('itri_staff_key', KEY); history.replaceState(null, '', location.pathname); }
+// 金鑰存在這台裝置的 localStorage（同仁第一次輸入或點專屬連結後，之後從入口頁點進來就不用再輸入；報名後台頁也讀這一份）
+let KEY = new URLSearchParams(location.hash.replace(/^#/, '')).get('k') || localStorage.getItem('itri_staff_key') || '';
+if (KEY) { localStorage.setItem('itri_staff_key', KEY); if (/k=/.test(location.hash)) history.replaceState(null, '', location.pathname); }
+function saveKey() {
+  const v = $('k-in').value.trim();
+  if (!v) return;
+  KEY = v; localStorage.setItem('itri_staff_key', v); $('k-err').textContent = '';
+  $('bad').style.display = 'none'; $('app').hidden = false; load();
+}
 
 async function api(method, action, body) {
   const headers = { 'X-Staff-Key': KEY };
@@ -76,7 +98,7 @@ async function api(method, action, body) {
   if (!res.ok) { const e = new Error(data.error || `錯誤 ${res.status}`); e.status = res.status; throw e; }
   return data;
 }
-function bad() { $('app').hidden = true; $('bad').style.display = 'block'; sessionStorage.removeItem('itri_staff_key'); }
+function bad() { $('app').hidden = true; $('bad').style.display = 'block'; localStorage.removeItem('itri_staff_key'); $('k-err').textContent = KEY ? '金鑰不正確或已失效，請向管理員重新索取' : ''; KEY = ''; }
 
 async function load() {
   try {
