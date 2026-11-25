@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<title>同仁專區｜活動管理</title>
+<style>
+  :root { --g: #0F9E7A; --ink: #1f2937; --mut: #6b7280; --line: #e5e7eb; --warn: #b45309; --bg: #f6f8f7; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: "Noto Sans TC", "Microsoft JhengHei", system-ui, sans-serif; color: var(--ink); background: var(--bg); line-height: 1.6; }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 24px 16px 80px; }
+  h1 { font-size: 1.35rem; margin: 0 0 4px; }
+  h2 { font-size: 1.05rem; margin: 0 0 12px; }
+  .muted { color: var(--mut); font-size: .85rem; }
+  .card { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin-top: 16px; }
+  label { display: block; font-size: .85rem; font-weight: 600; margin-bottom: 4px; }
+  input { width: 100%; padding: 9px 10px; border: 1px solid #cbd5d1; border-radius: 8px; font: inherit; }
+  .row { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 10px; }
+  .btn { background: var(--g); color: #fff; border: 0; border-radius: 8px; padding: 9px 16px; font: inherit; font-weight: 600; cursor: pointer; text-decoration: none; display: inline-block; }
+  .btn.outline { background: #fff; color: var(--g); border: 1px solid var(--g); padding: 6px 12px; font-size: .85rem; }
+  .btn:disabled { opacity: .5; cursor: default; }
+  .err { color: var(--warn); min-height: 1.4em; margin-top: 8px; font-size: .88rem; }
+  .ev { display: flex; gap: 12px; align-items: center; justify-content: space-between; padding: 10px 0; border-top: 1px solid var(--line); }
+  .ev:first-child { border-top: 0; }
+  .ev .t { font-weight: 600; }
+  .pill { font-size: .72rem; padding: 1px 8px; border-radius: 99px; background: #e5e7eb; margin-left: 6px; font-weight: 400; }
+  .pill.draft { background: #fef3c7; color: var(--warn); }
+  .pill.active { background: #d1fae5; color: #065f46; }
+  .tip { background: #f0fdf9; border: 1px solid #b7ebd9; border-radius: 10px; padding: 10px 12px; font-size: .85rem; margin-top: 12px; }
+  #bad { display: none; text-align: center; padding: 60px 16px; }
+  @media (max-width: 640px) { .row { grid-template-columns: 1fr; } .ev { flex-direction: column; align-items: flex-start; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div id="bad"><h1>這條連結不能用</h1><p class="muted">連結不完整、已失效，或已被管理員停用。請向管理員重新索取同仁專屬連結。</p></div>
+  <div id="app" hidden>
+    <h1>同仁專區</h1>
+    <div class="muted">新增活動、進入各場活動的編輯頁。不需要後台密碼。</div>
+
+    <div class="card">
+      <h2>新增活動</h2>
+      <div class="row">
+        <div><label for="n-name">活動名稱</label><input id="n-name" maxlength="100" autocomplete="off" placeholder="例：2026 春季技術說明會"></div>
+        <div><label for="n-date">活動日期（選填）</label><input id="n-date" type="date"></div>
+        <div><label for="n-venue">地點（選填）</label><input id="n-venue" maxlength="200" autocomplete="off"></div>
+      </div>
+      <div style="margin-top:12px"><button class="btn" id="n-go" onclick="createEvent()">新增活動</button></div>
+      <div class="err" id="n-err"></div>
+      <div class="tip">新增後是「未發布」草稿，記者與米亞都還看不到。進編輯頁補齊日期、地點、新聞稿等資料後，再在編輯頁改成「進行中」才會對外公開。</div>
+    </div>
+
+    <div class="card">
+      <h2>所有活動 <span class="muted" id="count"></span></h2>
+      <div id="list" class="muted">載入中…</div>
+    </div>
+  </div>
+</div>
+<script>
+'use strict';
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const STATUS = { draft: '未發布', active: '進行中', ended: '已結束' };
+// 金鑰在網址 # 後面（不會被送到伺服器）；讀到後存在這個分頁的 sessionStorage，並把網址列上的金鑰清掉
+let KEY = new URLSearchParams(location.hash.replace(/^#/, '')).get('k') || sessionStorage.getItem('itri_staff_key') || '';
+if (KEY) { sessionStorage.setItem('itri_staff_key', KEY); history.replaceState(null, '', location.pathname); }
+
+async function api(method, action, body) {
+  const headers = { 'X-Staff-Key': KEY };
+  const res = method === 'GET'
+    ? await fetch(`/api/events?action=${action}`, { headers })
+    : await fetch('/api/events', { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ action, ...body }) });
+  let data = {}; try { data = await res.json(); } catch {}
+  if (!res.ok) { const e = new Error(data.error || `錯誤 ${res.status}`); e.status = res.status; throw e; }
+  return data;
+}
+function bad() { $('app').hidden = true; $('bad').style.display = 'block'; sessionStorage.removeItem('itri_staff_key'); }
+
+async function load() {
+  try {
+    const { events } = await api('GET', 'staff_list');
+    $('count').textContent = `${events.length} 場`;
+    $('list').innerHTML = events.length ? events.map((e) => `
+      <div class="ev"><div><div class="t">${esc(e.name)}<span class="pill ${esc(e.status)}">${esc(STATUS[e.status] || e.status)}</span></div>
+        <div class="muted">${esc(e.event_date)}${e.venue ? '・' + esc(e.venue) : ''}</div></div>
+        ${e.edit_url ? `<a class="btn outline" href="${esc(e.edit_url)}" target="_blank" rel="noopener">編輯內容</a>` : '<span class="muted">沒有編輯連結，請洽管理員</span>'}
+      </div>`).join('') : '還沒有活動';
+  } catch (e) { if (e.status === 401 || e.status === 429) return e.status === 401 ? bad() : ($('list').textContent = e.message); $('list').textContent = e.message; }
+}
+async function createEvent() {
+  $('n-err').textContent = '';
+  const name = $('n-name').value.trim();
+  if (!name) return ($('n-err').textContent = '請填活動名稱');
+  $('n-go').disabled = true;
+  try {
+    const r = await api('POST', 'staff_create', { name, event_date: $('n-date').value, venue: $('n-venue').value });
+    location.href = r.edit_url; // 直接帶進編輯頁補資料
+  } catch (e) { if (e.status === 401) return bad(); $('n-err').textContent = e.message; $('n-go').disabled = false; }
+}
+if (!KEY) bad(); else { $('app').hidden = false; load(); }
+</script>
+</body>
+</html>

@@ -240,6 +240,7 @@
           <label><input type="checkbox" id="f-can" onchange="renderRegs()"> 顯示已取消</label>
           <label><input type="checkbox" id="f-test" onchange="toggleTest(this.checked)"> 含測試</label>
           <span style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn small" onclick="openAdd()">＋ 代記者報名</button>
             <button class="btn outline small" onclick="copyCol('email')">複製 Email</button>
             <button class="btn outline small" onclick="copyCol('phone')">複製手機</button>
             <button class="btn small" onclick="exportCsv()">匯出 CSV</button>
@@ -348,6 +349,23 @@
   <h2 id="m-sess-title">修改場次</h2>
   <div class="chk" id="m-sess-list"></div>
   <div class="actions"><button class="btn outline" onclick="closeModal('m-sess')">取消</button><button class="btn" onclick="saveSess()">儲存</button></div>
+</div></div>
+
+<!-- 承辦人代記者報名（批次 209） -->
+<div class="modal" id="m-add"><div class="box">
+  <h2>代記者報名</h2>
+  <div class="muted small" style="margin-bottom:10px;line-height:1.6">記者用電話、Email 或現場口頭報名時，在這裡補登。不受「已截止／額滿」限制；手機可以先空著。</div>
+  <div class="fld"><label for="a-name">姓名</label><input type="text" id="a-name" maxlength="40" autocomplete="off"></div>
+  <div class="fld"><label for="a-outlet">服務單位或媒體</label><input type="text" id="a-outlet" maxlength="60" autocomplete="off"></div>
+  <div class="row2">
+    <div class="fld"><label for="a-email">Email</label><input type="email" id="a-email" maxlength="100" autocomplete="off"></div>
+    <div class="fld"><label for="a-phone">手機（選填）</label><input type="tel" id="a-phone" maxlength="20" autocomplete="off"></div>
+  </div>
+  <div class="fld"><label>場次</label><div class="chk" id="a-sess"></div></div>
+  <div class="fld" id="a-opts"></div>
+  <div class="fld"><label for="a-note">備註（只有後台看得到，選填）</label><input type="text" id="a-note" maxlength="300" placeholder="例：電話報名、由 OO 轉介"></div>
+  <div class="help" id="a-err" style="color:var(--warn);min-height:1.2em"></div>
+  <div class="actions"><button class="btn outline" onclick="closeModal('m-add')">取消</button><button class="btn" id="a-save" onclick="saveAdd()">新增報名</button></div>
 </div></div>
 
 <div id="toast"></div>
@@ -686,6 +704,37 @@ async function saveSess() {
   const codes = [...document.querySelectorAll('#m-sess-list input:checked')].map((i) => i.value);
   if (!codes.length) return alert('至少要留一個場次；要整筆取消請用「取消」。');
   closeModal('m-sess'); update(editSessId, { sessions: codes }, '場次已更新');
+}
+/* 代記者報名（批次 209）：欄位檢查以伺服器為準（lib/registration.js validateSubmission admin 模式），這裡只負責收資料 */
+function openAdd() {
+  for (const id of ['a-name', 'a-outlet', 'a-email', 'a-phone', 'a-note']) $(id).value = '';
+  $('a-err').textContent = '';
+  const live = DATA.sessions.filter((s) => s.status !== 'cancelled');
+  const only = live.length === 1;
+  $('a-sess').innerHTML = live.map((s) => `<label><input type="checkbox" value="${esc(s.code)}"${only ? ' checked' : ''}> <span><b>${esc(s.code)}</b> ${esc(s.md)} ${esc(s.title)}${s.ended ? '（已結束）' : s.status !== 'open' ? '（' + ({ closed: '已截止', full: '額滿' }[s.status] || s.status) + '）' : ''}</span></label>`).join('');
+  // 選填項目：人數類給數字、勾選類給核取方塊、文字類給一行輸入（跟報名頁同一套代碼，伺服器端只收活動有定義的）
+  $('a-opts').innerHTML = DATA.options.map((o) => {
+    const lab = esc(o.label.replace(/（.*$/, ''));
+    if (o.type === 'number') return `<label class="small">${lab} <input type="number" min="0" max="9" data-opt="${esc(o.key)}" style="width:70px"></label>`;
+    if (o.type === 'text') return `<label class="small">${lab} <input type="text" maxlength="200" data-opt="${esc(o.key)}"></label>`;
+    return `<label class="small"><input type="checkbox" data-opt="${esc(o.key)}"> ${lab}</label>`;
+  }).join('<br>');
+  $('m-add').classList.add('show');
+  $('a-name').focus();
+}
+async function saveAdd() {
+  const sessions = [...document.querySelectorAll('#a-sess input:checked')].map((i) => i.value);
+  const options = {};
+  for (const el of document.querySelectorAll('#a-opts [data-opt]')) options[el.dataset.opt] = el.type === 'checkbox' ? el.checked : el.value;
+  $('a-err').textContent = '';
+  $('a-save').disabled = true;
+  try {
+    const r = await callJson('POST', 'reg_admin_add', { c: CUR, name: $('a-name').value, outlet: $('a-outlet').value, email: $('a-email').value, phone: $('a-phone').value, sessions, options, note: $('a-note').value });
+    closeModal('m-add'); toast(r.reopened ? '已恢復這位先前取消的報名' : '已新增報名'); await loadCamp(); renderCamp();
+  } catch (e) {
+    if (e.status === 401) return relock();
+    $('a-err').textContent = e.message;
+  } finally { $('a-save').disabled = false; }
 }
 async function quickStatus(v) {
   const c = DATA.campaigns.find((x) => x.id === CUR);
