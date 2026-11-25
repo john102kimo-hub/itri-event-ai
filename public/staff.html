@@ -29,6 +29,8 @@
   .pill.draft { background: #fef3c7; color: var(--warn); }
   .pill.active { background: #d1fae5; color: #065f46; }
   .tip { background: #f0fdf9; border: 1px solid #b7ebd9; border-radius: 10px; padding: 10px 12px; font-size: .85rem; margin-top: 12px; }
+  .quick { display: flex; gap: 10px; flex-wrap: wrap; }
+  .quick .btn { padding: 10px 14px; font-size: .92rem; }
   #bad { display: none; text-align: center; padding: 60px 16px; }
   @media (max-width: 640px) { .row { grid-template-columns: 1fr; } .ev { flex-direction: column; align-items: flex-start; } }
 </style>
@@ -38,9 +40,19 @@
   <div id="bad"><h1>這條連結不能用</h1><p class="muted">連結不完整、已失效，或已被管理員停用。請向管理員重新索取同仁專屬連結。</p></div>
   <div id="app" hidden>
     <h1>同仁專區</h1>
-    <div class="muted">新增活動、進入各場活動的編輯頁。不需要後台密碼。</div>
+    <div class="muted">新增／編輯活動、活動報名都在這裡。不需要後台密碼。</div>
 
     <div class="card">
+      <h2>快速前往</h2>
+      <div class="quick">
+        <a class="btn outline" href="#act">📅 新增／編輯活動</a>
+        <a class="btn outline" href="/registrations#/new">📝 新增活動報名</a>
+        <a class="btn outline" href="/registrations">👥 活動報名名單／代記者報名</a>
+      </div>
+      <div class="muted" style="margin-top:8px">AI 能見度追蹤、AI 主管問答訓練、匯出報名名單、LINE 選單等功能仍需管理員處理。</div>
+    </div>
+
+    <div class="card" id="act">
       <h2>新增活動</h2>
       <div class="row">
         <div><label for="n-name">活動名稱</label><input id="n-name" maxlength="100" autocomplete="off" placeholder="例：2026 春季技術說明會"></div>
@@ -53,7 +65,8 @@
     </div>
 
     <div class="card">
-      <h2>所有活動 <span class="muted" id="count"></span></h2>
+      <h2>編輯活動 <span class="muted" id="count"></span></h2>
+      <div class="muted" style="margin-bottom:6px">點活動右邊的「編輯內容」。剛新增的活動也在這裡（未發布）。</div>
       <div id="list" class="muted">載入中…</div>
     </div>
   </div>

@@ -177,6 +177,9 @@
     td .sess-tags { display: inline-flex; vertical-align: middle; }
     .ccards { grid-template-columns: 1fr; }
   }
+  .staff-mode .admin-only { display: none !important; }
+  .sugg { position: relative; } .sugg-list { border: 1px solid #cbd5d1; border-radius: 8px; background: #fff; margin-top: 4px; max-height: 190px; overflow: auto; }
+  .sugg-list button { display: block; width: 100%; text-align: left; border: 0; background: none; padding: 7px 10px; font: inherit; font-size: .85rem; cursor: pointer; } .sugg-list button:hover { background: #f0fdf9; }
 </style>
 </head>
 <body>
@@ -243,7 +246,7 @@
             <button class="btn small" onclick="openAdd()">＋ 代記者報名</button>
             <button class="btn outline small" onclick="copyCol('email')">複製 Email</button>
             <button class="btn outline small" onclick="copyCol('phone')">複製手機</button>
-            <button class="btn small" onclick="exportCsv()">匯出 CSV</button>
+            <button class="btn small admin-only" onclick="exportCsv()">匯出 CSV</button>
           </span>
         </div>
         <table><thead id="thead"></thead><tbody id="tb"></tbody></table>
@@ -355,14 +358,15 @@
 <div class="modal" id="m-add"><div class="box">
   <h2>代記者報名</h2>
   <div class="muted small" style="margin-bottom:10px;line-height:1.6">記者用電話、Email 或現場口頭報名時，在這裡補登。不受「已截止／額滿」限制；手機可以先空著。</div>
-  <div class="fld"><label for="a-name">姓名</label><input type="text" id="a-name" maxlength="40" autocomplete="off"></div>
-  <div class="fld"><label for="a-outlet">服務單位或媒體</label><input type="text" id="a-outlet" maxlength="60" autocomplete="off"></div>
+  <div class="fld"><label for="a-name">姓名（可打姓名、單位或 Email 搜尋記者名單）</label><input type="text" id="a-name" maxlength="40" autocomplete="off" oninput="rosterSuggest()"><div class="sugg-list" id="a-sugg" hidden></div><div class="help" id="a-roster-state"></div></div>
+  <div class="fld"><label for="a-outlet">服務單位或媒體</label><input type="text" id="a-outlet" maxlength="60" autocomplete="off" oninput="rosterMark()"></div>
   <div class="row2">
-    <div class="fld"><label for="a-email">Email</label><input type="email" id="a-email" maxlength="100" autocomplete="off"></div>
+    <div class="fld"><label for="a-email">Email</label><input type="email" id="a-email" maxlength="100" autocomplete="off" oninput="rosterMark()"></div>
     <div class="fld"><label for="a-phone">手機（選填）</label><input type="tel" id="a-phone" maxlength="20" autocomplete="off"></div>
   </div>
   <div class="fld"><label>場次</label><div class="chk" id="a-sess"></div></div>
   <div class="fld" id="a-opts"></div>
+  <div class="fld" id="a-roster-add" hidden><label style="font-weight:400"><input type="checkbox" id="a-roster-chk" checked> 這位不在記者名單裡，同時加入名單（之後打名字就會自動帶出）</label></div>
   <div class="fld"><label for="a-note">備註（只有後台看得到，選填）</label><input type="text" id="a-note" maxlength="300" placeholder="例：電話報名、由 OO 轉介"></div>
   <div class="help" id="a-err" style="color:var(--warn);min-height:1.2em"></div>
   <div class="actions"><button class="btn outline" onclick="closeModal('m-add')">取消</button><button class="btn" id="a-save" onclick="saveAdd()">新增報名</button></div>
@@ -372,7 +376,8 @@
 
 <script>
 'use strict';
-let PWD = '', LIST = [], LINK_ALL = '', DATA = null, CUR = '', TAB = 'over', FSESS = '', editSessId = '', INCLUDE_TEST = false;
+let PWD = '', STAFF = sessionStorage.getItem('itri_staff_key') || '', LIST = [], LINK_ALL = '', DATA = null, CUR = '', TAB = 'over', FSESS = '', editSessId = '', INCLUDE_TEST = false;
+let ROSTER_HIT = null, ROSTER_SEQ = 0, ROSTER_T = 0;
 let MENU = null, formMode = 'edit', sessMode = 'rows', routeSeq = 0, sessLineMap = [], optLineMap = [], LOADED_ID = '';
 const TABS = ['over', 'list', 'share', 'set'];
 const TAB_NAMES = { over: '總覽', list: '報名名單', share: '分享連結', set: '設定' };
@@ -385,7 +390,7 @@ const FORM_CARD = $('form-card');
 
 function toast(msg) { const t = $('toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove('show'), 2200); }
 async function call(method, action, params = {}) {
-  const headers = { 'X-Admin-Password': PWD };
+  const headers = PWD ? { 'X-Admin-Password': PWD } : { 'X-Staff-Key': STAFF };
   let res;
   if (method === 'GET') res = await fetch(`${API}?${new URLSearchParams({ action, ...params })}`, { headers });
   else res = await fetch(API, { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ action, ...params }) });
@@ -406,7 +411,7 @@ async function unlock() {
   catch (e) { $('gate-err').textContent = e.status === 401 ? '密碼錯誤' : e.message; }
 }
 function enter() { $('gate').style.display = 'none'; $('page').style.display = 'block'; route(); }
-function relock() { sessionStorage.removeItem('itri_pwd'); $('gate').style.display = 'flex'; $('page').style.display = 'none'; $('gate-err').textContent = '登入已失效，請重新輸入密碼'; }
+function relock() { if (STAFF && !PWD) { document.body.innerHTML = '<p style="padding:60px 20px;text-align:center">同仁連結已失效或不正確，請向管理員重新索取。</p>'; return; } sessionStorage.removeItem('itri_pwd'); $('gate').style.display = 'flex'; $('page').style.display = 'none'; $('gate-err').textContent = '登入已失效，請重新輸入密碼'; }
 
 function parseHash() {
   const [path, q] = location.hash.replace(/^#\/?/, '').split('?');
@@ -478,7 +483,7 @@ function renderList() {
   const has = LIST.length > 0;
   $('list-empty').hidden = has; $('entry').hidden = !has || !LINK_ALL;
   $('entry-url').textContent = LINK_ALL;
-  renderMenu(); loadMenu();
+  if (!(STAFF && !PWD)) { renderMenu(); loadMenu(); } // 同仁連結不能動 LINE 選單
   const starts = (a, b) => (a.date_from || '9999').localeCompare(b.date_from || '9999');
   const live = LIST.filter((c) => c.status === 'draft' || (c.status === 'open' && c.accepting)).sort(starts);
   const done = LIST.filter((c) => !live.includes(c)).sort((a, b) => starts(b, a));
@@ -609,7 +614,7 @@ function renderRegs() {
   $('list-count').textContent = `${rows.length} 筆`;
   $('noRows').style.display = rows.length ? 'none' : 'block';
   $('thead').innerHTML = `<tr><th>姓名／單位</th><th>Email／手機</th><th>場次</th>${hasOpts ? '<th>選填</th>' : ''}<th>標記</th><th></th></tr>`;
-  const rosterFlag = { yes: '<span class="flag yes">名單內</span>', no: '<span class="flag no">名單外</span>', maybe: '<span class="flag maybe" title="名字在記者名單裡，但媒體不同">同名不同媒體</span>', unknown: '' };
+  const rosterFlag = { yes: '<span class="flag yes">名單內</span>', no: '<span class="flag no" title="不在記者名單裡，可按「建議加入名單」">名單外・建議加入</span>', maybe: '<span class="flag maybe" title="名字在記者名單裡，但媒體不同">同名不同媒體</span>', unknown: '' };
   $('tb').innerHTML = rows.map((g) => `
     <tr class="${g.status !== 'active' ? 'cancelled' : ''}${g.test ? ' test' : ''}">
       <td><b>${esc(g.name)}</b><br><span class="muted">${esc(g.outlet)}</span><br><span class="muted small"><code>${esc(g.reg_id)}</code>・${esc((g.created_at || '').replace('T', ' ').replace('+08:00', '').slice(5, 16))}</span>${g.note ? `<br><span class="small" style="color:var(--warn)">📝 ${esc(g.note)}</span>` : ''}</td>
@@ -618,6 +623,7 @@ function renderRegs() {
       ${hasOpts ? `<td class="small" data-l="選填">${optText(g)}</td>` : ''}
       <td data-l="標記">${rosterFlag[g.roster] || ''}${g.line_bound ? '<span class="flag line">LINE</span>' : ''}${g.test ? '<span class="flag no">測試</span>' : ''}${g.dup ? `<span class="flag no" title="同一個 Email 有 ${g.dup + 1} 列，已合併計算">重複×${g.dup + 1}</span>` : ''}</td>
       <td class="act" style="white-space:nowrap">
+        ${g.roster === 'no' || g.roster === 'maybe' ? `<button class="btn outline small" onclick="addToRoster('${esc(g.reg_id)}')" title="這位不在記者名單裡，建議加入">建議加入名單</button>` : ''}
         <button class="btn outline small" onclick="editSess('${esc(g.reg_id)}')">場次</button>
         <button class="btn outline small" onclick="editNote('${esc(g.reg_id)}')">備註</button>
         ${g.status === 'active' ? `<button class="btn danger small" onclick="setStatus('${esc(g.reg_id)}','cancelled')">取消</button>` : `<button class="btn outline small" onclick="setStatus('${esc(g.reg_id)}','active')">恢復</button>`}
@@ -707,6 +713,7 @@ async function saveSess() {
 }
 /* 代記者報名（批次 209）：欄位檢查以伺服器為準（lib/registration.js validateSubmission admin 模式），這裡只負責收資料 */
 function openAdd() {
+  ROSTER_HIT = null; $('a-sugg').hidden = true; $('a-roster-state').textContent = ''; $('a-roster-add').hidden = true;
   for (const id of ['a-name', 'a-outlet', 'a-email', 'a-phone', 'a-note']) $(id).value = '';
   $('a-err').textContent = '';
   const live = DATA.sessions.filter((s) => s.status !== 'cancelled');
@@ -722,6 +729,40 @@ function openAdd() {
   $('m-add').classList.add('show');
   $('a-name').focus();
 }
+/* 記者名單：打字時查名單，點選後自動帶入單位、Email、手機；沒在名單裡就提示加入 */
+function rosterSuggest() {
+  ROSTER_HIT = null; rosterMark();
+  clearTimeout(ROSTER_T);
+  const q = $('a-name').value.trim();
+  if (q.length < 1) { $('a-sugg').hidden = true; return; }
+  const my = ++ROSTER_SEQ;
+  ROSTER_T = setTimeout(async () => {
+    try {
+      const r = await callJson('GET', 'reg_admin_roster_search', { q });
+      if (my !== ROSTER_SEQ) return;
+      const box = $('a-sugg');
+      box.innerHTML = r.matches.map((m, i) => `<button type="button" onclick="pickRoster(${i})">${esc(m.name)}・${esc(m.outlet)}<br><span class="muted small">${esc(m.email)} ${esc(m.phone)}</span></button>`).join('');
+      box._m = r.matches; box.hidden = !r.matches.length;
+    } catch (e) { /* 查名單失敗不擋代報名：照常手動填 */ }
+  }, 250);
+}
+function pickRoster(i) {
+  const m = $('a-sugg')._m[i]; if (!m) return;
+  $('a-name').value = m.name; $('a-outlet').value = m.outlet; $('a-email').value = m.email; $('a-phone').value = m.phone || '';
+  ROSTER_HIT = m; $('a-sugg').hidden = true; rosterMark();
+}
+function rosterMark() {
+  const email = $('a-email').value.trim().toLowerCase(), has = !!(ROSTER_HIT && ROSTER_HIT.email.toLowerCase() === email);
+  const filled = $('a-name').value.trim() && $('a-outlet').value.trim() && email.includes('@');
+  $('a-roster-state').textContent = has ? '✅ 在記者名單內，資料已帶入' : '';
+  $('a-roster-add').hidden = has || !filled;
+}
+async function addToRoster(id) {
+  const g = DATA.regs.find((x) => x.reg_id === id); if (!g) return;
+  if (!confirm(`把「${g.name}（${g.outlet}）」加入記者名單？`)) return;
+  try { const r = await callJson('POST', 'reg_admin_roster_add', { name: g.name, outlet: g.outlet, email: g.email, phone: g.phone }); toast(r.already ? '這個 Email 已經在名單裡了' : '已加入記者名單'); await loadCamp(); renderCamp(); }
+  catch (e) { alert(e.message); }
+}
 async function saveAdd() {
   const sessions = [...document.querySelectorAll('#a-sess input:checked')].map((i) => i.value);
   const options = {};
@@ -729,8 +770,8 @@ async function saveAdd() {
   $('a-err').textContent = '';
   $('a-save').disabled = true;
   try {
-    const r = await callJson('POST', 'reg_admin_add', { c: CUR, name: $('a-name').value, outlet: $('a-outlet').value, email: $('a-email').value, phone: $('a-phone').value, sessions, options, note: $('a-note').value });
-    closeModal('m-add'); toast(r.reopened ? '已恢復這位先前取消的報名' : '已新增報名'); await loadCamp(); renderCamp();
+    const r = await callJson('POST', 'reg_admin_add', { c: CUR, name: $('a-name').value, outlet: $('a-outlet').value, email: $('a-email').value, phone: $('a-phone').value, sessions, options, note: $('a-note').value, add_to_roster: !$('a-roster-add').hidden && $('a-roster-chk').checked });
+    closeModal('m-add'); toast((r.reopened ? '已恢復這位先前取消的報名' : '已新增報名') + (r.roster ? (r.roster.ok ? (r.roster.already ? '' : '，並加入記者名單') : '；' + r.roster.error) : '')); await loadCamp(); renderCamp();
   } catch (e) {
     if (e.status === 401) return relock();
     $('a-err').textContent = e.message;
@@ -1015,6 +1056,7 @@ function dlQr(id, name) {
 // 從後台（同分頁導覽）帶密碼進來時免登入
 (function () {
   const p = sessionStorage.getItem('itri_pwd');
+  if (!p && STAFF) { document.body.classList.add('staff-mode'); loadList().then(enter).catch(() => relock()); return; }
   if (p) { PWD = p; loadList().then(enter).catch(() => { sessionStorage.removeItem('itri_pwd'); }); }
 })();
 </script>
