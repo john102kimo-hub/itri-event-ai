@@ -151,6 +151,7 @@ seedEvents();
   const text = JSON.stringify(ok.body);
   check('★ 回應裡沒有知識庫全文、邀訪窗口分工', !/超長知識庫|機密窗口/.test(text));
   check('附各場的編輯連結（/edit?id=…&code=…）', ok.body.events.find((e) => e.id === 'e1').edit_url === '/edit?id=e1&code=codeAAAA');
+  check('附各場的媒體訓練連結（同一把編輯碼）', ok.body.events.find((e) => e.id === 'e1').training_url === '/training?id=e1&code=codeAAAA');
   check('不被瀏覽器快取', ok.headers['cache-control'] === 'no-store');
 }
 {

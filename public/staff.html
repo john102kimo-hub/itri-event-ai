@@ -51,7 +51,7 @@
         <a class="btn outline" href="/registrations#/new">📝 新增活動報名</a>
         <a class="btn outline" href="/registrations">👥 活動報名名單／代記者報名</a>
       </div>
-      <div class="muted" style="margin-top:8px">AI 能見度追蹤、AI 主管問答訓練、匯出報名名單、LINE 選單等功能仍需管理員處理。</div>
+      <div class="muted" style="margin-top:8px">AI 主管問答訓練：在下面的活動清單按該場的「媒體訓練」。匯出報名名單、LINE 選單等功能仍需管理員處理。</div>
     </div>
 
     <div class="card" id="act">
@@ -108,6 +108,7 @@ async function load() {
       <div class="ev"><div><div class="t">${esc(e.name)}<span class="pill ${esc(e.status)}">${esc(STATUS[e.status] || e.status)}</span></div>
         <div class="muted">${esc(e.event_date)}${e.venue ? '・' + esc(e.venue) : ''}</div></div>
         ${e.edit_url ? `<a class="btn outline" href="${esc(e.edit_url)}" target="_blank" rel="noopener">編輯內容</a>` : '<span class="muted">沒有編輯連結，請洽管理員</span>'}
+        ${e.training_url ? `<a class="btn outline" href="${esc(e.training_url)}" target="_blank" rel="noopener">🎤 媒體訓練</a>` : ''}
       </div>`).join('') : '還沒有活動';
   } catch (e) { if (e.status === 401 || e.status === 429) return e.status === 401 ? bad() : ($('list').textContent = e.message); $('list').textContent = e.message; }
 }
