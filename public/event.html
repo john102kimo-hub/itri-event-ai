@@ -338,6 +338,7 @@
   }
   @keyframes spin { to { transform: rotate(360deg); } }
   [hidden] { display: none !important; }
+  body.embed #header { display: none; }   /* 批次 213：嵌在報名頁對話框裡，標題列由外框提供 */
 
   /* ── 媒體名稱強制彈窗 ── */
   #media-modal {
@@ -517,6 +518,10 @@ const eventId = params.get('id');
 const SIM = params.get('sim') === 'day';
 const SIM_CODE = params.get('code') || '';
 const SIM_MEDIA = '（內部職員）';
+// 批次 213：報名頁右下角米亞的對話框用 iframe 開這一頁（?embed=1）。問答流程完全一樣，只收掉標題列（外框自己有）、
+// 「我要報名」（人就在報名頁，點了會在框裡再開一次報名頁）、LINE 入口（line.me 不能在框裡開）與新聞稿存檔。
+const EMBED = params.get('embed') === '1';
+if (EMBED) document.body.classList.add('embed');
 let hist = [];
 let eventColor = '#0F9E7A';
 let mediaName = '';       // 媒體／單位（必填）
@@ -565,7 +570,7 @@ const ICON = {
 };
 
 // 手機沒有 Shift+Enter 可按，提示只給有實體鍵盤的裝置；手機上那串字還會折成兩行被切掉
-const INPUT_HINT = (window.matchMedia && matchMedia('(pointer: coarse)').matches)
+const INPUT_HINT = (EMBED || (window.matchMedia && matchMedia('(pointer: coarse)').matches)) // 報名頁的對話框很窄，長提示會被切掉
   ? '請輸入您的問題…'
   : '請輸入您的問題…（Enter 送出，Shift+Enter 換行）';
 
@@ -628,6 +633,7 @@ async function init() {
     // 的一顆按鈕，點了才整頁展開；伺服器端 api/chat.js 本來就沒擋已結束的活動。
     applyAudienceWords(event);
     const ended = event.status === 'ended';
+    if (EMBED) document.getElementById('geo-article')?.remove(); // 不搬進面板就要拿掉，否則整篇會攤在對話框裡
     const hasArchive = ended && event.audience !== 'business' && !!document.getElementById('geo-article');
     if (hasArchive) setupArchive(document.getElementById('geo-article'));
 
@@ -652,8 +658,10 @@ async function init() {
       c.appendChild(contactNode(contactText));
       welcomeEl.appendChild(c);
     }
-    addLineLink(welcomeEl, null, event.line_url, '也可以用 LINE 問米亞', '會自動帶入這一場，會後也能隨時問');
-    addRegisterLink(welcomeEl, event.id); // 不等它：報名資料慢或壞了，活動頁照常能問
+    if (!EMBED) {
+      addLineLink(welcomeEl, null, event.line_url, '也可以用 LINE 問米亞', '會自動帶入這一場，會後也能隨時問');
+      addRegisterLink(welcomeEl, event.id); // 不等它：報名資料慢或壞了，活動頁照常能問
+    }
 
     // 快速問題：優先使用活動自訂 chips，否則用預設
     const chipsEl = document.getElementById('chips');
@@ -808,6 +816,18 @@ function addLineLink(parent, before, url, label, sub) {
 }
 
 function showError(msg) {
+  // 批次 213：在報名頁的對話框裡，不能叫人「重新整理」——整頁重新整理會把填到一半的報名表清掉。改成只重載框內。
+  if (EMBED) {
+    const screen = document.getElementById('error-screen');
+    screen.querySelector('h2').textContent = '問答暫時無法使用';
+    msg = '您的報名資料不受影響，\n關掉這個視窗就能繼續填。';
+    const retry = document.createElement('button');
+    retry.type = 'button';
+    retry.className = 'retry-btn';
+    retry.textContent = '再試一次';
+    retry.onclick = () => location.reload();
+    screen.appendChild(retry);
+  }
   document.getElementById('error-msg').textContent = msg;
   document.getElementById('loading').style.display = 'none';
   document.getElementById('error-screen').hidden = false;
