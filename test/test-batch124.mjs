@@ -304,7 +304,7 @@ console.log('\n── 六、記者名單健檢：管理員密碼不進網址、�
       const isAdmin = (opts.headers || {})['X-Admin-Password'] === 'Secret-Pw1';
       return { json: async () => (isAdmin && adminOk ? { totalActive: 1, needsReview: [] } : { error: '這條連結已失效，請向承辦人索取新的' }) };
     };
-    const api = new Function('document', 'fetch', 'sessionStorage', 'render', 'loadAll', `let S = { pwd:'', code:'', role:'staff' }; ${fnSource(MEDIA, 'call')} ${fnSource(MEDIA, 'unlock')} ${fnSource(MEDIA, 'enterApp')} ${fnSource(MEDIA, 'loadMailRequests')}; return { unlock, S: () => S };`)(document, fetch, sessionStorage, () => {}, () => {});
+    const api = new Function('document', 'fetch', 'sessionStorage', 'render', 'loadAll', `let S = { pwd:'', code:'', role:'staff' }; ${fnSource(MEDIA, 'call')} ${fnSource(MEDIA, 'unlock')} ${fnSource(MEDIA, 'enterApp')} ${fnSource(MEDIA, 'loadMailRequests')} return { unlock, S: () => S };`)(document, fetch, sessionStorage, () => {}, () => {});
     return { api, els, store };
   };
   let t = mkUnlock(true);
@@ -322,16 +322,13 @@ console.log('\n── 六、記者名單健檢：管理員密碼不進網址、�
   check('★ 從後台同一個分頁點進來免再輸入密碼（跟成效報告、活動報名一樣）', /sessionStorage\.getItem\('itri_pwd'\)/.test(MEDIA) && /S\.role='admin'; S\.pwd=saved;/.test(MEDIA));
   check('管理員有「匯出 CSV」（後端早就有 export，畫面上一直沒有按鈕），用 header 帶密碼下載', /onclick="doExport\(\)"/.test(MEDIA) && /fetch\('\/api\/media\?action=export', \{ headers: \{ 'X-Admin-Password': S\.pwd \} \}\)/.test(fnSource(MEDIA, 'doExport')));
 
-  // 還沒有路線的人，要先點路線才能確認
-  const toasts = [], posts = [];
-  const confirmRec = new Function('recBeats', 'pendingBeat', 'toast', 'call', 'document', 'setTimeout', `${fnSource(MEDIA, 'confirmRec')}; return confirmRec;`)(
-    { r1: '', r2: '半導體' }, {}, (m) => toasts.push(m), async (a, body) => { posts.push(body); return {}; },
-    { getElementById: () => ({ classList: { add() {} }, remove() {} }) }, () => {});
+  // 批次 212：沒有路線也能直接確認（缺路線另外批次設定，不再擋著確認）
+  const posts = [];
+  const confirmRec = new Function('pendingBeat', 'toast', 'call', 'dropRec', `${fnSource(MEDIA, 'confirmRec')}; return confirmRec;`)(
+    { r2: '經濟部線' }, () => {}, async (a, body) => { posts.push(body); return {}; }, () => {});
   await confirmRec('r1');
-  check('★ 沒有路線的人按「資料正確」：先請他點路線，不送出（不然路線還是空的，下次又排在最前面）', posts.length === 0 && /請先點他現在跑的線/.test(toasts[0] || ''), toasts[0]);
   await confirmRec('r2');
-  check('　 已經有路線的照常確認', posts.length === 1 && posts[0].id === 'r2');
-
+  check('沒點路線也能確認；有點就一起存', posts.length === 2 && posts[0].beat === undefined && posts[1].beat === '經濟部線', JSON.stringify(posts));
   // 後端：一年內確認過的不再列進待確認
   const { book, reset } = await import('./fakes-sheets82.mjs');
   reset();
@@ -348,15 +345,16 @@ console.log('\n── 六、記者名單健檢：管理員密碼不進網址、�
   check('（準備）匯入三位記者', r.code === 200 && r.out.created === 3, JSON.stringify(r.out));
   r = await call('GET', { action: 'list' }, {}, A);
   const ids = (x) => (x.out.needsReview || []).map((n) => n.id).sort().join();
-  check('（準備）太久沒受邀的 R1、沒有路線的 R2 在待確認裡；R3 不在', ids(r) === 'R1,R2', ids(r));
+  check('（準備）太久沒受邀的 R1 在待確認；只是沒有路線的 R2 不算（批次 212 分到「缺路線」）；R3 不在', ids(r) === 'R1' && r.out.totalNoBeat === 1, ids(r));
   await call('POST', {}, { action: 'update', id: 'R1' }, A);
   await call('POST', {}, { action: 'update', id: 'R2' }, A);
   r = await call('GET', { action: 'list' }, {}, A);
-  check('★ 按過「還在跑，資料正確」的 R1 不再出現（以前只淡出畫面，下次打開又排第一個，確認等於白做）', !ids(r).includes('R1'), ids(r));
-  check('　 沒點路線就確認的 R2 還在（路線還是空的，資料不算完整）', ids(r).includes('R2'));
+  check('★ 按過「還在跑，資料正確」的 R1 不再出現（以前只淡出畫面，下次打開又排第一個，確認等於白做）', ids(r) === '', ids(r));
+  r = await call('GET', { action: 'list', filter: 'nobeat' }, {}, A);
+  check('　 缺路線的篩選看得到 R2', ids(r) === 'R2', ids(r));
   await call('POST', {}, { action: 'update', id: 'R2', beat: '經濟部線' }, A);
-  r = await call('GET', { action: 'list' }, {}, A);
-  check('　 補了路線之後 R2 也離開待確認', ids(r) === '', ids(r));
+  r = await call('GET', { action: 'list', filter: 'nobeat' }, {}, A);
+  check('　 補了路線之後 R2 也離開缺路線', ids(r) === '', ids(r));
   // 一年前確認過的又會回來
   const row = book.media_roster.findIndex((x) => x[0] === 'R1');
   book.media_roster[row][12] = '2024/09/01 10:00:00';

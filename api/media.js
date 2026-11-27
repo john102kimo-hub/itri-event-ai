@@ -4,13 +4,17 @@
 // 這份資料只有這個平台上大家都能連到，同仁才有辦法幫忙補。
 //
 // ── 同仁（用團隊共用連結的 code，不需管理員密碼）────────────────────────
-// GET  ?action=list&code=xxx           → 待確認名單（依重要性排序，每次給一批）
+// GET  ?action=list&code=xxx[&filter=pending|nobeat&outlet=&size=] → 待確認名單（看得到本人活動紀錄的自動算確認過，批次 212）
+//      同一個回應裡的 suggestions＝跟活動報名、活動問答比對出來、建議修改名單的項目（批次 212；同仁看到的 mail／電話遮一半）
+// POST {action:'sync_apply',code,keys}  → 批次套用建議（伺服器重算一次，只收 key，不收前端送來的值；同仁換 mail 仍要管理員核准）
+// POST {action:'sync_dismiss',code,keys}→ 批次忽略建議
+// POST {action:'batch',code,ids,op,beat?} → 批次確認在職／標離職／恢復在職／設路線（不含刪除，批次 212）
 // GET  ?action=search&code=xxx&q=xxx   → 搜尋特定記者（辦活動前先查）
 // POST {action:'update',code,id,...}   → 一鍵更新：補路線／標記離職／標記仍在職
 // POST {action:'add',code,name,outlet,email,beat?,phone?,title?} → 新增一位記者（批次 137，不用編 id、不用貼 CSV）
 // POST {action:'card_scan',code,image}  → 名片翻拍：AI 讀出姓名／媒體／mail／電話，並比對名單裡是不是已經有這個人（批次 140）
 // POST card_match（不呼叫 AI）           → 同仁改過讀出來的欄位後，重新比對一次
-// GET  ?action=watch_cron              → 排程（Vercel Cron，Bearer CRON_SECRET）：每月抽一批主流媒體記者，查署名、標出疑似換媒體（見 lib/media-tracker.js）
+// GET  ?action=watch_cron              → 排程（Vercel Cron，Bearer CRON_SECRET）：每月抽一批主流媒體記者查原媒體署名，查到的自動算確認（見 lib/media-tracker.js）
 // POST {action:'update_contact',code,id,name?,outlet?,email?,phone?,title?,mark?} → 用名片上的新資料更新既有記者（批次 140）
 //                                        同仁要「換掉」既有的 mail 不會直接生效，先排進 media_mail_requests 等管理員核准（批次 145）
 //
@@ -24,11 +28,12 @@
 // GET  ?action=mail_requests             → 同仁送來、等核准的 mail 修改（管理員，批次 145）
 // POST {action:'mail_request_decide',id,approve} → 核准（真的換 mail）或不核准（管理員，批次 145）
 //
-// 誠實邊界：這裡不猜記者現在跑什麼路線，只把「太久沒受邀」「從沒填過路線」的人
-// 排到前面讓人判斷，是否還在職、路線是什麼，一律由人工按一下確認。
+// 誠實邊界：這裡不猜記者現在跑什麼路線，也不推測誰離職了。看得到本人活動紀錄（報名、提問、原媒體署名）
+// 或一年內受邀、確認過的不用管；剩下拿不準的才排進待確認讓人判斷。名單內容只有人按了才會改。
 
 import { timingSafeEqual } from 'node:crypto';
-import { readRange, appendRows, updateRange, ensureSheets } from '../lib/sheets.js';
+import { readRange, appendRows, updateRange, updateRanges, ensureSheets } from '../lib/sheets.js';
+import { buildSync, loadSyncSources, resetSyncCache, DISMISS_SHEET } from '../lib/media-sync.js';
 import { adminAttempt, requireAdmin, passwordFrom, codeMatches, authFailed } from '../lib/auth.js';
 import { generateShareCode } from '../lib/ids.js';
 import { pickRecipients, toBatches, clampBatchSize, buildOutlookCsv, csvCell, normalizeEmail, nextRosterId, BEATS } from '../lib/media-pick.js';
@@ -53,6 +58,7 @@ const parseMailReq = (r, i) => ({
 
 const STALE_DAYS = 365;
 const BATCH_SIZE = 25;
+const STAFF_BATCH_MAX = 200;
 
 const now = () => new Date().toLocaleString('zh-TW', { timeZone: 'Asia/Taipei', hour12: false });
 const today = () => new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Taipei' });
@@ -123,18 +129,110 @@ function confirmedDaysAgo(rec) {
   return Math.floor((Date.now() - Date.UTC(+m[1], +m[2] - 1, +m[3])) / 86400000);
 }
 
-/** 需要人工確認：還在職名單裡、但路線空白或太久沒受邀 */
-// 批次 124：一年內有人確認過的不再列進來。以前只看路線與受邀日期——同仁按了「還在跑，資料正確」，
-// 那一筆只是從畫面上淡出，「太久沒受邀」的條件沒變，下次打開又排在最前面，確認了等於白做，
-// 「資料會愈用愈準」從來不成立。路線還是空的仍然要確認（頁面也要求先點路線才按得了確認）。
-function needsReview(rec) {
+/** 需要人工確認「還在不在職」：拿得到本人活動紀錄的、一年內確認過或受邀過的，都不列 */
+// 批次 124：一年內有人確認過的不再列進來（不然確認了等於白做）。
+// 批次 212：①看得到本人最近的活動紀錄（verified，lib/media-sync.js）就算確認過，不丟給人點；
+//   ②「沒有路線」不再算待確認——88% 的名單沒填路線，混在一起待確認永遠清不完。缺路線另外一個篩選、批次設定。
+function needsReview(rec, verified = new Map()) {
   if (rec.status === 'left') return false;
-  if (!rec.beat) return true;
+  if (verified.has(rec.id)) return false;
   const c = confirmedDaysAgo(rec);
   if (c !== null && c <= STALE_DAYS) return false;
   const d = daysSince(rec.last_invited);
   if (d === null) return true;
   return d > STALE_DAYS;
+}
+
+/** 名單＋同步來源 → 待確認、自動確認、建議修改。名單頁與盤查共用同一套，兩邊的數字才會一致。 */
+async function syncState(rows, { fresh = false } = {}) {
+  const { loadWatch } = await import('../lib/media-tracker.js');
+  const [watch, sources] = await Promise.all([loadWatch(), loadSyncSources({ fresh })]);
+  const sync = buildSync({ roster: rows, watch, ...sources });
+  // 換媒體的建議排在同步區處理，同一個人不要在待確認又出現一次
+  const moving = new Set(sync.suggestions.filter((s) => s.type === 'outlet').map((s) => s.rosterId));
+  const pending = rows.filter((r) => needsReview(r, sync.verified) && !moving.has(r.id)).sort((a, b) => priority(b) - priority(a));
+  return { ...sync, watch, pending, failed: sources.failed };
+}
+
+const rowOf = (r) => [r.id, r.name, r.outlet, r.beat, r.email, r.phone, r.invited_count, r.confirmed_count, r.declined_count, r.last_invited, r.status, r.note, r.updated_at, r.updated_by];
+// 只寫有改到的那幾列，一次送出
+const writeRows = (recs) => (recs.length ? updateRanges(recs.map((r) => ({ range: `media_roster!A${r.rowNum}:N${r.rowNum}`, values: [rowOf(r)] }))) : null);
+const newMailReqId = (reqs, offset) => 'M' + String(reqs.reduce((m, x) => Math.max(m, Number(String(x.id).slice(1)) || 0), 0) + 1 + offset).padStart(4, '0');
+
+// 建議項目給畫面用的樣子。同仁（共用連結）看到的 mail／電話遮一半，跟名片比對同一條規矩（批次 137）
+function publicSuggestion(s, isAdmin) {
+  const mask = (v) => (isAdmin || !v ? v : String(v).includes('@') ? maskEmail(v) : maskPhone(v));
+  const contact = s.type === 'email' || s.type === 'phone';
+  return {
+    key: s.key, type: s.type, safe: s.safe, id: s.rosterId, name: s.name, outlet: s.outlet,
+    from: contact ? mask(s.from) : s.from || '', to: contact ? mask(s.to) : s.to || '',
+    email: mask(s.email || ''), phone: mask(s.phone || ''), evidence: s.evidence,
+    needsAdmin: !isAdmin && s.type === 'email' && !!s.from,
+  };
+}
+
+/** 套用勾選的建議。值一律用伺服器剛算出來的，不收前端送來的內容。 */
+async function applySuggestions(keys, { isAdmin, by }) {
+  await ensureSheets(SHEETS);
+  const rows = (await readRange('media_roster!A2:N')).map(parseRow); // 讀失敗就停，不能拿空名單去比對、編 id
+  const { suggestions, failed } = await syncState(rows, { fresh: true });
+  if (failed.length) throw new Error(`暫時讀不到${failed.join('、')}，請稍後再試`);
+  const want = new Set(keys);
+  const picked = suggestions.filter((s) => want.has(s.key));
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  const emails = new Map(rows.filter((r) => normalizeEmail(r.email)).map((r) => [normalizeEmail(r.email), r]));
+  const ids = rows.map((r) => r.id);
+  const changed = new Set(), added = [], requests = [], skipped = [];
+  let reqs = null, applied = 0;
+  const stamp = now();
+  const touch = (rec) => { rec.updated_at = stamp; rec.updated_by = by; changed.add(rec); };
+  for (const s of picked) {
+    if (s.type === 'new') {
+      if (s.email && emails.has(s.email)) { skipped.push(`${s.name}：這個 mail 已經在名單裡`); continue; }
+      const id = nextRosterId(ids);
+      ids.push(id);
+      const row = [id, s.name.slice(0, 40), s.outlet.slice(0, 60), '', s.email || '', s.phone || '', 0, 0, 0, '', 'active', '', stamp, by];
+      added.push(row);
+      if (s.email) emails.set(s.email, { id });
+      applied++;
+      continue;
+    }
+    const rec = byId.get(s.rosterId);
+    if (!rec) { skipped.push(`${s.name}：名單裡找不到了`); continue; }
+    if (s.type === 'outlet' || s.type === 'outlet_maybe') {
+      if (!rec.note) rec.note = `原媒體：${rec.outlet}`;
+      rec.outlet = s.to.slice(0, 60);
+      rec.status = 'active';
+      // 同名不同單位那一類：換媒體通常連 mail 一起換，但 mail 另有核准規矩，這裡只改媒體
+      touch(rec);
+    } else if (s.type === 'restore' || s.type === 'restore_news') {
+      rec.status = 'active';
+      touch(rec);
+    } else if (s.type === 'phone') {
+      if (rec.phone) continue;
+      rec.phone = s.to;
+      touch(rec);
+    } else if (s.type === 'email') {
+      const dup = emails.get(s.to);
+      if (dup && dup.id !== rec.id) { skipped.push(`${s.name}：這個 mail 已經是另一位的了`); continue; }
+      if (!isAdmin && normalizeEmail(rec.email)) {
+        // 批次 145：同仁要換掉既有的 mail 一律排進核准清單
+        if (!reqs) reqs = (await readRange(MAIL_REQ_RANGE)).map(parseMailReq);
+        if (!reqs.some((x) => x.status === 'open' && x.roster_id === rec.id && normalizeEmail(x.new_email) === s.to)) {
+          requests.push([newMailReqId(reqs, requests.length), stamp, rec.id, rec.name, rec.outlet, rec.email, s.to, by, 'open', '']);
+        }
+        continue;
+      }
+      rec.email = s.to;
+      emails.set(s.to, rec);
+      touch(rec);
+    }
+    applied++;
+  }
+  await writeRows([...changed]);
+  if (added.length) await appendRows('media_roster!A:N', added);
+  if (requests.length) await appendRows('media_mail_requests!A:J', requests);
+  return { success: true, applied, pending_email: requests.length, skipped, missing: want.size - picked.length };
 }
 
 function priority(rec) {
@@ -195,8 +293,8 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
 
   try {
-    // 排程：主流媒體記者「疑似換媒體」追蹤。跟 api/line.js 的排程入口同一條規矩：一定要帶 CRON_SECRET，
-    // 沒設定就一律拒絕（這個入口會打外部網站、會對管理員推播）。
+    // 排程：主流媒體記者署名查證。跟 api/line.js 的排程入口同一條規矩：一定要帶 CRON_SECRET，
+    // 沒設定就一律拒絕（這個入口會打外部網站、寫試算表）。
     if (req.method === 'GET' && req.query?.action === 'watch_cron') {
       const secret = process.env.CRON_SECRET;
       const bearer = String(req.headers?.authorization || '').replace(/^Bearer\s+/i, '');
@@ -219,40 +317,56 @@ export default async function handler(req, res) {
         if (!auth.ok) return res.status(auth.status).json({ error: auth.msg });
 
         const rows = (await safeRead('media_roster!A2:N')).map(parseRow);
-        // 疑似換媒體的追蹤結果（lib/media-tracker.js）掛在記者旁邊；讀不到就當沒有，不影響原本的名單
-        const { loadWatch } = await import('../lib/media-tracker.js');
-        const watchById = new Map((await loadWatch()).map((w) => [w.id, w]));
-        const isMoved = (r) => r.status !== 'left' && watchById.get(r.id)?.verdict === 'moved';
-        const review = rows.filter((r) => needsReview(r) || isMoved(r))
-          .sort((a, b) => (isMoved(b) - isMoved(a)) || (priority(b) - priority(a)));
+        const state = await syncState(rows);
         const active = rows.filter((r) => r.status !== 'left');
+        const filter = req.query.filter === 'nobeat' ? 'nobeat' : 'pending';
+        const kw = String(req.query.outlet || '').trim().toLowerCase().slice(0, 30);
+        const size = Math.min(STAFF_BATCH_MAX, Math.max(BATCH_SIZE, Number(req.query.size) || BATCH_SIZE));
+        const noBeat = active.filter((r) => !r.beat).sort((a, b) => priority(b) - priority(a));
+        const matched = (filter === 'nobeat' ? noBeat : state.pending)
+          .filter((r) => !kw || r.outlet.toLowerCase().includes(kw) || r.name.toLowerCase().includes(kw));
+        const verified = { total: 0, registration: 0, qa: 0, news: 0 };
+        for (const r of active) {
+          const v = state.verified.get(r.id);
+          if (v) { verified.total++; verified[v.source]++; }
+        }
 
         return res.status(200).json({
           totalActive: active.length,
-          totalNeedsReview: review.length,
+          totalNeedsReview: state.pending.length,
           totalWithBeat: active.filter((r) => r.beat).length,
+          totalNoBeat: noBeat.length,
+          verified, unavailable: state.failed,
+          // 同步建議跟清單同一次回（批次 212）：分兩支打會把試算表讀兩遍
+          suggestionTotal: state.suggestions.length,
+          suggestions: state.suggestions.slice(0, 300).map((s) => publicSuggestion(s, auth.who === 'admin')),
+          filter, matched: matched.length,
           beats: BEATS,
-          showing: Math.min(BATCH_SIZE, review.length),
-          needsReview: review.slice(0, BATCH_SIZE).map((r) => ({
+          showing: Math.min(size, matched.length),
+          needsReview: matched.slice(0, size).map((r) => ({
             id: r.id, name: r.name, outlet: r.outlet, beat: r.beat,
             invited_count: r.invited_count, last_invited: r.last_invited,
             daysSince: daysSince(r.last_invited),
-            watch: isMoved(r) ? (({ other_source, other_count, latest_at, evidence, checked_at }) =>
-              ({ other_source, other_count, latest_at, evidence, checked_at }))(watchById.get(r.id)) : null,
+            verified: state.verified.get(r.id)?.label || '',
+            duplicate: state.duplicates.has(r.id), noEmail: !normalizeEmail(r.email),
           })),
         });
       }
 
       // 一鍵盤查待確認的記者（批次 192）：回傳要查的 id。管理員專用（查詢會對外查新聞）。
-      // 排除：已離職、已被標疑似換媒體（人還沒處理，不重查）、姓名不像個人、28 天內查過的。
+      // 排除：已經自動確認的（不在待確認裡）、姓名不像個人、28 天內查過的。
       if (action === 'pending_ids') {
         if (!requireAdmin(req, res, password)) return;
-        const { loadWatch, RECHECK_DAYS } = await import('../lib/media-tracker.js');
-        const watch = new Map((await loadWatch()).map((w) => [w.id, w]));
-        const recent = (id) => { const t = watch.get(id)?.checked_at; return t && Date.now() - new Date(t).getTime() < RECHECK_DAYS * 86400000; };
+        const { RECHECK_DAYS } = await import('../lib/media-tracker.js');
         const rows = (await safeRead('media_roster!A2:N')).map(parseRow);
-        const ids = rows.filter((r) => needsReview(r) && r.id && r.name.length >= 2 && r.name.length <= 5
-          && watch.get(r.id)?.verdict !== 'moved' && !recent(r.id)).sort((a, b) => priority(b) - priority(a)).map((r) => r.id);
+        const state = await syncState(rows);
+        const watch = new Map(state.watch.map((w) => [w.id, w]));
+        const recent = (id) => {
+          const w = watch.get(id);
+          // 舊版判出來的 moved 不算「查過」：那個判法有誤，要能重查
+          return w?.checked_at && w.verdict !== 'moved' && Date.now() - new Date(w.checked_at).getTime() < RECHECK_DAYS * 86400000;
+        };
+        const ids = state.pending.filter((r) => r.id && r.name.length >= 2 && r.name.length <= 5 && !recent(r.id)).map((r) => r.id);
         return res.status(200).json({ ids, total: ids.length });
       }
 
@@ -261,11 +375,15 @@ export default async function handler(req, res) {
         if (!requireAdmin(req, res, password)) return;
         const kw = String(q || '').trim().toLowerCase();
         const beat = String(req.query.beat || ''), status = String(req.query.status || 'active');
+        const issue = String(req.query.issue || '');
         const size = Math.min(200, Math.max(10, Number(req.query.size) || 50));
         const rows = (await safeRead('media_roster!A2:N')).map(parseRow);
-        const hit = rows.filter((r) => (!kw || [r.name, r.outlet, r.email, r.phone].some((v) => String(v).toLowerCase().includes(kw)))
+        const dups = issue === 'dup' ? buildSync({ roster: rows }).duplicates : null;
+        const hit = rows.filter((r) => (!dups || dups.has(r.id)) && (issue !== 'noemail' || !normalizeEmail(r.email))
+          && (!kw || [r.name, r.outlet, r.email, r.phone].some((v) => String(v).toLowerCase().includes(kw)))
           && (!beat || (beat === '__none' ? !r.beat : r.beat === beat))
           && (status === 'all' || (status === 'left' ? r.status === 'left' : r.status !== 'left')));
+        if (dups) hit.sort((a, b) => a.name.localeCompare(b.name, 'zh-Hant')); // 重複的排在一起才看得出來
         const pages = Math.max(1, Math.ceil(hit.length / size));
         const page = Math.min(pages, Math.max(1, Number(req.query.page) || 1));
         const beatCounts = {};
@@ -454,7 +572,8 @@ export default async function handler(req, res) {
           n++;
           if (op === 'delete') continue;
           if (op === 'left') r.status = 'left'; else if (op === 'active') r.status = 'active'; else r.beat = beat;
-          r.updated_at = now(); r.updated_by = String(body.updated_by || '').slice(0, 20);
+          // 批量改路線不算「確認過在職」，不蓋確認時間（批次 212）
+          if (op !== 'beat') { r.updated_at = now(); r.updated_by = String(body.updated_by || '').slice(0, 20); }
           kept.push(r);
         }
         const out = kept.map((r) => [r.id, r.name, r.outlet, r.beat, r.email, r.phone, r.invited_count, r.confirmed_count, r.declined_count, r.last_invited, r.status, r.note, r.updated_at, r.updated_by]);
@@ -502,6 +621,49 @@ export default async function handler(req, res) {
       // ── 以下需要同仁 code 或管理員密碼 ──
       const auth = await authorize({ code, password }, req);
       if (!auth.ok) return res.status(auth.status).json({ error: auth.msg });
+
+      // 批次套用／忽略同步建議（批次 212）
+      if (action === 'sync_apply' || action === 'sync_dismiss') {
+        const keys = (Array.isArray(body.keys) ? body.keys : []).map((k) => String(k)).filter((k) => /^[0-9a-f]{16}$/.test(k)).slice(0, 300);
+        if (!keys.length) return res.status(400).json({ error: '沒有勾選任何項目' });
+        const isAdmin = auth.who === 'admin';
+        const by = String(body.updated_by || '').slice(0, 20) || (isAdmin ? '管理員' : '同仁連結');
+        if (action === 'sync_dismiss') {
+          await ensureSheets(DISMISS_SHEET);
+          await appendRows('media_sync_dismissed!A:C', keys.map((k) => [k, now(), by]));
+          resetSyncCache();
+          return res.status(200).json({ success: true, dismissed: keys.length });
+        }
+        return res.status(200).json(await applySuggestions(keys, { isAdmin, by }));
+      }
+
+      // 待確認名單的批次處理（批次 212）。同仁本來就能一筆一筆做這幾件事；刪除不在這裡（管理員的 bulk 才有）
+      if (action === 'batch') {
+        const ids = new Set((Array.isArray(body.ids) ? body.ids : []).map((x) => String(x)).filter(Boolean));
+        const op = String(body.op || '');
+        const beat = String(body.beat || '').trim();
+        if (!ids.size) return res.status(400).json({ error: '沒有選任何記者' });
+        if (ids.size > STAFF_BATCH_MAX) return res.status(400).json({ error: `一次最多 ${STAFF_BATCH_MAX} 位` });
+        if (!['confirm', 'left', 'active', 'beat'].includes(op)) return res.status(400).json({ error: '不認得的操作' });
+        if (beat && !BEATS.includes(beat)) return res.status(400).json({ error: '路線請從選項裡挑' });
+        if (op === 'beat' && !beat) return res.status(400).json({ error: '請先選路線' });
+        const rows = (await readRange('media_roster!A2:N')).map(parseRow);
+        const changed = [];
+        for (const r of rows) {
+          if (!r.id || !ids.has(r.id)) continue;
+          if (op === 'confirm' && r.status === 'left') continue; // 確認不能順手把離職的人復活
+          if (op === 'beat') r.beat = beat;
+          else {
+            if (op === 'left') r.status = 'left'; else r.status = 'active';
+            if (beat) r.beat = beat;
+            r.updated_at = now();
+            r.updated_by = String(body.updated_by || '').slice(0, 20);
+          }
+          changed.push(r);
+        }
+        await writeRows(changed);
+        return res.status(200).json({ success: true, affected: changed.length });
+      }
 
       // 新增一位記者（批次 137）：姓名、媒體、mail 必填，路線選填。id 由系統編（N0001…），不用自己想。
       if (action === 'add') {
@@ -633,11 +795,6 @@ export default async function handler(req, res) {
           rec.invited_count, rec.confirmed_count, rec.declined_count, rec.last_invited,
           rec.status, rec.note, rec.updated_at, rec.updated_by,
         ]]);
-        // 人按了「還在跑，資料正確」（或恢復在職），就把「疑似換媒體」的提醒收掉；失敗不影響這次更新本身
-        if (mark !== 'left') {
-          const { dismissWatch } = await import('../lib/media-tracker.js');
-          await dismissWatch(id).catch((e) => console.error('收掉追蹤提醒失敗:', e.message));
-        }
         return res.status(200).json({ success: true });
       }
 

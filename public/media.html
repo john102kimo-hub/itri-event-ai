@@ -29,7 +29,7 @@
   h1.title{font-size:1.4rem;margin-bottom:4px}
   .sub{color:var(--muted);font-size:.86rem;margin-bottom:20px}
 
-  .kpi-row{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:20px}
+  .kpi-row{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:8px}
   .kpi{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:14px;text-align:center}
   .kpi .num{font-size:1.6rem;font-weight:800;color:var(--primary)}
   .kpi .lab{font-size:.74rem;color:var(--muted);margin-top:2px}
@@ -50,10 +50,7 @@
   .rec-flag{font-size:.72rem;font-weight:700;padding:3px 9px;border-radius:20px;white-space:nowrap}
   .flag-stale{background:#fef2f2;color:var(--danger)}
   .flag-nobeat{background:#fffbeb;color:#92400e}
-  .flag-moved{background:#fff7ed;color:#c2410c}
-  .watch-note{background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;padding:10px 12px;font-size:.82rem;line-height:1.6;margin-bottom:12px}
-  .watch-note a{color:#c2410c;word-break:break-all}
-  .watch-note .hint{color:var(--muted);font-size:.75rem;margin-top:4px}
+  .flag-dup{background:#fff7ed;color:#c2410c}
   .rec-meta{font-size:.78rem;color:var(--muted);margin-bottom:12px}
 
   .beat-row{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}
@@ -65,6 +62,29 @@
   .btn-confirm{background:var(--primary);color:#fff}
   .btn-left{background:#fff;border:1px solid var(--border);color:var(--muted)}
   .btn:disabled{opacity:.5;cursor:not-allowed}
+
+  /* 批次 212：批次處理 */
+  .auto-note{font-size:.8rem;color:var(--primary-dark);background:var(--primary-light);border-radius:10px;padding:8px 12px;margin-bottom:18px}
+  .tabs{display:flex;gap:8px;margin-bottom:10px}
+  .tabs button,.bar button,.bar select,.bar input[type=text],.sync-actions button{border:1px solid var(--border);background:#fff;border-radius:9px;padding:8px 12px;font-family:var(--font);font-size:.82rem;cursor:pointer;color:var(--text)}
+  .tabs button.on{background:var(--primary);border-color:var(--primary);color:#fff;font-weight:700}
+  .bar{position:sticky;top:0;z-index:20;background:var(--bg);padding:8px 0;display:flex;flex-wrap:wrap;gap:8px;align-items:center;border-bottom:1px solid var(--border);margin-bottom:10px}
+  .bar input[type=text]{flex:1;min-width:140px;cursor:text}
+  .bar input[type=checkbox]{width:18px;height:18px;padding:0}
+  .bar label,.grp-head label{font-size:.84rem;display:flex;align-items:center;gap:6px;cursor:pointer}
+  .bar button.primary,.sync-actions button.primary{background:var(--primary);border-color:var(--primary);color:#fff;font-weight:700}
+  .bar button:disabled,.sync-actions button:disabled{opacity:.45;cursor:not-allowed}
+  .bar .break{flex-basis:100%;height:0}
+  .pick-rec{display:flex;gap:10px;align-items:flex-start;cursor:pointer}
+  .pick-rec input{width:18px;height:18px;margin-top:4px;flex:none}
+  #sync-box{margin-bottom:26px}
+  .grp{margin-bottom:12px;background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:10px 12px}
+  .grp-head{display:flex;justify-content:space-between;align-items:center;gap:8px;font-weight:700;font-size:.9rem}
+  .grp-tip{font-size:.76rem;color:var(--muted);margin:2px 0 4px}
+  .sug{display:flex;gap:10px;align-items:flex-start;border-top:1px solid var(--border);padding:8px 0;font-size:.85rem;cursor:pointer}
+  .sug input{width:18px;height:18px;margin-top:3px;flex:none}
+  .sug .why{font-size:.76rem;color:var(--muted);word-break:break-all}
+  .sync-actions{display:flex;gap:8px;flex-wrap:wrap;position:sticky;bottom:0;background:var(--bg);padding:8px 0;z-index:15}
 
   .empty{text-align:center;color:var(--muted);padding:50px 20px;font-size:.9rem}
   .empty .big{font-size:2.2rem;margin-bottom:10px}
@@ -144,13 +164,15 @@
 <div class="wrap" id="app" style="display:none">
   <a class="back" id="back-admin" href="/" style="display:none">← 回後台</a>
   <h1 class="title">記者名單健檢</h1>
-  <p class="sub">路線空白、或太久沒受邀的記者會排在前面。花一分鐘確認幾筆，資料就會愈用愈準。</p>
+  <p class="sub">看得到本人最近的報名、提問或原媒體署名，系統就自動算確認過。這裡只留拿不準的，勾一勾一次處理。</p>
 
   <div class="kpi-row">
     <div class="kpi"><div class="num" id="kpi-total">–</div><div class="lab">在職記者</div></div>
     <div class="kpi"><div class="num" id="kpi-beat">–</div><div class="lab">已有路線</div></div>
     <div class="kpi"><div class="num" id="kpi-review">–</div><div class="lab">待確認</div></div>
+    <div class="kpi"><div class="num" id="kpi-nobeat">–</div><div class="lab">缺路線</div></div>
   </div>
+  <div class="auto-note" id="auto-note">正在比對活動報名與問答…</div>
 
   <div class="search">
     <input id="search-input" type="text" placeholder="辦活動前先查一下：輸入記者姓名或媒體名稱">
@@ -158,6 +180,44 @@
   </div>
   <div id="search-results"></div>
   <a id="jump-all" href="#admin-panel" style="display:none;font-size:.85rem;color:var(--primary-dark);margin-bottom:12px">↓ 管理全部名單（搜尋、改路線、批次標離職／刪除）</a>
+
+  <!-- 批次 212：跟活動報名、活動問答比對出來的更新 -->
+  <div id="sync-box" style="display:none">
+    <div class="list-head"><h2>報名／問答比對出來的更新</h2><div class="note" id="sync-note"></div></div>
+    <div id="sync-list"></div>
+    <div class="sync-actions">
+      <button class="primary" id="sync-apply" onclick="syncAct('sync_apply')">套用勾選</button>
+      <button id="sync-dismiss" onclick="syncAct('sync_dismiss')">忽略勾選（不再提醒）</button>
+    </div>
+  </div>
+
+  <div class="list-head">
+    <h2>待確認名單</h2>
+    <div class="note" id="showing-note"></div>
+  </div>
+  <div class="tabs">
+    <button id="tab-pending" class="on" onclick="setTab('pending')">在職待確認</button>
+    <button id="tab-nobeat" onclick="setTab('nobeat')">缺路線</button>
+  </div>
+  <div id="pending-tools" style="display:none;margin-bottom:8px">
+    <div class="bar" style="position:static;border:none;margin:0;padding:0">
+      <button class="primary" id="pending-btn" onclick="checkPending()">一鍵查原媒體署名</button>
+      <span class="pick-tip" style="margin:0">查到本人在原媒體有署名的自動移出；查不到不代表離職，留著不動。</span>
+    </div>
+    <div id="pending-result" style="font-size:.85rem"></div>
+  </div>
+  <div class="bar">
+    <label><input type="checkbox" id="rec-sel" onchange="selectRecs(this.checked)"> 全選</label>
+    <input id="list-outlet" type="text" placeholder="篩媒體或姓名（例如：經濟日報）" maxlength="30" autocomplete="off" onkeydown="if(event.key==='Enter')refresh()" onchange="refresh()">
+    <select id="list-size" onchange="refresh()"><option value="25">每次 25 筆</option><option value="50">每次 50 筆</option><option value="100">每次 100 筆</option><option value="200">每次 200 筆</option></select>
+    <span class="break"></span>
+    <button class="primary batch-btn" onclick="batchDo('confirm')" disabled>✓ 批次確認在職</button>
+    <select id="batch-beat"><option value="">路線（選填）</option></select>
+    <button class="batch-btn" onclick="batchDo('beat')" disabled>只設路線</button>
+    <button class="batch-btn" onclick="batchDo('left')" disabled>標離職／轉線</button>
+    <span id="sel-count" style="font-size:.8rem;color:var(--muted)"></span>
+  </div>
+  <div id="list"></div>
 
   <!-- 批次 140：名片翻拍 -->
   <div class="card" id="card-card">
@@ -199,12 +259,6 @@
     <div class="form-msg" id="add-msg"></div>
   </div>
 
-  <div class="list-head">
-    <h2>待確認名單</h2>
-    <div class="note" id="showing-note"></div>
-  </div>
-  <div id="list"></div>
-
   <div class="admin-panel" id="admin-panel" style="display:none">
     <h3>全部名單管理</h3>
     <p class="desc">看得到所有記者，可以搜尋、篩選、逐筆改路線與聯絡資料，或勾選多筆一次標離職／改路線／刪除。路線選單改了就立刻儲存。</p>
@@ -212,6 +266,7 @@
       <input id="all-q" type="text" placeholder="搜尋姓名、媒體、mail、電話" style="flex:1;min-width:180px" onkeydown="if(event.key==='Enter')loadAll(1)">
       <select id="all-beat" onchange="loadAll(1)"><option value="">全部路線</option></select>
       <select id="all-status" onchange="loadAll(1)"><option value="active">在職</option><option value="left">已離職</option><option value="all">全部</option></select>
+      <select id="all-issue" onchange="loadAll(1)"><option value="">不篩問題</option><option value="dup">重複的資料</option><option value="noemail">沒有可用的 mail</option></select>
       <button onclick="loadAll(1)">搜尋</button>
     </div>
     <div class="row" style="flex-wrap:wrap;gap:8px;margin-bottom:8px;align-items:center">
@@ -257,11 +312,6 @@
       <button onclick="genLink(true)">換一條</button>
     </div>
 
-    <h3>盤查既有待確認的記者</h3>
-    <p class="desc">一鍵查「待確認」名單裡每位記者近 120 天的署名報導。只有疑似已換媒體的會列出來建議刪除，其他的不動、不用逐筆確認；28 天內查過的會跳過。</p>
-    <div class="row"><button class="primary" id="pending-btn" onclick="checkPending()">一鍵盤查待確認記者</button></div>
-    <div id="pending-result" style="font-size:.85rem"></div>
-
     <h3>匯出全部名單</h3>
     <p class="desc">下載整份記者名單（含已離職／轉線、路線、受邀次數），用 Excel 打開即可。</p>
     <div class="row"><button onclick="doExport()">匯出 CSV</button></div>
@@ -287,7 +337,7 @@
       <button class="primary" onclick="doSeed()">匯入</button>
       <span id="seed-result" style="font-size:.8rem;color:var(--muted)"></span>
     </div>
-    <p class="desc" style="margin-top:8px">匯入後會自動查每位記者近 120 天的署名報導。只有「疑似已換媒體」的會列在下面建議刪除，其他的直接留在名單，不用逐筆確認。</p>
+    <p class="desc" style="margin-top:8px">匯入後會自動查每位記者近 120 天在原媒體的署名報導，查到的自動算確認過。查不到不代表離職，名單一律保留。</p>
     <div id="check-result" style="font-size:.85rem"></div>
   </div>
 </div>
@@ -347,6 +397,7 @@ function enterApp(r){
   const admin = S.role==='admin';
   document.getElementById('admin-panel').style.display = admin ? 'block' : 'none';
   document.getElementById('back-admin').style.display = admin ? 'inline-block' : 'none';
+  document.getElementById('pending-tools').style.display = admin ? 'block' : 'none';
   render(r);
   if(admin){ loadMailRequests(); loadAll(1); }
   const jump = document.getElementById('jump-all'); if(jump) jump.style.display = admin ? 'inline-block' : 'none';
@@ -382,54 +433,158 @@ function daysLabel(d){
 }
 
 let recNames = {}; // id → name，供 markLeft 的確認訊息用
-let recBeats = {}; // id → 目前的路線（空字串＝還沒有），confirmRec 用
+let recBeats = {}; // id → 目前的路線（空字串＝還沒有）
+
+let LIST = { filter:'pending' };
+
+function listParams(){
+  return { filter: LIST.filter, outlet: document.getElementById('list-outlet').value.trim(), size: document.getElementById('list-size').value };
+}
+// 名單有任何變動之後，待確認與同步建議一起重讀
+async function refresh(){
+  const r = await call('list', listParams()).catch(()=>({error:'連線失敗，請稍後再試'}));
+  if(r.error){ toast(r.error); return; }
+  render(r);
+}
+function setTab(f){
+  LIST.filter = f;
+  ['pending','nobeat'].forEach(k => document.getElementById('tab-'+k).classList.toggle('on', k===f));
+  refresh();
+}
 
 function render(data){
+  renderSync(data);
   if(data.beats && data.beats.length){ beatsList = data.beats; fillBeatSelects(); }
   document.getElementById('kpi-total').textContent = data.totalActive ?? '–';
   document.getElementById('kpi-beat').textContent = data.totalWithBeat ?? '–';
   document.getElementById('kpi-review').textContent = data.totalNeedsReview ?? '–';
+  document.getElementById('kpi-nobeat').textContent = data.totalNoBeat ?? '–';
+  const v = data.verified || {total:0, registration:0, qa:0, news:0};
+  const down = (data.unavailable||[]).length ? `（暫時讀不到${data.unavailable.join('、')}，待確認可能偏多）` : '';
+  document.getElementById('auto-note').textContent =
+    `依活動紀錄自動確認 ${v.total} 位，不用處理：活動報名 ${v.registration}、活動問答 ${v.qa}、原媒體署名 ${v.news}${down}`;
+  const matched = data.matched ?? data.totalNeedsReview ?? 0;
   document.getElementById('showing-note').textContent =
-    data.totalNeedsReview > data.showing ? `顯示 ${data.showing} / ${data.totalNeedsReview} 筆（先處理最重要的）` : '';
+    matched > (data.showing||0) ? `顯示 ${data.showing} / ${matched} 筆（處理完會自動補上）` : (matched ? `共 ${matched} 筆` : '');
 
   const list = document.getElementById('list');
+  document.getElementById('rec-sel').checked = false;
+  recNames = {}; recBeats = {}; pendingBeat = {};
   if(!data.needsReview || !data.needsReview.length){
-    list.innerHTML = `<div class="empty"><div class="big">✓</div>目前沒有待確認的記者，太好了。</div>`;
+    const filtered = document.getElementById('list-outlet').value.trim();
+    list.innerHTML = `<div class="empty"><div class="big">✓</div>${filtered ? '這個篩選條件下沒有記者。' : LIST.filter==='nobeat' ? '每位在職記者都有路線了。' : '目前沒有待確認的記者，太好了。'}</div>`;
+    updateSel();
     return;
   }
-  recNames = {}; recBeats = {};
   list.innerHTML = data.needsReview.map(r => {
     recNames[r.id] = r.name;
     recBeats[r.id] = r.beat || '';
     const flags = [];
     if(!r.beat) flags.push('<span class="rec-flag flag-nobeat">沒有路線</span>');
-    if(r.daysSince===null || r.daysSince>365) flags.push('<span class="rec-flag flag-stale">太久沒受邀</span>');
-    // 追蹤結果（lib/media-tracker.js）：用新聞署名推測他換了媒體，附證據連結給人判斷
-    if(r.watch) flags.unshift('<span class="rec-flag flag-moved">疑似換媒體</span>');
-    const watchNote = r.watch ? `
-      <div class="watch-note">
-        近期署名出現在「${esc(r.watch.other_source)}」${esc(r.watch.other_count)} 篇，名單上的「${esc(r.outlet)}」查不到。
-        ${(r.watch.evidence||[]).slice(0,3).map(e=>/^https?:\/\//.test(e.l||'') ? `<div>・<a href="${esc(e.l)}" target="_blank" rel="noopener noreferrer">${esc(e.t||'相關報導')}</a>（${esc(e.s)} ${esc(e.d)}）</div>` : '').join('')}
-        <div class="hint">這是用新聞署名推測，同名的人也會被誤判。請看過報導再按「已離職／轉線」，或按「還在跑」維持原狀。</div>
-      </div>` : '';
+    if(!r.verified && (r.daysSince===null || r.daysSince>365)) flags.push('<span class="rec-flag flag-stale">太久沒受邀</span>');
+    if(r.duplicate) flags.push('<span class="rec-flag flag-dup">名單重複</span>');
+    if(r.noEmail) flags.push('<span class="rec-flag flag-dup">缺 mail</span>');
     const beats = (data.beats||[]).map(b =>
-      `<div class="beat-chip ${b===r.beat?'on':''}" onclick="pickBeat('${r.id}',this,'${b}')">${b}</div>`
+      `<div class="beat-chip ${b===r.beat?'on':''}" onclick="pickBeat('${esc(r.id)}',this,'${esc(b)}')">${esc(b)}</div>`
     ).join('');
     return `
-    <div class="rec" id="rec-${r.id}">
+    <div class="rec" id="rec-${esc(r.id)}">
       <div class="rec-top">
-        <div><div class="rec-name">${esc(r.name)}</div><div class="rec-outlet">${esc(r.outlet)}</div></div>
+        <label class="pick-rec"><input type="checkbox" class="rec-chk" value="${esc(r.id)}" onchange="updateSel()">
+          <span><div class="rec-name">${esc(r.name)}</div><div class="rec-outlet">${esc(r.outlet)}</div></span></label>
         <div>${flags.join(' ')}</div>
       </div>
-      <div class="rec-meta">受邀過 ${r.invited_count} 次・${daysLabel(r.daysSince)}</div>
-      ${watchNote}
-      <div class="beat-row" id="beats-${r.id}">${beats}</div>
+      <div class="rec-meta">受邀過 ${r.invited_count} 次・${daysLabel(r.daysSince)}${r.verified ? '・'+esc(r.verified) : ''}</div>
+      <div class="beat-row" id="beats-${esc(r.id)}">${beats}</div>
       <div class="action-row">
-        <button class="btn btn-confirm" onclick="confirmRec('${r.id}')">✓ 還在跑，資料正確</button>
-        <button class="btn btn-left" onclick="markLeft('${r.id}')">已離職／轉線</button>
+        <button class="btn btn-confirm" onclick="confirmRec('${esc(r.id)}')">✓ 還在跑，資料正確</button>
+        <button class="btn btn-left" onclick="markLeft('${esc(r.id)}')">已離職／轉線</button>
       </div>
     </div>`;
   }).join('');
+  updateSel();
+}
+
+// ── 批次 212：批次處理待確認 ───────────────────────────────────────────────
+const checkedRecs = () => [...document.querySelectorAll('.rec-chk:checked')].map(c => c.value);
+function updateSel(){
+  const n = checkedRecs().length;
+  document.getElementById('sel-count').textContent = n ? `已勾 ${n} 位` : '';
+  document.querySelectorAll('.batch-btn').forEach(b => b.disabled = !n);
+}
+function selectRecs(on){ document.querySelectorAll('.rec-chk').forEach(c => c.checked = on); updateSel(); }
+async function batchDo(op){
+  const ids = checkedRecs();
+  if(!ids.length){ toast('請先勾選記者'); return; }
+  const beat = document.getElementById('batch-beat').value;
+  if(op==='beat' && !beat){ toast('請先選路線'); return; }
+  const label = { confirm: `確認仍在職${beat ? `、路線設為「${beat}」` : ''}`, beat: `路線設為「${beat}」`, left: '標為已離職／轉線' }[op];
+  if(!confirm(`確定要把勾選的 ${ids.length} 位${label}嗎？`)) return;
+  const r = await call('batch', {ids, op, beat: op==='left' ? '' : beat}, 'POST');
+  if(r.error){ toast(r.error); return; }
+  toast(`已處理 ${r.affected} 位`);
+  await refresh();
+  if(S.role==='admin') loadAll(ALL.page);
+}
+
+// ── 批次 212：同步建議 ─────────────────────────────────────────────────────
+const SYNC_GROUPS = [
+  ['outlet', '換媒體了', '同一個姓名、同一個 mail 報名，單位跟名單不一樣。'],
+  ['restore', '標過離職，但又來報名', '建議恢復在職。'],
+  ['restore_news', '之前被「新聞推測」標離職', '舊的推測方式會誤判，請看一下誰其實還在職，勾起來套用就恢復。'],
+  ['email', '報名用了不同的 mail', '原本空白的預設勾選；要換掉舊 mail 的請自己勾。'],
+  ['phone', '補上電話', '名單原本沒有電話。'],
+  ['new', '名單裡沒有的人', '來自報名（有 mail）的預設勾選；只在問答出現的請自己判斷。'],
+  ['outlet_maybe', '同名但單位不同', '可能換媒體，也可能只是同名同姓，請逐筆確認再勾。'],
+];
+function sugText(s){
+  const who = `<b>${esc(s.name)}</b>（${esc(s.outlet)}）`;
+  if(s.type==='outlet' || s.type==='outlet_maybe') return `${who} → 改成「${esc(s.to)}」`;
+  if(s.type==='restore' || s.type==='restore_news') return `${who} → 恢復在職`;
+  if(s.type==='email') return `${who} mail：${s.from ? `<s>${esc(s.from)}</s> → ` : ''}${esc(s.to)}${s.needsAdmin ? '（要管理員核准）' : ''}`;
+  if(s.type==='phone') return `${who} 電話：${esc(s.to)}`;
+  return `${who}　${esc(s.email)}　${esc(s.phone)}`;
+}
+function renderSync(r){
+  const box = document.getElementById('sync-box');
+  if(!(r.suggestions||[]).length){ box.style.display = 'none'; return; }
+  box.style.display = 'block';
+  document.getElementById('sync-note').textContent = r.suggestionTotal > r.suggestions.length ? `顯示 ${r.suggestions.length} / ${r.suggestionTotal} 項` : `共 ${r.suggestionTotal} 項`;
+  document.getElementById('sync-list').innerHTML = SYNC_GROUPS.map(([type, title, tip]) => {
+    const items = r.suggestions.filter(s => s.type===type);
+    if(!items.length) return '';
+    return `<div class="grp" data-type="${type}">
+      <div class="grp-head"><span>${title}（${items.length}）</span><label><input type="checkbox" class="grp-all" onchange="selectGroup(this)" ${items.every(s=>s.safe)?'checked':''}> 這組全選</label></div>
+      <div class="grp-tip">${tip}</div>
+      ${items.map(s => `<label class="sug"><input type="checkbox" class="sug-chk" value="${esc(s.key)}" ${s.safe?'checked':''} onchange="updateSync()">
+        <span><div>${sugText(s)}</div><div class="why">${esc(s.evidence)}</div></span></label>`).join('')}
+    </div>`;
+  }).join('');
+  updateSync();
+}
+const checkedSugs = () => [...document.querySelectorAll('.sug-chk:checked')].map(c => c.value);
+function selectGroup(el){ el.closest('.grp').querySelectorAll('.sug-chk').forEach(c => c.checked = el.checked); updateSync(); }
+function updateSync(){
+  const n = checkedSugs().length;
+  document.getElementById('sync-apply').textContent = `套用勾選（${n}）`;
+  ['sync-apply','sync-dismiss'].forEach(id => document.getElementById(id).disabled = !n);
+}
+async function syncAct(action){
+  const keys = checkedSugs();
+  if(!keys.length) return;
+  const msg = action==='sync_apply' ? `把勾選的 ${keys.length} 項更新到記者名單？` : `忽略勾選的 ${keys.length} 項？之後不會再提醒。`;
+  if(!confirm(msg)) return;
+  const btns = ['sync-apply','sync-dismiss'].map(id => document.getElementById(id));
+  btns.forEach(b => b.disabled = true);
+  const r = await call(action, {keys}, 'POST').catch(()=>({error:'連線失敗，請稍後再試'}));
+  if(r.error){ toast(r.error); updateSync(); return; }
+  if(action==='sync_dismiss') toast(`已忽略 ${r.dismissed} 項`);
+  else {
+    toast(`已更新 ${r.applied} 項${r.pending_email ? `，${r.pending_email} 項 mail 等管理員核准` : ''}`);
+    if((r.skipped||[]).length) alert('以下沒有套用：\n' + r.skipped.join('\n'));
+  }
+  await refresh();
+  if(S.role==='admin'){ loadMailRequests(); loadAll(ALL.page); }
 }
 
 function esc(s){ return String(s||'').replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
@@ -442,23 +597,23 @@ function pickBeat(id, el, beat){
 }
 
 async function confirmRec(id){
-  // 還沒有路線的人，要先點一個路線才能確認（批次 124）——不然按了「資料正確」，路線照樣是空的，
-  // 下次打開又排在待確認最前面，等於白按。
-  if(!recBeats[id] && !pendingBeat[id]){ toast('請先點他現在跑的線（台北工研院線／新竹工研院線／經濟部線），再按確認'); return; }
   const r = await call('update', {id, beat: pendingBeat[id]}, 'POST');
   if(r.error){ toast(r.error); return; }
-  document.getElementById(`rec-${id}`).classList.add('done');
   toast('已確認');
-  setTimeout(()=>document.getElementById(`rec-${id}`)?.remove(), 400);
+  dropRec(id);
 }
 
 async function markLeft(id){
   if(!confirm(`${recNames[id] || '這位記者'} 確定標記為已離職／轉線？`)) return;
   const r = await call('update', {id, mark:'left'}, 'POST');
   if(r.error){ toast(r.error); return; }
-  document.getElementById(`rec-${id}`).classList.add('done');
   toast('已標記離職／轉線');
-  setTimeout(()=>document.getElementById(`rec-${id}`)?.remove(), 400);
+  dropRec(id);
+}
+// 單筆處理完只拿掉那一張（不整頁重讀，其他勾選不會被洗掉）
+function dropRec(id){
+  document.getElementById(`rec-${id}`)?.classList.add('done');
+  setTimeout(()=>{ document.getElementById(`rec-${id}`)?.remove(); updateSel(); if(!document.querySelector('#list .rec')) refresh(); }, 400);
 }
 
 // 誤點 markLeft 後唯一的復原管道：重新匯入 CSV 也救不回（seed 會保留既有的 status），
@@ -523,38 +678,30 @@ async function doSeed(){
   if(r.error){ out.textContent = r.error; return; }
   out.textContent = `完成：新增 ${r.created} 筆、更新 ${r.updated} 筆，目前共 ${r.total} 筆` +
     (r.default_beat ? `；其中 ${r.defaulted} 位套用了路線「${r.default_beat}」` : '');
-  const list = await call('list');
-  render(list);
+  await refresh();
   if(r.ids && r.ids.length) autoCheck(r.ids);
 }
 
 // 批次 191：匯入後自動盤查。每次呼叫只查一小批（後端有時間上限），回 remaining 就接著打，直到查完。
-// 只有「疑似換媒體」會被建議刪除；查不到署名（silent）證據太弱，不建議刪除，只報數量。
+// 批次 212：只回報「查到原媒體署名幾位」，不再推測誰換了媒體、不建議刪除任何人。
 async function autoCheck(ids, boxId){
   const box = document.getElementById(boxId || 'check-result');
   const total = ids.length;
-  let left = ids, ok = 0, silent = 0, unclear = 0, skipped = 0, fails = 0, stuck = 0;
-  const suggest = [];
-  box.innerHTML = '盤查中…';
+  let left = ids, confirmed = 0, notfound = 0, skipped = 0, stuck = 0;
+  box.textContent = '盤查中…';
   while(left.length){
     const r = await call('import_check', {ids: left}, 'POST');
-    if(r.error){ box.textContent = '盤查中斷：' + r.error + '（名單已匯入，沒有受影響）'; return; }
-    ok += r.ok; silent += r.silent; unclear += r.unclear; skipped += r.skipped; suggest.push(...r.suggest_delete);
+    if(r.error){ box.textContent = '盤查中斷：' + r.error + '（名單沒有受影響）'; return; }
+    confirmed += r.confirmed; notfound += r.notfound; skipped += r.skipped;
     // 沒有任何進展（例如 Google 暫時擋）連續兩輪就收工，不要無限重試
     if(r.checked === 0 && r.skipped === 0) stuck++; else stuck = 0;
-    fails += r.failed;
     left = r.remaining || [];
     box.textContent = `盤查中… ${total - left.length} / ${total}`;
     if(stuck >= 2) break;
   }
-  const summary = `完成：近期仍有署名 ${ok} 位、查無署名 ${silent} 位（證據不足，保留）、無法判斷 ${unclear} 位` +
-    (skipped ? `、非個人帳號略過 ${skipped} 位` : '') + (left.length ? `、<b>未查完 ${left.length} 位</b>（可再匯入一次續查）` : '');
-  if(!suggest.length){ box.innerHTML = summary + '。<br><b>沒有建議刪除的</b>，全部已在名單裡。'; return; }
-  box.innerHTML = summary + `。<br><b>建議刪除 ${suggest.length} 位</b>（近期署名出現在別家、原媒體查不到；只是推測，勾掉的會保留）：` +
-    '<div id="suggest-list">' + suggest.map(s => `<label style="display:block;margin:4px 0">
-      <input type="checkbox" class="sg" value="${esc(s.id)}" checked> ${esc(s.name)}（${esc(s.outlet)}）→ 近期在「${esc(s.other_source)}」${s.other_count} 篇` +
-      (s.link ? ` <a href="${esc(s.link)}" target="_blank" rel="noopener">證據</a>` : '') + '</label>').join('') + '</div>' +
-    '<button class="primary" onclick="applySuggest()">把勾選的標為已離職</button> <span id="suggest-result"></span>';
+  box.textContent = `完成：查到原媒體署名 ${confirmed} 位（自動確認，不用再點）、這次查不到 ${notfound} 位（不代表離職，名單照舊）` +
+    (skipped ? `、非個人帳號略過 ${skipped} 位` : '') + (left.length ? `、未查完 ${left.length} 位（可再按一次續查）` : '');
+  await refresh();
 }
 async function checkPending(){
   const box = document.getElementById('pending-result'), btn = document.getElementById('pending-btn');
@@ -564,18 +711,6 @@ async function checkPending(){
   if(!r.ids.length){ box.textContent = '沒有需要盤查的記者（待確認的都在 28 天內查過了）。'; btn.disabled = false; return; }
   await autoCheck(r.ids, 'pending-result');
   btn.disabled = false;
-}
-async function applySuggest(){
-  const ids = [...document.querySelectorAll('#suggest-list .sg:checked')].map(c => c.value);
-  const out = document.getElementById('suggest-result');
-  if(!ids.length){ out.textContent = '沒有勾選'; return; }
-  let n = 0;
-  for(const id of ids){
-    const r = await call('update', {id, mark: 'left'}, 'POST');
-    if(!r.error) n++;
-  }
-  out.textContent = `已標為離職 ${n} 位（不是刪除，名單裡仍查得到，可在待確認名單恢復在職）`;
-  render(await call('list'));
 }
 
 
@@ -595,7 +730,8 @@ async function loadAll(page){
   page = Math.max(1, page||1);
   const q = document.getElementById('all-q').value.trim();
   const beat = document.getElementById('all-beat').value, status = document.getElementById('all-status').value;
-  const r = await call('all', {q, beat, status, page, size: 50});
+  const issue = document.getElementById('all-issue').value;
+  const r = await call('all', {q, beat, status, issue, page, size: 50});
   if(r.error){ toast(r.error); return; }
   ALL.page = r.page; ALL.pages = r.pages; ALL.rows = r.rows;
   fillAllSelects(r.beats, r.beatCounts);
@@ -684,7 +820,7 @@ async function doExport(){
 // ── 批次 137：新增記者 ───────────────────────────────────────────────────────
 let beatsList = [];
 function fillBeatSelects(){
-  ['add-beat','pick-beat','seed-beat'].forEach(id => {
+  ['add-beat','pick-beat','seed-beat','batch-beat'].forEach(id => {
     const el = document.getElementById(id);
     if(!el || el.options.length > 1) return; // 已經填過就不重填（選到一半不要被洗掉）
     beatsList.forEach(b => { const o = document.createElement('option'); o.value = b; o.textContent = b; el.appendChild(o); });
@@ -705,7 +841,7 @@ async function addReporter(){
     msg.textContent = `已新增：${name}（${outlet}）`;
     ['add-name','add-outlet','add-email','add-beat'].forEach(id => { document.getElementById(id).value = ''; });
     toast('已新增');
-    render(await call('list')); // 在職人數、待確認會跟著變
+    refresh(); // 在職人數、待確認會跟著變
   }catch(e){ msg.className = 'form-msg err'; msg.textContent = '連線失敗，請稍後再試'; }
   finally{ btn.disabled = false; }
 }
@@ -809,7 +945,7 @@ async function applyCardUpdate(i){
   if(r.error){ toast(r.error); return; }
   toast(r.pending_email ? `已更新：${f.name || m.name}（mail 的修改要等管理員核准）` : `已更新：${f.name || m.name}`);
   clearCard();
-  render(await call('list'));
+  refresh();
 }
 
 async function submitCardAdd(){
@@ -822,7 +958,7 @@ async function submitCardAdd(){
     if(r.error){ msg.className = 'form-msg err'; msg.textContent = r.error; return; }
     toast(`已新增：${f.name}（${f.outlet}）`);
     clearCard();
-    render(await call('list'));
+    refresh();
   }catch(e){ msg.className = 'form-msg err'; msg.textContent = '連線失敗，請稍後再試'; }
   finally{ btn.disabled = false; }
 }
