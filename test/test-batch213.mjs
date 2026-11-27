@@ -109,5 +109,44 @@ check('　 嵌入時拿掉 SSR 的新聞稿存檔，不會攤在對話框裡', e
 check('　 報名頁與活動頁沒有被禁止嵌入（/event 不在 X-Frame-Options 清單）', JSON.parse(read('vercel.json')).headers.filter((h) => h.headers.some((x) => x.key === 'X-Frame-Options')).every((h) => !/[(|]event[)|]/.test(h.source)));
 check('★ api/ 沒有新增 Function', fs.readdirSync(path.join(ROOT, 'api')).filter((f) => f.endsWith('.js')).length <= 11);
 
+console.log('\n── 五、獨立審查後補的（嵌入模式的活動前內容、問答端舊快取）──');
+{
+  const pre = (extra = {}) => { const r = row({ date: '2026-11-20', invite: '誠摯邀請' }); r[6] = '當天才能問的晶片良率？'; r[8] = '今天發表全球首創'; Object.assign(r, extra); return r; };
+  setup(pre());
+  const embed = (await get('get_public', { id: 'ev', embed: '1' })).body.event;
+  check('★ 活動前＋嵌入：一般快速提問與開場白不出現', !JSON.stringify(embed).includes('晶片良率') && !JSON.stringify(embed).includes('全球首創') && embed.greeting === '', JSON.stringify(embed));
+  check('　 換成活動前預設那組快速提問', embed.chips.includes('邀請函的內容是什麼？'), embed.chips);
+  const page = (await get('get_public', { id: 'ev' })).body.event;
+  check('　 活動問答頁（沒帶 embed）行為不變', page.chips.includes('晶片良率') && page.greeting === '今天發表全球首創');
+  setup(pre({ 17: '採訪怎麼報名？' }));
+  check('★ 有填「活動前快速提問」就用那組', (await get('get_public', { id: 'ev', embed: '1' })).body.event.chips === '採訪怎麼報名？');
+  setup(pre({ 5: '2026-10-01' }));
+  const day = (await get('get_public', { id: 'ev', embed: '1' })).body.event;
+  check('　 活動日起：嵌入模式照常用同仁的快速提問與開場白', day.chips.includes('晶片良率') && day.greeting === '今天發表全球首創');
+
+  // 問答端：閒置很久的 instance 不能拿舊設定答第一題
+  process.env.ANTHROPIC_API_KEY = 'fake';
+  const chat = (await import('../api/chat.js')).default;
+  const sent = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, opt) => { sent.push(opt.body); return new Response(JSON.stringify({ content: [{ type: 'text', text: '好的' }], usage: {} }), { headers: { 'content-type': 'application/json' } }); };
+  const askChat = async () => { const r = res(); await chat({ method: 'POST', headers: { 'x-forwarded-for': '10.213.1.1' }, socket: {}, body: { event_id: 'ev', media_name: '測試日報', messages: [{ role: 'user', content: '請問重點？' }] } }, r); return sent.at(-1) || ''; };
+  const log = console.log, err = console.error; console.log = console.error = () => {};
+  setup(row({ date: '2026-11-20' }));
+  const first = await askChat();
+  setup(row({ date: '2026-11-20', invite: '誠摯邀請' }));
+  clock += 3 * 3600e3;
+  const later = await askChat();
+  console.log = log; console.error = err; globalThis.fetch = realFetch;
+  check('　 對照：還沒有邀請函時，模型看得到知識庫', first.includes('機密內文'));
+  check('★ 補上邀請函、閒置 3 小時後的第一題：模型只看到邀請函', later.includes('誠摯邀請') && !later.includes('機密內文'), later.slice(0, 300));
+}
+const evHtml = read('public/event.html');
+check('★ 嵌入時帶 embed=1 讀活動', evHtml.includes("(EMBED ? '&embed=1' : '')"));
+check('★ 嵌入時的錯誤畫面不叫人重新整理整頁，有「再試一次」', /function showError\(msg\) \{[\s\S]{0,700}if \(EMBED\)[\s\S]{0,600}再試一次/.test(evHtml));
+check('　 上次沒載成功，再點開會重載', code.includes('frame && broken(frame)'));
+check('　 圖示延後出現，不吃掉那一下點擊', code.includes('setTimeout') && code.includes("addEventListener('focusout', calm)"));
+check('　 CSS 與 JS 的全螢幕條件一致（含橫向）', reg.includes('@media (max-width: 640px), (max-height: 500px)') && reg.includes("MIA_FULL = '(max-width: 640px), (max-height: 500px)'"));
+
 console.log(`\n通過 ${pass}，失敗 ${fail}`);
 process.exit(fail ? 1 : 0);

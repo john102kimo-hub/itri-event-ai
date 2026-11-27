@@ -242,6 +242,9 @@ export default async function handler(req, res) {
         // 網址就拿得到每場技術窗口同仁的姓名、分機與私人 LINE ID。記者要找人走 LINE 的
         // 邀訪流程（一次只給對應的那一位），不是整份名單。
         res.setHeader('Cache-Control', simulating ? 'no-store' : PUBLIC_CACHE);
+        // 批次 213：報名頁的對話框（embed=1）是活動前就寄給記者的邀請連結。活動前只用「活動前快速提問」或系統預設那組，
+        // 開場白用預設——一般的快速提問與開場白是同仁為活動當天寫的，可能含還沒解禁的內容。
+        const guardEmbed = !!req.query.embed && !simulating && isPreEventMode({ event_date: row[5] || '', invite_letter: row[16] || '' });
         return res.status(200).json({
           event: {
             ...(simulating ? { sim_day: true } : {}),
@@ -251,11 +254,11 @@ export default async function handler(req, res) {
             // 「技術商業化」五題（院士授證典禮點下去只會得到「沒有資料」）。算法與 LINE 共用 lib/default-chips.js。
             chips: effectiveChips(dayOf({
               status: publicFields.status, event_date: row[5] || '',
-              chips: row[6] || '', images: row[7] || '',
+              chips: guardEmbed ? '' : row[6] || '', images: row[7] || '',
               invite_letter: row[16] || '', invite_letter_chips: row[17] || '',
               knowledge_base: row[3] || '', press_contact: row[14] || '', venue: row[12] || '', event_time: row[11] || '', event_type: row[13] || ''
             })).join('\n'),
-            images: publicFields.images, greeting: row[8] || '',
+            images: publicFields.images, greeting: guardEmbed ? '' : row[8] || '',
             event_time: row[11] || '', venue: row[12] || '', event_type: row[13] || '', press_contact: row[14] || '',
             // 企業場（批次 118）：活動頁問「公司／單位」不問媒體，字樣不寫記者會，見 lib/audience.js
             audience: isBusinessEvent(row[13]) ? 'business' : 'media',

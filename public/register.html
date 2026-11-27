@@ -129,7 +129,7 @@
   #mia-fab img { width: 60px; height: 60px; border-radius: 50%; box-shadow: 0 6px 18px rgba(0,0,0,.22); background: #fff; }
   #mia-fab span { margin-top: -8px; position: relative; background: var(--primary-dark); color: #fff; font-size: .75rem; font-weight: 700; line-height: 1; padding: 5px 9px; border-radius: 999px; white-space: nowrap; }
   #mia-fab:focus-visible { outline: 3px solid rgba(15,158,122,.45); outline-offset: 3px; border-radius: 14px; }
-  #mia-panel { position: fixed; right: 16px; bottom: var(--mia-lift, 16px); z-index: 40; width: 400px; height: 640px; max-height: calc(100vh - var(--mia-lift, 16px) - 16px); display: flex; flex-direction: column; background: #fff; border: 1px solid var(--border); border-radius: 16px; overflow: hidden; box-shadow: 0 18px 50px rgba(0,0,0,.25); }
+  #mia-panel { position: fixed; right: 16px; bottom: var(--mia-lift, 16px); z-index: 40; width: 400px; height: 640px; max-height: calc(100vh - var(--mia-lift, 16px) - 16px); max-height: calc(100dvh - var(--mia-lift, 16px) - 16px); display: flex; flex-direction: column; background: #fff; border: 1px solid var(--border); border-radius: 16px; overflow: hidden; box-shadow: 0 18px 50px rgba(0,0,0,.25); }
   .mia-head { display: flex; align-items: center; gap: 10px; padding: 10px 8px 10px 14px; background: var(--primary-dark); color: #fff; flex: none; }
   .mia-head img { width: 34px; height: 34px; border-radius: 50%; background: #fff; }
   .mia-head div { flex: 1; min-width: 0; line-height: 1.3; }
@@ -137,8 +137,9 @@
   .mia-head small { display: block; font-size: .75rem; opacity: .9; }
   .mia-head button { background: none; border: none; color: #fff; font: inherit; font-size: 1.25rem; width: 44px; height: 44px; cursor: pointer; flex: none; }
   #mia-panel iframe { flex: 1; width: 100%; border: 0; min-height: 0; }
-  /* 手機：整個畫面的對話框；在表單打字時先收起圖示，免得蓋住正在填的欄位 */
-  @media (max-width: 640px) {
+  /* 手機（含橫著拿：畫面很矮）：整個畫面的對話框；在表單打字時先收起圖示，免得蓋住正在填的欄位。
+     條件要跟下面 MIA_FULL 一樣 */
+  @media (max-width: 640px), (max-height: 500px) {
     #mia-panel { left: 0; right: 0; top: 0; bottom: auto; width: auto; height: 100%; max-height: none; border: 0; border-radius: 0; }
     body.mia-open { overflow: hidden; }
     body.mia-typing #mia-fab { display: none; }
@@ -550,6 +551,8 @@ async function loadMia(campaignId) {
   const id = r && r.ok && r.data.ask && r.data.ask.event_id;
   if (id && !$('#mia-fab')) mountMia(String(id));
 }
+const MIA_FULL = '(max-width: 640px), (max-height: 500px)'; // 全螢幕對話框的條件，跟 CSS 那條一樣
+const isEsc = (e) => e.key === 'Escape' && !e.isComposing && e.keyCode !== 229; // 輸入法選字中的 Esc 不算
 function mountMia(eventId) {
   const avatar = () => el('img', { src: '/mia-avatar.png', alt: '' });
   let frame = null;
@@ -560,12 +563,21 @@ function mountMia(eventId) {
   const fab = el('button', { id: 'mia-fab', type: 'button', 'aria-haspopup': 'dialog', 'aria-expanded': 'false', 'aria-label': '問米亞：活動問答', onclick: open },
     avatar(), el('span', { text: '問米亞' }));
 
+  // 上次沒載成功（斷線、伺服器出錯）：框裡是錯誤畫面或根本不是問答頁。再點開要重載，不能永遠卡在那一頁
+  function broken(f) {
+    const d = f.contentDocument;
+    if (!d) return true;
+    const err = d.getElementById('error-screen');
+    if (err) return !err.hidden;
+    return d.readyState === 'complete' && d.URL !== 'about:blank';
+  }
   function open() {
+    if (frame && broken(frame)) { frame.remove(); frame = null; }
     if (!frame) { // 第一次點開才載入，之後只藏不拆，對話留著
       frame = el('iframe', { src: `/event?id=${encodeURIComponent(eventId)}&embed=1`, title: '米亞活動問答', referrerpolicy: 'no-referrer' });
       // 焦點在對話框裡按 Esc 也要能關；圖片放大中的那一次 Esc 留給圖片
       frame.addEventListener('load', () => frame.contentDocument?.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape' && !frame.contentDocument.querySelector('#lightbox.open')) close();
+        if (isEsc(e) && !frame.contentDocument.querySelector('#lightbox.open')) close();
       }, true));
       panel.append(frame);
     }
@@ -591,7 +603,7 @@ function mountMia(eventId) {
   // 手機鍵盤跳出來時，對話框跟著縮到看得見的範圍，輸入框才不會被鍵盤蓋住
   function fitMia() {
     const vv = window.visualViewport;
-    const narrow = matchMedia('(max-width: 640px)').matches;
+    const narrow = matchMedia(MIA_FULL).matches;
     panel.style.height = vv && narrow ? `${vv.height}px` : '';
     panel.style.top = vv && narrow ? `${vv.offsetTop}px` : '';
   }
@@ -603,10 +615,14 @@ function mountMia(eventId) {
   }
   const typingIn = (n) => n && n.matches && n.matches('input[type=text], input[type=email], input[type=tel], textarea');
 
+  // 圖示晚一點才回來：點別的地方時欄位先失焦、click 才發生，圖示若立刻冒出來，那一下會落空（場次沒勾到）
+  let calmTimer = 0;
+  const calm = () => { clearTimeout(calmTimer); calmTimer = setTimeout(() => { if (!typingIn(document.activeElement)) document.body.classList.remove('mia-typing'); }, 400); };
+
   window.addEventListener('popstate', () => { pushed = false; hide(); });
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
-  document.addEventListener('focusin', (e) => document.body.classList.toggle('mia-typing', typingIn(e.target)));
-  document.addEventListener('focusout', () => document.body.classList.remove('mia-typing'));
+  document.addEventListener('keydown', (e) => { if (isEsc(e)) close(); });
+  document.addEventListener('focusin', (e) => { if (typingIn(e.target)) { clearTimeout(calmTimer); document.body.classList.add('mia-typing'); } });
+  document.addEventListener('focusout', calm);
   window.addEventListener('resize', () => { placeMia(); if (!panel.hidden) fitMia(); });
   window.visualViewport?.addEventListener('resize', () => { if (!panel.hidden) fitMia(); });
   window.visualViewport?.addEventListener('scroll', () => { if (!panel.hidden) fitMia(); });
