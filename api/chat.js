@@ -159,9 +159,11 @@ async function fetchEventConfig(eventId) {
 // 原本是過期就同步重讀 Sheets，等於每 60 秒就有一位倒楣的記者要多等一趟 Google 往返
 // （實測 0.5～0.9 秒）。改成背景更新後，那筆讀取不再卡在記者的等待時間裡，
 // 「最多晚 60 秒生效」的行為不變——只是慢的那一位變成不用等。
+// ⚠️ 舊值有年齡上限（批次 213）：過期超過一個 TTL 就同步重讀。沒有上限時，閒置幾小時的 instance 第一題拿的是
+// 幾小時前的設定——同仁後來才補的媒體邀請函不會生效，禁發中的新聞稿整份交給模型。
 async function getEventConfig(eventId) {
   const cached = eventCache.get(eventId);
-  if (cached) {
+  if (cached && Date.now() < cached.expiry + CACHE_TTL_MS) {
     if (Date.now() >= cached.expiry && !cached.refreshing) {
       cached.refreshing = true;
       fetchEventConfig(eventId)
@@ -175,6 +177,7 @@ async function getEventConfig(eventId) {
   }
   const data = await fetchEventConfig(eventId);
   if (data) eventCache.set(eventId, { data, expiry: Date.now() + CACHE_TTL_MS });
+  else eventCache.delete(eventId);
   return data;
 }
 
