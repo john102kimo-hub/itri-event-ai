@@ -8,7 +8,7 @@
 //      同一個回應裡的 suggestions＝跟活動報名、活動問答比對出來、建議修改名單的項目（批次 212；同仁看到的 mail／電話遮一半）
 // POST {action:'sync_apply',code,keys}  → 批次套用建議（伺服器重算一次，只收 key，不收前端送來的值；同仁換 mail 仍要管理員核准）
 // POST {action:'sync_dismiss',code,keys}→ 批次忽略建議
-// POST {action:'batch',code,ids,op,beat?} → 批次確認在職／標離職／恢復在職／設路線（不含刪除，批次 212）
+// POST {action:'batch',code,ids,op,beat?,beats?} → 批次確認在職／標離職／恢復在職／設路線（不含刪除，批次 212）；beats＝{id:路線}，卡片上各自點的優先於 beat（批次 214）
 // GET  ?action=search&code=xxx&q=xxx   → 搜尋特定記者（辦活動前先查）
 // POST {action:'update',code,id,...}   → 一鍵更新：補路線／標記離職／標記仍在職
 // POST {action:'add',code,name,outlet,email,beat?,phone?,title?} → 新增一位記者（批次 137，不用編 id、不用貼 CSV）
@@ -646,16 +646,21 @@ export default async function handler(req, res) {
         if (ids.size > STAFF_BATCH_MAX) return res.status(400).json({ error: `一次最多 ${STAFF_BATCH_MAX} 位` });
         if (!['confirm', 'left', 'active', 'beat'].includes(op)) return res.status(400).json({ error: '不認得的操作' });
         if (beat && !BEATS.includes(beat)) return res.status(400).json({ error: '路線請從選項裡挑' });
-        if (op === 'beat' && !beat) return res.status(400).json({ error: '請先選路線' });
+        // 卡片上各自點的路線（批次 214）：優先於上方選單那一個
+        const beats = new Map(Object.entries(body.beats && typeof body.beats === 'object' ? body.beats : {})
+          .map(([k, v]) => [k, String(v || '').trim()]).filter(([k, v]) => ids.has(k) && v));
+        if ([...beats.values()].some((v) => !BEATS.includes(v))) return res.status(400).json({ error: '路線請從選項裡挑' });
+        if (op === 'beat' && [...ids].some((id) => !(beats.get(id) || beat))) return res.status(400).json({ error: '請先選路線' });
         const rows = (await readRange('media_roster!A2:N')).map(parseRow);
         const changed = [];
         for (const r of rows) {
           if (!r.id || !ids.has(r.id)) continue;
           if (op === 'confirm' && r.status === 'left') continue; // 確認不能順手把離職的人復活
-          if (op === 'beat') r.beat = beat;
+          const own = beats.get(r.id) || beat;
+          if (op === 'beat') r.beat = own;
           else {
             if (op === 'left') r.status = 'left'; else r.status = 'active';
-            if (beat) r.beat = beat;
+            if (op !== 'left' && own) r.beat = own;
             r.updated_at = now();
             r.updated_by = String(body.updated_by || '').slice(0, 20);
           }
