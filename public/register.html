@@ -572,7 +572,8 @@ function mountMia(eventId) {
     panel.hidden = false; fab.hidden = true;
     fab.setAttribute('aria-expanded', 'true');
     document.body.classList.add('mia-open');
-    if (!pushed) { history.pushState({ mia: true }, ''); pushed = true; }
+    // scrollRestoration 要在墊紀錄之前設：否則關對話框時，瀏覽器會把表單捲回「剛打開對話框時」的位置
+    if (!pushed) { history.scrollRestoration = 'manual'; history.pushState({ mia: true }, ''); pushed = true; }
     fitMia();
     closeBtn.focus();
   }

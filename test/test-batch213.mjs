@@ -96,6 +96,7 @@ check('★ 這一段不碰報名資料：沒有身分簽章、編輯碼、表單
 check('★ 掛在 body（#app 與表單外面），開關不重畫表單', code.includes('document.body.append(fab, panel)') && !/renderForm|renderDone|replaceChildren|location\.(href|assign|replace|reload)/.test(code));
 check('　 按鈕都是 type=button（不會誤送出報名）', (code.match(/el\('button'/g) || []).length === (code.match(/el\('button', \{[^}]*type: 'button'/g) || []).length);
 check('　 手機「返回」先關對話框', code.includes('history.pushState') && code.includes("'popstate'"));
+check('★ 關對話框不把表單捲回原位（先設 scrollRestoration 才墊紀錄）', code.indexOf("scrollRestoration = 'manual'") > 0 && code.indexOf("scrollRestoration = 'manual'") < code.indexOf('history.pushState'));
 check('★ 圖示墊在送出列上面', code.includes("$('.bar')") && reg.includes('bottom: var(--mia-lift, 16px)'));
 check('　 查詢不擋報名表（不 await）', /\n\s*loadMia\(campaign\.id\);/.test(reg));
 check('　 圖示用本站圖片，不載外部資源', fs.existsSync(path.join(ROOT, 'public', 'mia-avatar.png')) && !/<(script|link)[^>]+https?:/.test(reg));
