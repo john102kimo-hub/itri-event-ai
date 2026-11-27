@@ -109,20 +109,17 @@ check('　 嵌入時拿掉 SSR 的新聞稿存檔，不會攤在對話框裡', e
 check('　 報名頁與活動頁沒有被禁止嵌入（/event 不在 X-Frame-Options 清單）', JSON.parse(read('vercel.json')).headers.filter((h) => h.headers.some((x) => x.key === 'X-Frame-Options')).every((h) => !/[(|]event[)|]/.test(h.source)));
 check('★ api/ 沒有新增 Function', fs.readdirSync(path.join(ROOT, 'api')).filter((f) => f.endsWith('.js')).length <= 11);
 
-console.log('\n── 五、獨立審查後補的（嵌入模式的活動前內容、問答端舊快取）──');
+console.log('\n── 五、獨立審查後補的（活動前的開場白與快速提問、問答端舊快取）──');
 {
-  const pre = (extra = {}) => { const r = row({ date: '2026-11-20', invite: '誠摯邀請' }); r[6] = '當天才能問的晶片良率？'; r[8] = '今天發表全球首創'; Object.assign(r, extra); return r; };
-  setup(pre());
-  const embed = (await get('get_public', { id: 'ev', embed: '1' })).body.event;
-  check('★ 活動前＋嵌入：一般快速提問與開場白不出現', !JSON.stringify(embed).includes('晶片良率') && !JSON.stringify(embed).includes('全球首創') && embed.greeting === '', JSON.stringify(embed));
-  check('　 換成活動前預設那組快速提問', embed.chips.includes('邀請函的內容是什麼？'), embed.chips);
-  const page = (await get('get_public', { id: 'ev' })).body.event;
-  check('　 活動問答頁（沒帶 embed）行為不變', page.chips.includes('晶片良率') && page.greeting === '今天發表全球首創');
-  setup(pre({ 17: '採訪怎麼報名？' }));
-  check('★ 有填「活動前快速提問」就用那組', (await get('get_public', { id: 'ev', embed: '1' })).body.event.chips === '採訪怎麼報名？');
-  setup(pre({ 5: '2026-10-01' }));
-  const day = (await get('get_public', { id: 'ev', embed: '1' })).body.event;
-  check('　 活動日起：嵌入模式照常用同仁的快速提問與開場白', day.chips.includes('晶片良率') && day.greeting === '今天發表全球首創');
+  const pre = (extra = {}) => Object.assign(row({ date: '2026-11-20', invite: '誠摯邀請' }), extra);
+  const day = { 6: '當天才能問的晶片良率？', 8: '今天發表全球首創' };
+  check('★ 活動前、自訂開場白 → 不提供（活動代碼也不給）', await hidden(pre({ 8: day[8] })));
+  check('★ 活動前、自訂快速提問但沒填活動前那組 → 不提供', await hidden(pre({ 6: day[6] })));
+  check('　 活動前那組只有空白 → 當作沒填', await hidden(pre({ 6: day[6], 17: '  ' })));
+  check('★ 活動前、有填活動前快速提問、沒有開場白 → 提供', await shown(pre({ 6: day[6], 17: '採訪怎麼報名？' })));
+  const got = (await get('get_public', { id: 'ev' })).body.event;
+  check('★ 放行的場次直接開問答頁，也看不到當天的快速提問', got.chips === '採訪怎麼報名？' && !JSON.stringify(got).includes('晶片良率'), JSON.stringify(got));
+  check('　 活動日起：自訂開場白與快速提問照常提供', await shown(pre({ ...day, 5: '2026-10-01' })));
 
   // 問答端：閒置很久的 instance 不能拿舊設定答第一題
   process.env.ANTHROPIC_API_KEY = 'fake';
@@ -142,7 +139,6 @@ console.log('\n── 五、獨立審查後補的（嵌入模式的活動前內�
   check('★ 補上邀請函、閒置 3 小時後的第一題：模型只看到邀請函', later.includes('誠摯邀請') && !later.includes('機密內文'), later.slice(0, 300));
 }
 const evHtml = read('public/event.html');
-check('★ 嵌入時帶 embed=1 讀活動', evHtml.includes("(EMBED ? '&embed=1' : '')"));
 check('★ 嵌入時的錯誤畫面不叫人重新整理整頁，有「再試一次」', /function showError\(msg\) \{[\s\S]{0,700}if \(EMBED\)[\s\S]{0,600}再試一次/.test(evHtml));
 check('　 上次沒載成功，再點開會重載', code.includes('frame && broken(frame)'));
 check('　 圖示延後出現，不吃掉那一下點擊', code.includes('setTimeout') && code.includes("addEventListener('focusout', calm)"));

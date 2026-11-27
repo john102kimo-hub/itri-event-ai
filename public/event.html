@@ -604,7 +604,7 @@ async function init() {
 
   try {
     // 只取這一個活動（不再撈回全部活動清單，降低資訊外洩）
-    const res = await fetch(`/api/events?action=get_public&id=${encodeURIComponent(eventId)}` + (EMBED ? '&embed=1' : '') + (SIM ? `&sim_day=1&code=${encodeURIComponent(SIM_CODE)}` : ''));
+    const res = await fetch(`/api/events?action=get_public&id=${encodeURIComponent(eventId)}` + (SIM ? `&sim_day=1&code=${encodeURIComponent(SIM_CODE)}` : ''));
     const data = await res.json().catch(() => ({}));
     const event = data.event;
 
