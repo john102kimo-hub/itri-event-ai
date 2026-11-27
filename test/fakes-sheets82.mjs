@@ -90,6 +90,20 @@ function bound(b, tag) {
       });
       return {};
     },
+    // 批次 212：values:batchUpdate。真的 API 是一次請求，這裡也只記一筆寫入。
+    async updateRanges(data) {
+      maybeFail('update', label(data.map((d) => d.range).join('|')));
+      for (const { range, values } of data) {
+        const { tab, c1, r1 } = parse(range);
+        const rows = (b[tab] ||= []);
+        values.forEach((v, k) => {
+          const row = rows[r1 + k] || [];
+          v.forEach((x, j) => { if (x != null) row[c1 + j] = String(x); });
+          rows[r1 + k] = row;
+        });
+      }
+      return {};
+    },
     async listSheets() { return Object.keys(b).map((title, i) => ({ title, sheetId: i + 1 })); },
     // 批次 84：支援 deleteDimension（刪整列），sheetId 對應 listSheets() 的編號。
     async batchUpdate(requests = []) {
@@ -114,6 +128,7 @@ export const readRange = main.readRange;
 export const readRanges = main.readRanges;
 export const appendRows = main.appendRows;
 export const updateRange = main.updateRange;
+export const updateRanges = main.updateRanges;
 export const listSheets = main.listSheets;
 export const batchUpdate = main.batchUpdate;
 export const ensureSheets = main.ensureSheets;

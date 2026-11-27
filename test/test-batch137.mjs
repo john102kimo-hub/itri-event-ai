@@ -185,7 +185,7 @@ console.log('\n── 三、頁面：新增表單、挑出名單、複製 ──
     const { els, document } = mkDoc({ 'add-name': ' 陳新人 ', 'add-outlet': '經濟日報', 'add-email': 'new@x.com', 'add-beat': '半導體' });
     const calls = [], toasts = [], rendered = [];
     const call = async (a, body, method) => { calls.push([a, body, method]); return a === 'add' ? { success: true, id: 'N0001' } : { totalActive: 9 }; };
-    const { addReporter } = new Function('document', 'call', 'toast', 'render', `${fnSource(MEDIA, 'addReporter')}; return { addReporter };`)(document, call, (m) => toasts.push(m), (d) => rendered.push(d));
+    const { addReporter } = new Function('document', 'call', 'toast', 'refresh', `${fnSource(MEDIA, 'addReporter')}; return { addReporter };`)(document, call, (m) => toasts.push(m), () => rendered.push(1));
     await addReporter();
     check('★ 新增表單：把姓名／媒體／mail／路線送出、成功後清空欄位、重新載入統計',
       calls[0][0] === 'add' && calls[0][2] === 'POST' && calls[0][1].name === '陳新人' && calls[0][1].email === 'new@x.com' && calls[0][1].beat === '半導體'
@@ -195,13 +195,13 @@ console.log('\n── 三、頁面：新增表單、挑出名單、複製 ──
   {
     const { els, document } = mkDoc({ 'add-name': '陳新人', 'add-outlet': '', 'add-email': 'new@x.com' });
     const calls = [];
-    const { addReporter } = new Function('document', 'call', 'toast', 'render', `${fnSource(MEDIA, 'addReporter')}; return { addReporter };`)(document, async () => { calls.push(1); return {}; }, () => {}, () => {});
+    const { addReporter } = new Function('document', 'call', 'toast', 'refresh', `${fnSource(MEDIA, 'addReporter')}; return { addReporter };`)(document, async () => { calls.push(1); return {}; }, () => {}, () => {});
     await addReporter();
     check('　 有欄位沒填：在畫面上提醒、不送出', calls.length === 0 && els['add-msg'].className.includes('err') && /都要填/.test(els['add-msg'].textContent));
   }
   {
     const { els, document } = mkDoc({ 'add-name': '重複', 'add-outlet': 'x', 'add-email': 'dup@x.com' });
-    const { addReporter } = new Function('document', 'call', 'toast', 'render', `${fnSource(MEDIA, 'addReporter')}; return { addReporter };`)(document, async () => ({ error: '這個 mail 已經在名單裡了：林小美（聯合報）' }), () => {}, () => {});
+    const { addReporter } = new Function('document', 'call', 'toast', 'refresh', `${fnSource(MEDIA, 'addReporter')}; return { addReporter };`)(document, async () => ({ error: '這個 mail 已經在名單裡了：林小美（聯合報）' }), () => {}, () => {});
     await addReporter();
     check('　 後端說 mail 重複：原文顯示在表單下面，已填的欄位保留（不用重打）', /林小美（聯合報）/.test(els['add-msg'].textContent) && els['add-email'].value === 'dup@x.com');
   }
