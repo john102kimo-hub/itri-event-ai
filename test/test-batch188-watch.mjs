@@ -22,8 +22,11 @@ assert.ok(T.sameOutlet('中央社', '中央社 CNA'));
 assert.ok(T.sameOutlet('自由時報', '自由時報電子報'));
 assert.ok(!T.sameOutlet('經濟日報', '工商時報'));
 assert.ok(!T.sameOutlet('聯合報', '自由時報'));
-assert.ok(T.isAggregator('Yahoo奇摩新聞'));
-assert.ok(!T.isAggregator('工商時報'));
+assert.ok(T.sameOutlet('Yahoo奇摩新聞', 'Yahoo股市'));
+assert.ok(!T.sameOutlet('聯合報', '新聞'), '光是「新聞」認不出是哪一家');
+assert.equal(T.outletDomain('中央社'), 'cna.com.tw');
+assert.equal(T.outletDomain('Yahoo奇摩新聞'), 'yahoo.com');
+assert.equal(T.outletDomain('鏡週刊'), 'mirrormedia.mg');
 
 // 主流判斷
 assert.ok(T.isMainstream('經濟日報'));
@@ -32,18 +35,34 @@ assert.ok(!T.isMainstream('某某地方生活報'));
 assert.ok(!T.isMainstream(''));
 assert.deepEqual(T.parseOutletList('甲報、乙報,丙報\n丁報'), ['甲報', '乙報', '丙報', '丁報']);
 
-// 判斷
+// 判斷：只做正面查證，永遠不下「換媒體／離職」的結論（批次 212）
 const wang = rec('m1', '王大明', '經濟日報');
 assert.equal(T.judge(wang, [hit('經濟日報', 10)], NOW).verdict, 'ok');
-assert.equal(T.judge(wang, [hit('UDN 經濟日報', 10), hit('工商時報', 5), hit('工商時報', 8)], NOW).verdict, 'ok', '原媒體有署名就算在職，不管別家');
-const mv = T.judge(wang, [hit('工商時報', 5), hit('工商時報', 20), hit('Yahoo奇摩新聞', 3), hit('Yahoo奇摩新聞', 4)], NOW);
-assert.equal(mv.verdict, 'moved');
-assert.equal(mv.other_source, '工商時報');
-assert.equal(mv.other_count, 2);
-assert.equal(T.judge(wang, [hit('工商時報', 5)], NOW).verdict, 'unclear', '只有 1 篇不足以說換媒體');
-assert.equal(T.judge(wang, [hit('Yahoo奇摩新聞', 5), hit('Yahoo奇摩新聞', 6)], NOW).verdict, 'unclear', '轉載平台不算另一家媒體');
+assert.equal(T.judge(wang, [hit('UDN 經濟日報', 10), hit('工商時報', 5), hit('工商時報', 8)], NOW).same_count, 1);
+const far = T.judge(wang, [hit('工商時報', 5), hit('工商時報', 20), hit('工商時報', 30)], NOW);
+assert.equal(far.verdict, 'unclear', '別家有幾篇都不算換媒體');
+assert.equal(far.other_source, '');
+assert.deepEqual(far.evidence, [], '別家的連結不拿出來給人看');
 assert.equal(T.judge(wang, [], NOW).verdict, 'silent');
-assert.equal(T.judge(wang, [hit('工商時報', 200), hit('工商時報', 210)], NOW).verdict, 'silent', '超過 120 天的不算');
+assert.equal(T.judge(wang, [hit('經濟日報', 200)], NOW).verdict, 'silent', '超過 120 天的不算');
+
+// 兩個正式使用的誤判（2026-11-27 實測的搜尋結果形狀）
+const cnaRec = rec('m8', '張記者', '中央社');
+const reprints = Array.from({ length: 25 }, (_, i) => hit('放言Fount Media', i + 1));
+assert.notEqual(T.judge(cnaRec, reprints, NOW).verdict, 'moved', '通訊社稿件被轉載不是換媒體');
+const queries = [];
+const fakeFetch = (pages) => async (url) => {
+  const q = new URL(url).searchParams.get('q'); queries.push(q);
+  const items = (q.includes('site:') ? pages.site : pages.plain).map(([source, link]) => `<item><title>t</title><link>${link}</link><pubDate>${new Date().toUTCString()}</pubDate><source url="x">${source}</source></item>`).join('');
+  return { ok: true, text: async () => `<rss>${items}</rss>` };
+};
+let found = await T.searchBylines(cnaRec, fakeFetch({ plain: [['放言Fount Media', 'a']], site: [['中央社 CNA', 'b'], ['中央社 CNA', 'c']] }));
+assert.equal(T.judge(cnaRec, found).verdict, 'ok', '原媒體被轉載擠掉時，限定原媒體網站再查一次找得回來');
+assert.ok(queries.length === 2 && queries[1].includes('site:cna.com.tw') && !queries.some((q) => q.includes(' OR ')), queries.join(' / '));
+queries.length = 0;
+found = await T.searchBylines(rec('m9', '陳記者', 'Yahoo'), fakeFetch({ plain: [['Yahoo股市', 'a'], ['Yahoo股市', 'b']], site: [] }));
+assert.equal(queries.length, 1, '第一輪就夠了不多查');
+assert.equal(T.judge(rec('m9', '陳記者', 'Yahoo'), found).same_count, 2);
 
 // 挑人：只挑主流、在職、沒被最近查過的；沒查過的先
 const roster = [
@@ -58,72 +77,20 @@ const batch = T.pickBatch(roster, watch, { now: NOW });
 assert.deepEqual(batch.map((r) => r.id), ['m1', 'm2'], '依受邀次數排序，排除小媒體／離職／近期查過');
 assert.equal(T.pickBatch(roster, watch, { now: NOW, size: 1 }).length, 1);
 
-// 排程：moved 才推播、同結論不重複推、dismissed 不再提醒
+// 排程：查完寫回 media_watch，不推播、不下指控
 const writes = [];
 const store = { update: async (n, row) => writes.push(['u', n, row]), append: async (rows) => writes.push(['a', rows]) };
-const always = async () => true;
-const pushed = [];
-const push = async (uid, text) => pushed.push([uid, text]);
-const searchMap = {
-  王大明: [hit('工商時報', 5), hit('工商時報', 9)],
-  李小華: [hit('聯合新聞網', 4)],
-};
-const search = async (name) => { if (name === '失敗人') throw new Error('boom'); return searchMap[name] || []; };
-
-let out = await T.runWatchCron({ now: NOW, roster, watch, list: T.DEFAULT_MAINSTREAM, search, push, store, gapMs: 0 });
+const search = async (p) => (p.name === '王大明' ? [hit('工商時報', 5), hit('工商時報', 9)] : [hit(p.outlet, 3), hit(p.outlet, 4)]);
+let out = await T.runWatchCron({ now: NOW, roster, watch, list: T.DEFAULT_MAINSTREAM, search, store, gapMs: 0 });
 assert.equal(out.checked, 2);
-assert.equal(out.moved, 1);
-assert.equal(out.ok, 1);
-assert.equal(out.pushed, 1);
-assert.equal(pushed[0][0], 'UADMIN', '只推給管理員');
-assert.match(pushed[0][1], /王大明/);
-assert.match(pushed[0][1], /不是確定/, '推播要老實說這是推測');
-assert.doesNotMatch(pushed[0][1], /李小華/, '沒事的人不吵');
+assert.equal(out.confirmed, 1);
+assert.equal(out.notfound, 1);
+assert.ok(!('moved' in out) && !('pushed' in out));
 const appended = writes.find((w) => w[0] === 'a')[1];
-assert.equal(appended.length, 2);
-assert.equal(appended.find((r) => r[0] === 'm1')[2], 'moved');
-
-// 第二輪：已通知過的同結論不再推
-pushed.length = 0;
-const watch2 = [{ id: 'm1', checked_at: daysAgo(30), verdict: 'moved', other_source: '工商時報', notified: '1', rowNum: 2, evidence: [] }];
-out = await T.runWatchCron({ now: NOW, roster: [roster[0]], watch: watch2, list: T.DEFAULT_MAINSTREAM, search, push, store, gapMs: 0 });
-assert.equal(out.moved, 1);
-assert.equal(pushed.length, 0, '同一個疑似結論不重複通知');
-
-// 人按了「還在跑」之後：同一家不再提醒、不推播
-pushed.length = 0;
-const watch3 = [{ id: 'm1', checked_at: daysAgo(30), verdict: 'dismissed', other_source: '工商時報', notified: '1', rowNum: 2, evidence: [] }];
-out = await T.runWatchCron({ now: NOW, roster: [roster[0]], watch: watch3, list: T.DEFAULT_MAINSTREAM, search, push, store, gapMs: 0 });
-assert.equal(out.moved, 0);
-assert.equal(pushed.length, 0);
-
-// 單一記者查詢失敗不影響其他人
-const roster4 = [rec('m1', '王大明', '經濟日報'), rec('m9', '失敗人', '中央社')];
-out = await T.runWatchCron({ now: NOW, roster: roster4, watch: [], list: T.DEFAULT_MAINSTREAM, search, push, store, gapMs: 0 });
-assert.equal(out.failed, 1);
-assert.equal(out.checked, 1);
-
-// 文案不得有簡體
-assert.doesNotMatch(T.formatWatchDigest([{ rec: wang, other_source: '工商時報', other_count: 2, evidence: [hit('工商時報', 5)] }]), /[这个们]/);
-
-// 逾時收工：超過期限就不再查，已查的照寫；沒查的下次還排在最前面
-writes.length = 0;
-out = await T.runWatchCron({ now: NOW, roster, watch: [], list: T.DEFAULT_MAINSTREAM, search, push, store, gapMs: 0, deadlineMs: -1 });
+assert.equal(appended.find((r) => r[0] === 'm1')[2], 'unclear');
+assert.equal(appended.find((r) => r[0] === 'm1')[7], '[]');
+out = await T.runWatchCron({ now: NOW, roster, watch: [], list: T.DEFAULT_MAINSTREAM, search, store, gapMs: 0, deadlineMs: -1 });
 assert.equal(out.checked, 0);
-
-// 沒設定管理員 → 不推播、也不當掉；結果照常寫入
-delete process.env.LINE_ADMIN_USER_ID;
-pushed.length = 0;
-out = await T.runWatchCron({ now: NOW, roster, watch: [], list: T.DEFAULT_MAINSTREAM, search, push, store, gapMs: 0 });
-assert.equal(out.moved, 1);
-assert.equal(out.pushed, 0);
-assert.equal(pushed.length, 0);
-process.env.LINE_ADMIN_USER_ID = 'UADMIN';
-
-// 推播出口過簡體→繁體（CLAUDE.md 第 1 條）：記者姓名是人輸入的
-pushed.length = 0;
-await T.runWatchCron({ now: NOW, roster: [rec('m7', '张三', '经济日报')], watch: [], list: ['经济日报'], search: async () => [hit('工商時報', 5), hit('工商時報', 9)], push, store, gapMs: 0 });
-assert.ok(pushed.length === 1 && !/[张济]/.test(pushed[0][1]), pushed[0]?.[1]);
 
 // ═══ 後端：真的 api/media.js，只有 Google 試算表是假的 ═══
 const { book, reset } = await import('./fakes-sheets82.mjs');
@@ -147,22 +114,10 @@ delete process.env.CRON_SECRET;
 assert.equal((await call('GET', { action: 'watch_cron' }, {}, { authorization: 'Bearer ' })).code, 401, '沒設 CRON_SECRET 就一律拒絕');
 process.env.CRON_SECRET = 'cronsecret';
 
-// 查完把 R1 標成疑似換媒體（用真的 media_watch 分頁讀寫），名單頁就看得到證據
-const liveRoster = book.media_roster.slice(1).map((row, i) => T.parseRosterRow(row, i));
-await T.runWatchCron({ now: Date.now(), roster: liveRoster, list: T.DEFAULT_MAINSTREAM, push: async () => {}, gapMs: 0,
-  search: async (name) => (name === '王大明' ? [hit('工商時報', 5), hit('工商時報', 9)] : []) });
+// 舊版留下的「疑似換媒體」紀錄：不再掛標記，離職的列出來讓人恢復
+book.media_watch = [['id'], ['R1', daysAgo(1), 'moved', '0', '工商時報', '2', daysAgo(2), '[]', '1']];
 r = await call('GET', { action: 'list', code: 'staffcode1' });
 assert.equal(r.code, 200);
-const moved = r.out.needsReview.find((x) => x.id === 'R1');
-assert.ok(moved && moved.watch && moved.watch.other_source === '工商時報', JSON.stringify(r.out.needsReview));
-assert.equal(moved.watch.evidence.length, 2);
-assert.equal(r.out.needsReview[0].id, 'R1', '疑似換媒體的排最前面');
-assert.ok(!r.out.needsReview.find((x) => x.id === 'R2')?.watch, '沒事的人不掛標記');
+assert.ok(!JSON.stringify(r.out).includes('工商時報'), JSON.stringify(r.out));
 
-// 同仁按「還在跑」→ 標記收掉
-r = await call('POST', {}, { action: 'update', code: 'staffcode1', id: 'R1', beat: '經濟部線' });
-assert.equal(r.code, 200);
-r = await call('GET', { action: 'list', code: 'staffcode1' });
-assert.ok(!r.out.needsReview.find((x) => x.id === 'R1')?.watch, '按過還在跑就不再掛標記');
-
-console.log('批次 188 離職追蹤：全部通過');
+console.log('批次 188 署名查證：全部通過');
