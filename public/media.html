@@ -211,10 +211,10 @@
     <input id="list-outlet" type="text" placeholder="篩媒體或姓名（例如：經濟日報）" maxlength="30" autocomplete="off" onkeydown="if(event.key==='Enter')refresh()" onchange="refresh()">
     <select id="list-size" onchange="refresh()"><option value="25">每次 25 筆</option><option value="50">每次 50 筆</option><option value="100">每次 100 筆</option><option value="200">每次 200 筆</option></select>
     <span class="break"></span>
-    <button class="primary batch-btn" onclick="batchDo('confirm')" disabled>✓ 批次確認在職</button>
-    <select id="batch-beat"><option value="">路線（選填）</option></select>
-    <button class="batch-btn" onclick="batchDo('beat')" disabled>只設路線</button>
-    <button class="batch-btn" onclick="batchDo('left')" disabled>標離職／轉線</button>
+    <select id="batch-beat" onchange="updateSel()"><option value="">選路線套用到勾選的人</option></select>
+    <button class="primary" id="batch-confirm" onclick="batchDo('confirm')">✓ 批次確認在職</button>
+    <button onclick="batchDo('beat')">只設路線</button>
+    <button onclick="batchDo('left')">標離職／轉線</button>
     <span id="sel-count" style="font-size:.8rem;color:var(--muted)"></span>
   </div>
   <div id="list"></div>
@@ -510,20 +510,30 @@ const checkedRecs = () => [...document.querySelectorAll('.rec-chk:checked')].map
 function updateSel(){
   const n = checkedRecs().length;
   document.getElementById('sel-count').textContent = n ? `已勾 ${n} 位` : '';
-  document.querySelectorAll('.batch-btn').forEach(b => b.disabled = !n);
+  document.getElementById('batch-confirm').textContent = LIST.filter==='nobeat' ? '✓ 套用路線並確認' : '✓ 批次確認在職';
 }
 function selectRecs(on){ document.querySelectorAll('.rec-chk').forEach(c => c.checked = on); updateSel(); }
+// 批次 214：按鈕一律可按、按了不能做的事要講清楚。以前沒勾人時按鈕是停用的（看起來還是能按），
+// 卡片上各自點的路線也不會送出——兩種情況畫面都沒有任何反應，缺路線永遠清不掉。
 async function batchDo(op){
   const ids = checkedRecs();
-  if(!ids.length){ toast('請先勾選記者'); return; }
-  const beat = document.getElementById('batch-beat').value;
-  if(op==='beat' && !beat){ toast('請先選路線'); return; }
-  const label = { confirm: `確認仍在職${beat ? `、路線設為「${beat}」` : ''}`, beat: `路線設為「${beat}」`, left: '標為已離職／轉線' }[op];
+  if(!ids.length){ alert('還沒勾選任何記者。請勾姓名前面的方框，或按「全選」。'); return; }
+  const beat = op==='left' ? '' : document.getElementById('batch-beat').value;
+  const beats = {};
+  if(op!=='left') ids.forEach(id => { if(pendingBeat[id]) beats[id] = pendingBeat[id]; });
+  if(op==='beat' || (op==='confirm' && LIST.filter==='nobeat')){
+    const missing = ids.filter(id => !beats[id] && !beat);
+    if(missing.length){ alert(`有 ${missing.length} 位還沒選路線。請在上方選單選一個路線，或在各自的卡片上點路線。`); return; }
+  }
+  const routed = ids.filter(id => beats[id] || beat).length;
+  const label = op==='left' ? '標為已離職／轉線' : `${op==='beat' ? '設定路線' : '確認仍在職'}${op==='confirm' && routed ? `（其中 ${routed} 位一併設定路線）` : ''}`;
   if(!confirm(`確定要把勾選的 ${ids.length} 位${label}嗎？`)) return;
-  const r = await call('batch', {ids, op, beat: op==='left' ? '' : beat}, 'POST');
-  if(r.error){ toast(r.error); return; }
-  toast(`已處理 ${r.affected} 位`);
+  toast('處理中…');
+  const r = await call('batch', {ids, op, beat, beats}, 'POST').catch(()=>({error:'連線失敗，請稍後再試'}));
+  if(r.error){ alert('沒有更新成功：' + r.error); return; }
+  document.getElementById('batch-beat').value = ''; // 清掉，下一批不會沿用到上一批的路線
   await refresh();
+  toast(`已處理 ${r.affected} 位`);
   if(S.role==='admin') loadAll(ALL.page);
 }
 
@@ -594,6 +604,9 @@ function pickBeat(id, el, beat){
   pendingBeat[id] = beat;
   document.querySelectorAll(`#beats-${id} .beat-chip`).forEach(c=>c.classList.remove('on'));
   el.classList.add('on');
+  // 點了路線就順手勾起來，批次按鈕才吃得到（批次 214）
+  const box = document.querySelector(`#rec-${id} .rec-chk`);
+  if(box){ box.checked = true; updateSel(); }
 }
 
 async function confirmRec(id){

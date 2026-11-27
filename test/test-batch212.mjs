@@ -143,6 +143,56 @@ await staffPost({ action: 'batch', ids: ['R8'], op: 'left' });
 ok('批次標離職', row('R8')[10] === 'left');
 ok('沒動到的列完好', row('R5')[2] === '自由時報' && row('R1')[4] === 'one@a.example');
 
+// ── 批次 214：缺路線清得掉 ──
+setup();
+r = await staffPost({ action: 'batch', ids: ['R5', 'R6'], op: 'confirm', beats: { R5: '經濟部線' }, beat: '新竹工研院線' });
+ok('卡片上各自點的路線優先，其餘套上方選的', r.code === 200 && row('R5')[3] === '經濟部線' && row('R6')[3] === '新竹工研院線', JSON.stringify(r.out));
+r = await staffGet({ action: 'list', filter: 'nobeat', size: '200' });
+ok('設好路線就離開缺路線', !r.out.needsReview.some((x) => ['R5', 'R6'].includes(x.id)));
+ok('亂填的路線擋掉', (await staffPost({ action: 'batch', ids: ['R8'], op: 'confirm', beats: { R8: '亂填' } })).code === 400);
+ok('只設路線時每一位都要有', (await staffPost({ action: 'batch', ids: ['R8', 'R9'], op: 'beat', beats: { R8: '經濟部線' } })).code === 400);
+await staffPost({ action: 'batch', ids: ['R8'], op: 'left', beats: { R8: '經濟部線' } });
+ok('標離職不順手改路線', row('R8')[3] === '' && row('R8')[10] === 'left');
+
+// 頁面：沒勾人、沒選路線要講清楚；卡片點的路線要送出去
+{
+  const fs = await import('node:fs');
+  const html = fs.readFileSync(new URL('../public/media.html', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
+  const a = html.indexOf('async function batchDo(');
+  const src = html.slice(a, html.indexOf('\n}\n', a) + 3);
+  const run = async ({ ids, dropdown = '', pending = {}, filter = 'nobeat' }) => {
+    const alerts = [], posts = [];
+    const fn = new Function('checkedRecs', 'document', 'pendingBeat', 'LIST', 'alert', 'confirm', 'toast', 'call', 'refresh', 'S', 'loadAll', 'ALL', `${src}; return batchDo;`)(
+      () => ids, { getElementById: () => ({ value: dropdown }) }, pending, { filter }, (m) => alerts.push(m), () => true, () => {},
+      async (x, body) => { posts.push(body); return { affected: ids.length }; }, async () => {}, { role: 'staff' }, () => {}, {});
+    await fn('confirm');
+    return { alerts, posts };
+  };
+  let p = await run({ ids: [] });
+  ok('沒勾人按下去有說明', p.alerts.length === 1 && !p.posts.length);
+  p = await run({ ids: ['R5'] });
+  ok('缺路線分頁沒選路線按確認：提醒、不送出', /還沒選路線/.test(p.alerts[0]) && !p.posts.length);
+  p = await run({ ids: ['R5'], pending: { R5: '經濟部線' } });
+  ok('★ 只在卡片上點路線也送得出去', p.posts[0]?.beats.R5 === '經濟部線', JSON.stringify(p.posts));
+  p = await run({ ids: ['R5'], filter: 'pending' });
+  ok('在職待確認分頁不用選路線', p.posts.length === 1 && !p.alerts.length);
+}
+
+// 真的 lib/sheets.js：批次寫入打的是 values:batchUpdate
+{
+  const { generateKeyPairSync } = await import('node:crypto');
+  process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL = 'svc@example.com';
+  process.env.GOOGLE_PRIVATE_KEY = generateKeyPairSync('rsa', { modulusLength: 2048, privateKeyEncoding: { type: 'pkcs8', format: 'pem' }, publicKeyEncoding: { type: 'spki', format: 'pem' } }).privateKey;
+  const sent = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, o) => { sent.push([String(url), o]); return { status: 200, json: async () => (String(url).includes('oauth2') ? { access_token: 't', expires_in: 3600 } : {}) }; };
+  const real = await import('../lib/sheets.js?real');
+  await real.updateRanges([{ range: 'media_roster!A2:N2', values: [['x']] }]);
+  globalThis.fetch = realFetch;
+  const [url, o] = sent.at(-1);
+  ok('網址、方法、內容正確', url.endsWith('/spreadsheets/sheet/values:batchUpdate') && o.method === 'POST' && JSON.parse(o.body).valueInputOption === 'RAW' && JSON.parse(o.body).data[0].range === 'media_roster!A2:N2', url);
+}
+
 // 同步來源讀不到時：不誤判成在職，講清楚
 setup();
 const { ctl } = await import('./fakes-sheets82.mjs');
